@@ -8,18 +8,33 @@ export const feedbackStatus = v.union(
   v.literal("done"),
 );
 
+export const mediaItemValidator = v.object({
+  key: v.string(),
+  name: v.string(),
+  size: v.number(),
+  type: v.string(),
+  url: v.string(),
+});
+
+export const annotationValidator = v.object({
+  id: v.string(),
+  label: v.number(),
+  mediaIndex: v.number(),
+  kind: v.union(v.literal("point"), v.literal("time")),
+  x: v.optional(v.number()),
+  y: v.optional(v.number()),
+  time: v.optional(v.number()),
+  text: v.string(),
+  createdAt: v.number(),
+});
+
 export default defineSchema({
   feedback: defineTable({
     title: v.string(),
     description: v.string(),
     status: feedbackStatus,
-    media: v.object({
-      key: v.string(),
-      name: v.string(),
-      size: v.number(),
-      type: v.string(),
-      url: v.string(),
-    }),
+    media: v.array(mediaItemValidator),
+    annotations: v.optional(v.array(annotationValidator)),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

@@ -1,36 +1,36 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
-  Camera,
   CheckCircle2,
   Clock3,
   ImagePlus,
+  Images,
   Loader2,
   LogOut,
+  MapPin,
   PlayCircle,
   RefreshCw,
   Search,
-  Upload,
 } from "lucide-react";
 import { api } from "../convex/_generated/api";
-import type { Doc, Id } from "../convex/_generated/dataModel";
+import type { Id } from "../convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
+import { MediaUploadField, releasePendingMedia, type PendingMedia } from "@/components/media-upload";
+import { MediaViewer, type MediaViewerHandle } from "@/components/media-viewer";
 import { uploadFiles } from "@/uploadthing";
 import { cn } from "@/lib/utils";
+import { isVideoMedia, type Feedback, type FeedbackStatus, type MediaItem } from "@/lib/types";
 
 const SESSION_KEY = "ease-pos-tracking-session";
 
-type Feedback = Doc<"feedback">;
-type Status = Feedback["status"];
-type MediaPayload = Feedback["media"];
-
 const statuses: Array<{
-  value: Status;
+  value: FeedbackStatus;
   label: string;
   tone: string;
   icon: typeof Clock3;
@@ -53,7 +53,7 @@ function clearToken() {
   window.localStorage.removeItem(SESSION_KEY);
 }
 
-function statusMeta(status: Status) {
+function statusMeta(status: FeedbackStatus) {
   return statuses.find((item) => item.value === status) ?? statuses[0];
 }
 
@@ -158,7 +158,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
 
   const selected = feedback?.find((item) => item._id === selectedId) ?? null;
 
-  async function moveItem(id: Id<"feedback">, status: Status) {
+  async function moveItem(id: Id<"feedback">, status: FeedbackStatus) {
     await updateStatus({ token, id, status });
   }
 
@@ -215,66 +215,47 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
 
 function SubmitFeedback({ token }: { token: string }) {
   const createFeedback = useMutation(api.feedback.createFeedback);
-  const uploadInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [items, setItems] = useState<PendingMedia[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!file) {
-      setPreviewUrl("");
-      return;
-    }
-
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  function onFileChange(nextFile: File | undefined) {
-    setSuccess(false);
-    setError("");
-    setFile(nextFile ?? null);
-  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setSuccess(false);
 
-    if (!title.trim() || !description.trim() || !file) {
-      setError("Topic, description, and media are required.");
+    if (!title.trim() || !description.trim() || items.length === 0) {
+      setError("Topic, description, and at least one photo or video are required.");
       return;
     }
 
     setProgress(0);
     try {
-      const [uploaded] = await uploadFiles("feedbackMedia", {
-        files: [file],
-        onUploadProgress: ({ progress: nextProgress }) => setProgress(nextProgress),
+      const uploads = await uploadFiles("feedbackMedia", {
+        files: items.map((item) => item.file),
+        onUploadProgress: ({ totalProgress }) => setProgress(Math.round(totalProgress)),
       });
 
-      const raw = uploaded as typeof uploaded & { ufsUrl?: string; url?: string; type?: string };
-      const media: MediaPayload = {
-        key: uploaded.key,
-        name: uploaded.name,
-        size: uploaded.size,
-        type: raw.type ?? file.type,
-        url: raw.ufsUrl ?? raw.url ?? "",
-      };
+      const media: MediaItem[] = uploads.map((uploaded, index) => {
+        const raw = uploaded as typeof uploaded & { ufsUrl?: string; url?: string; type?: string };
+        return {
+          key: uploaded.key,
+          name: uploaded.name,
+          size: uploaded.size,
+          type: raw.type ?? items[index]?.file.type ?? "",
+          url: raw.ufsUrl ?? raw.url ?? "",
+        };
+      });
 
       await createFeedback({ token, title, description, media });
+      releasePendingMedia(items);
+      setItems([]);
       setTitle("");
       setDescription("");
-      setFile(null);
       setSuccess(true);
-      if (uploadInputRef.current) uploadInputRef.current.value = "";
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to submit feedback");
     } finally {
@@ -305,34 +286,9 @@ function SubmitFeedback({ token }: { token: string }) {
             <Textarea id="description" value={description} onChange={(event) => setDescription(event.target.value)} />
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             <label className="text-sm font-medium">Media</label>
-            <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" onClick={() => cameraInputRef.current?.click()}>
-                <Camera />
-                Camera
-              </Button>
-              <Button type="button" variant="outline" onClick={() => uploadInputRef.current?.click()}>
-                <Upload />
-                Upload
-              </Button>
-            </div>
-            <input
-              ref={cameraInputRef}
-              className="hidden"
-              type="file"
-              accept="image/*,video/*"
-              capture="environment"
-              onChange={(event) => onFileChange(event.target.files?.[0])}
-            />
-            <input
-              ref={uploadInputRef}
-              className="hidden"
-              type="file"
-              accept="image/*,video/*"
-              onChange={(event) => onFileChange(event.target.files?.[0])}
-            />
-            <MediaPreview file={file} previewUrl={previewUrl} />
+            <MediaUploadField items={items} onItemsChange={setItems} disabled={isUploading} />
           </div>
 
           {progress !== null ? (
@@ -352,41 +308,16 @@ function SubmitFeedback({ token }: { token: string }) {
   );
 }
 
-function MediaPreview({ file, previewUrl }: { file: File | null; previewUrl: string }) {
-  if (!file || !previewUrl) {
-    return (
-      <div className="grid aspect-video place-items-center rounded-lg border border-dashed bg-muted/40 text-sm text-muted-foreground">
-        No media selected
-      </div>
-    );
-  }
-
-  const isVideo = file.type.startsWith("video/");
-  return (
-    <div className="overflow-hidden rounded-lg border bg-black">
-      {isVideo ? (
-        <video className="aspect-video w-full object-contain" src={previewUrl} controls />
-      ) : (
-        <img className="aspect-video w-full object-contain" src={previewUrl} alt="" />
-      )}
-      <div className="flex items-center justify-between gap-3 bg-card px-3 py-2 text-xs">
-        <span className="min-w-0 truncate font-medium">{file.name}</span>
-        <span className="shrink-0 text-muted-foreground">{Math.ceil(file.size / 1024)} KB</span>
-      </div>
-    </div>
-  );
-}
-
 function BoardColumn({
   status,
   items,
   onSelect,
   onMove,
 }: {
-  status: Status;
+  status: FeedbackStatus;
   items: Feedback[];
   onSelect: (id: Id<"feedback">) => void;
-  onMove: (id: Id<"feedback">, status: Status) => void;
+  onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
 }) {
   const meta = statusMeta(status);
   const Icon = meta.icon;
@@ -420,22 +351,40 @@ function FeedbackCard({
 }: {
   item: Feedback;
   onSelect: (id: Id<"feedback">) => void;
-  onMove: (id: Id<"feedback">, status: Status) => void;
+  onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
 }) {
-  const isVideo = item.media.type.startsWith("video/");
+  const cover = item.media[0];
+  const extraCount = item.media.length - 1;
+  const pinCount = item.annotations?.length ?? 0;
 
   return (
     <article className="rounded-md border bg-background shadow-sm">
       <button className="block w-full text-left" onClick={() => onSelect(item._id)}>
         <div className="relative overflow-hidden rounded-t-md bg-black">
-          {isVideo ? (
-            <>
-              <video className="aspect-video w-full object-cover opacity-80" src={item.media.url} muted />
-              <PlayCircle className="absolute left-1/2 top-1/2 size-9 -translate-x-1/2 -translate-y-1/2 text-white" />
-            </>
+          {cover ? (
+            isVideoMedia(cover) ? (
+              <>
+                <video className="aspect-video w-full object-cover opacity-80" src={cover.url} muted playsInline preload="metadata" />
+                <PlayCircle className="absolute left-1/2 top-1/2 size-9 -translate-x-1/2 -translate-y-1/2 text-white" />
+              </>
+            ) : (
+              <img className="aspect-video w-full object-cover" src={cover.url} alt="" loading="lazy" />
+            )
           ) : (
-            <img className="aspect-video w-full object-cover" src={item.media.url} alt="" loading="lazy" />
+            <div className="grid aspect-video w-full place-items-center text-xs text-muted-foreground">No media</div>
           )}
+          {extraCount > 0 ? (
+            <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white">
+              <Images className="size-3" />
+              +{extraCount}
+            </span>
+          ) : null}
+          {pinCount > 0 ? (
+            <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white">
+              <MapPin className="size-3" />
+              {pinCount}
+            </span>
+          ) : null}
         </div>
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
@@ -447,7 +396,7 @@ function FeedbackCard({
         <select
           className="h-9 w-full rounded-md border bg-background px-2 text-xs"
           value={item.status}
-          onChange={(event) => onMove(item._id, event.target.value as Status)}
+          onChange={(event) => onMove(item._id, event.target.value as FeedbackStatus)}
           aria-label="Status"
         >
           {statuses.map((status) => (
@@ -470,16 +419,31 @@ function FeedbackDialog({
   feedback: Feedback | null;
   token: string;
   onClose: () => void;
-  onMove: (id: Id<"feedback">, status: Status) => void;
+  onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
 }) {
   const detail = useQuery(api.feedback.getFeedback, feedback ? { token, id: feedback._id } : "skip");
+  const addAnnotation = useMutation(api.feedback.addAnnotation);
+  const removeAnnotation = useMutation(api.feedback.removeAnnotation);
+  const viewerRef = useRef<MediaViewerHandle>(null);
   const item = detail ?? feedback;
+  const annotations = item?.annotations ?? [];
 
   return (
     <Dialog open={Boolean(feedback)} onOpenChange={(open) => !open && onClose()} title={item?.title ?? "Feedback"}>
       {item ? (
         <div className="space-y-4">
-          <RemoteMedia media={item.media} />
+          <MediaViewer
+            key={item._id}
+            ref={viewerRef}
+            media={item.media}
+            annotations={annotations}
+            onCreateAnnotation={async (input) => {
+              await addAnnotation({ token, id: item._id, ...input });
+            }}
+            onDeleteAnnotation={async (annotationId) => {
+              await removeAnnotation({ token, id: item._id, annotationId });
+            }}
+          />
           <div className="flex flex-wrap items-center gap-2">
             {statuses.map((status) => (
               <Button
@@ -492,30 +456,27 @@ function FeedbackDialog({
               </Button>
             ))}
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Badge className={cn("border", statusMeta(item.status).tone)} variant="outline">
               {statusMeta(item.status).label}
             </Badge>
-            <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{item.description}</p>
+            <DescriptionWithTags
+              text={item.description}
+              annotations={annotations}
+              onFocus={(annotation) => viewerRef.current?.focusAnnotation(annotation)}
+            />
+            <AnnotationList
+              annotations={annotations}
+              onFocus={(annotation) => viewerRef.current?.focusAnnotation(annotation)}
+              onDelete={async (annotationId) => {
+                await removeAnnotation({ token, id: item._id, annotationId });
+              }}
+            />
             <p className="text-xs text-muted-foreground">Created {formatDate(item.createdAt)}</p>
           </div>
         </div>
       ) : null}
     </Dialog>
-  );
-}
-
-function RemoteMedia({ media }: { media: MediaPayload }) {
-  const isVideo = media.type.startsWith("video/");
-
-  return (
-    <div className="overflow-hidden rounded-lg border bg-black">
-      {isVideo ? (
-        <video className="max-h-[60vh] w-full object-contain" src={media.url} controls />
-      ) : (
-        <img className="max-h-[60vh] w-full object-contain" src={media.url} alt="" />
-      )}
-    </div>
   );
 }
 
