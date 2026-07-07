@@ -9,11 +9,11 @@ export const uploadRouter: FileRouter = {
   feedbackMedia: f({
     image: {
       maxFileSize: "8MB",
-      maxFileCount: 1,
+      maxFileCount: 10,
     },
     video: {
       maxFileSize: "64MB",
-      maxFileCount: 1,
+      maxFileCount: 3,
     },
   }).onUploadComplete(({ file }) => {
     console.log("UploadThing completed", file.name, file.key);
