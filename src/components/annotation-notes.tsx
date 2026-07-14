@@ -22,7 +22,7 @@ export function DescriptionWithTags({
   const parts = text.split(/\[(\d+)\]/g);
 
   return (
-    <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+    <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
       {parts.map((part, index) => {
         if (index % 2 === 0) {
           return <Fragment key={index}>{part}</Fragment>;

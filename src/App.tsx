@@ -374,13 +374,13 @@ function FeedbackCard({
             <div className="grid aspect-video w-full place-items-center text-xs text-muted-foreground">No media</div>
           )}
           {extraCount > 0 ? (
-            <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white">
+            <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
               <Images className="size-3" />
               +{extraCount}
             </span>
           ) : null}
           {pinCount > 0 ? (
-            <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white">
+            <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
               <MapPin className="size-3" />
               {pinCount}
             </span>
@@ -388,7 +388,7 @@ function FeedbackCard({
         </div>
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
-          <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{item.description}</p>
+          <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">{item.description}</p>
           <p className="text-xs text-muted-foreground">{formatDate(item.createdAt)}</p>
         </div>
       </button>
