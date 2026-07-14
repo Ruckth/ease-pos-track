@@ -16,4 +16,16 @@ export default defineConfig({
       "/api/uploadthing": "http://localhost:8787",
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("/convex/")) return "convex-vendor";
+          if (id.includes("uploadthing")) return "upload-vendor";
+          return undefined;
+        },
+      },
+    },
+  },
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, GripVertical, ImagePlus, PlayCircle, Upload, X } from "lucide-react";
+import { Camera, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -25,10 +25,16 @@ export function releasePendingMedia(items: PendingMedia[]) {
 export function MediaUploadField({
   items,
   onItemsChange,
+  onPreviewItem,
+  onRequestRemove,
+  annotationCounts = {},
   disabled = false,
 }: {
   items: PendingMedia[];
   onItemsChange: (items: PendingMedia[]) => void;
+  onPreviewItem?: (item: PendingMedia) => void;
+  onRequestRemove?: (item: PendingMedia) => void;
+  annotationCounts?: Record<string, number>;
   disabled?: boolean;
 }) {
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +112,10 @@ export function MediaUploadField({
 
   function removeItem(id: string) {
     const target = items.find((item) => item.id === id);
+    if (target && onRequestRemove) {
+      onRequestRemove(target);
+      return;
+    }
     if (target) URL.revokeObjectURL(target.previewUrl);
     onItemsChange(items.filter((item) => item.id !== id));
   }
@@ -191,20 +201,34 @@ export function MediaUploadField({
             {items.map((item, index) => (
               <SortableItem key={item.id} value={item.id} disabled={disabled}>
                 <div className="group relative aspect-square overflow-hidden rounded-md border bg-black">
-                  {item.isVideo ? (
-                    <>
-                      <video className="h-full w-full object-cover opacity-80" src={item.previewUrl} muted playsInline preload="metadata" />
-                      <PlayCircle className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 text-white" />
-                    </>
-                  ) : (
-                    <img className="h-full w-full object-cover" src={item.previewUrl} alt={item.file.name} />
-                  )}
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onPreviewItem?.(item)}
+                    aria-label={`Open ${item.file.name} to add pins`}
+                    className="absolute inset-0 block h-full w-full disabled:cursor-not-allowed"
+                  >
+                    {item.isVideo ? (
+                      <>
+                        <video className="h-full w-full object-cover opacity-80" src={item.previewUrl} muted playsInline preload="metadata" />
+                        <PlayCircle className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 text-white" />
+                      </>
+                    ) : (
+                      <img className="h-full w-full object-cover" src={item.previewUrl} alt={item.file.name} />
+                    )}
+                  </button>
                   {index === 0 ? (
-                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
+                    <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
                       Cover
                     </span>
                   ) : null}
-                  <SortableItemHandle className="absolute left-1 top-1">
+                  {(annotationCounts[item.id] ?? 0) > 0 ? (
+                    <span className="pointer-events-none absolute bottom-1 right-1 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
+                      <MapPin className="size-3" />
+                      {annotationCounts[item.id]}
+                    </span>
+                  ) : null}
+                  <SortableItemHandle className="absolute left-1 top-1 z-10">
                     <span className="flex size-6 items-center justify-center rounded-full border bg-background/90 shadow-sm">
                       <GripVertical className="size-3.5" />
                     </span>
@@ -214,7 +238,7 @@ export function MediaUploadField({
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
                     aria-label={`Remove ${item.file.name}`}
-                    className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white"
+                    className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white"
                   >
                     <X className="size-3.5" />
                   </button>

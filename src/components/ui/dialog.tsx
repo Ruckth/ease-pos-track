@@ -1,41 +1,38 @@
 import * as React from "react";
+import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 type DialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
+  description?: string;
   children: React.ReactNode;
 };
 
-export function Dialog({ open, onOpenChange, title, children }: DialogProps) {
-  React.useEffect(() => {
-    if (!open) return;
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onOpenChange(false);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onOpenChange]);
-
-  if (!open) return null;
-
+export function Dialog({ open, onOpenChange, title, description, children }: DialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-3 sm:items-center" role="dialog" aria-modal="true">
-      <button className="absolute inset-0 cursor-default" aria-label="Close dialog" onClick={() => onOpenChange(false)} />
-      <div className={cn("relative max-h-[92vh] w-full max-w-3xl overflow-auto rounded-lg border bg-background shadow-xl")}>
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/95 px-5 py-4 backdrop-blur">
-          <h2 className="text-base font-semibold">{title}</h2>
-          <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} aria-label="Close">
-            <X />
-          </Button>
-        </div>
-        <div className="p-5">{children}</div>
-      </div>
-    </div>
+    <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
+      <BaseDialog.Portal>
+        <BaseDialog.Backdrop className="fixed inset-0 z-50 min-h-dvh bg-black/35 backdrop-blur-[1px] transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <BaseDialog.Popup className={cn(
+          "fixed bottom-3 left-3 right-3 z-50 max-h-[calc(100dvh-1.5rem)] overflow-auto rounded-lg border bg-background shadow-xl outline-none",
+          "sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:-translate-x-1/2 sm:-translate-y-1/2",
+          "transition-[transform,opacity] data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0",
+        )}>
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b bg-background/95 px-5 py-4 backdrop-blur">
+            <div className="min-w-0">
+              <BaseDialog.Title className="truncate text-base font-semibold">{title}</BaseDialog.Title>
+              {description ? <BaseDialog.Description className="mt-1 text-sm text-muted-foreground">{description}</BaseDialog.Description> : null}
+            </div>
+            <BaseDialog.Close className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Close dialog">
+              <X className="size-4" />
+            </BaseDialog.Close>
+          </div>
+          <div className="p-5">{children}</div>
+        </BaseDialog.Popup>
+      </BaseDialog.Portal>
+    </BaseDialog.Root>
   );
 }

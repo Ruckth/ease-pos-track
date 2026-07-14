@@ -1,7 +1,19 @@
 import { v } from "convex/values";
-import { feedbackStatus, mediaItemValidator } from "./schema";
-import { mutation, query } from "./_generated/server";
+import { annotationCreateInputValidator, feedbackStatus, mediaItemValidator } from "./schema";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import {
+  createAnnotationRecord,
+  restoreAnnotationRecord,
+  softDeleteAnnotationRecord,
+  updateAnnotationRecord,
+  type AnnotationRecord,
+} from "./annotation_state";
+import { requireCurrentVersion, validateFeedbackText } from "./feedback_state";
+import { planTicketNumberBackfill } from "./ticket_numbers";
+
+const FEEDBACK_COUNTER_NAME = "feedback";
 
 async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
   const session = await ctx.db
@@ -12,16 +24,107 @@ async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
   if (!session || session.expiresAt <= Date.now()) {
     throw new Error("Your session expired. Please sign in again.");
   }
+
+  return session;
+}
+
+async function recordAnnotationEvent(
+  ctx: MutationCtx,
+  input: {
+    feedbackId: Id<"feedback">;
+    annotationId: string;
+    action: "created" | "updated" | "deleted" | "restored" | "update_undone";
+    before?: AnnotationRecord;
+    after?: AnnotationRecord;
+    sessionId: Id<"sessions">;
+    createdAt: number;
+  },
+) {
+  return await ctx.db.insert("annotationEvents", input);
+}
+
+function feedbackState(doc: Doc<"feedback">) {
+  return {
+    title: doc.title,
+    description: doc.description,
+    status: doc.status,
+    version: doc.version ?? 0,
+    ...(doc.deletedAt === undefined ? {} : { deletedAt: doc.deletedAt }),
+  };
+}
+
+async function recordFeedbackEvent(
+  ctx: MutationCtx,
+  input: {
+    feedbackId: Id<"feedback">;
+    action: "created" | "edited" | "edit_undone" | "status_changed" | "status_undone" | "archived" | "restored";
+    before?: ReturnType<typeof feedbackState>;
+    after?: ReturnType<typeof feedbackState>;
+    sessionId: Id<"sessions">;
+    sourceEventId?: Id<"feedbackEvents">;
+    createdAt: number;
+  },
+) {
+  return await ctx.db.insert("feedbackEvents", input);
+}
+
+async function ensureTicketNumbersInDb(ctx: MutationCtx) {
+  const [rows, counter] = await Promise.all([
+    ctx.db.query("feedback").withIndex("by_created_at").order("asc").collect(),
+    ctx.db
+      .query("ticketCounters")
+      .withIndex("by_name", (q) => q.eq("name", FEEDBACK_COUNTER_NAME))
+      .unique(),
+  ]);
+  const plan = planTicketNumberBackfill(
+    rows.map((row) => ({ id: row._id, createdAt: row.createdAt, ticketNumber: row.ticketNumber })),
+    counter?.nextNumber,
+  );
+  const now = Date.now();
+
+  for (const assignment of plan.assignments) {
+    await ctx.db.patch(assignment.id as Id<"feedback">, { ticketNumber: assignment.ticketNumber });
+  }
+
+  const counterId = counter
+    ? counter._id
+    : await ctx.db.insert("ticketCounters", {
+      name: FEEDBACK_COUNTER_NAME,
+      nextNumber: plan.nextNumber,
+      updatedAt: now,
+    });
+  if (counter && counter.nextNumber !== plan.nextNumber) {
+    await ctx.db.patch(counter._id, { nextNumber: plan.nextNumber, updatedAt: now });
+  }
+
+  return { counterId, assignments: plan.assignments.length, nextNumber: plan.nextNumber };
+}
+
+async function allocateTicketNumber(ctx: MutationCtx) {
+  const state = await ensureTicketNumbersInDb(ctx);
+  await ctx.db.patch(state.counterId, { nextNumber: state.nextNumber + 1, updatedAt: Date.now() });
+  return state.nextNumber;
 }
 
 export const listFeedback = query({
   args: {
     token: v.string(),
+    includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
 
-    return await ctx.db.query("feedback").withIndex("by_created_at").order("desc").collect();
+    const rows = await ctx.db.query("feedback").withIndex("by_created_at").order("desc").collect();
+    return args.includeDeleted ? rows : rows.filter((item) => item.deletedAt === undefined);
+  },
+});
+
+export const ensureTicketNumbers = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const result = await ensureTicketNumbersInDb(ctx);
+    return { updated: result.assignments };
   },
 });
 
@@ -36,21 +139,47 @@ export const getFeedback = query({
   },
 });
 
+export const listAnnotationActivity = query({
+  args: {
+    token: v.string(),
+    id: v.id("feedback"),
+  },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    return await ctx.db
+      .query("annotationEvents")
+      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
+      .order("desc")
+      .take(30);
+  },
+});
+
+export const listFeedbackActivity = query({
+  args: { token: v.string(), id: v.id("feedback") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    return await ctx.db
+      .query("feedbackEvents")
+      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
+      .order("desc")
+      .take(30);
+  },
+});
+
 export const createFeedback = mutation({
   args: {
     token: v.string(),
     title: v.string(),
     description: v.string(),
     media: v.array(mediaItemValidator),
+    annotations: v.optional(v.array(annotationCreateInputValidator)),
+    uploadIntentId: v.id("uploadIntents"),
+    uploadIntentSecret: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireSession(ctx, args.token);
+    const session = await requireSession(ctx, args.token);
 
-    const title = args.title.trim();
-    const description = args.description.trim();
-    if (!title || !description) {
-      throw new Error("Topic and description are required.");
-    }
+    const { title, description } = validateFeedbackText(args.title, args.description);
     if (args.media.length === 0) {
       throw new Error("At least one image or video is required.");
     }
@@ -63,20 +192,69 @@ export const createFeedback = mutation({
       throw new Error("Up to 10 images and 3 videos per report.");
     }
     for (const item of args.media) {
-      if (!item.key || !item.url.startsWith("https://")) {
+      const sizeLimit = item.type.startsWith("image/") ? 8 * 1024 * 1024 : 64 * 1024 * 1024;
+      if (!item.key || !item.url.startsWith("https://") || item.size <= 0 || item.size > sizeLimit) {
         throw new Error("Invalid media reference.");
       }
     }
 
+    const intent = await ctx.db.get(args.uploadIntentId);
+    if (!intent || intent.sessionId !== session._id || intent.secret !== args.uploadIntentSecret) {
+      throw new Error("Upload authorization was not found.");
+    }
+    if (intent.status === "attached" && intent.feedbackId) return intent.feedbackId;
+    if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
+      throw new Error("Upload authorization expired. Upload the files again.");
+    }
+    if (intent.uploadedFiles.length !== args.media.length) throw new Error("Some files did not finish uploading.");
+    const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
+    const verified = args.media.every((item) => {
+      const uploaded = uploadedByKey.get(item.key);
+      return uploaded
+        && uploaded.url === item.url
+        && uploaded.name === item.name
+        && uploaded.size === item.size
+        && uploaded.type === item.type;
+    });
+    if (!verified) throw new Error("Uploaded media could not be verified.");
+
     const now = Date.now();
-    return await ctx.db.insert("feedback", {
+    const annotations = (args.annotations ?? []).map((annotation, index) =>
+      createAnnotationRecord(args.media, annotation, index + 1, crypto.randomUUID(), now)
+    );
+    const ticketNumber = await allocateTicketNumber(ctx);
+    const feedbackId = await ctx.db.insert("feedback", {
       title,
       description,
       status: "new",
+      ticketNumber,
       media: args.media,
+      ...(annotations.length === 0 ? {} : { annotations }),
+      version: 0,
       createdAt: now,
       updatedAt: now,
     });
+    const created = await ctx.db.get(feedbackId);
+    if (!created) throw new Error("Unable to create feedback.");
+    await ctx.db.patch(intent._id, { status: "attached", feedbackId, updatedAt: now });
+    await recordFeedbackEvent(ctx, {
+      feedbackId,
+      action: "created",
+      after: feedbackState(created),
+      sessionId: session._id,
+      createdAt: now,
+    });
+    for (const annotation of annotations) {
+      await recordAnnotationEvent(ctx, {
+        feedbackId,
+        annotationId: annotation.id,
+        action: "created",
+        after: annotation,
+        sessionId: session._id,
+        createdAt: now,
+      });
+    }
+    return feedbackId;
   },
 });
 
@@ -85,14 +263,181 @@ export const updateFeedbackStatus = mutation({
     token: v.string(),
     id: v.id("feedback"),
     status: feedbackStatus,
+    expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    await requireSession(ctx, args.token);
+    const session = await requireSession(ctx, args.token);
+    const doc = await ctx.db.get(args.id);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    if (doc.status === args.status) return { eventId: null, version: currentVersion };
 
+    const now = Date.now();
+    const after = { ...doc, status: args.status, version: currentVersion + 1, updatedAt: now };
     await ctx.db.patch(args.id, {
       status: args.status,
-      updatedAt: Date.now(),
+      version: currentVersion + 1,
+      updatedAt: now,
     });
+    const eventId = await recordFeedbackEvent(ctx, {
+      feedbackId: args.id,
+      action: "status_changed",
+      before: feedbackState(doc),
+      after: feedbackState(after),
+      sessionId: session._id,
+      createdAt: now,
+    });
+    return { eventId, version: currentVersion + 1 };
+  },
+});
+
+export const undoFeedbackStatus = mutation({
+  args: {
+    token: v.string(),
+    eventId: v.id("feedbackEvents"),
+    expectedVersion: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const event = await ctx.db.get(args.eventId);
+    if (!event || event.action !== "status_changed" || !event.before || !event.after) {
+      throw new Error("This status change cannot be undone.");
+    }
+    const doc = await ctx.db.get(event.feedbackId);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    if (doc.status !== event.after.status) throw new Error("The status changed again and can no longer be undone.");
+
+    const now = Date.now();
+    const after = { ...doc, status: event.before.status, version: currentVersion + 1, updatedAt: now };
+    await ctx.db.patch(doc._id, { status: event.before.status, version: currentVersion + 1, updatedAt: now });
+    await recordFeedbackEvent(ctx, {
+      feedbackId: doc._id,
+      action: "status_undone",
+      before: feedbackState(doc),
+      after: feedbackState(after),
+      sessionId: session._id,
+      sourceEventId: event._id,
+      createdAt: now,
+    });
+    return { version: currentVersion + 1 };
+  },
+});
+
+export const undoFeedbackEdit = mutation({
+  args: { token: v.string(), eventId: v.id("feedbackEvents"), expectedVersion: v.number() },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const event = await ctx.db.get(args.eventId);
+    if (!event || event.action !== "edited" || !event.before || !event.after) {
+      throw new Error("This edit cannot be undone.");
+    }
+    const doc = await ctx.db.get(event.feedbackId);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    if (doc.title !== event.after.title || doc.description !== event.after.description) {
+      throw new Error("The feedback changed again and can no longer be undone.");
+    }
+    const now = Date.now();
+    const after = {
+      ...doc,
+      title: event.before.title,
+      description: event.before.description,
+      version: currentVersion + 1,
+      updatedAt: now,
+    };
+    await ctx.db.patch(doc._id, {
+      title: event.before.title,
+      description: event.before.description,
+      version: currentVersion + 1,
+      updatedAt: now,
+    });
+    await recordFeedbackEvent(ctx, {
+      feedbackId: doc._id,
+      action: "edit_undone",
+      before: feedbackState(doc),
+      after: feedbackState(after),
+      sessionId: session._id,
+      sourceEventId: event._id,
+      createdAt: now,
+    });
+    return { version: currentVersion + 1 };
+  },
+});
+
+export const editFeedback = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("feedback"),
+    title: v.string(),
+    description: v.string(),
+    expectedVersion: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const doc = await ctx.db.get(args.id);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    const { title, description } = validateFeedbackText(args.title, args.description);
+    if (title === doc.title && description === doc.description) return { version: currentVersion };
+
+    const now = Date.now();
+    const after = { ...doc, title, description, version: currentVersion + 1, updatedAt: now };
+    await ctx.db.patch(doc._id, { title, description, version: currentVersion + 1, updatedAt: now });
+    const eventId = await recordFeedbackEvent(ctx, {
+      feedbackId: doc._id,
+      action: "edited",
+      before: feedbackState(doc),
+      after: feedbackState(after),
+      sessionId: session._id,
+      createdAt: now,
+    });
+    return { eventId, version: currentVersion + 1 };
+  },
+});
+
+export const archiveFeedback = mutation({
+  args: { token: v.string(), id: v.id("feedback"), expectedVersion: v.number() },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const doc = await ctx.db.get(args.id);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    const now = Date.now();
+    const after = { ...doc, deletedAt: now, version: currentVersion + 1, updatedAt: now };
+    await ctx.db.patch(doc._id, { deletedAt: now, version: currentVersion + 1, updatedAt: now });
+    await recordFeedbackEvent(ctx, {
+      feedbackId: doc._id,
+      action: "archived",
+      before: feedbackState(doc),
+      after: feedbackState(after),
+      sessionId: session._id,
+      createdAt: now,
+    });
+    return { version: currentVersion + 1 };
+  },
+});
+
+export const restoreFeedback = mutation({
+  args: { token: v.string(), id: v.id("feedback"), expectedVersion: v.number() },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const doc = await ctx.db.get(args.id);
+    if (!doc || doc.deletedAt === undefined) throw new Error("Archived feedback not found.");
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    const now = Date.now();
+    const { deletedAt: _deletedAt, ...restored } = doc;
+    const after = { ...restored, version: currentVersion + 1, updatedAt: now };
+    await ctx.db.replace(doc._id, after);
+    await recordFeedbackEvent(ctx, {
+      feedbackId: doc._id,
+      action: "restored",
+      before: feedbackState(doc),
+      after: feedbackState(after),
+      sessionId: session._id,
+      createdAt: now,
+    });
+    return { version: currentVersion + 1 };
   },
 });
 
@@ -108,51 +453,102 @@ export const addAnnotation = mutation({
     text: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireSession(ctx, args.token);
+    const session = await requireSession(ctx, args.token);
 
     const doc = await ctx.db.get(args.id);
-    if (!doc) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
 
-    const text = args.text.trim();
-    if (!text) throw new Error("Comment text is required.");
-    if (!Number.isInteger(args.mediaIndex) || args.mediaIndex < 0 || args.mediaIndex >= doc.media.length) {
-      throw new Error("Invalid media index.");
-    }
-    const target = doc.media[args.mediaIndex];
-    if (args.kind === "point" && (args.x === undefined || args.y === undefined)) {
-      throw new Error("Point annotations require x and y.");
-    }
-    if (args.kind === "time" && args.time === undefined) {
-      throw new Error("Time annotations require a timestamp.");
-    }
-    if (args.kind === "time" && !target.type.startsWith("video/")) {
-      throw new Error("Time marks are only valid on videos.");
-    }
-    if (args.kind === "point" && target.type.startsWith("video/")) {
-      throw new Error("Use a time mark for videos.");
-    }
-
-    const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
     const annotations = doc.annotations ?? [];
     const label = annotations.reduce((max, item) => Math.max(max, item.label), 0) + 1;
-    const annotation = {
-      id: crypto.randomUUID(),
-      label,
-      mediaIndex: args.mediaIndex,
-      kind: args.kind,
-      x: args.x === undefined ? undefined : clamp01(args.x),
-      y: args.y === undefined ? undefined : clamp01(args.y),
-      time: args.time === undefined ? undefined : Math.max(0, args.time),
-      text,
-      createdAt: Date.now(),
-    };
+    const now = Date.now();
+    const annotation = createAnnotationRecord(doc.media, args, label, crypto.randomUUID(), now);
 
     await ctx.db.patch(args.id, {
       annotations: [...annotations, annotation],
-      updatedAt: Date.now(),
+      updatedAt: now,
+    });
+
+    await recordAnnotationEvent(ctx, {
+      feedbackId: args.id,
+      annotationId: annotation.id,
+      action: "created",
+      after: annotation,
+      sessionId: session._id,
+      createdAt: now,
     });
 
     return annotation.id;
+  },
+});
+
+export const updateAnnotation = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("feedback"),
+    annotationId: v.string(),
+    text: v.optional(v.string()),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    time: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const doc = await ctx.db.get(args.id);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+
+    const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
+    if (index < 0) throw new Error("Comment not found.");
+
+    const annotations = [...(doc.annotations ?? [])];
+    const before = annotations[index];
+    const now = Date.now();
+    const after = updateAnnotationRecord(before, args, now);
+    annotations[index] = after;
+
+    await ctx.db.patch(args.id, { annotations, updatedAt: now });
+    const eventId = await recordAnnotationEvent(ctx, {
+      feedbackId: args.id,
+      annotationId: args.annotationId,
+      action: "updated",
+      before,
+      after,
+      sessionId: session._id,
+      createdAt: now,
+    });
+    return { eventId };
+  },
+});
+
+export const undoAnnotationUpdate = mutation({
+  args: { token: v.string(), eventId: v.id("annotationEvents") },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const event = await ctx.db.get(args.eventId);
+    if (!event || event.action !== "updated" || !event.before || !event.after) {
+      throw new Error("This comment change cannot be undone.");
+    }
+    const doc = await ctx.db.get(event.feedbackId);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    const annotations = [...(doc.annotations ?? [])];
+    const index = annotations.findIndex((annotation) => annotation.id === event.annotationId);
+    if (index < 0 || annotations[index].deletedAt !== undefined) throw new Error("Comment not found.");
+    if (annotations[index].updatedAt !== event.after.updatedAt) {
+      throw new Error("The comment changed again and can no longer be undone.");
+    }
+    const now = Date.now();
+    const before = annotations[index];
+    const after = { ...event.before, updatedAt: now };
+    annotations[index] = after;
+    await ctx.db.patch(doc._id, { annotations, updatedAt: now });
+    await recordAnnotationEvent(ctx, {
+      feedbackId: doc._id,
+      annotationId: event.annotationId,
+      action: "update_undone",
+      before,
+      after,
+      sessionId: session._id,
+      createdAt: now,
+    });
   },
 });
 
@@ -163,15 +559,93 @@ export const removeAnnotation = mutation({
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireSession(ctx, args.token);
+    const session = await requireSession(ctx, args.token);
 
     const doc = await ctx.db.get(args.id);
-    if (!doc) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
 
-    const annotations = (doc.annotations ?? []).filter((item) => item.id !== args.annotationId);
+    const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
+    if (index < 0) throw new Error("Comment not found.");
+
+    const annotations = [...(doc.annotations ?? [])];
+    const before = annotations[index];
+    const now = Date.now();
+    const after = softDeleteAnnotationRecord(before, now);
+    annotations[index] = after;
     await ctx.db.patch(args.id, {
       annotations,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
+    await recordAnnotationEvent(ctx, {
+      feedbackId: args.id,
+      annotationId: args.annotationId,
+      action: "deleted",
+      before,
+      after,
+      sessionId: session._id,
+      createdAt: now,
+    });
+  },
+});
+
+export const restoreAnnotation = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("feedback"),
+    annotationId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const doc = await ctx.db.get(args.id);
+    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+
+    const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
+    if (index < 0) throw new Error("Comment not found.");
+
+    const annotations = [...(doc.annotations ?? [])];
+    const before = annotations[index];
+    const now = Date.now();
+    const after = restoreAnnotationRecord(before, now);
+    annotations[index] = after;
+
+    await ctx.db.patch(args.id, { annotations, updatedAt: now });
+    await recordAnnotationEvent(ctx, {
+      feedbackId: args.id,
+      annotationId: args.annotationId,
+      action: "restored",
+      before,
+      after,
+      sessionId: session._id,
+      createdAt: now,
+    });
+  },
+});
+
+export const listFeedbackForPurge = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return await ctx.db
+      .query("feedback")
+      .withIndex("by_deleted_at", (q) => q.gte("deletedAt", 0).lt("deletedAt", cutoff))
+      .take(25);
+  },
+});
+
+export const purgeFeedback = internalMutation({
+  args: { id: v.id("feedback") },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.id);
+    if (!doc?.deletedAt || doc.deletedAt > Date.now() - 30 * 24 * 60 * 60 * 1000) return;
+    const feedbackEvents = await ctx.db
+      .query("feedbackEvents")
+      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
+      .collect();
+    const annotationEvents = await ctx.db
+      .query("annotationEvents")
+      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
+      .collect();
+    for (const event of [...feedbackEvents, ...annotationEvents]) await ctx.db.delete(event._id);
+    await ctx.db.delete(args.id);
   },
 });
