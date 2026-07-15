@@ -8,14 +8,14 @@ test("feedback text is trimmed and bounded on the server", () => {
     title: "Printer issue",
     description: "Receipt is blank",
   });
-  assert.throws(() => validateFeedbackText("x".repeat(101), "description"), /100 characters/);
-  assert.throws(() => validateFeedbackText("title", "x".repeat(10_001)), /10,000 characters/);
+  assert.throws(() => validateFeedbackText("x".repeat(101), "description"), /TITLE_TOO_LONG/);
+  assert.throws(() => validateFeedbackText("title", "x".repeat(10_001)), /DESCRIPTION_TOO_LONG/);
 });
 
 test("optimistic versions reject stale mutations", () => {
   assert.equal(requireCurrentVersion({ version: 3 }, 3), 3);
   assert.equal(requireCurrentVersion({}, 0), 0);
-  assert.throws(() => requireCurrentVersion({ version: 4 }, 3), /changed in another session/);
+  assert.throws(() => requireCurrentVersion({ version: 4 }, 3), /VERSION_CONFLICT/);
 });
 
 test("upload validation rejects unsupported and oversized media", () => {
@@ -23,8 +23,8 @@ test("upload validation rejects unsupported and oversized media", () => {
     { name: "photo.png", size: 1_024, type: "image/png" },
     { name: "clip.mp4", size: 2_048, type: "video/mp4" },
   ]));
-  assert.throws(() => validateFiles([{ name: "notes.txt", size: 100, type: "text/plain" }]), /Only images and videos/);
-  assert.throws(() => validateFiles([{ name: "large.png", size: 8 * 1024 * 1024 + 1, type: "image/png" }]), /no more than 8MB/);
+  assert.throws(() => validateFiles([{ name: "notes.txt", size: 100, type: "text/plain" }]), /IMAGE_VIDEO_ONLY/);
+  assert.throws(() => validateFiles([{ name: "large.png", size: 8 * 1024 * 1024 + 1, type: "image/png" }]), /IMAGE_TOO_LARGE/);
 });
 
 test("upload intent comparison detects metadata tampering", () => {

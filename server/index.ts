@@ -30,9 +30,9 @@ app.all("/api/uploadthing", async (c) => uploadHandler(c.req.raw));
 app.post("/api/uploads/cancel", async (c) => {
   const authorization = c.req.header("authorization") ?? "";
   const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!token) return c.json({ error: "Unauthorized" }, 401);
+  if (!token) return c.json({ error: "SESSION_EXPIRED" }, 401);
   const body = await c.req.json<{ intentId?: string; secret?: string }>();
-  if (!body.intentId || !body.secret) return c.json({ error: "Invalid upload intent" }, 400);
+  if (!body.intentId || !body.secret) return c.json({ error: "UPLOAD_INTENT_INVALID" }, 400);
 
   try {
     const result = await convex.mutation(api.uploads.cancelUploadIntent, {
@@ -43,7 +43,7 @@ app.post("/api/uploads/cancel", async (c) => {
     if (result.keys.length > 0) await utapi.deleteFiles(result.keys);
     return c.json({ ok: true, deleted: result.keys.length });
   } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : "Unable to cancel upload" }, 400);
+    return c.json({ error: error instanceof Error ? error.message : "UPLOAD_CLEANUP_FAILED" }, 400);
   }
 });
 

@@ -2,19 +2,22 @@ import * as React from "react";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 type DialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  keepMounted?: boolean;
   children: React.ReactNode;
 };
 
-export function Dialog({ open, onOpenChange, title, description, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, title, description, keepMounted = false, children }: DialogProps) {
+  const { t } = useI18n();
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
-      <BaseDialog.Portal>
+      <BaseDialog.Portal keepMounted={keepMounted}>
         <BaseDialog.Backdrop className="fixed inset-0 z-50 min-h-dvh bg-black/35 backdrop-blur-[1px] transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <BaseDialog.Popup className={cn(
           "fixed bottom-3 left-3 right-3 z-50 max-h-[calc(100dvh-1.5rem)] overflow-auto rounded-lg border bg-background shadow-xl outline-none",
@@ -26,7 +29,7 @@ export function Dialog({ open, onOpenChange, title, description, children }: Dia
               <BaseDialog.Title className="truncate text-base font-semibold">{title}</BaseDialog.Title>
               {description ? <BaseDialog.Description className="mt-1 text-sm text-muted-foreground">{description}</BaseDialog.Description> : null}
             </div>
-            <BaseDialog.Close className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Close dialog">
+            <BaseDialog.Close className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("closeDialog")}>
               <X className="size-4" />
             </BaseDialog.Close>
           </div>

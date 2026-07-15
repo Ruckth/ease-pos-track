@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Copy,
   ImagePlus,
   Images,
   Loader2,
@@ -47,20 +48,21 @@ import {
   withoutPendingAnnotationsForMedia,
 } from "@/lib/pending-annotations";
 import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus, type MediaItem } from "@/lib/types";
+import { localizeError, useI18n } from "@/lib/i18n";
 
 const SESSION_KEY = "ease-pos-tracking-session";
 const CLIENT_ID_KEY = "ease-pos-client-id";
 
 const statuses: Array<{
   value: FeedbackStatus;
-  label: string;
+  labelKey: "new" | "inProgress" | "waiting" | "done";
   tone: string;
   icon: typeof Clock3;
 }> = [
-  { value: "new", label: "New", tone: "bg-sky-50 text-sky-800 border-sky-200", icon: ImagePlus },
-  { value: "in_progress", label: "In Progress", tone: "bg-amber-50 text-amber-800 border-amber-200", icon: RefreshCw },
-  { value: "waiting", label: "Waiting", tone: "bg-violet-50 text-violet-800 border-violet-200", icon: Clock3 },
-  { value: "done", label: "Done", tone: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: CheckCircle2 },
+  { value: "new", labelKey: "new", tone: "bg-sky-50 text-sky-800 border-sky-200", icon: ImagePlus },
+  { value: "in_progress", labelKey: "inProgress", tone: "bg-amber-50 text-amber-800 border-amber-200", icon: RefreshCw },
+  { value: "waiting", labelKey: "waiting", tone: "bg-violet-50 text-violet-800 border-violet-200", icon: Clock3 },
+  { value: "done", labelKey: "done", tone: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: CheckCircle2 },
 ];
 
 function getStoredToken() {
@@ -91,20 +93,8 @@ function statusMeta(status: FeedbackStatus) {
   return statuses.find((item) => item.value === status) ?? statuses[0];
 }
 
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(timestamp);
-}
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong. Please try again.";
-}
-
-function App() {
+function AppContent() {
   const [token, setToken] = useState(getStoredToken);
   const logout = useMutation(api.auth.logout);
   const sessionValid = useQuery(api.auth.validateSession, { token: token || undefined });
@@ -134,7 +124,12 @@ function App() {
   }} />;
 }
 
+function App() {
+  return <AppContent />;
+}
+
 function PasswordGate({ onLogin }: { onLogin: (token: string) => void }) {
+  const { language, setLanguage, t } = useI18n();
   const login = useMutation(api.auth.login);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -150,7 +145,7 @@ function PasswordGate({ onLogin }: { onLogin: (token: string) => void }) {
       storeToken(result.token);
       onLogin(result.token);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in");
+      setError(localizeError(err, t));
     } finally {
       setSubmitting(false);
     }
@@ -160,14 +155,14 @@ function PasswordGate({ onLogin }: { onLogin: (token: string) => void }) {
     <main className="grid min-h-screen place-items-center px-4 py-10">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Ease POS Tracking</CardTitle>
-          <CardDescription>Internal feedback board</CardDescription>
+          <div className="flex items-center justify-between gap-3"><CardTitle>{t("appName")}</CardTitle><LanguageSelector language={language} onChange={setLanguage} /></div>
+          <CardDescription>{t("internalBoard")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="password">
-                Password
+              {t("password")}
               </label>
               <Input
                 id="password"
@@ -180,8 +175,7 @@ function PasswordGate({ onLogin }: { onLogin: (token: string) => void }) {
             </div>
             {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
             <Button className="w-full" disabled={isSubmitting || !password}>
-              {isSubmitting ? <Loader2 className="animate-spin" /> : null}
-              Enter
+              {isSubmitting ? <Loader2 className="animate-spin" /> : null}{isSubmitting ? t("signingIn") : t("enter")}
             </Button>
           </form>
         </CardContent>
@@ -190,8 +184,22 @@ function PasswordGate({ onLogin }: { onLogin: (token: string) => void }) {
   );
 }
 
+function LanguageSelector({ language, onChange }: { language: "th" | "en"; onChange: (language: "th" | "en") => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="inline-flex rounded-md border p-0.5" aria-label={t("language")}>
+      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-7 px-2" onClick={() => onChange("th")}>ไทย</Button>
+      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-7 px-2" onClick={() => onChange("en")}>EN</Button>
+    </div>
+  );
+}
+
 function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () => Promise<void> }) {
+  const { language, setLanguage, t, formatDate } = useI18n();
   const [showArchived, setShowArchived] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerHasDraft, setComposerHasDraft] = useState(false);
+  const [composerBusy, setComposerBusy] = useState(false);
   const feedback = useQuery(api.feedback.listFeedback, { token, includeDeleted: showArchived });
   const updateStatus = useMutation(api.feedback.updateFeedbackStatus);
   const undoStatus = useMutation(api.feedback.undoFeedbackStatus);
@@ -215,7 +223,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     if (!feedback?.some((item) => item.ticketNumber === undefined) || ticketBackfillRunningRef.current) return;
     ticketBackfillRunningRef.current = true;
     void ensureTicketNumbers({ token })
-      .catch((error) => toast.error(errorMessage(error)))
+      .catch((error) => toast.error(localizeError(error, t)))
       .finally(() => {
         ticketBackfillRunningRef.current = false;
       });
@@ -231,17 +239,17 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     try {
       const result = await updateStatus({ token, id, status, expectedVersion: current.version ?? 0 });
       if (!result.eventId) return;
-      toast.success("Status updated", {
+      toast.success(t("statusUpdated"), {
         action: {
-          label: "Undo",
+          label: t("undo"),
           onClick: () => {
             void undoStatus({ token, eventId: result.eventId!, expectedVersion: result.version })
-              .catch((error) => toast.error(errorMessage(error)));
+              .catch((error) => toast.error(localizeError(error, t)));
           },
         },
       });
     } catch (error) {
-      toast.error(errorMessage(error));
+      toast.error(localizeError(error, t));
     }
   }
 
@@ -249,7 +257,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     const current = feedback?.find((item) => item._id === id);
     if (!current) return;
     await restoreFeedback({ token, id, expectedVersion: current.version ?? 0 });
-    if (announce) toast.success("Feedback restored");
+    if (announce) toast.success(t("feedbackRestored"));
   }
 
   async function archiveItem(id: Id<"feedback">) {
@@ -257,12 +265,12 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     if (!current) return;
     const result = await archiveFeedback({ token, id, expectedVersion: current.version ?? 0 });
     setSelectedId(null);
-    toast.success("Feedback archived for 30 days", {
+    toast.success(t("feedbackArchived"), {
       action: {
-        label: "Undo",
+          label: t("undo"),
         onClick: () => {
           void restoreFeedback({ token, id, expectedVersion: result.version })
-            .catch((error) => toast.error(errorMessage(error)));
+            .catch((error) => toast.error(localizeError(error, t)));
         },
       },
     });
@@ -272,29 +280,38 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     <main className="min-h-screen">
       <Toaster richColors position="bottom-right" />
       <header className="border-b bg-card/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-normal">Ease POS Tracking</h1>
-            <p className="text-sm text-muted-foreground">{feedback ? `${feedback.length} feedback item${feedback.length === 1 ? "" : "s"}` : "Syncing"}</p>
+            <h1 className="text-2xl font-semibold tracking-normal">{t("appName")}</h1>
+            <p className="text-sm text-muted-foreground">{feedback ? t("feedbackItems", { count: feedback.length }) : t("syncing")}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1 sm:w-72">
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap">
+            <div className="relative min-w-48 flex-1 basis-full sm:basis-auto lg:w-72 lg:flex-none">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Search" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <Input className="pl-9" placeholder={t("search")} value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
+            <Button
+              type="button"
+              variant="default"
+              aria-expanded={composerOpen}
+              onClick={() => setComposerOpen(true)}
+            >
+              <ImagePlus />
+              {composerHasDraft ? t("resumeFeedback") : t("newFeedback")}
+            </Button>
             <Button variant={showArchived ? "default" : "outline"} onClick={() => setShowArchived((value) => !value)}>
               <Archive />
-              {showArchived ? "Hide archive" : "Archive"}
+              {showArchived ? t("hideArchive") : t("archive")}
             </Button>
-            <Button variant="outline" size="icon" onClick={() => void onLogout()} aria-label="Sign out">
+            <LanguageSelector language={language} onChange={setLanguage} />
+            <Button variant="outline" size="icon" onClick={() => void onLogout()} aria-label={t("signOut")}>
               <LogOut />
             </Button>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[380px_1fr]">
-        <SubmitFeedback token={token} />
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6">
         <section className="min-w-0">
           {feedback === undefined ? (
             <div className="grid min-h-72 place-items-center rounded-lg border bg-card">
@@ -318,7 +335,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           )}
           {showArchived && archivedItems.length > 0 ? (
             <section className="mt-5 rounded-lg border bg-card p-4">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />Archived feedback</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedFeedback")}</h2>
               <div className="space-y-2">
                 {archivedItems.map((item) => (
                   <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
@@ -326,11 +343,11 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
                       <span className="block truncate text-sm font-medium">{item.title}</span>
                       <span className="text-xs text-muted-foreground">
                         <span className="font-mono">{formatTicketNumber(item.ticketNumber)}</span>
-                        {" · "}Archived {formatDate(item.deletedAt ?? item.updatedAt)}
+                        {" · "}{t("archivedOn", { date: formatDate(item.deletedAt ?? item.updatedAt) })}
                       </span>
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(errorMessage(error)))}>
-                      <ArchiveRestore /> Restore
+                    <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(localizeError(error, t)))}>
+                      <ArchiveRestore /> {t("restore")}
                     </Button>
                   </div>
                 ))}
@@ -339,6 +356,27 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           ) : null}
         </section>
       </div>
+
+      <Dialog
+        open={composerOpen}
+        onOpenChange={(open) => {
+          if (open || !composerBusy) setComposerOpen(open);
+        }}
+        title={t("newFeedback")}
+        description={t("internalBoard")}
+        keepMounted
+      >
+        <SubmitFeedback
+          token={token}
+          active={composerOpen}
+          onSubmissionComplete={() => {
+            setComposerHasDraft(false);
+            setComposerOpen(false);
+          }}
+          onDraftStateChange={setComposerHasDraft}
+          onUploadBusyChange={setComposerBusy}
+        />
+      </Dialog>
 
       <FeedbackDialog
         feedback={selected}
@@ -351,11 +389,25 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   );
 }
 
-function SubmitFeedback({ token }: { token: string }) {
+function SubmitFeedback({
+  token,
+  active,
+  onSubmissionComplete,
+  onDraftStateChange,
+  onUploadBusyChange,
+}: {
+  token: string;
+  active: boolean;
+  onSubmissionComplete: () => void;
+  onDraftStateChange: (hasDraft: boolean) => void;
+  onUploadBusyChange: (isBusy: boolean) => void;
+}) {
+  const { t } = useI18n();
   const createFeedback = useMutation(api.feedback.createFeedback);
   const createUploadIntent = useMutation(api.uploads.createUploadIntent);
   const abortControllerRef = useRef<AbortController | null>(null);
   const idempotencyKeyRef = useRef(crypto.randomUUID());
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [items, setItems] = useState<PendingMedia[]>([]);
@@ -363,8 +415,9 @@ function SubmitFeedback({ token }: { token: string }) {
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingMedia | null>(null);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const isUploading = progress !== null;
+  const hasDraft = title.length > 0 || description.length > 0 || items.length > 0 || annotations.length > 0;
   const viewerMedia = useMemo(() => pendingMediaForViewer(items), [items]);
   const viewerAnnotations = useMemo(
     () => pendingAnnotationsForViewer(items, annotations),
@@ -376,7 +429,25 @@ function SubmitFeedback({ token }: { token: string }) {
     return counts;
   }, {}), [annotations]);
 
-  function resetForm() {
+  useEffect(() => {
+    onDraftStateChange(hasDraft);
+  }, [hasDraft, onDraftStateChange]);
+
+  useEffect(() => {
+    onUploadBusyChange(isUploading);
+  }, [isUploading, onUploadBusyChange]);
+
+  useEffect(() => {
+    if (active) titleInputRef.current?.focus();
+  }, [active]);
+
+  useEffect(() => {
+    if (active) return;
+    setSelectedMediaId(null);
+    setPendingRemoval(null);
+  }, [active]);
+
+  function finishSubmission() {
     releasePendingMedia(items);
     setItems([]);
     setAnnotations([]);
@@ -384,8 +455,10 @@ function SubmitFeedback({ token }: { token: string }) {
     setPendingRemoval(null);
     setTitle("");
     setDescription("");
-    setSuccess(true);
+    setError("");
     idempotencyKeyRef.current = crypto.randomUUID();
+    toast.success(t("feedbackSubmitted"));
+    onSubmissionComplete();
   }
 
   function removePendingItem(item: PendingMedia) {
@@ -406,7 +479,7 @@ function SubmitFeedback({ token }: { token: string }) {
 
   async function createPendingAnnotation(input: AnnotationDraftInput) {
     const mediaItem = items[input.mediaIndex];
-    if (!mediaItem) throw new Error("This media item is no longer available.");
+    if (!mediaItem) throw new Error("MEDIA_UNAVAILABLE");
     setAnnotations((current) => [...current, {
       id: crypto.randomUUID(),
       mediaId: mediaItem.id,
@@ -417,7 +490,7 @@ function SubmitFeedback({ token }: { token: string }) {
       text: input.text.trim(),
       createdAt: Date.now(),
     }]);
-    toast.success("Pin added to draft");
+    toast.success(t("pinAdded"));
   }
 
   async function updatePendingAnnotation(input: AnnotationUpdateInput) {
@@ -444,18 +517,17 @@ function SubmitFeedback({ token }: { token: string }) {
       body: JSON.stringify({ intentId, secret }),
     });
     if (!response.ok) {
-      const result = await response.json().catch(() => ({ error: "Unable to clean up uploaded files." }));
-      throw new Error(typeof result.error === "string" ? result.error : "Unable to clean up uploaded files.");
+      const result = await response.json().catch(() => ({ error: "UPLOAD_CLEANUP_FAILED" }));
+      throw new Error(typeof result.error === "string" ? result.error : "UPLOAD_CLEANUP_FAILED");
     }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setSuccess(false);
 
     if (!title.trim() || !description.trim() || items.length === 0) {
-      setError("Topic, description, and at least one photo or video are required.");
+      setError(t("requiredFeedback"));
       return;
     }
 
@@ -468,7 +540,7 @@ function SubmitFeedback({ token }: { token: string }) {
         files: items.map((item) => ({ name: item.file.name, size: item.file.size, type: item.file.type })),
       });
       if (intent.feedbackId) {
-        resetForm();
+        finishSubmission();
         return;
       }
       activeIntent = { intentId: intent.intentId, secret: intent.secret };
@@ -503,92 +575,81 @@ function SubmitFeedback({ token }: { token: string }) {
         uploadIntentSecret: intent.secret,
       });
       activeIntent = null;
-      resetForm();
+      finishSubmission();
     } catch (err) {
       if (activeIntent) {
         try {
           await cancelUploadIntent(activeIntent.intentId, activeIntent.secret);
         } catch (cleanupError) {
-          toast.error(errorMessage(cleanupError));
+          toast.error(localizeError(cleanupError, t));
         }
       }
-      setError(err instanceof Error ? err.message : "Unable to submit feedback");
+      setError(localizeError(err, t));
     } finally {
       abortControllerRef.current = null;
       setProgress(null);
     }
   }
 
-  const isUploading = progress !== null;
-
   return (
     <>
-      <Card className="h-fit">
-        <CardHeader>
-          <CardTitle>New Feedback</CardTitle>
-          <CardDescription>Problem report</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={onSubmit}>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="title">
-              Topic
-            </label>
-            <Input id="title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="description">
-              Description
-            </label>
-            <Textarea id="description" maxLength={10_000} value={description} onChange={(event) => setDescription(event.target.value)} />
-          </div>
+      <form className="space-y-4" onSubmit={onSubmit}>
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor="title">
+            {t("topic")}
+          </label>
+          <Input ref={titleInputRef} id="title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} />
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor="description">
+            {t("description")}
+          </label>
+          <Textarea id="description" maxLength={10_000} value={description} onChange={(event) => setDescription(event.target.value)} />
+        </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Media</label>
-            <MediaUploadField
-              items={items}
-              onItemsChange={setItems}
-              onPreviewItem={(item) => setSelectedMediaId(item.id)}
-              onRequestRemove={requestPendingItemRemoval}
-              annotationCounts={annotationCounts}
-              disabled={isUploading}
-            />
-            {items.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {annotations.length > 0
-                  ? `${annotations.length} pin${annotations.length === 1 ? "" : "s"} ready to submit. Click media to review or add more.`
-                  : "Click a photo or video to add pins and descriptions before submitting."}
-              </p>
-            ) : null}
-          </div>
-
-          {progress !== null ? (
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
-            </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">{t("media")}</label>
+          <MediaUploadField
+            items={items}
+            onItemsChange={setItems}
+            onPreviewItem={(item) => setSelectedMediaId(item.id)}
+            onRequestRemove={requestPendingItemRemoval}
+            annotationCounts={annotationCounts}
+            disabled={!active || isUploading}
+          />
+          {items.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {annotations.length > 0
+                ? t("pinSummary", { count: annotations.length })
+                : t("pinHint")}
+            </p>
           ) : null}
-          {success ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Feedback submitted.</p> : null}
-          {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-          <div className="flex gap-2">
-            <Button className="flex-1" disabled={isUploading}>
-              {isUploading ? <Loader2 className="animate-spin" /> : null}
-              Submit
-            </Button>
-            {isUploading ? (
-              <Button type="button" variant="outline" onClick={() => abortControllerRef.current?.abort()}>
-                Cancel upload
-              </Button>
-            ) : null}
+        </div>
+
+        {progress !== null ? (
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
           </div>
-          </form>
-        </CardContent>
-      </Card>
+        ) : null}
+        {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+        <div className="flex gap-2">
+          <Button className="flex-1" disabled={isUploading}>
+            {isUploading ? <Loader2 className="animate-spin" /> : null}
+            {isUploading ? t("submitting") : t("submit")}
+          </Button>
+          {isUploading ? (
+            <Button type="button" variant="outline" onClick={() => abortControllerRef.current?.abort()}>
+              {t("cancelUpload")}
+            </Button>
+          ) : null}
+        </div>
+      </form>
 
       <Dialog
-        open={selectedMediaId !== null}
+        open={active && selectedMediaId !== null}
         onOpenChange={(open) => !open && setSelectedMediaId(null)}
-        title={items[selectedMediaIndex]?.file.name ?? "Annotate media"}
-        description="Add a pin, then describe the issue at that point."
+        title={items[selectedMediaIndex]?.file.name ?? t("annotateMedia")}
+        description={t("annotateDescription")}
       >
         <MediaViewer
           key={selectedMediaId ?? "pending-media"}
@@ -602,11 +663,11 @@ function SubmitFeedback({ token }: { token: string }) {
       </Dialog>
 
       <AlertDialog
-        open={pendingRemoval !== null}
+        open={active && pendingRemoval !== null}
         onOpenChange={(open) => !open && setPendingRemoval(null)}
-        title="Remove media and pins?"
-        description={`${pendingRemoval?.file.name ?? "This media item"} has ${pendingRemoval ? annotationCounts[pendingRemoval.id] ?? 0 : 0} pin descriptions. Removing it will discard those pins.`}
-        confirmLabel="Remove media"
+        title={t("removeMediaPins")}
+        description={t("removeMediaDescription", { name: pendingRemoval?.file.name ?? t("media"), count: pendingRemoval ? annotationCounts[pendingRemoval.id] ?? 0 : 0 })}
+        confirmLabel={t("removeMedia")}
         onConfirm={() => {
           if (pendingRemoval) removePendingItem(pendingRemoval);
         }}
@@ -626,6 +687,7 @@ function BoardColumn({
   onSelect: (id: Id<"feedback">) => void;
   onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
 }) {
+  const { t } = useI18n();
   const meta = statusMeta(status);
   const Icon = meta.icon;
 
@@ -634,7 +696,7 @@ function BoardColumn({
       <div className={cn("flex items-center justify-between border-b px-3 py-3", meta.tone)}>
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0" />
-          <h2 className="truncate text-sm font-semibold">{meta.label}</h2>
+          <h2 className="truncate text-sm font-semibold">{t(meta.labelKey)}</h2>
         </div>
         <Badge variant="outline" className="bg-white/70">
           {items.length}
@@ -642,7 +704,7 @@ function BoardColumn({
       </div>
       <div className="space-y-3 p-3">
         {items.length === 0 ? (
-          <div className="grid min-h-24 place-items-center rounded-md border border-dashed text-sm text-muted-foreground">Empty</div>
+          <div className="grid min-h-24 place-items-center rounded-md border border-dashed text-sm text-muted-foreground">{t("empty")}</div>
         ) : (
           items.map((item) => <FeedbackCard key={item._id} item={item} onSelect={onSelect} onMove={onMove} />)
         )}
@@ -660,13 +722,14 @@ function FeedbackCard({
   onSelect: (id: Id<"feedback">) => void;
   onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
 }) {
+  const { t, formatDate } = useI18n();
   const cover = item.media[0];
   const extraCount = item.media.length - 1;
   const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
   const ticketLabel = formatTicketNumber(item.ticketNumber);
   const nextStatus = nextFeedbackStatus(item.status);
   const currentStatus = statusMeta(item.status);
-  const nextStatusLabel = nextStatus ? statusMeta(nextStatus).label : null;
+  const nextStatusLabel = nextStatus ? t(statusMeta(nextStatus).labelKey) : null;
 
   return (
     <article className="rounded-md border bg-background shadow-sm">
@@ -682,7 +745,7 @@ function FeedbackCard({
               <img className="aspect-video w-full object-cover" src={cover.url} alt="" loading="lazy" />
             )
           ) : (
-            <div className="grid aspect-video w-full place-items-center text-xs text-muted-foreground">No media</div>
+            <div className="grid aspect-video w-full place-items-center text-xs text-muted-foreground">{t("noMedia")}</div>
           )}
           {extraCount > 0 ? (
             <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
@@ -713,11 +776,11 @@ function FeedbackCard({
           onClick={() => {
             if (nextStatus) onMove(item._id, nextStatus);
           }}
-          aria-label={nextStatusLabel ? `Move ${ticketLabel} to ${nextStatusLabel}` : `${ticketLabel} is Done`}
-          title={nextStatusLabel ? `Move to ${nextStatusLabel}` : "Ticket is complete"}
+          aria-label={nextStatusLabel ? t("movedTo", { ticket: ticketLabel, status: nextStatusLabel }) : t("ticketComplete", { ticket: ticketLabel })}
+          title={nextStatusLabel ? t("movedTo", { ticket: ticketLabel, status: nextStatusLabel }) : t("ticketCompleteTitle")}
           className={cn("h-7 rounded-full px-2.5 text-xs disabled:opacity-100", currentStatus.tone)}
         >
-          {currentStatus.label}
+          {t(currentStatus.labelKey)}
           {nextStatus ? <ChevronRight className="size-3" /> : null}
         </Button>
       </div>
@@ -738,6 +801,7 @@ function FeedbackDialog({
   onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
   onArchive: (id: Id<"feedback">) => Promise<void>;
 }) {
+  const { t, formatDate } = useI18n();
   const detail = useQuery(api.feedback.getFeedback, feedback ? { token, id: feedback._id } : "skip");
   const activity = useQuery(api.feedback.listAnnotationActivity, feedback ? { token, id: feedback._id } : "skip");
   const feedbackActivity = useQuery(api.feedback.listFeedbackActivity, feedback ? { token, id: feedback._id } : "skip");
@@ -780,18 +844,18 @@ function FeedbackDialog({
       });
       setEditing(false);
       if ("eventId" in result && result.eventId) {
-        toast.success("Feedback updated", {
+        toast.success(t("feedbackUpdated"), {
           action: {
-            label: "Undo",
+            label: t("undo"),
             onClick: () => {
               void undoFeedbackEdit({ token, eventId: result.eventId, expectedVersion: result.version })
-                .catch((error) => toast.error(errorMessage(error)));
+                .catch((error) => toast.error(localizeError(error, t)));
             },
           },
         });
       }
     } catch (error) {
-      setFeedbackError(errorMessage(error));
+      setFeedbackError(localizeError(error, t));
     } finally {
       setSavingFeedback(false);
     }
@@ -800,12 +864,12 @@ function FeedbackDialog({
   async function handleUpdateAnnotation(input: AnnotationUpdateInput) {
     if (!item) return;
     const result = await updateAnnotation({ token, id: item._id, ...input });
-    toast.success("Comment updated", {
+    toast.success(t("commentUpdated"), {
       action: {
-        label: "Undo",
+        label: t("undo"),
         onClick: () => {
           void undoAnnotationUpdate({ token, eventId: result.eventId })
-            .catch((error) => toast.error(errorMessage(error)));
+            .catch((error) => toast.error(localizeError(error, t)));
         },
       },
     });
@@ -814,30 +878,49 @@ function FeedbackDialog({
   async function handleRestoreAnnotation(annotationId: string, announce = true) {
     if (!item) return;
     await restoreAnnotation({ token, id: item._id, annotationId });
-    if (announce) toast.success("Comment restored");
+    if (announce) toast.success(t("commentRestored"));
   }
 
   async function handleDeleteAnnotation(annotationId: string) {
     if (!item) return;
     await removeAnnotation({ token, id: item._id, annotationId });
-    toast.success("Comment deleted", {
+    toast.success(t("commentDeleted"), {
       action: {
-        label: "Undo",
+        label: t("undo"),
         onClick: () => {
-          void handleRestoreAnnotation(annotationId, false).catch((error) => toast.error(errorMessage(error)));
+          void handleRestoreAnnotation(annotationId, false).catch((error) => toast.error(localizeError(error, t)));
         },
       },
     });
+  }
+
+  async function copyTicketNumber() {
+    if (!item) return;
+    try {
+      await navigator.clipboard.writeText(formatTicketNumber(item.ticketNumber));
+      toast.success(t("ticketCopied"));
+    } catch {
+      toast.error(t("ticketCopyFailed"));
+    }
   }
 
   return (
     <Dialog
       open={Boolean(feedback)}
       onOpenChange={(open) => !open && onClose()}
-      title={item ? `${formatTicketNumber(item.ticketNumber)} · ${item.title}` : "Feedback"}
+      title={item ? `${formatTicketNumber(item.ticketNumber)} · ${item.title}` : t("feedback")}
     >
       {item ? (
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2.5">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">{t("ticketNumber")}</p>
+              <p className="font-mono text-sm font-semibold">{formatTicketNumber(item.ticketNumber)}</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => void copyTicketNumber()}>
+              <Copy /> {t("copy")}
+            </Button>
+          </div>
           <MediaViewer
             key={item._id}
             ref={viewerRef}
@@ -857,7 +940,7 @@ function FeedbackDialog({
                 size="sm"
                 onClick={() => onMove(item._id, status.value)}
               >
-                {status.label}
+                {t(status.labelKey)}
               </Button>
             ))}
             <Button type="button" variant="outline" size="sm" onClick={() => {
@@ -865,7 +948,7 @@ function FeedbackDialog({
               setEditDescription(item.description);
               setEditing(true);
             }}>
-              <Pencil /> Edit
+              <Pencil /> {t("edit")}
             </Button>
             <Button
               type="button"
@@ -873,32 +956,32 @@ function FeedbackDialog({
               size="sm"
               className="text-destructive hover:text-destructive"
               onClick={() => {
-                if (!window.confirm("Archive this feedback? It can be restored for 30 days.")) return;
-                void onArchive(item._id).catch((error) => setFeedbackError(errorMessage(error)));
+                if (!window.confirm(t("archiveConfirm"))) return;
+                void onArchive(item._id).catch((error) => setFeedbackError(localizeError(error, t)));
               }}
             >
-              <Archive /> Archive
+              <Archive /> {t("archive")}
             </Button>
           </div>
           <div className="space-y-3">
             <Badge className={cn("border", statusMeta(item.status).tone)} variant="outline">
-              {statusMeta(item.status).label}
+              {t(statusMeta(item.status).labelKey)}
             </Badge>
             {editing ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                 <div className="space-y-1.5">
-                  <label htmlFor="edit-feedback-title" className="text-sm font-medium">Topic</label>
+                  <label htmlFor="edit-feedback-title" className="text-sm font-medium">{t("topic")}</label>
                   <Input id="edit-feedback-title" value={editTitle} maxLength={100} onChange={(event) => setEditTitle(event.target.value)} />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="edit-feedback-description" className="text-sm font-medium">Description</label>
+                  <label htmlFor="edit-feedback-description" className="text-sm font-medium">{t("description")}</label>
                   <Textarea id="edit-feedback-description" rows={5} maxLength={10_000} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} />
-                  <p className="text-xs text-muted-foreground">Use [1], [2], and similar labels to link to media comments.</p>
+                  <p className="text-xs text-muted-foreground">{t("mediaLinkHint")}</p>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button type="button" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                  <Button type="button" variant="ghost" onClick={() => setEditing(false)}>{t("cancel")}</Button>
                   <Button type="button" disabled={savingFeedback || !editTitle.trim() || !editDescription.trim()} onClick={() => void saveFeedbackEdits()}>
-                    {savingFeedback ? <Loader2 className="animate-spin" /> : null} Save
+                    {savingFeedback ? <Loader2 className="animate-spin" /> : null} {t("save")}
                   </Button>
                 </div>
               </div>
@@ -920,7 +1003,7 @@ function FeedbackDialog({
             />
             <AnnotationActivityList events={activity ?? []} />
             <FeedbackActivityList events={feedbackActivity ?? []} />
-            <p className="text-xs text-muted-foreground">Created {formatDate(item.createdAt)}</p>
+            <p className="text-xs text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
           </div>
         </div>
       ) : null}

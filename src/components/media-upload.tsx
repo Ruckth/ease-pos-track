@@ -3,6 +3,7 @@ import { Camera, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type PendingMedia = {
   id: string;
@@ -37,6 +38,7 @@ export function MediaUploadField({
   annotationCounts?: Record<string, number>;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setDragging] = useState(false);
@@ -59,23 +61,23 @@ export function MediaUploadField({
         const isVideo = file.type.startsWith("video/");
         const isImage = file.type.startsWith("image/");
         if (!isVideo && !isImage) {
-          problems.push(`${file.name}: only images and videos are supported`);
+          problems.push(`${file.name}: ${t("imageVideoOnly")}`);
           continue;
         }
         if (isImage && file.size > IMAGE_MAX_BYTES) {
-          problems.push(`${file.name}: images must be 8MB or smaller`);
+          problems.push(`${file.name}: ${t("imageTooLarge")}`);
           continue;
         }
         if (isVideo && file.size > VIDEO_MAX_BYTES) {
-          problems.push(`${file.name}: videos must be 64MB or smaller`);
+          problems.push(`${file.name}: ${t("videoTooLarge")}`);
           continue;
         }
         if (isImage && imageCount >= IMAGE_LIMIT) {
-          problems.push(`${file.name}: up to ${IMAGE_LIMIT} images allowed`);
+          problems.push(`${file.name}: ${t("imageLimit")}`);
           continue;
         }
         if (isVideo && videoCount >= VIDEO_LIMIT) {
-          problems.push(`${file.name}: up to ${VIDEO_LIMIT} videos allowed`);
+          problems.push(`${file.name}: ${t("videoLimit")}`);
           continue;
         }
         if (isImage) imageCount += 1;
@@ -93,7 +95,7 @@ export function MediaUploadField({
         onItemsChange([...items, ...accepted]);
       }
     },
-    [items, onItemsChange],
+    [items, onItemsChange, t],
   );
 
   useEffect(() => {
@@ -144,11 +146,11 @@ export function MediaUploadField({
       <div className="grid grid-cols-2 gap-2">
         <Button type="button" variant="outline" disabled={disabled} onClick={() => cameraInputRef.current?.click()}>
           <Camera />
-          Camera
+          {t("camera")}
         </Button>
         <Button type="button" variant="outline" disabled={disabled} onClick={() => uploadInputRef.current?.click()}>
           <Upload />
-          Upload
+          {t("upload")}
         </Button>
       </div>
       <input
@@ -185,8 +187,8 @@ export function MediaUploadField({
           )}
         >
           <span className="px-4 text-center">
-            Drop, paste, or tap to add photos and videos
-            <span className="mt-1 block text-xs">First image becomes the cover. Drag tiles to reorder.</span>
+            {t("dropMedia")}
+            <span className="mt-1 block text-xs">{t("mediaOrderHint")}</span>
           </span>
         </button>
       ) : (
@@ -205,7 +207,7 @@ export function MediaUploadField({
                     type="button"
                     disabled={disabled}
                     onClick={() => onPreviewItem?.(item)}
-                    aria-label={`Open ${item.file.name} to add pins`}
+                    aria-label={t("openMedia", { name: item.file.name })}
                     className="absolute inset-0 block h-full w-full disabled:cursor-not-allowed"
                   >
                     {item.isVideo ? (
@@ -219,7 +221,7 @@ export function MediaUploadField({
                   </button>
                   {index === 0 ? (
                     <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
-                      Cover
+                      {t("cover")}
                     </span>
                   ) : null}
                   {(annotationCounts[item.id] ?? 0) > 0 ? (
@@ -237,7 +239,7 @@ export function MediaUploadField({
                     type="button"
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
-                    aria-label={`Remove ${item.file.name}`}
+                    aria-label={t("removeFile", { name: item.file.name })}
                     className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white"
                   >
                     <X className="size-3.5" />
@@ -249,14 +251,14 @@ export function MediaUploadField({
               type="button"
               disabled={disabled}
               onClick={() => uploadInputRef.current?.click()}
-              aria-label="Add more media"
+              aria-label={t("addMedia")}
               className="grid aspect-square place-items-center rounded-md border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary"
             >
               <ImagePlus className="size-5" />
             </button>
           </Sortable>
           <p className="text-xs text-muted-foreground">
-            {items.length} file{items.length === 1 ? "" : "s"} — drag tiles to reorder, first image is the cover.
+            {t("fileCount", { count: items.length })}
           </p>
         </>
       )}

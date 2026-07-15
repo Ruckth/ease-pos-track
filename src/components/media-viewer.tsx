@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { formatClock, isVideoMedia, type Annotation, type MediaItem } from "@/lib/types";
+import { localizeError, useI18n } from "@/lib/i18n";
 
 export type AnnotationDraftInput = {
   mediaIndex: number;
@@ -58,6 +59,7 @@ export const MediaViewer = forwardRef<
     onDeleteAnnotation: (annotationId: string) => Promise<void>;
   }
 >(function MediaViewer({ media, annotations, initialIndex = 0, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
+  const { t } = useI18n();
   const [mainApi, setMainApi] = useState<CarouselApi>();
   const [thumbApi, setThumbApi] = useState<CarouselApi>();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -160,12 +162,12 @@ export const MediaViewer = forwardRef<
     const movingAnnotation = annotations.find((annotation) => annotation.id === movingId);
     if (!movingAnnotation) {
       setMovingId(null);
-      setActionError("This comment is no longer available.");
+      setActionError(t("mediaUnavailable"));
       return;
     }
     if (target.mediaIndex !== movingAnnotation.mediaIndex) {
       mainApi?.scrollTo(movingAnnotation.mediaIndex);
-      setActionError("A comment can only be moved within its current media item.");
+      setActionError(t("unableMoveComment"));
       return;
     }
 
@@ -179,7 +181,7 @@ export const MediaViewer = forwardRef<
       });
       setMovingId(null);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Unable to move the comment.");
+      setActionError(localizeError(error, t));
     }
   }
 
@@ -193,7 +195,7 @@ export const MediaViewer = forwardRef<
       setDraftText("");
       setAnnotateMode(false);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Unable to save the comment.");
+      setActionError(localizeError(error, t));
     } finally {
       setSaving(false);
     }
@@ -202,7 +204,7 @@ export const MediaViewer = forwardRef<
   if (media.length === 0) {
     return (
       <div className="grid aspect-video place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">
-        No media attached
+        {t("noMedia")}
       </div>
     );
   }
@@ -216,7 +218,7 @@ export const MediaViewer = forwardRef<
         {movingId ? (
           <Button type="button" size="sm" variant="outline" onClick={() => setMovingId(null)}>
             <X />
-            Cancel move
+            {t("cancelMove")}
           </Button>
         ) : (
           <Button
@@ -231,12 +233,12 @@ export const MediaViewer = forwardRef<
             }}
           >
             <MapPin />
-            {annotateMode ? "Click the media to place a pin" : "Add pin"}
+            {annotateMode ? t("placePin") : t("addPin")}
           </Button>
         )}
       </div>
 
-      {movingId ? <p className="text-sm text-primary">Click the media to move this comment.</p> : null}
+      {movingId ? <p className="text-sm text-primary">{t("moveComment")}</p> : null}
       {actionError ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{actionError}</p> : null}
 
       <Carousel setApi={setMainApi} opts={carouselOpts} className="overflow-hidden rounded-lg border bg-black">
@@ -293,7 +295,7 @@ export const MediaViewer = forwardRef<
                 <button
                   type="button"
                   onClick={() => mainApi?.scrollTo(index)}
-                  aria-label={`Show media ${index + 1}`}
+                  aria-label={t("mediaNumber", { number: index + 1 })}
                   className={cn(
                     "relative block aspect-square w-full overflow-hidden rounded-md border-2 bg-black transition-all",
                     index === selectedIndex
@@ -319,7 +321,7 @@ export const MediaViewer = forwardRef<
       {draft ? (
         <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
           <p className="text-xs font-medium text-muted-foreground">
-            New pin on item {draft.mediaIndex + 1}
+            {t("addPin")} {draft.mediaIndex + 1}
             {draft.time !== undefined ? ` at ${formatClock(draft.time)}` : ""}
           </p>
           <Textarea
@@ -327,15 +329,15 @@ export const MediaViewer = forwardRef<
             rows={2}
             value={draftText}
             onChange={(event) => setDraftText(event.target.value)}
-            placeholder="Describe the issue at this spot"
+            placeholder={t("describeIssue")}
           />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setDraft(null)}>
-              Cancel
+              {t("cancel")}
             </Button>
             <Button type="button" size="sm" disabled={!draftText.trim() || saving} onClick={saveDraft}>
               {saving ? <Loader2 className="animate-spin" /> : null}
-              Save pin
+              {t("savePin")}
             </Button>
           </div>
         </div>
@@ -382,6 +384,7 @@ function ImageSlide({
   onMove,
   onDelete,
 }: SlideProps) {
+  const { t } = useI18n();
   return (
     <div className="flex h-[42vh] items-center justify-center sm:h-[48vh]">
       <div className="relative inline-flex max-h-full max-w-full">
@@ -436,6 +439,7 @@ function VideoSlide({
   onMove,
   onDelete,
 }: SlideProps) {
+  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -502,7 +506,7 @@ function VideoSlide({
         {annotateMode ? (
           <button
             type="button"
-            aria-label="Mark a point on this frame"
+            aria-label={t("markPoint")}
             className="absolute inset-0 z-10 cursor-crosshair"
             onClick={(event) => {
               const video = videoRef.current;
@@ -550,6 +554,7 @@ function MarkerBar({
   currentTime: number;
   onJump: (annotation: Annotation) => void;
 }) {
+  const { t } = useI18n();
   const total = duration > 0 ? duration : Math.max(...marks.map((mark) => mark.time ?? 0), 1);
 
   return (
@@ -586,6 +591,7 @@ function PinMarker({
   highlighted: boolean;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -593,7 +599,7 @@ function PinMarker({
         event.stopPropagation();
         onClick();
       }}
-      aria-label={`Comment ${annotation.label}: ${annotation.text}`}
+      aria-label={`${t("comment", { label: annotation.label })}: ${annotation.text}`}
       className={cn(
         "absolute z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-[11px] font-bold text-primary-foreground shadow-md transition-transform hover:scale-110",
         highlighted && "scale-125 ring-4 ring-amber-400/80",
@@ -629,6 +635,7 @@ function PinPopover({
   onMove: (annotationId: string) => void;
   onDelete: (annotationId: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -661,7 +668,7 @@ function PinPopover({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            aria-label={`Edit comment ${annotation.label}`}
+            aria-label={t("editComment", { label: annotation.label })}
             onClick={() => {
               setEditText(annotation.text);
               setEditing(true);
@@ -673,7 +680,7 @@ function PinPopover({
           </button>
           <button
             type="button"
-            aria-label={`Move comment ${annotation.label}`}
+            aria-label={t("moveComment")}
             onClick={() => {
               onMove(annotation.id);
               onClose();
@@ -684,18 +691,18 @@ function PinPopover({
           </button>
           <button
             type="button"
-            aria-label={`Delete comment ${annotation.label}`}
+            aria-label={t("deleteComment", { label: annotation.label })}
             disabled={deleting}
             onClick={async (event) => {
               event.stopPropagation();
-              if (!window.confirm(`Delete comment ${annotation.label}? You can undo this afterwards.`)) return;
+              if (!window.confirm(t("deleteCommentConfirm", { label: annotation.label }))) return;
               setDeleting(true);
               setError("");
               try {
                 await onDelete(annotation.id);
                 onClose();
               } catch (deleteError) {
-                setError(deleteError instanceof Error ? deleteError.message : "Unable to delete the comment.");
+                setError(localizeError(deleteError, t));
               } finally {
                 setDeleting(false);
               }
@@ -710,7 +717,7 @@ function PinPopover({
         <div className="mt-2 space-y-2">
           <Textarea rows={3} value={editText} maxLength={2_000} onChange={(event) => setEditText(event.target.value)} />
           <div className="flex justify-end gap-1">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>{t("cancel")}</Button>
             <Button
               type="button"
               size="sm"
@@ -722,21 +729,21 @@ function PinPopover({
                   await onUpdate({ annotationId: annotation.id, text: editText });
                   setEditing(false);
                 } catch (updateError) {
-                  setError(updateError instanceof Error ? updateError.message : "Unable to update the comment.");
+                  setError(localizeError(updateError, t));
                 } finally {
                   setSavingEdit(false);
                 }
               }}
             >
               {savingEdit ? <Loader2 className="animate-spin" /> : null}
-              Save
+              {t("save")}
             </Button>
           </div>
         </div>
       ) : <p className="mt-1.5 whitespace-pre-wrap leading-5">{annotation.text}</p>}
       {error ? <p role="alert" className="mt-2 text-destructive">{error}</p> : null}
       {annotation.time !== undefined ? (
-        <p className="mt-1 text-muted-foreground">at {formatClock(annotation.time)}</p>
+        <p className="mt-1 text-muted-foreground">{t("videoAt", { time: formatClock(annotation.time) })}</p>
       ) : null}
     </div>
   );

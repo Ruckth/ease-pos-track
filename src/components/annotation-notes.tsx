@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { formatClock, type Annotation } from "@/lib/types";
+import { localizeError, useI18n } from "@/lib/i18n";
 
 function labelChipClass(active = false) {
   return cn(
@@ -21,6 +22,7 @@ export function DescriptionWithTags({
   annotations: Annotation[];
   onFocus: (annotation: Annotation) => void;
 }) {
+  const { t } = useI18n();
   const parts = text.split(/\[(\d+)\]/g);
 
   return (
@@ -38,7 +40,7 @@ export function DescriptionWithTags({
             key={index}
             type="button"
             onClick={() => onFocus(annotation)}
-            aria-label={`Show comment ${annotation.label} on media`}
+            aria-label={t("showComment", { label: annotation.label })}
             className={cn(labelChipClass(), "mx-0.5 -translate-y-px align-text-bottom")}
           >
             {annotation.label}
@@ -64,6 +66,7 @@ export function AnnotationList({
   onDelete: (annotationId: string) => Promise<void>;
   onRestore: (annotationId: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,7 +82,7 @@ export function AnnotationList({
   return (
     <div className="space-y-1.5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Comments on media
+        {t("commentsOnMedia")}
       </p>
       {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       <ul className="space-y-1.5">
@@ -88,7 +91,7 @@ export function AnnotationList({
             <button
               type="button"
               onClick={() => onFocus(annotation)}
-              aria-label={`Show comment ${annotation.label} on media`}
+              aria-label={t("showComment", { label: annotation.label })}
               className={labelChipClass()}
             >
               {annotation.label}
@@ -98,7 +101,7 @@ export function AnnotationList({
                 <div className="space-y-2">
                   <Textarea rows={3} value={editText} maxLength={2_000} onChange={(event) => setEditText(event.target.value)} />
                   <div className="flex justify-end gap-1">
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setEditingId(null)}>{t("cancel")}</Button>
                     <Button
                       type="button"
                       size="sm"
@@ -110,14 +113,14 @@ export function AnnotationList({
                           await onUpdate(annotation.id, editText);
                           setEditingId(null);
                         } catch (updateError) {
-                          setError(updateError instanceof Error ? updateError.message : "Unable to update the comment.");
+                          setError(localizeError(updateError, t));
                         } finally {
                           setSavingEdit(false);
                         }
                       }}
                     >
                       {savingEdit ? <Loader2 className="animate-spin" /> : null}
-                      Save
+                      {t("save")}
                     </Button>
                   </div>
                 </div>
@@ -126,19 +129,19 @@ export function AnnotationList({
                 {annotation.kind === "time" ? (
                   <>
                     <Clock3 className="size-3" />
-                    video at {formatClock(annotation.time ?? 0)}
+                    {t("videoAt", { time: formatClock(annotation.time ?? 0) })}
                   </>
                 ) : (
                   <>
                     <MapPin className="size-3" />
-                    image {annotation.mediaIndex + 1}
+                    {t("imageNumber", { number: annotation.mediaIndex + 1 })}
                   </>
                 )}
               </p>
             </div>
             <button
               type="button"
-              aria-label={`Edit comment ${annotation.label}`}
+              aria-label={t("editComment", { label: annotation.label })}
               onClick={() => {
                 setEditingId(annotation.id);
                 setEditText(annotation.text);
@@ -150,16 +153,16 @@ export function AnnotationList({
             </button>
             <button
               type="button"
-              aria-label={`Delete comment ${annotation.label}`}
+              aria-label={t("deleteComment", { label: annotation.label })}
               disabled={deletingId === annotation.id}
               onClick={async () => {
-                if (!window.confirm(`Delete comment ${annotation.label}? You can undo this afterwards.`)) return;
+                if (!window.confirm(t("deleteCommentConfirm", { label: annotation.label }))) return;
                 setDeletingId(annotation.id);
                 setError("");
                 try {
                   await onDelete(annotation.id);
                 } catch (deleteError) {
-                  setError(deleteError instanceof Error ? deleteError.message : "Unable to delete the comment.");
+                  setError(localizeError(deleteError, t));
                 } finally {
                   setDeletingId(null);
                 }
@@ -177,7 +180,7 @@ export function AnnotationList({
       </ul>
       {deleted.length > 0 ? (
         <div className="space-y-1.5 pt-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recently deleted</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("recentlyDeleted")}</p>
           <ul className="space-y-1.5">
             {deleted.map((annotation) => (
               <li key={annotation.id} className="flex items-start gap-2 rounded-md border border-dashed bg-muted/20 px-2.5 py-2 opacity-80">
@@ -194,14 +197,14 @@ export function AnnotationList({
                     try {
                       await onRestore(annotation.id);
                     } catch (restoreError) {
-                      setError(restoreError instanceof Error ? restoreError.message : "Unable to restore the comment.");
+                      setError(localizeError(restoreError, t));
                     } finally {
                       setRestoringId(null);
                     }
                   }}
                 >
                   {restoringId === annotation.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-                  Restore
+                  {t("restore")}
                 </Button>
               </li>
             ))}

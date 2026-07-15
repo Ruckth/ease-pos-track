@@ -60,7 +60,7 @@ test("deleted comments cannot be edited until restored", () => {
 
   assert.throws(
     () => updateAnnotationRecord(deleted, { text: "Should fail" }, 400),
-    /must be restored before editing/,
+    /COMMENT_DELETED/,
   );
 });
 
@@ -83,7 +83,7 @@ test("legacy pin comments keep image-point behavior", () => {
   const legacyPin: AnnotationRecord = { ...imageComment, kind: "pin" };
   assert.throws(
     () => updateAnnotationRecord(legacyPin, { time: 12 }, 500),
-    /Image comments cannot have a video timestamp/,
+    /INVALID_ANNOTATION_TIME/,
   );
 });
 
@@ -116,5 +116,5 @@ test("creates and validates image and video annotations consistently", () => {
     y: 0.5,
     time: 2,
     text: "Invalid",
-  }, 3, "bad", 600), /only valid on videos/);
+  }, 3, "bad", 600), /INVALID_ANNOTATION_KIND/);
 });

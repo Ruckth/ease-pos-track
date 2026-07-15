@@ -36,25 +36,25 @@ export function createAnnotationRecord(
   now: number,
 ): AnnotationRecord {
   const text = input.text.trim();
-  if (!text) throw new Error("Comment text is required.");
+  if (!text) throw new Error("COMMENT_TEXT_REQUIRED");
   if (text.length > MAX_ANNOTATION_LENGTH) {
-    throw new Error(`Comments must be ${MAX_ANNOTATION_LENGTH.toLocaleString()} characters or fewer.`);
+    throw new Error("COMMENT_TOO_LONG");
   }
   if (!Number.isInteger(input.mediaIndex) || input.mediaIndex < 0 || input.mediaIndex >= media.length) {
-    throw new Error("Invalid media index.");
+    throw new Error("INVALID_MEDIA_INDEX");
   }
 
   const target = media[input.mediaIndex];
   const isVideo = target.type.startsWith("video/");
-  if (input.kind === "point" && isVideo) throw new Error("Use a time mark for videos.");
-  if (input.kind === "time" && !isVideo) throw new Error("Time marks are only valid on videos.");
+  if (input.kind === "point" && isVideo) throw new Error("INVALID_ANNOTATION_KIND");
+  if (input.kind === "time" && !isVideo) throw new Error("INVALID_ANNOTATION_KIND");
   if (input.x === undefined || input.y === undefined || !Number.isFinite(input.x) || !Number.isFinite(input.y)) {
-    throw new Error("Comments require a valid media position.");
+    throw new Error("INVALID_ANNOTATION_POSITION");
   }
   if (input.kind === "time" && (input.time === undefined || !Number.isFinite(input.time))) {
-    throw new Error("Time annotations require a valid timestamp.");
+    throw new Error("INVALID_ANNOTATION_TIME");
   }
-  if (!Number.isInteger(label) || label < 1) throw new Error("Invalid comment label.");
+  if (!Number.isInteger(label) || label < 1) throw new Error("INVALID_COMMENT_LABEL");
 
   return {
     id,
@@ -83,27 +83,27 @@ export function updateAnnotationRecord(
   now: number,
 ): AnnotationRecord {
   if (annotation.deletedAt !== undefined) {
-    throw new Error("Deleted comments must be restored before editing.");
+    throw new Error("COMMENT_DELETED");
   }
 
   if (update.text === undefined && update.x === undefined && update.y === undefined && update.time === undefined) {
-    throw new Error("No comment changes were provided.");
+    throw new Error("NO_COMMENT_CHANGES");
   }
 
   const text = update.text === undefined ? annotation.text : update.text.trim();
-  if (!text) throw new Error("Comment text is required.");
+  if (!text) throw new Error("COMMENT_TEXT_REQUIRED");
   if (text.length > MAX_ANNOTATION_LENGTH) {
-    throw new Error(`Comments must be ${MAX_ANNOTATION_LENGTH.toLocaleString()} characters or fewer.`);
+    throw new Error("COMMENT_TOO_LONG");
   }
 
   const x = update.x === undefined ? annotation.x : clamp01(update.x);
   const y = update.y === undefined ? annotation.y : clamp01(update.y);
   if (x === undefined || y === undefined) {
-    throw new Error("Comments require an image position.");
+    throw new Error("INVALID_ANNOTATION_POSITION");
   }
 
   if ((annotation.kind === "pin" || annotation.kind === "point") && update.time !== undefined) {
-    throw new Error("Image comments cannot have a video timestamp.");
+    throw new Error("INVALID_ANNOTATION_TIME");
   }
 
   const time = annotation.kind === "time"
@@ -121,12 +121,12 @@ export function updateAnnotationRecord(
 }
 
 export function softDeleteAnnotationRecord(annotation: AnnotationRecord, now: number): AnnotationRecord {
-  if (annotation.deletedAt !== undefined) throw new Error("Comment is already deleted.");
+  if (annotation.deletedAt !== undefined) throw new Error("COMMENT_ALREADY_DELETED");
   return { ...annotation, deletedAt: now, updatedAt: now };
 }
 
 export function restoreAnnotationRecord(annotation: AnnotationRecord, now: number): AnnotationRecord {
-  if (annotation.deletedAt === undefined) throw new Error("Comment is not deleted.");
+  if (annotation.deletedAt === undefined) throw new Error("COMMENT_NOT_DELETED");
   const { deletedAt: _deletedAt, ...active } = annotation;
   return { ...active, updatedAt: now };
 }

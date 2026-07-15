@@ -1,31 +1,25 @@
 import { History } from "lucide-react";
 import type { FeedbackEvent } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
-const actionLabels: Record<FeedbackEvent["action"], string> = {
-  created: "created",
-  edited: "edited",
-  edit_undone: "undid an edit",
-  status_changed: "changed status",
-  status_undone: "undid a status change",
-  archived: "archived",
-  restored: "restored",
-};
+const actionKeys = { created: "actionCreated", edited: "actionEdited", edit_undone: "actionEditUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored" } as const;
 
 export function FeedbackActivityList({ events }: { events: FeedbackEvent[] }) {
+  const { t, formatDate } = useI18n();
   if (events.length === 0) return null;
   return (
     <details className="rounded-md border bg-muted/20 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <History className="size-3.5" /> Feedback activity ({events.length})
+        <History className="size-3.5" /> {t("feedbackActivity", { count: events.length })}
       </summary>
       <ol className="mt-3 space-y-2 border-t pt-3">
         {events.map((event) => (
           <li key={event._id} className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{actionLabels[event.action]}</span>
+            <span className="font-medium text-foreground">{t(actionKeys[event.action])}</span>
             {event.before?.status !== event.after?.status && event.before && event.after
-              ? ` · ${event.before.status.replace("_", " ")} → ${event.after.status.replace("_", " ")}`
+              ? ` · ${t(({ new: "new", in_progress: "inProgress", waiting: "waiting", done: "done" } as const)[event.before.status])} → ${t(({ new: "new", in_progress: "inProgress", waiting: "waiting", done: "done" } as const)[event.after.status])}`
               : ""}
-            <span className="ml-1">{new Date(event.createdAt).toLocaleString()}</span>
+            <span className="ml-1">{formatDate(event.createdAt)}</span>
           </li>
         ))}
       </ol>

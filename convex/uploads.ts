@@ -13,7 +13,7 @@ async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
     .withIndex("by_token", (q) => q.eq("token", token))
     .unique();
   if (!session || session.expiresAt <= Date.now()) {
-    throw new Error("Your session expired. Please sign in again.");
+    throw new Error("SESSION_EXPIRED");
   }
   return session;
 }
@@ -25,19 +25,19 @@ function makeSecret() {
 }
 
 export function validateFiles(files: Array<{ name: string; size: number; type: string }>) {
-  if (files.length === 0) throw new Error("At least one image or video is required.");
+  if (files.length === 0) throw new Error("REQUIRED_FEEDBACK");
   const images = files.filter((file) => file.type.startsWith("image/"));
   const videos = files.filter((file) => file.type.startsWith("video/"));
-  if (images.length + videos.length !== files.length) throw new Error("Only images and videos are supported.");
-  if (images.length > 10 || videos.length > 3) throw new Error("Up to 10 images and 3 videos are allowed.");
+  if (images.length + videos.length !== files.length) throw new Error("IMAGE_VIDEO_ONLY");
+  if (images.length > 10 || videos.length > 3) throw new Error("MEDIA_LIMIT_EXCEEDED");
   if (images.some((file) => file.size <= 0 || file.size > IMAGE_MAX_BYTES)) {
-    throw new Error("Images must be larger than 0 bytes and no more than 8MB.");
+    throw new Error("IMAGE_TOO_LARGE");
   }
   if (videos.some((file) => file.size <= 0 || file.size > VIDEO_MAX_BYTES)) {
-    throw new Error("Videos must be larger than 0 bytes and no more than 64MB.");
+    throw new Error("VIDEO_TOO_LARGE");
   }
   if (files.some((file) => !file.name.trim() || file.name.length > 255 || file.type.length > 100)) {
-    throw new Error("Invalid file metadata.");
+    throw new Error("INVALID_FILE_METADATA");
   }
 }
 
@@ -64,7 +64,7 @@ export const createUploadIntent = mutation({
     const session = await requireSession(ctx, args.token);
     const idempotencyKey = args.idempotencyKey.trim();
     if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
-      throw new Error("Invalid upload request.");
+      throw new Error("INVALID_UPLOAD_REQUEST");
     }
     validateFiles(args.files);
 
@@ -127,11 +127,11 @@ export const recordUploadedFile = mutation({
   handler: async (ctx, args) => {
     const intent = await ctx.db.get(args.intentId);
     if (!intent || intent.secret !== args.secret || intent.status !== "pending" || intent.expiresAt <= Date.now()) {
-      throw new Error("Upload intent is no longer valid.");
+      throw new Error("UPLOAD_INTENT_INVALID");
     }
     const expectedMatch = intent.expectedFiles.some((file) => fileSignature(file) === fileSignature(args.file));
-    if (!expectedMatch) throw new Error("Uploaded file was not part of this request.");
-    if (!args.file.key || !args.file.url.startsWith("https://")) throw new Error("Invalid uploaded file.");
+    if (!expectedMatch) throw new Error("UPLOAD_FILE_MISMATCH");
+    if (!args.file.key || !args.file.url.startsWith("https://")) throw new Error("INVALID_UPLOADED_FILE");
     if (intent.uploadedFiles.some((file) => file.key === args.file.key)) return;
     await ctx.db.patch(intent._id, {
       uploadedFiles: [...intent.uploadedFiles, args.file],
@@ -150,7 +150,7 @@ export const cancelUploadIntent = mutation({
     const session = await requireSession(ctx, args.token);
     const intent = await ctx.db.get(args.intentId);
     if (!intent || intent.sessionId !== session._id || intent.secret !== args.secret) {
-      throw new Error("Upload intent not found.");
+      throw new Error("UPLOAD_INTENT_NOT_FOUND");
     }
     if (intent.status === "attached") return { keys: [] as string[] };
     await ctx.db.patch(intent._id, { status: "cancelled", updatedAt: Date.now() });

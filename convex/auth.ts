@@ -28,7 +28,7 @@ export const login = mutation({
   handler: async (ctx, args) => {
     const clientId = args.clientId.trim();
     if (clientId.length < 16 || clientId.length > 128) {
-      throw new Error("Invalid sign-in client.");
+      throw new Error("INVALID_SIGNIN_CLIENT");
     }
 
     const now = Date.now();
@@ -43,8 +43,7 @@ export const login = mutation({
 
     const lockedUntil = Math.max(existingAttempt?.lockedUntil ?? 0, globalAttempt?.lockedUntil ?? 0);
     if (lockedUntil > now) {
-      const seconds = Math.ceil((lockedUntil - now) / 1000);
-      throw new Error(`Too many attempts. Try again in ${seconds} seconds.`);
+      throw new Error("AUTH_RATE_LIMITED");
     }
 
     if (args.password !== getAppPassword()) {
@@ -73,7 +72,7 @@ export const login = mutation({
       };
       if (globalAttempt) await ctx.db.replace(globalAttempt._id, globalValue);
       else await ctx.db.insert("loginAttempts", globalValue);
-      throw new Error("Incorrect password");
+      throw new Error("INCORRECT_PASSWORD");
     }
 
     if (existingAttempt) await ctx.db.delete(existingAttempt._id);

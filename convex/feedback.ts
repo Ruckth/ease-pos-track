@@ -22,7 +22,7 @@ async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
     .unique();
 
   if (!session || session.expiresAt <= Date.now()) {
-    throw new Error("Your session expired. Please sign in again.");
+    throw new Error("SESSION_EXPIRED");
   }
 
   return session;
@@ -181,32 +181,32 @@ export const createFeedback = mutation({
 
     const { title, description } = validateFeedbackText(args.title, args.description);
     if (args.media.length === 0) {
-      throw new Error("At least one image or video is required.");
+      throw new Error("REQUIRED_FEEDBACK");
     }
     const imageCount = args.media.filter((item) => item.type.startsWith("image/")).length;
     const videoCount = args.media.filter((item) => item.type.startsWith("video/")).length;
     if (imageCount + videoCount !== args.media.length) {
-      throw new Error("Only image and video media are supported.");
+      throw new Error("IMAGE_VIDEO_ONLY");
     }
     if (imageCount > 10 || videoCount > 3) {
-      throw new Error("Up to 10 images and 3 videos per report.");
+      throw new Error("MEDIA_LIMIT_EXCEEDED");
     }
     for (const item of args.media) {
       const sizeLimit = item.type.startsWith("image/") ? 8 * 1024 * 1024 : 64 * 1024 * 1024;
       if (!item.key || !item.url.startsWith("https://") || item.size <= 0 || item.size > sizeLimit) {
-        throw new Error("Invalid media reference.");
+        throw new Error("INVALID_MEDIA_REFERENCE");
       }
     }
 
     const intent = await ctx.db.get(args.uploadIntentId);
     if (!intent || intent.sessionId !== session._id || intent.secret !== args.uploadIntentSecret) {
-      throw new Error("Upload authorization was not found.");
+      throw new Error("UPLOAD_INTENT_NOT_FOUND");
     }
     if (intent.status === "attached" && intent.feedbackId) return intent.feedbackId;
     if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
-      throw new Error("Upload authorization expired. Upload the files again.");
+      throw new Error("UPLOAD_INTENT_INVALID");
     }
-    if (intent.uploadedFiles.length !== args.media.length) throw new Error("Some files did not finish uploading.");
+    if (intent.uploadedFiles.length !== args.media.length) throw new Error("UPLOAD_INCOMPLETE");
     const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
     const verified = args.media.every((item) => {
       const uploaded = uploadedByKey.get(item.key);
@@ -216,7 +216,7 @@ export const createFeedback = mutation({
         && uploaded.size === item.size
         && uploaded.type === item.type;
     });
-    if (!verified) throw new Error("Uploaded media could not be verified.");
+    if (!verified) throw new Error("UPLOAD_VERIFICATION_FAILED");
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
@@ -235,7 +235,7 @@ export const createFeedback = mutation({
       updatedAt: now,
     });
     const created = await ctx.db.get(feedbackId);
-    if (!created) throw new Error("Unable to create feedback.");
+    if (!created) throw new Error("CREATE_FEEDBACK_FAILED");
     await ctx.db.patch(intent._id, { status: "attached", feedbackId, updatedAt: now });
     await recordFeedbackEvent(ctx, {
       feedbackId,
@@ -268,7 +268,7 @@ export const updateFeedbackStatus = mutation({
   handler: async (ctx, args) => {
     const session = await requireSession(ctx, args.token);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status === args.status) return { eventId: null, version: currentVersion };
 
@@ -301,12 +301,12 @@ export const undoFeedbackStatus = mutation({
     const session = await requireSession(ctx, args.token);
     const event = await ctx.db.get(args.eventId);
     if (!event || event.action !== "status_changed" || !event.before || !event.after) {
-      throw new Error("This status change cannot be undone.");
+      throw new Error("STATUS_UNDO_UNAVAILABLE");
     }
     const doc = await ctx.db.get(event.feedbackId);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
-    if (doc.status !== event.after.status) throw new Error("The status changed again and can no longer be undone.");
+    if (doc.status !== event.after.status) throw new Error("STATUS_UNDO_UNAVAILABLE");
 
     const now = Date.now();
     const after = { ...doc, status: event.before.status, version: currentVersion + 1, updatedAt: now };
@@ -330,13 +330,13 @@ export const undoFeedbackEdit = mutation({
     const session = await requireSession(ctx, args.token);
     const event = await ctx.db.get(args.eventId);
     if (!event || event.action !== "edited" || !event.before || !event.after) {
-      throw new Error("This edit cannot be undone.");
+      throw new Error("EDIT_UNDO_UNAVAILABLE");
     }
     const doc = await ctx.db.get(event.feedbackId);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     if (doc.title !== event.after.title || doc.description !== event.after.description) {
-      throw new Error("The feedback changed again and can no longer be undone.");
+      throw new Error("EDIT_UNDO_UNAVAILABLE");
     }
     const now = Date.now();
     const after = {
@@ -376,7 +376,7 @@ export const editFeedback = mutation({
   handler: async (ctx, args) => {
     const session = await requireSession(ctx, args.token);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     const { title, description } = validateFeedbackText(args.title, args.description);
     if (title === doc.title && description === doc.description) return { version: currentVersion };
@@ -401,7 +401,7 @@ export const archiveFeedback = mutation({
   handler: async (ctx, args) => {
     const session = await requireSession(ctx, args.token);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     const now = Date.now();
     const after = { ...doc, deletedAt: now, version: currentVersion + 1, updatedAt: now };
@@ -423,7 +423,7 @@ export const restoreFeedback = mutation({
   handler: async (ctx, args) => {
     const session = await requireSession(ctx, args.token);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt === undefined) throw new Error("Archived feedback not found.");
+    if (!doc || doc.deletedAt === undefined) throw new Error("ARCHIVED_FEEDBACK_NOT_FOUND");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     const now = Date.now();
     const { deletedAt: _deletedAt, ...restored } = doc;
@@ -456,7 +456,7 @@ export const addAnnotation = mutation({
     const session = await requireSession(ctx, args.token);
 
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
 
     const annotations = doc.annotations ?? [];
     const label = annotations.reduce((max, item) => Math.max(max, item.label), 0) + 1;
@@ -494,10 +494,10 @@ export const updateAnnotation = mutation({
   handler: async (ctx, args) => {
     const session = await requireSession(ctx, args.token);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
 
     const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
-    if (index < 0) throw new Error("Comment not found.");
+    if (index < 0) throw new Error("COMMENT_NOT_FOUND");
 
     const annotations = [...(doc.annotations ?? [])];
     const before = annotations[index];
@@ -525,15 +525,15 @@ export const undoAnnotationUpdate = mutation({
     const session = await requireSession(ctx, args.token);
     const event = await ctx.db.get(args.eventId);
     if (!event || event.action !== "updated" || !event.before || !event.after) {
-      throw new Error("This comment change cannot be undone.");
+      throw new Error("COMMENT_UNDO_UNAVAILABLE");
     }
     const doc = await ctx.db.get(event.feedbackId);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
     const annotations = [...(doc.annotations ?? [])];
     const index = annotations.findIndex((annotation) => annotation.id === event.annotationId);
-    if (index < 0 || annotations[index].deletedAt !== undefined) throw new Error("Comment not found.");
+    if (index < 0 || annotations[index].deletedAt !== undefined) throw new Error("COMMENT_NOT_FOUND");
     if (annotations[index].updatedAt !== event.after.updatedAt) {
-      throw new Error("The comment changed again and can no longer be undone.");
+      throw new Error("COMMENT_UNDO_UNAVAILABLE");
     }
     const now = Date.now();
     const before = annotations[index];
@@ -562,10 +562,10 @@ export const removeAnnotation = mutation({
     const session = await requireSession(ctx, args.token);
 
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
 
     const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
-    if (index < 0) throw new Error("Comment not found.");
+    if (index < 0) throw new Error("COMMENT_NOT_FOUND");
 
     const annotations = [...(doc.annotations ?? [])];
     const before = annotations[index];
@@ -597,10 +597,10 @@ export const restoreAnnotation = mutation({
   handler: async (ctx, args) => {
     const session = await requireSession(ctx, args.token);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("Feedback not found.");
+    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
 
     const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
-    if (index < 0) throw new Error("Comment not found.");
+    if (index < 0) throw new Error("COMMENT_NOT_FOUND");
 
     const annotations = [...(doc.annotations ?? [])];
     const before = annotations[index];
