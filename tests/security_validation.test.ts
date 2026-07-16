@@ -8,6 +8,11 @@ test("feedback text is trimmed and bounded on the server", () => {
     title: "Printer issue",
     description: "Receipt is blank",
   });
+  assert.deepEqual(validateFeedbackText("  Printer issue  ", "   "), {
+    title: "Printer issue",
+    description: "",
+  });
+  assert.throws(() => validateFeedbackText("   ", "optional description"), /REQUIRED_FEEDBACK/);
   assert.throws(() => validateFeedbackText("x".repeat(101), "description"), /TITLE_TOO_LONG/);
   assert.throws(() => validateFeedbackText("title", "x".repeat(10_001)), /DESCRIPTION_TOO_LONG/);
 });

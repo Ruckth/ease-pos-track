@@ -9,12 +9,12 @@ export function FeedbackActivityList({ events }: { events: FeedbackEvent[] }) {
   if (events.length === 0) return null;
   return (
     <details className="rounded-md border bg-muted/20 px-3 py-2">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <History className="size-3.5" /> {t("feedbackActivity", { count: events.length })}
+      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <History className="size-4" /> {t("feedbackActivity", { count: events.length })}
       </summary>
       <ol className="mt-3 space-y-2 border-t pt-3">
         {events.map((event) => (
-          <li key={event._id} className="text-xs text-muted-foreground">
+          <li key={event._id} className="text-sm leading-5 text-muted-foreground">
             <span className="font-medium text-foreground">{t(actionKeys[event.action])}</span>
             {event.before?.status !== event.after?.status && event.before && event.after
               ? ` · ${t(({ new: "new", in_progress: "inProgress", waiting: "waiting", done: "done" } as const)[event.before.status])} → ${t(({ new: "new", in_progress: "inProgress", waiting: "waiting", done: "done" } as const)[event.after.status])}`

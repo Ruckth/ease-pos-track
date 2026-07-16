@@ -1,7 +1,7 @@
 export function validateFeedbackText(titleInput: string, descriptionInput: string) {
   const title = titleInput.trim();
   const description = descriptionInput.trim();
-  if (!title || !description) throw new Error("REQUIRED_FEEDBACK");
+  if (!title) throw new Error("REQUIRED_FEEDBACK");
   if (title.length > 100) throw new Error("TITLE_TOO_LONG");
   if (description.length > 10_000) throw new Error("DESCRIPTION_TOO_LONG");
   return { title, description };

@@ -17,8 +17,8 @@ export function AnnotationActivityList({ events }: { events: AnnotationEvent[] }
 
   return (
     <details className="rounded-md border bg-muted/20 px-3 py-2">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <History className="size-3.5" />
+      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <History className="size-4" />
         {t("commentActivity", { count: events.length })}
       </summary>
       <ol className="mt-3 space-y-2 border-t pt-3">
@@ -28,7 +28,7 @@ export function AnnotationActivityList({ events }: { events: AnnotationEvent[] }
             && (event.before.x !== event.after.x || event.before.y !== event.after.y || event.before.time !== event.after.time);
           const textChanged = event.action === "updated" && event.before?.text !== event.after?.text;
           return (
-            <li key={event._id} className="text-xs text-muted-foreground">
+            <li key={event._id} className="text-sm leading-5 text-muted-foreground">
               <span className="font-medium text-foreground">{t("comment", { label: annotation?.label ?? "?" })}</span>
               {` ${t(actionKey(event.action))}`}
               {moved ? ` · ${t("positionChanged")}` : ""}

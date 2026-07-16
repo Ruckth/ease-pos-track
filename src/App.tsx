@@ -188,8 +188,8 @@ function LanguageSelector({ language, onChange }: { language: "th" | "en"; onCha
   const { t } = useI18n();
   return (
     <div className="inline-flex rounded-md border p-0.5" aria-label={t("language")}>
-      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-7 px-2" onClick={() => onChange("th")}>ไทย</Button>
-      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-7 px-2" onClick={() => onChange("en")}>EN</Button>
+      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-9 px-3" onClick={() => onChange("th")}>ไทย</Button>
+      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-9 px-3" onClick={() => onChange("en")}>EN</Button>
     </div>
   );
 }
@@ -341,7 +341,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
                   <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
                     <div className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{item.title}</span>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-sm leading-5 text-muted-foreground">
                         <span className="font-mono">{formatTicketNumber(item.ticketNumber)}</span>
                         {" · "}{t("archivedOn", { date: formatDate(item.deletedAt ?? item.updatedAt) })}
                       </span>
@@ -526,7 +526,7 @@ function SubmitFeedback({
     event.preventDefault();
     setError("");
 
-    if (!title.trim() || !description.trim() || items.length === 0) {
+    if (!title.trim() || items.length === 0) {
       setError(t("requiredFeedback"));
       return;
     }
@@ -618,7 +618,7 @@ function SubmitFeedback({
             disabled={!active || isUploading}
           />
           {items.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm leading-5 text-muted-foreground">
               {annotations.length > 0
                 ? t("pinSummary", { count: annotations.length })
                 : t("pinHint")}
@@ -745,8 +745,11 @@ function FeedbackCard({
               <img className="aspect-video w-full object-cover" src={cover.url} alt="" loading="lazy" />
             )
           ) : (
-            <div className="grid aspect-video w-full place-items-center text-xs text-muted-foreground">{t("noMedia")}</div>
+            <div className="grid aspect-video w-full place-items-center text-sm text-muted-foreground">{t("noMedia")}</div>
           )}
+          <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/80 px-2 py-1 font-mono text-sm font-semibold leading-5 text-white shadow-sm">
+            {ticketLabel}
+          </span>
           {extraCount > 0 ? (
             <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
               <Images className="size-3" />
@@ -762,12 +765,11 @@ function FeedbackCard({
         </div>
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
-          <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">{item.description}</p>
-          <p className="text-xs text-muted-foreground">{formatDate(item.createdAt)}</p>
+          {item.description ? <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">{item.description}</p> : null}
+          <p className="text-sm leading-5 text-muted-foreground">{formatDate(item.createdAt)}</p>
         </div>
       </button>
-      <div className="flex items-center justify-between gap-2 border-t p-2">
-        <span className="font-mono text-xs font-medium text-muted-foreground">{ticketLabel}</span>
+      <div className="flex items-center justify-end gap-2 border-t p-2">
         <Button
           type="button"
           variant="outline"
@@ -778,7 +780,7 @@ function FeedbackCard({
           }}
           aria-label={nextStatusLabel ? t("movedTo", { ticket: ticketLabel, status: nextStatusLabel }) : t("ticketComplete", { ticket: ticketLabel })}
           title={nextStatusLabel ? t("movedTo", { ticket: ticketLabel, status: nextStatusLabel }) : t("ticketCompleteTitle")}
-          className={cn("h-7 rounded-full px-2.5 text-xs disabled:opacity-100", currentStatus.tone)}
+          className={cn("h-9 rounded-full px-3 text-sm disabled:opacity-100", currentStatus.tone)}
         >
           {t(currentStatus.labelKey)}
           {nextStatus ? <ChevronRight className="size-3" /> : null}
@@ -914,7 +916,7 @@ function FeedbackDialog({
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2.5">
             <div>
-              <p className="text-xs font-medium text-muted-foreground">{t("ticketNumber")}</p>
+              <p className="text-sm font-medium leading-5 text-muted-foreground">{t("ticketNumber")}</p>
               <p className="font-mono text-sm font-semibold">{formatTicketNumber(item.ticketNumber)}</p>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => void copyTicketNumber()}>
@@ -976,21 +978,25 @@ function FeedbackDialog({
                 <div className="space-y-1.5">
                   <label htmlFor="edit-feedback-description" className="text-sm font-medium">{t("description")}</label>
                   <Textarea id="edit-feedback-description" rows={5} maxLength={10_000} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} />
-                  <p className="text-xs text-muted-foreground">{t("mediaLinkHint")}</p>
+                  <p className="text-sm leading-5 text-muted-foreground">{t("mediaLinkHint")}</p>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="ghost" onClick={() => setEditing(false)}>{t("cancel")}</Button>
-                  <Button type="button" disabled={savingFeedback || !editTitle.trim() || !editDescription.trim()} onClick={() => void saveFeedbackEdits()}>
+                  <Button type="button" disabled={savingFeedback || !editTitle.trim()} onClick={() => void saveFeedbackEdits()}>
                     {savingFeedback ? <Loader2 className="animate-spin" /> : null} {t("save")}
                   </Button>
                 </div>
               </div>
             ) : (
-              <DescriptionWithTags
-                text={item.description}
-                annotations={annotations}
-                onFocus={(annotation) => viewerRef.current?.focusAnnotation(annotation)}
-              />
+              item.description ? (
+                <DescriptionWithTags
+                  text={item.description}
+                  annotations={annotations}
+                  onFocus={(annotation) => viewerRef.current?.focusAnnotation(annotation)}
+                />
+              ) : (
+                <p className="text-sm leading-6 text-muted-foreground">{t("noDescription")}</p>
+              )
             )}
             {feedbackError ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{feedbackError}</p> : null}
             <AnnotationList
@@ -1003,7 +1009,7 @@ function FeedbackDialog({
             />
             <AnnotationActivityList events={activity ?? []} />
             <FeedbackActivityList events={feedbackActivity ?? []} />
-            <p className="text-xs text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
+            <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
           </div>
         </div>
       ) : null}

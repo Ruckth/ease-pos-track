@@ -188,7 +188,7 @@ export function MediaUploadField({
         >
           <span className="px-4 text-center">
             {t("dropMedia")}
-            <span className="mt-1 block text-xs">{t("mediaOrderHint")}</span>
+            <span className="mt-1 block text-sm leading-5">{t("mediaOrderHint")}</span>
           </span>
         </button>
       ) : (
@@ -231,8 +231,8 @@ export function MediaUploadField({
                     </span>
                   ) : null}
                   <SortableItemHandle className="absolute left-1 top-1 z-10">
-                    <span className="flex size-6 items-center justify-center rounded-full border bg-background/90 shadow-sm">
-                      <GripVertical className="size-3.5" />
+                    <span className="flex size-9 items-center justify-center rounded-full border bg-background/90 shadow-sm">
+                      <GripVertical className="size-4" />
                     </span>
                   </SortableItemHandle>
                   <button
@@ -240,9 +240,9 @@ export function MediaUploadField({
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
                     aria-label={t("removeFile", { name: item.file.name })}
-                    className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white"
+                    className="absolute right-1 top-1 z-10 flex size-9 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <X className="size-3.5" />
+                    <X className="size-4" />
                   </button>
                 </div>
               </SortableItem>
@@ -257,7 +257,7 @@ export function MediaUploadField({
               <ImagePlus className="size-5" />
             </button>
           </Sortable>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm leading-5 text-muted-foreground">
             {t("fileCount", { count: items.length })}
           </p>
         </>

@@ -212,7 +212,7 @@ export const MediaViewer = forwardRef<
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm leading-5 text-muted-foreground">
           {selectedIndex + 1} / {media.length}
         </p>
         {movingId ? (
@@ -320,7 +320,7 @@ export const MediaViewer = forwardRef<
 
       {draft ? (
         <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
-          <p className="text-xs font-medium text-muted-foreground">
+          <p className="text-sm font-medium leading-5 text-muted-foreground">
             {t("addPin")} {draft.mediaIndex + 1}
             {draft.time !== undefined ? ` at ${formatClock(draft.time)}` : ""}
           </p>
@@ -559,7 +559,7 @@ function MarkerBar({
 
   return (
     <div className="w-full max-w-md px-6">
-      <div className="relative h-7">
+      <div className="relative h-9">
         <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/25" />
         <div
           className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/60"
@@ -571,7 +571,7 @@ function MarkerBar({
             type="button"
             title={`${formatClock(mark.time ?? 0)} — ${mark.text}`}
             onClick={() => onJump(mark)}
-            className="absolute top-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-primary text-[10px] font-bold text-primary-foreground shadow hover:scale-110"
+            className="absolute top-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-primary text-xs font-bold text-primary-foreground shadow transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             style={{ left: `${Math.min(100, ((mark.time ?? 0) / total) * 100)}%` }}
           >
             {mark.label}
@@ -601,7 +601,7 @@ function PinMarker({
       }}
       aria-label={`${t("comment", { label: annotation.label })}: ${annotation.text}`}
       className={cn(
-        "absolute z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-[11px] font-bold text-primary-foreground shadow-md transition-transform hover:scale-110",
+        "absolute z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-xs font-bold text-primary-foreground shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/80",
         highlighted && "scale-125 ring-4 ring-amber-400/80",
       )}
       style={{ left: `${(annotation.x ?? 0) * 100}%`, top: `${(annotation.y ?? 0) * 100}%` }}
@@ -650,19 +650,17 @@ function PinPopover({
   if (!annotation || annotation.x === undefined || annotation.y === undefined) return null;
 
   const below = annotation.y <= 0.6;
-  const left = Math.min(0.82, Math.max(0.18, annotation.x));
-
   return (
     <div
-      className="absolute z-20 w-52 rounded-md border bg-background p-2.5 text-xs shadow-lg"
+      className="absolute z-20 w-52 rounded-md border bg-background p-2.5 text-sm shadow-lg"
       style={{
-        left: `${left * 100}%`,
+        left: `clamp(112px, ${annotation.x * 100}%, calc(100% - 112px))`,
         top: `${annotation.y * 100}%`,
         transform: below ? "translate(-50%, 18px)" : "translate(-50%, calc(-100% - 18px))",
       }}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
           {annotation.label}
         </span>
         <div className="flex items-center gap-1">
@@ -674,9 +672,9 @@ function PinPopover({
               setEditing(true);
               setError("");
             }}
-            className="text-muted-foreground hover:text-primary"
+            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Pencil className="size-3.5" />
+            <Pencil className="size-4" />
           </button>
           <button
             type="button"
@@ -685,9 +683,9 @@ function PinPopover({
               onMove(annotation.id);
               onClose();
             }}
-            className="text-muted-foreground hover:text-primary"
+            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Move className="size-3.5" />
+            <Move className="size-4" />
           </button>
           <button
             type="button"
@@ -707,9 +705,9 @@ function PinPopover({
                 setDeleting(false);
               }
             }}
-            className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
           >
-            {deleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
           </button>
         </div>
       </div>

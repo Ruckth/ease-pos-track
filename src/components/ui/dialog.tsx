@@ -26,7 +26,7 @@ export function Dialog({ open, onOpenChange, title, description, keepMounted = f
         )}>
           <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b bg-background/95 px-5 py-4 backdrop-blur">
             <div className="min-w-0">
-              <BaseDialog.Title className="truncate text-base font-semibold">{title}</BaseDialog.Title>
+              <BaseDialog.Title className="break-words text-base font-semibold leading-6">{title}</BaseDialog.Title>
               {description ? <BaseDialog.Description className="mt-1 text-sm text-muted-foreground">{description}</BaseDialog.Description> : null}
             </div>
             <BaseDialog.Close className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("closeDialog")}>

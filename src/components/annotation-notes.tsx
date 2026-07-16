@@ -6,9 +6,10 @@ import { cn } from "@/lib/utils";
 import { formatClock, type Annotation } from "@/lib/types";
 import { localizeError, useI18n } from "@/lib/i18n";
 
-function labelChipClass(active = false) {
+function labelChipClass(active = false, touchTarget = false) {
   return cn(
-    "inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground transition-transform hover:scale-110",
+    "inline-flex shrink-0 items-center justify-center rounded-full bg-primary font-bold text-primary-foreground transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    touchTarget ? "size-9 text-xs" : "size-5 text-[11px]",
     active && "ring-2 ring-amber-400/80",
   );
 }
@@ -81,7 +82,7 @@ export function AnnotationList({
 
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
         {t("commentsOnMedia")}
       </p>
       {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
@@ -92,7 +93,7 @@ export function AnnotationList({
               type="button"
               onClick={() => onFocus(annotation)}
               aria-label={t("showComment", { label: annotation.label })}
-              className={labelChipClass()}
+              className={labelChipClass(false, true)}
             >
               {annotation.label}
             </button>
@@ -125,7 +126,7 @@ export function AnnotationList({
                   </div>
                 </div>
               ) : <p className="whitespace-pre-wrap text-sm leading-5">{annotation.text}</p>}
-              <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+              <p className="mt-0.5 flex items-center gap-1 text-sm leading-5 text-muted-foreground">
                 {annotation.kind === "time" ? (
                   <>
                     <Clock3 className="size-3" />
@@ -147,9 +148,9 @@ export function AnnotationList({
                 setEditText(annotation.text);
                 setError("");
               }}
-              className="mt-0.5 text-muted-foreground hover:text-primary"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Pencil className="size-3.5" />
+              <Pencil className="size-4" />
             </button>
             <button
               type="button"
@@ -167,12 +168,12 @@ export function AnnotationList({
                   setDeletingId(null);
                 }
               }}
-              className="mt-0.5 text-muted-foreground hover:text-destructive disabled:opacity-50"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             >
               {deletingId === annotation.id ? (
-                <Loader2 className="size-3.5 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                <Trash2 className="size-3.5" />
+                <Trash2 className="size-4" />
               )}
             </button>
           </li>
@@ -180,7 +181,7 @@ export function AnnotationList({
       </ul>
       {deleted.length > 0 ? (
         <div className="space-y-1.5 pt-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("recentlyDeleted")}</p>
+          <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{t("recentlyDeleted")}</p>
           <ul className="space-y-1.5">
             {deleted.map((annotation) => (
               <li key={annotation.id} className="flex items-start gap-2 rounded-md border border-dashed bg-muted/20 px-2.5 py-2 opacity-80">
