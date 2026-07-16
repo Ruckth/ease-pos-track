@@ -157,7 +157,7 @@ export function MediaUploadField({
         ref={cameraInputRef}
         className="hidden"
         type="file"
-        accept="image/*,video/*"
+        accept="image/*"
         capture="environment"
         onChange={(event) => {
           if (event.target.files) addFiles(event.target.files);
