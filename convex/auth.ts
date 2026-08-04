@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { actorFromSession } from "./authz";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
@@ -88,6 +89,7 @@ export const login = mutation({
     await ctx.db.insert("sessions", {
       token,
       clientId,
+      role: "staff",
       createdAt: now,
       expiresAt: now + SESSION_TTL_MS,
     });
@@ -109,22 +111,58 @@ export const logout = mutation({
   },
 });
 
+/**
+ * Backward-compatible staff session check. Existing callers keep working, but a
+ * customer token can never be mistaken for authorization to enter the staff UI.
+ * New role-aware callers should use currentSession instead.
+ */
 export const validateSession = query({
   args: {
     token: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const token = args.token;
-    if (!token) {
-      return false;
-    }
+    if (!token) return false;
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_token", (q) => q.eq("token", token))
+      .unique();
+    if (!session || session.expiresAt <= Date.now()) return false;
+    return actorFromSession(session).role === "staff";
+  },
+});
+
+/**
+ * Single source of truth for "who is signed in" on the client. Legacy sessions
+ * created before the customer portal have no role and resolve to staff.
+ */
+export const currentSession = query({
+  args: {
+    token: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const token = args.token;
+    if (!token) return null;
 
     const session = await ctx.db
       .query("sessions")
       .withIndex("by_token", (q) => q.eq("token", token))
       .unique();
+    if (!session || session.expiresAt <= Date.now()) return null;
 
-    return Boolean(session && session.expiresAt > Date.now());
+    const actor = actorFromSession(session);
+    if (actor.role === "staff") {
+      return { role: "staff" as const, expiresAt: session.expiresAt, customerId: null, email: null };
+    }
+
+    const customer = await ctx.db.get(actor.customerId);
+    if (!customer) return null;
+    return {
+      role: "customer" as const,
+      expiresAt: session.expiresAt,
+      customerId: customer._id,
+      email: customer.email,
+    };
   },
 });
 

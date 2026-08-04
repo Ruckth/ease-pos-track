@@ -4,8 +4,8 @@ export type Feedback = Doc<"feedback">;
 export type FeedbackStatus = Feedback["status"];
 export type MediaItem = Feedback["media"][number];
 export type Annotation = NonNullable<Feedback["annotations"]>[number];
-export type AnnotationEvent = Doc<"annotationEvents">;
-export type FeedbackEvent = Doc<"feedbackEvents">;
+export type AnnotationEvent = Omit<Doc<"annotationEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
+export type FeedbackEvent = Omit<Doc<"feedbackEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
 
 export function isActiveAnnotation(annotation: Annotation) {
   return annotation.deletedAt === undefined;

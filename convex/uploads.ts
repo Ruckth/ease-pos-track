@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mediaItemValidator, pendingFileValidator } from "./schema";
+import { actorFields, actorFromSession } from "./authz";
 
 const INTENT_TTL_MS = 30 * 60 * 1000;
 const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
@@ -82,6 +83,7 @@ export const createUploadIntent = mutation({
 
     const now = Date.now();
     const secret = makeSecret();
+    const actor = actorFromSession(session);
     const intentId = await ctx.db.insert("uploadIntents", {
       sessionId: session._id,
       secret,
@@ -89,6 +91,9 @@ export const createUploadIntent = mutation({
       expectedFiles: args.files,
       uploadedFiles: [],
       status: "pending",
+      // Recorded so the ticket created from this intent can be checked against
+      // the same actor that requested the upload.
+      ...actorFields(actor),
       createdAt: now,
       expiresAt: now + INTENT_TTL_MS,
       updatedAt: now,
@@ -133,6 +138,11 @@ export const recordUploadedFile = mutation({
     if (!expectedMatch) throw new Error("UPLOAD_FILE_MISMATCH");
     if (!args.file.key || !args.file.url.startsWith("https://")) throw new Error("INVALID_UPLOADED_FILE");
     if (intent.uploadedFiles.some((file) => file.key === args.file.key)) return;
+    // An intent never needs more uploads than it declared, so the array cannot be
+    // grown past the document size limit by replaying with fresh keys.
+    if (intent.uploadedFiles.length >= intent.expectedFiles.length) {
+      throw new Error("UPLOAD_FILE_MISMATCH");
+    }
     await ctx.db.patch(intent._id, {
       uploadedFiles: [...intent.uploadedFiles, args.file],
       updatedAt: Date.now(),

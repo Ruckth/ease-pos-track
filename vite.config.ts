@@ -14,6 +14,9 @@ export default defineConfig({
     host: true,
     proxy: {
       "/api/uploadthing": "http://localhost:8787",
+      // Upload cancellation runs on the same local API; without this the dev
+      // server answers with index.html and cleanup silently fails.
+      "/api/uploads": "http://localhost:8787",
     },
   },
   build: {

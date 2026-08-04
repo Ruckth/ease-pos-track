@@ -4,18 +4,11 @@ import { Toaster, toast } from "sonner";
 import {
   Archive,
   ArchiveRestore,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
   Copy,
   ImagePlus,
-  Images,
   Loader2,
   LogOut,
-  MapPin,
   Pencil,
-  PlayCircle,
-  RefreshCw,
   Search,
 } from "lucide-react";
 import { api } from "../convex/_generated/api";
@@ -23,13 +16,15 @@ import type { Id } from "../convex/_generated/dataModel";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { AnnotationActivityList } from "@/components/annotation-activity";
 import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
+import { AuthGate, LanguageSelector } from "@/components/auth-screens";
+import { CustomerPortal } from "@/components/customer-portal";
 import { FeedbackActivityList } from "@/components/feedback-activity";
+import { statuses, statusMeta } from "@/components/feedback-status";
 import { MediaUploadField, releasePendingMedia, type PendingMedia } from "@/components/media-upload";
 import {
   MediaViewer,
@@ -37,161 +32,73 @@ import {
   type AnnotationUpdateInput,
   type MediaViewerHandle,
 } from "@/components/media-viewer";
-import { uploadFiles } from "@/uploadthing";
+import { StaffBoard } from "@/components/staff-board";
 import { cn } from "@/lib/utils";
-import { formatTicketNumber, nextFeedbackStatus } from "@/lib/feedback-ui";
+import { formatTicketNumber } from "@/lib/feedback-ui";
+import { submitFeedbackDraft } from "@/lib/feedback-submit";
 import {
-  pendingAnnotationsForCreate,
   pendingAnnotationsForViewer,
   pendingMediaForViewer,
   type PendingAnnotation,
   withoutPendingAnnotationsForMedia,
 } from "@/lib/pending-annotations";
-import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus, type MediaItem } from "@/lib/types";
+import { clearToken, getStoredToken, storeToken } from "@/lib/session";
+import { isActiveAnnotation, type Feedback, type FeedbackStatus } from "@/lib/types";
 import { localizeError, useI18n } from "@/lib/i18n";
 
-const SESSION_KEY = "ease-pos-tracking-session";
-const CLIENT_ID_KEY = "ease-pos-client-id";
-
-const statuses: Array<{
-  value: FeedbackStatus;
-  labelKey: "new" | "inProgress" | "waiting" | "done";
-  tone: string;
-  icon: typeof Clock3;
-}> = [
-  { value: "new", labelKey: "new", tone: "bg-sky-50 text-sky-800 border-sky-200", icon: ImagePlus },
-  { value: "in_progress", labelKey: "inProgress", tone: "bg-amber-50 text-amber-800 border-amber-200", icon: RefreshCw },
-  { value: "waiting", labelKey: "waiting", tone: "bg-violet-50 text-violet-800 border-violet-200", icon: Clock3 },
-  { value: "done", labelKey: "done", tone: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: CheckCircle2 },
-];
-
-function getStoredToken() {
-  const token = window.sessionStorage.getItem(SESSION_KEY) ?? window.localStorage.getItem(SESSION_KEY) ?? "";
-  if (token) window.sessionStorage.setItem(SESSION_KEY, token);
-  window.localStorage.removeItem(SESSION_KEY);
-  return token;
-}
-
-function storeToken(token: string) {
-  window.sessionStorage.setItem(SESSION_KEY, token);
-}
-
-function clearToken() {
-  window.sessionStorage.removeItem(SESSION_KEY);
-  window.localStorage.removeItem(SESSION_KEY);
-}
-
-function getClientId() {
-  const existing = window.localStorage.getItem(CLIENT_ID_KEY);
-  if (existing) return existing;
-  const clientId = crypto.randomUUID();
-  window.localStorage.setItem(CLIENT_ID_KEY, clientId);
-  return clientId;
-}
-
-function statusMeta(status: FeedbackStatus) {
-  return statuses.find((item) => item.value === status) ?? statuses[0];
-}
-
-
+/**
+ * Routes by session role. `currentSession` resolves a missing role to staff, so
+ * sessions created before the customer portal still land in the workspace.
+ */
 function AppContent() {
   const [token, setToken] = useState(getStoredToken);
   const logout = useMutation(api.auth.logout);
-  const sessionValid = useQuery(api.auth.validateSession, { token: token || undefined });
+  const session = useQuery(api.auth.currentSession, { token: token || undefined });
 
   useEffect(() => {
-    if (token && sessionValid === false) {
+    if (token && session === null) {
       clearToken();
       setToken("");
     }
-  }, [sessionValid, token]);
+  }, [session, token]);
 
-  if (!token || sessionValid === false) {
-    return <PasswordGate onLogin={setToken} />;
-  }
-
-  if (sessionValid === undefined) {
-    return <main className="grid min-h-screen place-items-center"><Loader2 className="size-7 animate-spin text-muted-foreground" /></main>;
-  }
-
-  return <TrackingWorkspace token={token} onLogout={async () => {
+  async function signOut() {
     try {
       await logout({ token });
     } finally {
       clearToken();
       setToken("");
     }
-  }} />;
+  }
+
+  if (!token || session === null) {
+    return (
+      <AuthGate
+        onSignedIn={(nextToken) => {
+          storeToken(nextToken);
+          setToken(nextToken);
+        }}
+      />
+    );
+  }
+
+  if (session === undefined) {
+    return (
+      <main className="grid min-h-screen place-items-center">
+        <Loader2 className="size-7 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+
+  if (session.role === "customer") {
+    return <CustomerPortal token={token} email={session.email} onLogout={signOut} />;
+  }
+
+  return <TrackingWorkspace token={token} onLogout={signOut} />;
 }
 
 function App() {
   return <AppContent />;
-}
-
-function PasswordGate({ onLogin }: { onLogin: (token: string) => void }) {
-  const { language, setLanguage, t } = useI18n();
-  const login = useMutation(api.auth.login);
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [isSubmitting, setSubmitting] = useState(false);
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-
-    try {
-      const result = await login({ password, clientId: getClientId() });
-      storeToken(result.token);
-      onLogin(result.token);
-    } catch (err) {
-      setError(localizeError(err, t));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="grid min-h-screen place-items-center px-4 py-10">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3"><CardTitle>{t("appName")}</CardTitle><LanguageSelector language={language} onChange={setLanguage} /></div>
-          <CardDescription>{t("internalBoard")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={onSubmit}>
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="password">
-              {t("password")}
-              </label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoFocus
-              />
-            </div>
-            {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-            <Button className="w-full" disabled={isSubmitting || !password}>
-              {isSubmitting ? <Loader2 className="animate-spin" /> : null}{isSubmitting ? t("signingIn") : t("enter")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </main>
-  );
-}
-
-function LanguageSelector({ language, onChange }: { language: "th" | "en"; onChange: (language: "th" | "en") => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="inline-flex rounded-md border p-0.5" aria-label={t("language")}>
-      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-9 px-3" onClick={() => onChange("th")}>ไทย</Button>
-      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-9 px-3" onClick={() => onChange("en")}>EN</Button>
-    </div>
-  );
 }
 
 function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () => Promise<void> }) {
@@ -230,15 +137,16 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   }, [ensureTicketNumbers, feedback, token]);
 
   const selected = feedback?.find((item) => item._id === selectedId) ?? null;
-  const activeItems = filtered.filter((item) => item.deletedAt === undefined);
-  const archivedItems = filtered.filter((item) => item.deletedAt !== undefined);
+  const activeItems = useMemo(() => filtered.filter((item) => item.deletedAt === undefined), [filtered]);
+  const archivedItems = useMemo(() => filtered.filter((item) => item.deletedAt !== undefined), [filtered]);
 
+  /** Persists a status change and offers an undo. False means it was rejected. */
   async function moveItem(id: Id<"feedback">, status: FeedbackStatus) {
     const current = feedback?.find((item) => item._id === id);
-    if (!current) return;
+    if (!current) return false;
     try {
       const result = await updateStatus({ token, id, status, expectedVersion: current.version ?? 0 });
-      if (!result.eventId) return;
+      if (!result.eventId) return true;
       toast.success(t("statusUpdated"), {
         action: {
           label: t("undo"),
@@ -248,8 +156,10 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           },
         },
       });
+      return true;
     } catch (error) {
       toast.error(localizeError(error, t));
+      return false;
     }
   }
 
@@ -318,20 +228,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-4">
-              {statuses.map((status) => {
-                const items = activeItems.filter((item) => item.status === status.value);
-                return (
-                  <BoardColumn
-                    key={status.value}
-                    status={status.value}
-                    items={items}
-                    onSelect={setSelectedId}
-                    onMove={moveItem}
-                  />
-                );
-              })}
-            </div>
+            <StaffBoard items={activeItems} onSelect={setSelectedId} onMoveCard={moveItem} />
           )}
           {showArchived && archivedItems.length > 0 ? (
             <section className="mt-5 rounded-lg border bg-card p-4">
@@ -382,7 +279,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         feedback={selected}
         token={token}
         onClose={() => setSelectedId(null)}
-        onMove={moveItem}
+        onMove={(id, status) => void moveItem(id, status)}
         onArchive={archiveItem}
       />
     </main>
@@ -510,18 +407,6 @@ function SubmitFeedback({
     setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
   }
 
-  async function cancelUploadIntent(intentId: Id<"uploadIntents">, secret: string) {
-    const response = await fetch("/api/uploads/cancel", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ intentId, secret }),
-    });
-    if (!response.ok) {
-      const result = await response.json().catch(() => ({ error: "UPLOAD_CLEANUP_FAILED" }));
-      throw new Error(typeof result.error === "string" ? result.error : "UPLOAD_CLEANUP_FAILED");
-    }
-  }
-
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -532,58 +417,22 @@ function SubmitFeedback({
     }
 
     setProgress(0);
-    let activeIntent: { intentId: Id<"uploadIntents">; secret: string } | null = null;
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     try {
-      const intent = await createUploadIntent({
-        token,
-        idempotencyKey: idempotencyKeyRef.current,
-        files: items.map((item) => ({ name: item.file.name, size: item.file.size, type: item.file.type })),
-      });
-      if (intent.feedbackId) {
-        finishSubmission();
-        return;
-      }
-      activeIntent = { intentId: intent.intentId, secret: intent.secret };
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
-      const uploads = await uploadFiles("feedbackMedia", {
-        files: items.map((item) => item.file),
-        input: { intentId: intent.intentId, secret: intent.secret },
-        headers: { authorization: `Bearer ${token}` },
-        signal: abortController.signal,
-        onUploadProgress: ({ totalProgress }) => setProgress(Math.round(totalProgress)),
-      });
-
-      const media: MediaItem[] = uploads.map((uploaded, index) => {
-        const raw = uploaded as typeof uploaded & { ufsUrl?: string; url?: string; type?: string };
-        return {
-          key: uploaded.key,
-          name: uploaded.name,
-          size: uploaded.size,
-          type: raw.type ?? items[index]?.file.type ?? "",
-          url: raw.ufsUrl ?? raw.url ?? "",
-        };
-      });
-
-      await createFeedback({
-        token,
-        title,
-        description,
-        media,
-        annotations: pendingAnnotationsForCreate(items, annotations),
-        uploadIntentId: intent.intentId,
-        uploadIntentSecret: intent.secret,
-      });
-      activeIntent = null;
+      await submitFeedbackDraft(
+        {
+          token,
+          createUploadIntent,
+          createFeedback,
+          onProgress: setProgress,
+          signal: abortController.signal,
+          onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),
+        },
+        { title, description, items, annotations, idempotencyKey: idempotencyKeyRef.current },
+      );
       finishSubmission();
     } catch (err) {
-      if (activeIntent) {
-        try {
-          await cancelUploadIntent(activeIntent.intentId, activeIntent.secret);
-        } catch (cleanupError) {
-          toast.error(localizeError(cleanupError, t));
-        }
-      }
       setError(localizeError(err, t));
     } finally {
       abortControllerRef.current = null;
@@ -673,120 +522,6 @@ function SubmitFeedback({
         }}
       />
     </>
-  );
-}
-
-function BoardColumn({
-  status,
-  items,
-  onSelect,
-  onMove,
-}: {
-  status: FeedbackStatus;
-  items: Feedback[];
-  onSelect: (id: Id<"feedback">) => void;
-  onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
-}) {
-  const { t } = useI18n();
-  const meta = statusMeta(status);
-  const Icon = meta.icon;
-
-  return (
-    <section className="min-w-0 rounded-lg border bg-card">
-      <div className={cn("flex items-center justify-between border-b px-3 py-3", meta.tone)}>
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon className="size-4 shrink-0" />
-          <h2 className="truncate text-sm font-semibold">{t(meta.labelKey)}</h2>
-        </div>
-        <Badge variant="outline" className="bg-white/70">
-          {items.length}
-        </Badge>
-      </div>
-      <div className="space-y-3 p-3">
-        {items.length === 0 ? (
-          <div className="grid min-h-24 place-items-center rounded-md border border-dashed text-sm text-muted-foreground">{t("empty")}</div>
-        ) : (
-          items.map((item) => <FeedbackCard key={item._id} item={item} onSelect={onSelect} onMove={onMove} />)
-        )}
-      </div>
-    </section>
-  );
-}
-
-function FeedbackCard({
-  item,
-  onSelect,
-  onMove,
-}: {
-  item: Feedback;
-  onSelect: (id: Id<"feedback">) => void;
-  onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
-}) {
-  const { t, formatDate } = useI18n();
-  const cover = item.media[0];
-  const extraCount = item.media.length - 1;
-  const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
-  const ticketLabel = formatTicketNumber(item.ticketNumber);
-  const nextStatus = nextFeedbackStatus(item.status);
-  const currentStatus = statusMeta(item.status);
-  const nextStatusLabel = nextStatus ? t(statusMeta(nextStatus).labelKey) : null;
-
-  return (
-    <article className="rounded-md border bg-background shadow-sm">
-      <button className="block w-full text-left" onClick={() => onSelect(item._id)}>
-        <div className="relative overflow-hidden rounded-t-md bg-black">
-          {cover ? (
-            isVideoMedia(cover) ? (
-              <>
-                <video className="aspect-video w-full object-cover opacity-80" src={cover.url} muted playsInline preload="metadata" />
-                <PlayCircle className="absolute left-1/2 top-1/2 size-9 -translate-x-1/2 -translate-y-1/2 text-white" />
-              </>
-            ) : (
-              <img className="aspect-video w-full object-cover" src={cover.url} alt="" loading="lazy" />
-            )
-          ) : (
-            <div className="grid aspect-video w-full place-items-center text-sm text-muted-foreground">{t("noMedia")}</div>
-          )}
-          <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/80 px-2 py-1 font-mono text-sm font-semibold leading-5 text-white shadow-sm">
-            {ticketLabel}
-          </span>
-          {extraCount > 0 ? (
-            <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
-              <Images className="size-3" />
-              +{extraCount}
-            </span>
-          ) : null}
-          {pinCount > 0 ? (
-            <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
-              <MapPin className="size-3" />
-              {pinCount}
-            </span>
-          ) : null}
-        </div>
-        <div className="space-y-2 p-3">
-          <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
-          {item.description ? <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">{item.description}</p> : null}
-          <p className="text-sm leading-5 text-muted-foreground">{formatDate(item.createdAt)}</p>
-        </div>
-      </button>
-      <div className="flex items-center justify-end gap-2 border-t p-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!nextStatus}
-          onClick={() => {
-            if (nextStatus) onMove(item._id, nextStatus);
-          }}
-          aria-label={nextStatusLabel ? t("movedTo", { ticket: ticketLabel, status: nextStatusLabel }) : t("ticketComplete", { ticket: ticketLabel })}
-          title={nextStatusLabel ? t("movedTo", { ticket: ticketLabel, status: nextStatusLabel }) : t("ticketCompleteTitle")}
-          className={cn("h-9 rounded-full px-3 text-sm disabled:opacity-100", currentStatus.tone)}
-        >
-          {t(currentStatus.labelKey)}
-          {nextStatus ? <ChevronRight className="size-3" /> : null}
-        </Button>
-      </div>
-    </article>
   );
 }
 

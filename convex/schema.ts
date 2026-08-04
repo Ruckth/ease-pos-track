@@ -8,6 +8,10 @@ export const feedbackStatus = v.union(
   v.literal("done"),
 );
 
+// Sessions created before the customer portal have no role; readers treat a
+// missing role as staff so legacy sessions keep full workspace access.
+export const actorRole = v.union(v.literal("staff"), v.literal("customer"));
+
 export const mediaItemValidator = v.object({
   key: v.string(),
   name: v.string(),
@@ -89,12 +93,25 @@ export default defineSchema({
     annotations: v.optional(v.array(annotationValidator)),
     version: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
+    // Tickets created before the customer portal have no owner and stay staff-only.
+    ownerCustomerId: v.optional(v.id("customers")),
+    origin: v.optional(actorRole),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_status", ["status"])
     .index("by_created_at", ["createdAt"])
-    .index("by_deleted_at", ["deletedAt"]),
+    .index("by_deleted_at", ["deletedAt"])
+    .index("by_owner", ["ownerCustomerId", "createdAt"]),
+  customers: defineTable({
+    email: v.string(),
+    passwordAlgorithm: v.string(),
+    passwordSalt: v.string(),
+    passwordHash: v.string(),
+    passwordIterations: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
   ticketCounters: defineTable({
     name: v.string(),
     nextNumber: v.number(),
@@ -106,6 +123,8 @@ export default defineSchema({
     before: v.optional(feedbackStateValidator),
     after: v.optional(feedbackStateValidator),
     sessionId: v.id("sessions"),
+    actorRole: v.optional(actorRole),
+    actorCustomerId: v.optional(v.id("customers")),
     sourceEventId: v.optional(v.id("feedbackEvents")),
     createdAt: v.number(),
   })
@@ -117,6 +136,8 @@ export default defineSchema({
     before: v.optional(annotationValidator),
     after: v.optional(annotationValidator),
     sessionId: v.id("sessions"),
+    actorRole: v.optional(actorRole),
+    actorCustomerId: v.optional(v.id("customers")),
     createdAt: v.number(),
   })
     .index("by_feedback", ["feedbackId", "createdAt"])
@@ -124,6 +145,8 @@ export default defineSchema({
   sessions: defineTable({
     token: v.string(),
     clientId: v.optional(v.string()),
+    role: v.optional(actorRole),
+    customerId: v.optional(v.id("customers")),
     createdAt: v.number(),
     expiresAt: v.number(),
   })
@@ -144,6 +167,8 @@ export default defineSchema({
     uploadedFiles: v.array(mediaItemValidator),
     status: uploadIntentStatus,
     feedbackId: v.optional(v.id("feedback")),
+    actorRole: v.optional(actorRole),
+    actorCustomerId: v.optional(v.id("customers")),
     createdAt: v.number(),
     expiresAt: v.number(),
     updatedAt: v.number(),
