@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
+import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
 import { Button } from "@/components/ui/button";
+import { supportsCamera } from "@/lib/camera";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 
@@ -41,6 +43,7 @@ export function MediaUploadField({
   const { t } = useI18n();
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [isDragging, setDragging] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const itemsRef = useRef(items);
@@ -129,6 +132,14 @@ export function MediaUploadField({
     if (event.dataTransfer.files.length > 0) addFiles(event.dataTransfer.files);
   }
 
+  function openCamera() {
+    if (supportsCamera(window.navigator.mediaDevices)) {
+      setCameraOpen(true);
+      return;
+    }
+    cameraInputRef.current?.click();
+  }
+
   return (
     <div
       className="space-y-3"
@@ -144,7 +155,7 @@ export function MediaUploadField({
       onDrop={onDrop}
     >
       <div className="grid grid-cols-2 gap-2">
-        <Button type="button" variant="outline" disabled={disabled} onClick={() => cameraInputRef.current?.click()}>
+        <Button type="button" variant="outline" disabled={disabled} onClick={openCamera}>
           <Camera />
           {t("camera")}
         </Button>
@@ -163,6 +174,12 @@ export function MediaUploadField({
           if (event.target.files) addFiles(event.target.files);
           event.target.value = "";
         }}
+      />
+      <CameraCaptureDialog
+        open={cameraOpen}
+        onOpenChange={setCameraOpen}
+        onCapture={(file) => addFiles([file])}
+        onUseFilePicker={() => cameraInputRef.current?.click()}
       />
       <input
         ref={uploadInputRef}
