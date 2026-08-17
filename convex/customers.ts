@@ -12,10 +12,9 @@ import {
   validateCustomerPassword,
 } from "./customer_validation";
 import {
-  CUSTOMER_GLOBAL_ATTEMPT_KEY,
-  CUSTOMER_GLOBAL_GUARD,
   CUSTOMER_GUARD,
-  customerAttemptKey,
+  customerLoginAttemptKeys,
+  customerRegistrationAttemptKeys,
   isLockedOut,
   planFailure,
 } from "./login_guard";
@@ -68,30 +67,22 @@ async function writeAttempts(
   else await ctx.db.insert("loginAttempts", value);
 }
 
-async function recordFailure(ctx: MutationCtx, clientId: string) {
+async function recordFailure(ctx: MutationCtx, keys: string[]) {
   const now = Date.now();
-  const scopedKey = customerAttemptKey(clientId);
-  const scoped = await readAttempts(ctx, scopedKey);
-  const global = await readAttempts(ctx, CUSTOMER_GLOBAL_ATTEMPT_KEY);
-  await writeAttempts(ctx, scopedKey, scoped, planFailure(scoped, now, CUSTOMER_GUARD), now);
-  await writeAttempts(
-    ctx,
-    CUSTOMER_GLOBAL_ATTEMPT_KEY,
-    global,
-    planFailure(global, now, CUSTOMER_GLOBAL_GUARD),
-    now,
-  );
+  for (const key of keys) {
+    const existing = await readAttempts(ctx, key);
+    await writeAttempts(ctx, key, existing, planFailure(existing, now, CUSTOMER_GUARD), now);
+  }
 }
 
-async function assertNotLockedOut(ctx: MutationCtx, clientId: string) {
-  const scoped = await readAttempts(ctx, customerAttemptKey(clientId));
-  const global = await readAttempts(ctx, CUSTOMER_GLOBAL_ATTEMPT_KEY);
-  if (isLockedOut([scoped, global], Date.now())) throw new Error("AUTH_RATE_LIMITED");
+async function assertNotLockedOut(ctx: MutationCtx, keys: string[]) {
+  const attempts = await Promise.all(keys.map((key) => readAttempts(ctx, key)));
+  if (isLockedOut(attempts, Date.now())) throw new Error("AUTH_RATE_LIMITED");
 }
 
-async function clearFailures(ctx: MutationCtx, clientId: string) {
-  const scoped = await readAttempts(ctx, customerAttemptKey(clientId));
-  if (scoped) await ctx.db.delete(scoped._id);
+async function clearFailures(ctx: MutationCtx, keys: string[]) {
+  const attempts = await Promise.all(keys.map((key) => readAttempts(ctx, key)));
+  await Promise.all(attempts.map((attempt) => attempt && ctx.db.delete(attempt._id)));
 }
 
 async function issueCustomerSession(ctx: MutationCtx, customerId: Id<"customers">, clientId: string) {
@@ -117,7 +108,8 @@ async function issueCustomerSession(ctx: MutationCtx, customerId: Id<"customers"
 export const startRegistration = internalMutation({
   args: { email: v.string(), clientId: v.string() },
   handler: async (ctx, args) => {
-    await assertNotLockedOut(ctx, args.clientId);
+    const attemptKeys = customerRegistrationAttemptKeys(args.clientId);
+    await assertNotLockedOut(ctx, attemptKeys);
     const existing = await ctx.db
       .query("customers")
       .withIndex("by_email", (q) => q.eq("email", args.email))
@@ -125,12 +117,11 @@ export const startRegistration = internalMutation({
     // A duplicate sign-up is a failed attempt, otherwise registration becomes an
     // unthrottled probe for which emails already have accounts.
     if (existing) {
-      await recordFailure(ctx, args.clientId);
+      await recordFailure(ctx, attemptKeys);
       throw new Error("EMAIL_ALREADY_REGISTERED");
     }
   },
 });
-
 export const finishRegistration = internalMutation({
   args: {
     email: v.string(),
@@ -157,7 +148,7 @@ export const finishRegistration = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
-    await clearFailures(ctx, args.clientId);
+    await clearFailures(ctx, customerRegistrationAttemptKeys(args.clientId));
     return await issueCustomerSession(ctx, customerId, args.clientId);
   },
 });
@@ -165,7 +156,7 @@ export const finishRegistration = internalMutation({
 export const startLogin = internalMutation({
   args: { email: v.string(), clientId: v.string() },
   handler: async (ctx, args) => {
-    await assertNotLockedOut(ctx, args.clientId);
+    await assertNotLockedOut(ctx, customerLoginAttemptKeys(args.clientId, args.email));
     const customer = await ctx.db
       .query("customers")
       .withIndex("by_email", (q) => q.eq("email", args.email))
@@ -184,9 +175,9 @@ export const startLogin = internalMutation({
 });
 
 export const failLogin = internalMutation({
-  args: { clientId: v.string() },
+  args: { clientId: v.string(), email: v.string() },
   handler: async (ctx, args) => {
-    await recordFailure(ctx, args.clientId);
+    await recordFailure(ctx, customerLoginAttemptKeys(args.clientId, args.email));
   },
 });
 
@@ -195,7 +186,7 @@ export const finishLogin = internalMutation({
   handler: async (ctx, args) => {
     const customer = await ctx.db.get(args.customerId);
     if (!customer) throw new Error("INVALID_CREDENTIALS");
-    await clearFailures(ctx, args.clientId);
+    await clearFailures(ctx, customerLoginAttemptKeys(args.clientId, customer.email));
     return await issueCustomerSession(ctx, customer._id, args.clientId);
   },
 });
@@ -240,7 +231,7 @@ export const login = action({
     const verified = withinBounds
       && await verifyPasswordRecord(args.password, pepper, challenge.record);
     if (!verified || challenge.customerId === null) {
-      await ctx.runMutation(internal.customers.failLogin, { clientId });
+      await ctx.runMutation(internal.customers.failLogin, { clientId, email });
       throw new Error("INVALID_CREDENTIALS");
     }
     return await ctx.runMutation(internal.customers.finishLogin, {
@@ -249,4 +240,3 @@ export const login = action({
     });
   },
 });
-

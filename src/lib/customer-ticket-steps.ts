@@ -26,7 +26,7 @@ export type CustomerTicketDraft = {
 };
 
 /** Stable codes, localized through the shared error table. */
-export type StepIssue = "REQUIRED_TITLE" | "TITLE_TOO_LONG" | "DESCRIPTION_TOO_LONG" | "REQUIRED_MEDIA";
+export type StepIssue = "REQUIRED_TITLE" | "TITLE_TOO_LONG" | "DESCRIPTION_TOO_LONG";
 
 export function stepIssues(step: CustomerStep, draft: CustomerTicketDraft): StepIssue[] {
   const issues: StepIssue[] = [];
@@ -35,7 +35,6 @@ export function stepIssues(step: CustomerStep, draft: CustomerTicketDraft): Step
     if (draft.title.trim().length > TITLE_MAX_LENGTH) issues.push("TITLE_TOO_LONG");
     if (draft.description.trim().length > DESCRIPTION_MAX_LENGTH) issues.push("DESCRIPTION_TOO_LONG");
   }
-  if (step === 2 && draft.mediaCount < 1) issues.push("REQUIRED_MEDIA");
   return issues;
 }
 

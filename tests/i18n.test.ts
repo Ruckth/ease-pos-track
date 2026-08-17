@@ -56,8 +56,8 @@ test("translations interpolate in Thai and English", () => {
   assert.equal(translate("en", "description"), "Description (optional)");
   assert.equal(translate("th", "noDescription"), "ไม่มีรายละเอียด");
   assert.equal(translate("en", "noDescription"), "No description provided.");
-  assert.equal(translate("th", "requiredFeedback"), "กรอกหัวข้อและเพิ่มรูปหรือวิดีโออย่างน้อย 1 ไฟล์");
-  assert.equal(translate("en", "requiredFeedback"), "Topic and at least one photo or video are required.");
+  assert.equal(translate("th", "requiredFeedback"), "ต้องกรอกหัวข้อ");
+  assert.equal(translate("en", "requiredFeedback"), "A topic is required.");
 });
 
 test("stable error codes are localized", () => {

@@ -26,7 +26,6 @@ function makeSecret() {
 }
 
 export function validateFiles(files: Array<{ name: string; size: number; type: string }>) {
-  if (files.length === 0) throw new Error("REQUIRED_FEEDBACK");
   const images = files.filter((file) => file.type.startsWith("image/"));
   const videos = files.filter((file) => file.type.startsWith("video/"));
   if (images.length + videos.length !== files.length) throw new Error("IMAGE_VIDEO_ONLY");

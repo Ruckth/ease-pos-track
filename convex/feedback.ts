@@ -281,9 +281,6 @@ export const createFeedback = mutation({
     const { session, actor } = await requireActor(ctx, args.token);
 
     const { title, description } = validateFeedbackText(args.title, args.description);
-    if (args.media.length === 0) {
-      throw new Error("REQUIRED_FEEDBACK");
-    }
     const imageCount = args.media.filter((item) => item.type.startsWith("image/")).length;
     const videoCount = args.media.filter((item) => item.type.startsWith("video/")).length;
     if (imageCount + videoCount !== args.media.length) {

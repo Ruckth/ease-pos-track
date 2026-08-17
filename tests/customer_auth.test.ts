@@ -8,9 +8,11 @@ import {
   validateCustomerPassword,
 } from "../convex/customer_validation";
 import {
-  CUSTOMER_GLOBAL_ATTEMPT_KEY,
   CUSTOMER_GUARD,
   customerAttemptKey,
+  customerEmailAttemptKey,
+  customerLoginAttemptKeys,
+  customerRegistrationAttemptKeys,
   isLockedOut,
   planFailure,
 } from "../convex/login_guard";
@@ -58,10 +60,16 @@ test("client ids are bounded so the rate limiter keys stay sane", () => {
   assert.throws(() => validateClientId("a".repeat(129)), /INVALID_SIGNIN_CLIENT/);
 });
 
-test("customer attempt keys are namespaced away from staff attempts", () => {
+test("customer attempt keys scope lockouts to one device and one account", () => {
   assert.equal(customerAttemptKey("device-1"), "customer:device-1");
-  assert.equal(CUSTOMER_GLOBAL_ATTEMPT_KEY, "customer:__global__");
+  assert.equal(customerEmailAttemptKey("owner@shop.co"), "customer-email:owner@shop.co");
   assert.notEqual(customerAttemptKey("__global__"), "__global__");
+  assert.notEqual(customerEmailAttemptKey("owner@shop.co"), customerEmailAttemptKey("other@shop.co"));
+  assert.deepEqual(customerRegistrationAttemptKeys("device-1"), ["customer:device-1"]);
+  assert.deepEqual(customerLoginAttemptKeys("device-1", "owner@shop.co"), [
+    "customer:device-1",
+    "customer-email:owner@shop.co",
+  ]);
 });
 
 test("repeated failures lock out, and a stale window starts over", () => {

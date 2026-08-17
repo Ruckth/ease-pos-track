@@ -23,18 +23,25 @@ export const CUSTOMER_GUARD: GuardConfig = {
   lockoutMs: 5 * 60 * 1000,
 };
 
-export const CUSTOMER_GLOBAL_GUARD: GuardConfig = {
-  windowMs: 10 * 60 * 1000,
-  maxAttempts: 50,
-  lockoutMs: 5 * 60 * 1000,
-};
-
 /** Attempt keys are namespaced so customer traffic cannot lock out staff. */
 export function customerAttemptKey(clientId: string) {
   return `customer:${clientId}`;
 }
 
-export const CUSTOMER_GLOBAL_ATTEMPT_KEY = "customer:__global__";
+/** Account-scoped failures stop password spraying without a site-wide lockout. */
+export function customerEmailAttemptKey(email: string) {
+  return `customer-email:${email}`;
+}
+
+/** Duplicate sign-up attempts must never lock the existing account itself. */
+export function customerRegistrationAttemptKeys(clientId: string) {
+  return [customerAttemptKey(clientId)];
+}
+
+/** Failed password checks are bounded by both device and target account. */
+export function customerLoginAttemptKeys(clientId: string, email: string) {
+  return [customerAttemptKey(clientId), customerEmailAttemptKey(email)];
+}
 
 export function isLockedOut(records: Array<AttemptRecord | null | undefined>, now: number) {
   return records.some((record) => (record?.lockedUntil ?? 0) > now);

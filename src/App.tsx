@@ -411,7 +411,7 @@ function SubmitFeedback({
     event.preventDefault();
     setError("");
 
-    if (!title.trim() || items.length === 0) {
+    if (!title.trim()) {
       setError(t("requiredFeedback"));
       return;
     }

@@ -24,6 +24,7 @@ test("optimistic versions reject stale mutations", () => {
 });
 
 test("upload validation rejects unsupported and oversized media", () => {
+  assert.doesNotThrow(() => validateFiles([]));
   assert.doesNotThrow(() => validateFiles([
     { name: "photo.png", size: 1_024, type: "image/png" },
     { name: "clip.mp4", size: 2_048, type: "video/mp4" },

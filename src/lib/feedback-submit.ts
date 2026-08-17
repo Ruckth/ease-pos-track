@@ -46,6 +46,8 @@ export type SubmitFeedbackDeps = {
     uploadIntentId: Id<"uploadIntents">;
     uploadIntentSecret: string;
   }) => Promise<unknown>;
+  /** Injectable at the upload boundary so the zero-media path is regression tested. */
+  uploadMedia?: typeof uploadFiles;
   onProgress?: (percent: number) => void;
   signal?: AbortSignal;
   /** Reports a cleanup failure without masking the original error. */
@@ -82,13 +84,15 @@ export async function submitFeedbackDraft(deps: SubmitFeedbackDeps, draft: Feedb
     if (intent.feedbackId) return;
 
     activeIntent = { intentId: intent.intentId, secret: intent.secret };
-    const uploads = await uploadFiles("feedbackMedia", {
-      files: draft.items.map((item) => item.file),
-      input: { intentId: intent.intentId, secret: intent.secret },
-      headers: { authorization: `Bearer ${deps.token}` },
-      signal: deps.signal,
-      onUploadProgress: ({ totalProgress }) => deps.onProgress?.(Math.round(totalProgress)),
-    });
+    const uploads = draft.items.length === 0
+      ? []
+      : await (deps.uploadMedia ?? uploadFiles)("feedbackMedia", {
+          files: draft.items.map((item) => item.file),
+          input: { intentId: intent.intentId, secret: intent.secret },
+          headers: { authorization: `Bearer ${deps.token}` },
+          signal: deps.signal,
+          onUploadProgress: ({ totalProgress }) => deps.onProgress?.(Math.round(totalProgress)),
+        });
 
     const media: MediaItem[] = uploads.map((uploaded, index) => {
       const raw = uploaded as typeof uploaded & { ufsUrl?: string; url?: string; type?: string };
