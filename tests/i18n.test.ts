@@ -65,6 +65,10 @@ test("stable error codes are localized", () => {
   const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
   assert.equal(localizeError(new Error("SESSION_EXPIRED"), thai), "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
   assert.equal(localizeError(new Error("IMAGE_TOO_LARGE"), english), "Images must be 8MB or smaller.");
+  assert.equal(
+    localizeError(new Error("UPLOAD_INCOMPLETE"), thai),
+    "อัปโหลดไฟล์ยังไม่เสร็จสมบูรณ์ กรุณาลองอีกครั้ง",
+  );
   assert.equal(localizeError(new Error("UNKNOWN_CODE"), thai), "เกิดข้อผิดพลาด โปรดลองอีกครั้ง");
 });
 
