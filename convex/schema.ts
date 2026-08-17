@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 export const feedbackStatus = v.union(
   v.literal("new"),
+  v.literal("acknowledged"),
   v.literal("in_progress"),
   v.literal("waiting"),
   v.literal("done"),

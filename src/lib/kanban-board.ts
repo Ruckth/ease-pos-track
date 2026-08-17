@@ -10,7 +10,7 @@
 import type { FeedbackStatus } from "@/lib/types";
 
 /** Fixed board columns. Columns are never added, removed, or reordered. */
-export const BOARD_COLUMNS: FeedbackStatus[] = ["new", "in_progress", "waiting", "done"];
+export const BOARD_COLUMNS: FeedbackStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
 
 export type BoardColumns<T> = Record<FeedbackStatus, T[]>;
 
@@ -27,11 +27,11 @@ export function isBoardStatus(value: string): value is FeedbackStatus {
 }
 
 export function emptyColumns<T>(): BoardColumns<T> {
-  return { new: [], in_progress: [], waiting: [], done: [] };
+  return { new: [], acknowledged: [], in_progress: [], waiting: [], done: [] };
 }
 
 /**
- * Narrows the primitive's generic `Record<string, T[]>` back to the four fixed
+ * Narrows the primitive's generic `Record<string, T[]>` back to the five fixed
  * columns, dropping anything unexpected.
  */
 export function normalizeColumns<T>(value: Record<string, T[]>): BoardColumns<T> {

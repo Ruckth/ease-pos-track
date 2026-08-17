@@ -1,4 +1,5 @@
 import { History } from "lucide-react";
+import { statusMeta } from "@/components/feedback-status";
 import type { FeedbackEvent } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
@@ -17,7 +18,7 @@ export function FeedbackActivityList({ events }: { events: FeedbackEvent[] }) {
           <li key={event._id} className="text-sm leading-5 text-muted-foreground">
             <span className="font-medium text-foreground">{t(actionKeys[event.action])}</span>
             {event.before?.status !== event.after?.status && event.before && event.after
-              ? ` · ${t(({ new: "new", in_progress: "inProgress", waiting: "waiting", done: "done" } as const)[event.before.status])} → ${t(({ new: "new", in_progress: "inProgress", waiting: "waiting", done: "done" } as const)[event.after.status])}`
+              ? ` · ${t(statusMeta(event.before.status).labelKey)} → ${t(statusMeta(event.after.status).labelKey)}`
               : ""}
             <span className="ml-1">{formatDate(event.createdAt)}</span>
           </li>

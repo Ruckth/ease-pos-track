@@ -21,7 +21,8 @@ test("formats ticket numbers and advances status without wrapping Done", () => {
   assert.equal(formatTicketNumber(1), "TKT-0001");
   assert.equal(formatTicketNumber(10_001), "TKT-10001");
   assert.equal(formatTicketNumber(undefined), "TKT—");
-  assert.equal(nextFeedbackStatus("new"), "in_progress");
+  assert.equal(nextFeedbackStatus("new"), "acknowledged");
+  assert.equal(nextFeedbackStatus("acknowledged"), "in_progress");
   assert.equal(nextFeedbackStatus("waiting"), "done");
   assert.equal(nextFeedbackStatus("done"), null);
 });

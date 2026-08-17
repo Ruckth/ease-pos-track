@@ -18,8 +18,9 @@ type Card = { _id: string; status: FeedbackStatus };
 
 const card = (id: string, status: FeedbackStatus): Card => ({ _id: id, status });
 
-test("the board has exactly the four workflow columns", () => {
-  assert.deepEqual(BOARD_COLUMNS, ["new", "in_progress", "waiting", "done"]);
+test("the board has exactly the five workflow columns", () => {
+  assert.deepEqual(BOARD_COLUMNS, ["new", "acknowledged", "in_progress", "waiting", "done"]);
+  assert.equal(isBoardStatus("acknowledged"), true);
   assert.equal(isBoardStatus("waiting"), true);
   assert.equal(isBoardStatus("archived"), false);
   assert.deepEqual(Object.keys(emptyColumns()), BOARD_COLUMNS);

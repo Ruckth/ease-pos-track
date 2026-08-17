@@ -33,6 +33,10 @@ test("new customer portal and board screens are translated in both languages", (
     "stepReview",
     "submitTicket",
     "dragTicket",
+    "acknowledged",
+    "boardStatusTabs",
+    "ticketProgress",
+    "ticketStep",
     "moveConflict",
     "invalidCredentials",
   ] as const;
