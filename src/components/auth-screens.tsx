@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { useAction, useMutation } from "convex/react";
-import { ArrowLeft, Loader2, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowLeft, ChevronRight, Headphones, Loader2, ShieldCheck, UserRound } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,25 +35,45 @@ export function AuthGate({ onSignedIn }: { onSignedIn: (token: string) => void }
   const [screen, setScreen] = useState<Screen>("choose");
 
   return (
-    <main className="grid min-h-screen place-items-center px-4 py-10">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
+    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)),transparent_32rem)] px-4 py-8 sm:py-12">
+      <Card className="w-full max-w-md overflow-hidden rounded-2xl border-primary/10 bg-card/95 shadow-xl shadow-primary/5">
+        <CardHeader className="space-y-5 border-b bg-muted/20 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>{t("appName")}</CardTitle>
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                <Headphones className="size-5" aria-hidden="true" />
+              </div>
+              <p className="truncate text-sm font-semibold">{t("appName")}</p>
+            </div>
             <LanguageSelector language={language} onChange={setLanguage} />
           </div>
-          <CardDescription>
-            {screen === "choose" ? t("chooseAccountType") : screen === "staff" ? t("staffSignInDescription") : t("customerSignInDescription")}
-          </CardDescription>
+          <div>
+            <CardTitle className="text-xl leading-7">
+              {screen === "choose" ? t("chooseAccountType") : screen === "staff" ? t("staffSignIn") : t("customerSignIn")}
+            </CardTitle>
+            <CardDescription className="mt-1.5 leading-5">
+            {screen === "choose" ? t("chooseAccountTypeDescription") : screen === "staff" ? t("staffSignInDescription") : t("customerSignInDescription")}
+            </CardDescription>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-5 sm:p-6">
           {screen === "choose" ? (
-            <div className="space-y-2">
-              <Button type="button" className="w-full justify-start" variant="outline" onClick={() => setScreen("staff")}>
-                <ShieldCheck /> {t("staffAccess")}
+            <div className="space-y-3">
+              <Button type="button" className="h-auto w-full justify-start rounded-xl p-4 text-start" variant="outline" onClick={() => setScreen("customer")}>
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><UserRound /></span>
+                <span className="min-w-0 flex-1 whitespace-normal">
+                  <span className="block font-semibold">{t("customerAccess")}</span>
+                  <span className="mt-0.5 block text-xs font-normal leading-5 text-muted-foreground">{t("customerAccessDescription")}</span>
+                </span>
+                <ChevronRight className="text-muted-foreground" />
               </Button>
-              <Button type="button" className="w-full justify-start" variant="outline" onClick={() => setScreen("customer")}>
-                <UserRound /> {t("customerAccess")}
+              <Button type="button" className="h-auto w-full justify-start rounded-xl p-4 text-start" variant="outline" onClick={() => setScreen("staff")}>
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><ShieldCheck /></span>
+                <span className="min-w-0 flex-1 whitespace-normal">
+                  <span className="block font-semibold">{t("staffAccess")}</span>
+                  <span className="mt-0.5 block text-xs font-normal leading-5 text-muted-foreground">{t("staffAccessDescription")}</span>
+                </span>
+                <ChevronRight className="text-muted-foreground" />
               </Button>
             </div>
           ) : screen === "staff" ? (
@@ -104,7 +124,7 @@ function StaffSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: string)
         />
       </div>
       {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <Button className="w-full" disabled={isSubmitting || !password}>
+      <Button className="h-11 w-full rounded-xl" disabled={isSubmitting || !password}>
         {isSubmitting ? <Loader2 className="animate-spin" /> : null}{isSubmitting ? t("signingIn") : t("enter")}
       </Button>
       <Button type="button" variant="ghost" className="w-full" onClick={onSwitch}>
@@ -186,7 +206,7 @@ function CustomerSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: stri
         </div>
       ) : null}
       {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <Button className="w-full" disabled={isSubmitting || !email || !password}>
+      <Button className="h-11 w-full rounded-xl" disabled={isSubmitting || !email || !password}>
         {isSubmitting ? <Loader2 className="animate-spin" /> : null}
         {isSubmitting
           ? (isRegistering ? t("creatingAccount") : t("signingIn"))

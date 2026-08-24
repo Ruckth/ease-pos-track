@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
+import { Camera, FileImage, GripVertical, ImagePlus, Info, MapPin, PlayCircle, Upload, X } from "lucide-react";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
 import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
 import { Button } from "@/components/ui/button";
@@ -155,13 +155,13 @@ export function MediaUploadField({
       onDrop={onDrop}
     >
       <div className="grid grid-cols-2 gap-2">
-        <Button type="button" variant="outline" disabled={disabled} onClick={openCamera}>
+        <Button type="button" className="h-11 rounded-xl" variant="outline" disabled={disabled} onClick={openCamera}>
           <Camera />
-          {t("camera")}
+          {t("takePhoto")}
         </Button>
-        <Button type="button" variant="outline" disabled={disabled} onClick={() => uploadInputRef.current?.click()}>
+        <Button type="button" className="h-11 rounded-xl" variant="outline" disabled={disabled} onClick={() => uploadInputRef.current?.click()}>
           <Upload />
-          {t("upload")}
+          {t("chooseFiles")}
         </Button>
       </div>
       <input
@@ -199,27 +199,43 @@ export function MediaUploadField({
           disabled={disabled}
           onClick={() => uploadInputRef.current?.click()}
           className={cn(
-            "grid aspect-video w-full place-items-center rounded-lg border border-dashed bg-muted/40 text-sm text-muted-foreground transition-colors",
-            isDragging && "border-primary bg-primary/5 text-primary",
+            "grid min-h-52 w-full place-items-center rounded-2xl border-2 border-dashed bg-muted/30 px-5 py-8 text-sm text-muted-foreground transition-all hover:border-primary/60 hover:bg-primary/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            isDragging && "scale-[1.01] border-primary bg-primary/5 text-primary",
           )}
         >
-          <span className="px-4 text-center">
-            {t("dropMedia")}
-            <span className="mt-1 block text-sm leading-5">{t("mediaOrderHint")}</span>
+          <span className="text-center">
+            <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+              <FileImage className="size-6" aria-hidden="true" />
+            </span>
+            <span className="block font-semibold text-foreground">{t("addPhotosTitle")}</span>
+            <span className="mt-1 block leading-5">{t("dropMedia")}</span>
+            <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs shadow-sm">
+              <Info className="size-3.5" aria-hidden="true" />
+              {t("uploadLimits")}
+            </span>
           </span>
         </button>
       ) : (
         <>
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/45 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{t("filesReady", { count: items.length })}</p>
+              <p className="text-xs leading-4 text-muted-foreground">{t("reorderHint")}</p>
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="shrink-0" disabled={disabled} onClick={() => uploadInputRef.current?.click()}>
+              <ImagePlus /> {t("addMore")}
+            </Button>
+          </div>
           <Sortable
             value={items}
             onValueChange={onItemsChange}
             getItemValue={(item) => item.id}
             strategy="grid"
-            className={cn("grid grid-cols-3 gap-2", isDragging && "rounded-lg ring-2 ring-primary/50")}
+            className={cn("grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4", isDragging && "rounded-xl ring-2 ring-primary/50")}
           >
             {items.map((item, index) => (
               <SortableItem key={item.id} value={item.id} disabled={disabled}>
-                <div className="group relative aspect-square overflow-hidden rounded-md border bg-black">
+                <div className="group relative aspect-square overflow-hidden rounded-xl border bg-black shadow-sm">
                   <button
                     type="button"
                     disabled={disabled}
@@ -248,7 +264,7 @@ export function MediaUploadField({
                     </span>
                   ) : null}
                   <SortableItemHandle className="absolute left-1 top-1 z-10">
-                    <span className="flex size-9 items-center justify-center rounded-full border bg-background/90 shadow-sm">
+                    <span className="flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm">
                       <GripVertical className="size-4" />
                     </span>
                   </SortableItemHandle>
@@ -257,7 +273,7 @@ export function MediaUploadField({
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
                     aria-label={t("removeFile", { name: item.file.name })}
-                    className="absolute right-1 top-1 z-10 flex size-9 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="size-4" />
                   </button>
@@ -269,19 +285,20 @@ export function MediaUploadField({
               disabled={disabled}
               onClick={() => uploadInputRef.current?.click()}
               aria-label={t("addMedia")}
-              className="grid aspect-square place-items-center rounded-md border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              className="grid aspect-square place-items-center rounded-xl border-2 border-dashed text-muted-foreground transition-colors hover:border-primary hover:bg-primary/[0.03] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <ImagePlus className="size-5" />
+              <span className="flex flex-col items-center gap-1 text-xs font-medium">
+                <ImagePlus className="size-5" />
+                {t("addMore")}
+              </span>
             </button>
           </Sortable>
-          <p className="text-sm leading-5 text-muted-foreground">
-            {t("fileCount", { count: items.length })}
-          </p>
+          <p className="text-xs leading-5 text-muted-foreground">{t("uploadLimits")}</p>
         </>
       )}
 
       {errors.length > 0 ? (
-        <div className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div role="alert" className="space-y-1 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           {errors.map((message) => (
             <p key={message}>{message}</p>
           ))}
