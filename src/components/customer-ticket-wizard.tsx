@@ -224,9 +224,9 @@ export function CustomerTicketWizard({
         value={step}
         onValueChange={(next) => setStep(clampStep(next, draft))}
         indicators={{ completed: <Check className="size-3.5" />, loading: <Loader2 className="size-3.5 animate-spin" /> }}
-        className="space-y-6"
+        className="space-y-5 sm:space-y-6"
       >
-        <StepperNav className="gap-3">
+        <StepperNav className="gap-1 sm:gap-3">
           {CUSTOMER_STEPS.map(({ step: stepValue, titleKey }, index) => {
             const state = stepState(stepValue, step, draft);
             const reachable = canEnterStep(stepValue, draft);
@@ -238,21 +238,21 @@ export function CustomerTicketWizard({
                 disabled={!reachable || isUploading}
                 className="relative flex-1 items-start"
               >
-                <StepperTrigger className="flex grow flex-col items-start justify-center gap-2.5">
+                <StepperTrigger className="flex grow flex-col items-center justify-center gap-1.5 px-0.5 sm:items-start sm:gap-2.5 sm:px-0">
                   <StepperIndicator className="size-8 border-2 border-background text-sm data-[state=inactive]:border-border data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground">
                     {stepValue}
                   </StepperIndicator>
-                  <div className="flex flex-col items-start gap-1">
-                    <span className="text-[10px] font-semibold uppercase text-muted-foreground">
+                  <div className="flex min-w-0 flex-col items-center gap-1 sm:items-start">
+                    <span className="hidden text-[10px] font-semibold uppercase text-muted-foreground sm:block">
                       {t("stepNumber", { number: stepValue })}
                     </span>
-                    <StepperTitle className="text-start text-sm font-semibold group-data-[state=inactive]/step:text-muted-foreground">
+                    <StepperTitle className="line-clamp-2 text-center text-xs font-semibold leading-4 group-data-[state=inactive]/step:text-muted-foreground sm:text-start sm:text-sm sm:leading-5">
                       {t(titleKey)}
                     </StepperTitle>
                     <Badge
                       variant="outline"
                       className={cn(
-                        "border",
+                        "hidden border sm:inline-flex",
                         state === "completed" && "border-emerald-200 bg-emerald-50 text-emerald-800",
                         state === "active" && "border-sky-200 bg-sky-50 text-sky-800",
                       )}
@@ -262,7 +262,7 @@ export function CustomerTicketWizard({
                   </div>
                 </StepperTrigger>
                 {index < CUSTOMER_STEPS.length - 1 ? (
-                  <StepperSeparator className="absolute inset-x-0 start-9 top-4 m-0 group-data-[orientation=horizontal]/stepper-nav:w-[calc(100%-2rem)] group-data-[orientation=horizontal]/stepper-nav:flex-none group-data-[state=completed]/step:bg-primary" />
+                  <StepperSeparator className="absolute inset-x-0 start-[calc(50%+1rem)] top-4 m-0 w-[calc(100%-2rem)] group-data-[orientation=horizontal]/stepper-nav:flex-none group-data-[state=completed]/step:bg-primary sm:start-9" />
                 ) : null}
               </StepperItem>
             );
@@ -270,32 +270,47 @@ export function CustomerTicketWizard({
         </StepperNav>
 
         <StepperPanel>
-          <StepperContent value={1} className="space-y-4">
-            <p className="text-sm leading-6 text-muted-foreground">{t("stepDetailsHint")}</p>
+          <StepperContent value={1} className="space-y-5">
+            <div className="rounded-xl bg-secondary/55 px-4 py-3 text-sm leading-6 text-secondary-foreground">
+              {t("stepDetailsHint")}
+            </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="customer-ticket-title">{t("topic")}</label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-sm font-medium" htmlFor="customer-ticket-title">
+                  {t("topic")} <span className="text-destructive" aria-hidden="true">*</span>
+                </label>
+                <span className="text-xs tabular-nums text-muted-foreground">{title.length}/{TITLE_MAX_LENGTH}</span>
+              </div>
               <Input
                 ref={titleInputRef}
                 id="customer-ticket-title"
                 value={title}
                 maxLength={TITLE_MAX_LENGTH}
+                placeholder={t("topicPlaceholder")}
+                aria-required="true"
                 onChange={(event) => setTitle(event.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="customer-ticket-description">{t("description")}</label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-sm font-medium" htmlFor="customer-ticket-description">{t("description")}</label>
+                <span className="text-xs tabular-nums text-muted-foreground">{description.length}/{DESCRIPTION_MAX_LENGTH}</span>
+              </div>
               <Textarea
                 id="customer-ticket-description"
                 rows={5}
                 maxLength={DESCRIPTION_MAX_LENGTH}
                 value={description}
+                placeholder={t("descriptionPlaceholder")}
                 onChange={(event) => setDescription(event.target.value)}
               />
             </div>
           </StepperContent>
 
-          <StepperContent value={2} className="space-y-3">
-            <p className="text-sm leading-6 text-muted-foreground">{t("stepMediaHint")}</p>
+          <StepperContent value={2} className="space-y-4">
+            <div className="rounded-xl bg-secondary/55 px-4 py-3 text-sm leading-6 text-secondary-foreground">
+              {t("stepMediaHint")}
+            </div>
             <MediaUploadField
               items={items}
               onItemsChange={setItems}
@@ -305,24 +320,26 @@ export function CustomerTicketWizard({
               disabled={!active || isUploading}
             />
             {items.length > 0 ? (
-              <p className="text-sm leading-5 text-muted-foreground">
+              <p className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2.5 text-sm leading-5 text-sky-800">
                 {annotations.length > 0 ? t("pinSummary", { count: annotations.length }) : t("pinHint")}
               </p>
             ) : null}
           </StepperContent>
 
-          <StepperContent value={3} className="space-y-3">
-            <p className="text-sm leading-6 text-muted-foreground">{t("stepReviewHint")}</p>
-            <dl className="divide-y rounded-md border bg-muted/20 text-sm">
-              <div className="flex flex-col gap-1 p-3">
+          <StepperContent value={3} className="space-y-4">
+            <div className="rounded-xl bg-secondary/55 px-4 py-3 text-sm leading-6 text-secondary-foreground">
+              {t("stepReviewHint")}
+            </div>
+            <dl className="divide-y overflow-hidden rounded-xl border bg-card text-sm shadow-sm">
+              <div className="flex flex-col gap-1 p-4">
                 <dt className="font-medium text-muted-foreground">{t("reviewTopic")}</dt>
                 <dd className="font-semibold">{title.trim()}</dd>
               </div>
-              <div className="flex flex-col gap-1 p-3">
+              <div className="flex flex-col gap-1 p-4">
                 <dt className="font-medium text-muted-foreground">{t("reviewDescription")}</dt>
                 <dd className="whitespace-pre-wrap leading-6">{description.trim() || t("noDescription")}</dd>
               </div>
-              <div className="flex flex-wrap items-center gap-3 p-3">
+              <div className="flex flex-wrap items-center gap-3 p-4">
                 <span className="inline-flex items-center gap-1.5 text-sm">
                   <ImagePlus className="size-4 text-muted-foreground" />
                   {t("reviewMedia", { count: items.length })}
@@ -334,14 +351,14 @@ export function CustomerTicketWizard({
               </div>
             </dl>
             {items.length > 0 ? (
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {items.map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedMediaId(item.id)}
                     aria-label={t("openMedia", { name: item.file.name })}
-                    className="relative aspect-square overflow-hidden rounded-md border bg-black"
+                    className="relative aspect-square overflow-hidden rounded-xl border bg-black transition-transform hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {item.isVideo ? (
                       <video className="h-full w-full object-cover opacity-80" src={item.previewUrl} muted playsInline preload="metadata" />
@@ -367,23 +384,24 @@ export function CustomerTicketWizard({
         ) : null}
         {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
 
-        <div className="flex items-center justify-between gap-2">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex items-center justify-between gap-2 border-t bg-background/95 px-5 py-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
           <Button
             type="button"
             variant="outline"
+            className="shrink-0"
             disabled={step === 1 || isUploading}
             onClick={() => setStep((current) => clampStep(current - 1, draft))}
           >
             {t("back")}
           </Button>
           {step === 3 ? (
-            <div className="flex gap-2">
+            <div className="ml-auto flex min-w-0 gap-2">
               {isUploading ? (
                 <Button type="button" variant="outline" onClick={() => abortControllerRef.current?.abort()}>
                   {t("cancelUpload")}
                 </Button>
               ) : null}
-              <Button type="button" disabled={isUploading} onClick={() => void submit()}>
+              <Button type="button" className="min-w-0 flex-1 sm:flex-none" disabled={isUploading} onClick={() => void submit()}>
                 {isUploading ? <Loader2 className="animate-spin" /> : <Send />}
                 {isUploading ? t("submitting") : t("submitTicket")}
               </Button>
@@ -391,10 +409,11 @@ export function CustomerTicketWizard({
           ) : (
             <Button
               type="button"
+              className="min-w-28"
               disabled={!isStepComplete(step, draft) || isUploading}
               onClick={() => setStep((current) => clampStep(current + 1, draft))}
             >
-              {t("next")}
+              {step === 2 && items.length === 0 ? t("skipForNow") : t("next")}
             </Button>
           )}
         </div>
@@ -405,6 +424,7 @@ export function CustomerTicketWizard({
         onOpenChange={(open) => !open && setSelectedMediaId(null)}
         title={items[selectedMediaIndex]?.file.name ?? t("annotateMedia")}
         description={t("annotateDescription")}
+        mobileFullScreen
       >
         <MediaViewer
           key={selectedMediaId ?? "pending-media"}

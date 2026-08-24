@@ -55,7 +55,7 @@ test("Thai is the default persisted language and English is retained", () => {
 
 test("translations interpolate in Thai and English", () => {
   assert.equal(translate("th", "feedbackItems", { count: 3 }), "รายการแจ้งปัญหา 3 รายการ");
-  assert.equal(translate("en", "feedbackItems", { count: 3 }), "3 feedback items");
+  assert.equal(translate("en", "feedbackItems", { count: 3 }), "3 Tickets");
   assert.equal(translate("th", "description"), "รายละเอียด (ไม่บังคับ)");
   assert.equal(translate("en", "description"), "Description (optional)");
   assert.equal(translate("th", "noDescription"), "ไม่มีรายละเอียด");
