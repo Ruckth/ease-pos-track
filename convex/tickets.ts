@@ -12,6 +12,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { newFeedbackOwnership } from "./authz";
 import type { AnnotationRecord } from "./annotation_state";
+import { requireCurrentVersion } from "./feedback_state";
 import { planTicketNumberBackfill } from "./ticket_numbers";
 
 const FEEDBACK_COUNTER_NAME = "feedback";
@@ -103,6 +104,76 @@ export async function recordFeedbackEvent(
   } & TicketAuthor,
 ) {
   return await ctx.db.insert("feedbackEvents", input);
+}
+
+/** The audit-trail snapshot of a Ticket. */
+export type TicketState = ReturnType<typeof feedbackState>;
+
+/** Ticket fields that versioned state mutations may change. */
+export type TicketChanges = Partial<
+  Pick<Doc<"feedback">, "title" | "description" | "status" | "deletedAt">
+>;
+
+type TicketChangeAction =
+  | "edited"
+  | "edit_undone"
+  | "status_changed"
+  | "status_undone"
+  | "archived";
+
+export type TicketChangePlan<Changes extends TicketChanges> = {
+  version: number;
+  updatedAt: number;
+  patch: Changes & { version: number; updatedAt: number };
+  before: TicketState;
+  after: TicketState;
+};
+
+/**
+ * Plans a versioned Ticket change without writing to the database. The row patch
+ * and audit snapshot are derived from the same changes so they cannot drift.
+ */
+export function planTicketChange<Changes extends TicketChanges>(input: {
+  doc: Doc<"feedback">;
+  expectedVersion: number;
+  changes: Changes;
+  now: number;
+}): TicketChangePlan<Changes> {
+  const version = requireCurrentVersion(input.doc, input.expectedVersion) + 1;
+  return {
+    version,
+    updatedAt: input.now,
+    patch: { ...input.changes, version, updatedAt: input.now },
+    before: feedbackState(input.doc),
+    after: feedbackState({ ...input.doc, ...input.changes, version, updatedAt: input.now }),
+  };
+}
+
+/** Applies one versioned Ticket patch and records its matching audit event. */
+export async function applyTicketChange(
+  ctx: MutationCtx,
+  input: {
+    doc: Doc<"feedback">;
+    expectedVersion: number;
+    changes: TicketChanges;
+    action: TicketChangeAction;
+    author: TicketAuthor;
+    sourceEventId?: Id<"feedbackEvents">;
+    now: number;
+  },
+) {
+  const plan = planTicketChange(input);
+  await ctx.db.patch(input.doc._id, plan.patch);
+  const eventId = await recordFeedbackEvent(ctx, {
+    feedbackId: input.doc._id,
+    action: input.action,
+    before: plan.before,
+    after: plan.after,
+    ...input.author,
+    ...(input.sourceEventId === undefined ? {} : { sourceEventId: input.sourceEventId }),
+    createdAt: plan.updatedAt,
+  });
+  return { eventId, version: plan.version };
 }
 
 export async function recordAnnotationEvent(
