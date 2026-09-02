@@ -50,20 +50,31 @@ test("deployment URLs refuse embedded credentials and non-http protocols", () =>
 
 test("macOS Keychain adapter never places session material in process arguments", async () => {
   const calls: Array<{ command: string; args: string[]; stdin?: string }> = [];
+  const encodedCredential = Buffer.from('{"token":"secret-token","expiresAt":20000,"url":"https://dev.example.com"}').toString("base64");
   const run = async (command: string, args: string[], stdin?: string): Promise<ProcessResult> => {
     calls.push({ command, args, stdin });
-    if (args[0] === "find-generic-password") return { exitCode: 0, stdout: '{"token":"secret-token","expiresAt":20000,"url":"https://dev.example.com"}\n', stderr: "" };
+    if (args[0] === "find-generic-password") return { exitCode: 0, stdout: `${encodedCredential}\n`, stderr: "" };
     return { exitCode: 0, stdout: "", stderr: "" };
   };
   const store = new MacOsKeychainCredentialStore(run, "darwin");
   await store.set("dev", { token: "secret-token", expiresAt: 20_000, url: "https://dev.example.com" });
   assert.equal(calls[0].command, "/usr/bin/security");
+  assert.deepEqual(calls[0].args, ["-i"]);
   assert.equal(calls[0].args.includes("secret-token"), false);
-  assert.match(calls[0].stdin ?? "", /secret-token/);
-  assert.equal(calls[0].args.at(-1), "-w");
+  assert.doesNotMatch(calls[0].stdin ?? "", /secret-token/);
+  assert.match(calls[0].stdin ?? "", /^add-generic-password .* -w [A-Za-z0-9+/]+=*\n$/);
   assert.equal((await store.get("dev"))?.token, "secret-token");
   await store.delete("dev");
   assert.equal(calls.at(-1)?.args[0], "delete-generic-password");
+});
+
+test("Keychain adapter can still read legacy plaintext JSON credentials", async () => {
+  const legacy = new MacOsKeychainCredentialStore(async () => ({
+    exitCode: 0,
+    stdout: '{"token":"legacy-token","expiresAt":20000,"url":"https://dev.example.com"}\n',
+    stderr: "",
+  }), "darwin");
+  assert.equal((await legacy.get("dev"))?.token, "legacy-token");
 });
 
 test("Keychain not-found, invalid content, and non-macOS access have stable behavior", async () => {

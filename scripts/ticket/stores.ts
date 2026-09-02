@@ -134,21 +134,26 @@ export class MacOsKeychainCredentialStore implements CredentialStore {
     const result = await this.run("/usr/bin/security", ["find-generic-password", "-a", target, "-s", KEYCHAIN_SERVICE, "-w"]);
     if (result.exitCode === 44) return null;
     if (result.exitCode !== 0) throw this.failure(result);
-    try {
-      const parsed = JSON.parse(result.stdout.trim()) as StoredCredential;
-      if (typeof parsed.token !== "string" || typeof parsed.expiresAt !== "number" || typeof parsed.url !== "string") throw new Error();
-      return parsed;
-    } catch {
-      throw new TicketCliError("CREDENTIAL_INVALID", "The saved Ticket session in macOS Keychain is invalid.", EXIT.auth, `Run \`pnpm ticket logout${target === "prod" ? " --prod" : ""}\`, then log in again.`);
+    const raw = result.stdout.trim();
+    for (const candidate of [raw, Buffer.from(raw, "base64").toString("utf8")]) {
+      try {
+        const parsed = JSON.parse(candidate) as StoredCredential;
+        if (typeof parsed.token !== "string" || typeof parsed.expiresAt !== "number" || typeof parsed.url !== "string") continue;
+        return parsed;
+      } catch {
+        // Try the base64-encoded format after the legacy plaintext JSON format.
+      }
     }
+    throw new TicketCliError("CREDENTIAL_INVALID", "The saved Ticket session in macOS Keychain is invalid.", EXIT.auth, `Run \`pnpm ticket logout${target === "prod" ? " --prod" : ""}\`, then log in again.`);
   }
 
   async set(target: Deployment, credential: StoredCredential) {
     this.assertAvailable();
+    const encoded = Buffer.from(JSON.stringify(credential), "utf8").toString("base64");
     const result = await this.run(
       "/usr/bin/security",
-      ["add-generic-password", "-U", "-a", target, "-s", KEYCHAIN_SERVICE, "-w"],
-      `${JSON.stringify(credential)}\n`,
+      ["-i"],
+      `add-generic-password -U -a ${target} -s ${KEYCHAIN_SERVICE} -w ${encoded}\n`,
     );
     if (result.exitCode !== 0) throw this.failure(result);
   }
