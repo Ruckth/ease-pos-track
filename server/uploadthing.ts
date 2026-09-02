@@ -15,10 +15,35 @@ if (!convexUrl) throw new Error("CONVEX_URL or VITE_CONVEX_URL is required by th
 const convex = new ConvexHttpClient(convexUrl);
 const utapi = new UTApi();
 
-const uploadIntentInput = z.object({
+type UploadIntentInput = {
+  intentId: string;
+  secret: string;
+};
+
+const uploadIntentSchema = z.object({
   intentId: z.string().min(1),
   secret: z.string().length(48),
 });
+
+// UploadThing accepts any parser with this small Zod-compatible interface. Keep
+// its input/output types explicit because Vercel checks API functions with
+// strictNullChecks disabled, which makes Zod 3 infer every object key as optional.
+const uploadIntentInput = {
+  _input: undefined as unknown as UploadIntentInput,
+  _output: undefined as unknown as UploadIntentInput,
+  parseAsync: async (value: unknown): Promise<UploadIntentInput> => {
+    const parsed = await uploadIntentSchema.parseAsync(value);
+    return { intentId: parsed.intentId, secret: parsed.secret };
+  },
+};
+
+type CompletedUpload = {
+  key: string;
+  name: string;
+  size: number;
+  type: string;
+  ufsUrl: string;
+};
 
 function bearerToken(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
@@ -27,7 +52,7 @@ function bearerToken(request: Request) {
 
 export type OurFileRouter = {
   feedbackMedia: FileRoute<{
-    input: z.infer<typeof uploadIntentInput>;
+    input: UploadIntentInput;
     output: null;
     errorShape: Json;
   }>;
@@ -44,7 +69,7 @@ export const uploadRouter: OurFileRouter = {
       maxFileCount: 3,
     },
   })
-    .input(uploadIntentInput)
+    .input<UploadIntentInput, UploadIntentInput>(uploadIntentInput)
     .middleware(async ({ req, input, files }) => {
       const token = bearerToken(req);
       if (!token) throw new UploadThingError({ code: "FORBIDDEN", message: "Sign in before uploading." });
@@ -58,21 +83,24 @@ export const uploadRouter: OurFileRouter = {
       return input;
     })
     .onUploadComplete(async ({ metadata, file }) => {
+      // See the parser note above: Vercel's non-strict API check also erases the
+      // properties of UploadThing's Effect Schema-derived UploadedFileData type.
+      const uploaded = file as unknown as CompletedUpload;
       try {
         await convex.mutation(api.uploads.recordUploadedFile, {
           intentId: metadata.intentId as Id<"uploadIntents">,
           secret: metadata.secret,
           file: {
-            key: file.key,
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            url: file.ufsUrl,
+            key: uploaded.key,
+            name: uploaded.name,
+            size: uploaded.size,
+            type: uploaded.type,
+            url: uploaded.ufsUrl,
           },
         });
-        console.log("UploadThing completed", file.name, file.key);
+        console.log("UploadThing completed", uploaded.name, uploaded.key);
       } catch (error) {
-        await utapi.deleteFiles(file.key).catch(() => undefined);
+        await utapi.deleteFiles(uploaded.key).catch(() => undefined);
         throw error;
       }
     }),
