@@ -18,7 +18,7 @@ createRoot(document.getElementById("root")!).render(
       <main className="flex min-h-screen items-center justify-center p-6">
         <div className="max-w-md rounded-lg border bg-card p-6 shadow-sm">
           <h1 className="text-xl font-semibold">Convex is not configured</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Run `npx convex dev --once` to create `VITE_CONVEX_URL`.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Run `pnpm exec convex dev --once` to create `VITE_CONVEX_URL`.</p>
         </div>
       </main>
     )}</LanguageProvider>

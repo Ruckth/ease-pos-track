@@ -1,2 +1,4 @@
 loglevel: silent
 reporter: silent
+overrides:
+  effect: 3.22.0
