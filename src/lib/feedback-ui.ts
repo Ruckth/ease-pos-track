@@ -1,12 +1,10 @@
 import type { FeedbackStatus } from "@/lib/types";
 
+// Formatting lives with the ticket-number rules on the server so both sides agree.
+export { formatTicketNumber } from "@convex/ticket_numbers";
+
 /** The workflow, in order. A ticket only ever moves forward through it. */
 export const STATUS_ORDER: FeedbackStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
-
-export function formatTicketNumber(ticketNumber: number | undefined) {
-  if (ticketNumber === undefined || !Number.isInteger(ticketNumber) || ticketNumber < 1) return "TKT—";
-  return `TKT-${String(ticketNumber).padStart(4, "0")}`;
-}
 
 export function nextFeedbackStatus(status: FeedbackStatus): FeedbackStatus | null {
   const index = STATUS_ORDER.indexOf(status);

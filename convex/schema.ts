@@ -77,6 +77,13 @@ export const feedbackStateValidator = v.object({
   deletedAt: v.optional(v.number()),
 });
 
+/**
+ * How a ticket entered the system when it did not come from the browser UI.
+ * Absent means the browser UI, so every ticket created before agent creation
+ * existed keeps its meaning without a migration.
+ */
+export const ticketCreatedVia = v.literal("codex");
+
 export const uploadIntentStatus = v.union(
   v.literal("pending"),
   v.literal("attached"),
@@ -97,12 +104,18 @@ export default defineSchema({
     // Tickets created before the customer portal have no owner and stay staff-only.
     ownerCustomerId: v.optional(v.id("customers")),
     origin: v.optional(actorRole),
+    createdVia: v.optional(ticketCreatedVia),
+    // Idempotency key supplied by a non-browser caller (the ticket CLI). Unset
+    // for UI tickets, so at most one ticket exists per external request id.
+    externalRequestId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_status", ["status"])
     .index("by_created_at", ["createdAt"])
     .index("by_deleted_at", ["deletedAt"])
+    .index("by_ticket_number", ["ticketNumber"])
+    .index("by_external_request", ["externalRequestId"])
     .index("by_owner", ["ownerCustomerId", "createdAt"]),
   customers: defineTable({
     email: v.string(),
@@ -124,6 +137,7 @@ export default defineSchema({
     before: v.optional(feedbackStateValidator),
     after: v.optional(feedbackStateValidator),
     sessionId: v.id("sessions"),
+    createdVia: v.optional(ticketCreatedVia),
     actorRole: v.optional(actorRole),
     actorCustomerId: v.optional(v.id("customers")),
     sourceEventId: v.optional(v.id("feedbackEvents")),

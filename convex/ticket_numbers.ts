@@ -13,6 +13,15 @@ export function isValidTicketNumber(value: number | undefined): value is number 
   return value !== undefined && Number.isInteger(value) && value > 0;
 }
 
+/**
+ * The customer-facing ticket reference. Lives here, beside the allocation rules,
+ * so the UI, the audit trail and the ticket CLI all print the same string.
+ */
+export function formatTicketNumber(ticketNumber: number | undefined) {
+  if (!isValidTicketNumber(ticketNumber)) return "TKT—";
+  return `TKT-${String(ticketNumber).padStart(4, "0")}`;
+}
+
 export function planTicketNumberBackfill(
   rows: TicketNumberRow[],
   counterNextNumber?: number,

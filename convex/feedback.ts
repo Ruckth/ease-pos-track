@@ -21,9 +21,14 @@ import {
   type AnnotationRecord,
 } from "./annotation_state";
 import { requireCurrentVersion, validateFeedbackText } from "./feedback_state";
-import { planTicketNumberBackfill } from "./ticket_numbers";
-
-const FEEDBACK_COUNTER_NAME = "feedback";
+import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
+import {
+  createTicketRecord,
+  ensureTicketNumbersInDb,
+  feedbackState,
+  recordAnnotationEvent,
+  recordFeedbackEvent,
+} from "./tickets";
 
 async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
   const session = await ctx.db
@@ -99,88 +104,6 @@ async function requireWritableFeedback(
   return doc;
 }
 
-async function recordAnnotationEvent(
-  ctx: MutationCtx,
-  input: {
-    feedbackId: Id<"feedback">;
-    annotationId: string;
-    action: "created" | "updated" | "deleted" | "restored" | "update_undone";
-    before?: AnnotationRecord;
-    after?: AnnotationRecord;
-    sessionId: Id<"sessions">;
-    actorRole?: "staff" | "customer";
-    actorCustomerId?: Id<"customers">;
-    createdAt: number;
-  },
-) {
-  return await ctx.db.insert("annotationEvents", input);
-}
-
-function feedbackState(doc: Doc<"feedback">) {
-  return {
-    title: doc.title,
-    description: doc.description,
-    status: doc.status,
-    version: doc.version ?? 0,
-    ...(doc.deletedAt === undefined ? {} : { deletedAt: doc.deletedAt }),
-  };
-}
-
-async function recordFeedbackEvent(
-  ctx: MutationCtx,
-  input: {
-    feedbackId: Id<"feedback">;
-    action: "created" | "edited" | "edit_undone" | "status_changed" | "status_undone" | "archived" | "restored";
-    before?: ReturnType<typeof feedbackState>;
-    after?: ReturnType<typeof feedbackState>;
-    sessionId: Id<"sessions">;
-    actorRole?: "staff" | "customer";
-    actorCustomerId?: Id<"customers">;
-    sourceEventId?: Id<"feedbackEvents">;
-    createdAt: number;
-  },
-) {
-  return await ctx.db.insert("feedbackEvents", input);
-}
-
-async function ensureTicketNumbersInDb(ctx: MutationCtx) {
-  const [rows, counter] = await Promise.all([
-    ctx.db.query("feedback").withIndex("by_created_at").order("asc").collect(),
-    ctx.db
-      .query("ticketCounters")
-      .withIndex("by_name", (q) => q.eq("name", FEEDBACK_COUNTER_NAME))
-      .unique(),
-  ]);
-  const plan = planTicketNumberBackfill(
-    rows.map((row) => ({ id: row._id, createdAt: row.createdAt, ticketNumber: row.ticketNumber })),
-    counter?.nextNumber,
-  );
-  const now = Date.now();
-
-  for (const assignment of plan.assignments) {
-    await ctx.db.patch(assignment.id as Id<"feedback">, { ticketNumber: assignment.ticketNumber });
-  }
-
-  const counterId = counter
-    ? counter._id
-    : await ctx.db.insert("ticketCounters", {
-      name: FEEDBACK_COUNTER_NAME,
-      nextNumber: plan.nextNumber,
-      updatedAt: now,
-    });
-  if (counter && counter.nextNumber !== plan.nextNumber) {
-    await ctx.db.patch(counter._id, { nextNumber: plan.nextNumber, updatedAt: now });
-  }
-
-  return { counterId, assignments: plan.assignments.length, nextNumber: plan.nextNumber };
-}
-
-async function allocateTicketNumber(ctx: MutationCtx) {
-  const state = await ensureTicketNumbersInDb(ctx);
-  await ctx.db.patch(state.counterId, { nextNumber: state.nextNumber + 1, updatedAt: Date.now() });
-  return state.nextNumber;
-}
-
 export const listFeedback = query({
   args: {
     token: v.string(),
@@ -233,6 +156,25 @@ export const getFeedback = query({
   handler: async (ctx, args) => {
     const { actor } = await requireActor(ctx, args.token);
     return await readableFeedback(ctx, actor, args.id);
+  },
+});
+
+/** Ticket-number lookup for authenticated staff tools such as the Ticket CLI. */
+export const getFeedbackByTicketNumber = query({
+  args: {
+    token: v.string(),
+    ticketNumber: v.number(),
+    includeDeleted: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const { actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const doc = await ctx.db
+      .query("feedback")
+      .withIndex("by_ticket_number", (q) => q.eq("ticketNumber", args.ticketNumber))
+      .unique();
+    if (!doc || (!args.includeDeleted && doc.deletedAt !== undefined)) return null;
+    return doc;
   },
 });
 
@@ -328,43 +270,57 @@ export const createFeedback = mutation({
     const annotations = (args.annotations ?? []).map((annotation, index) =>
       createAnnotationRecord(args.media, annotation, index + 1, crypto.randomUUID(), now)
     );
-    const ticketNumber = await allocateTicketNumber(ctx);
-    const feedbackId = await ctx.db.insert("feedback", {
+    const created = await createTicketRecord(ctx, {
       title,
       description,
-      status: "new",
-      ticketNumber,
       media: args.media,
-      ...(annotations.length === 0 ? {} : { annotations }),
-      version: 0,
+      annotations,
       // Ownership is derived from the session; clients cannot pass it in.
-      ...newFeedbackOwnership(actor),
-      createdAt: now,
-      updatedAt: now,
+      ownership: newFeedbackOwnership(actor),
+      author: { sessionId: session._id, ...actorFields(actor) },
+      now,
     });
-    const created = await ctx.db.get(feedbackId);
-    if (!created) throw new Error("CREATE_FEEDBACK_FAILED");
-    await ctx.db.patch(intent._id, { status: "attached", feedbackId, updatedAt: now });
-    await recordFeedbackEvent(ctx, {
-      feedbackId,
-      action: "created",
-      after: feedbackState(created),
-      sessionId: session._id,
-      ...actorFields(actor),
-      createdAt: now,
-    });
-    for (const annotation of annotations) {
-      await recordAnnotationEvent(ctx, {
-        feedbackId,
-        annotationId: annotation.id,
-        action: "created",
-        after: annotation,
-        sessionId: session._id,
-        ...actorFields(actor),
-        createdAt: now,
-      });
+    await ctx.db.patch(intent._id, { status: "attached", feedbackId: created._id, updatedAt: now });
+    return created._id;
+  },
+});
+
+/**
+ * Authenticated text-only creation for the Ticket CLI. It shares staff sessions,
+ * validation, ownership, ticket allocation, audit events and request id rules
+ * with the rest of the Ticket domain.
+ */
+export const createTextFeedback = mutation({
+  args: {
+    token: v.string(),
+    title: v.string(),
+    description: v.string(),
+    requestId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { session, actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const requestId = normalizeRequestId(args.requestId);
+    const { title, description } = validateFeedbackText(args.title, args.description);
+    const existing = await ctx.db
+      .query("feedback")
+      .withIndex("by_external_request", (q) => q.eq("externalRequestId", requestId))
+      .unique();
+    if (existing) {
+      assertSameTicketRequest(existing, { title, description });
+      return { ticket: existing, created: false, requestId };
     }
-    return feedbackId;
+
+    const created = await createTicketRecord(ctx, {
+      title,
+      description,
+      media: [],
+      ownership: newFeedbackOwnership(actor),
+      author: { sessionId: session._id, ...actorFields(actor), createdVia: "codex" },
+      externalRequestId: requestId,
+      now: Date.now(),
+    });
+    return { ticket: created, created: true, requestId };
   },
 });
 
