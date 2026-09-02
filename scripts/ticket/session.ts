@@ -1,11 +1,19 @@
-import { EXIT, TicketCliError, type Deployment } from "./cli";
+/**
+ * Persistent staff-session policy behind three operations. Callers do not need
+ * to know config creation order, deployment binding, expiry cleanup, or role
+ * validation rules.
+ */
+
+import { loadOrCreateConfig, type ConfigStore } from "./config";
+import { authHint, deploymentUrl, type Deployment } from "./deployment";
+import { authError, type TicketCliError } from "./errors";
+import type { CredentialStore } from "./keychain";
 import type { CurrentSession, TicketRemote } from "./remote";
-import {
-  deploymentUrl,
-  loadOrCreateConfig,
-  type ConfigStore,
-  type CredentialStore,
-} from "./stores";
+
+/** An auth failure a fresh login can fix, hinted for the deployment in play. */
+export function credentialError(code: string, message: string, target: Deployment) {
+  return authError(code, message, authHint(target));
+}
 
 export type SessionAccessDeps = {
   remote: Pick<TicketRemote, "login" | "currentSession" | "logout">;
@@ -21,22 +29,13 @@ export type StaffAccess = {
   session: CurrentSession & { role: "staff" };
 };
 
-export function authHint(target: Deployment) {
-  return `Run \`pnpm ticket login${target === "prod" ? " --prod" : ""}\`.`;
-}
-
-export function credentialError(code: string, message: string, target: Deployment) {
-  return new TicketCliError(code, message, EXIT.auth, authHint(target));
-}
-
-/**
- * Persistent staff-session policy behind three operations. Callers do not need
- * to know config creation order, deployment binding, expiry cleanup, or role
- * validation rules.
- */
 export class TicketSessions {
   constructor(private readonly deps: SessionAccessDeps) {}
 
+  /**
+   * Binds the deployment URL and the machine client id before authenticating, so
+   * a failed login still leaves the deployment configured for a retry.
+   */
   async login(target: Deployment, urlOverride: string | undefined, password: string) {
     const config = await loadOrCreateConfig(this.deps.config);
     const url = deploymentUrl(config, target, urlOverride, this.deps.env);
@@ -49,6 +48,10 @@ export class TicketSessions {
     return { url, expiresAt: result.expiresAt };
   }
 
+  /**
+   * Revokes the session server-side, then drops the local record either way, so
+   * an already-invalid session can still be cleaned up.
+   */
   async logout(target: Deployment) {
     const credential = await this.deps.credentials.get(target);
     if (!credential) return false;
@@ -60,29 +63,35 @@ export class TicketSessions {
     return true;
   }
 
+  /**
+   * The gate every live Ticket operation passes through: a locally valid,
+   * deployment-matched credential that the deployment still recognizes as staff.
+   */
   async requireStaff(target: Deployment): Promise<StaffAccess> {
-    const config = await this.deps.config.load();
-    const url = deploymentUrl(config, target, undefined, this.deps.env);
+    const url = deploymentUrl(await this.deps.config.load(), target, undefined, this.deps.env);
     const credential = await this.deps.credentials.get(target);
     if (!credential) throw credentialError("NOT_LOGGED_IN", "No saved Ticket session was found.", target);
     if (credential.url !== url) {
       throw credentialError("SESSION_DEPLOYMENT_MISMATCH", "The saved Ticket session belongs to a different deployment URL.", target);
     }
     if (credential.expiresAt <= this.deps.now()) {
-      await this.deps.credentials.delete(target);
-      throw credentialError("SESSION_EXPIRED", "The saved Ticket session has expired.", target);
+      throw await this.forget(target, credentialError("SESSION_EXPIRED", "The saved Ticket session has expired.", target));
     }
 
     const session = await this.deps.remote.currentSession(url, credential.token);
     if (!session) {
-      await this.deps.credentials.delete(target);
-      throw credentialError("SESSION_INVALID", "The saved Ticket session is no longer valid.", target);
+      throw await this.forget(target, credentialError("SESSION_INVALID", "The saved Ticket session is no longer valid.", target));
     }
     if (session.role !== "staff") {
       await this.deps.remote.logout(url, credential.token);
-      await this.deps.credentials.delete(target);
-      throw new TicketCliError("NOT_AUTHORIZED", "The saved session is not a staff session.", EXIT.auth, authHint(target));
+      throw await this.forget(target, credentialError("NOT_AUTHORIZED", "The saved session is not a staff session.", target));
     }
-    return { url, token: credential.token, session: session as CurrentSession & { role: "staff" } };
+    return { url, token: credential.token, session: { ...session, role: "staff" } };
+  }
+
+  /** Drops a credential the deployment or the clock has already invalidated. */
+  private async forget(target: Deployment, error: TicketCliError) {
+    await this.deps.credentials.delete(target);
+    return error;
   }
 }

@@ -178,14 +178,19 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | File | Role |
 | --- | --- |
 | `scripts/ticket/registry.ts` | Shared parser/help/discovery command contract. |
-| `scripts/ticket/cli.ts` | Pure parsing, local validation, exit codes, and error shapes. |
+| `scripts/ticket/cli.ts` | Pure argument parsing and local Ticket validation. |
+| `scripts/ticket/errors.ts` | Error codes, exit codes, and Convex validation-code mapping. |
 | `scripts/ticket/status.ts` | Public Ticket statuses and their existing storage mappings. |
-| `scripts/ticket/stores.ts` | Restrictive config file and injectable macOS Keychain adapter. |
+| `scripts/ticket/deployment.ts` | Development/production selection, URL rules, and `pnpm ticket` hints. |
+| `scripts/ticket/config.ts` | Restrictive non-secret configuration file. |
+| `scripts/ticket/keychain.ts` | Injectable macOS Keychain credential adapter. |
 | `scripts/ticket/prompt.ts` | Controlling-terminal password input with echo disabled. |
+| `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
-| `scripts/ticket/run.ts` | Ticket command orchestration and JSON output. |
+| `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
 | `convex/feedback.ts` | Existing Ticket domain functions plus authenticated text create and Ticket-number lookup. |
+| `convex/feedback_state.ts` | Ticket text limits and the optimistic-version check. |
 | `convex/tickets.ts` | Shared Ticket allocation and audit-record helpers. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 

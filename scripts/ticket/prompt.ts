@@ -1,6 +1,6 @@
 import { closeSync, openSync } from "node:fs";
 import { ReadStream, WriteStream } from "node:tty";
-import { EXIT, TicketCliError } from "./cli";
+import { authError, type TicketCliError } from "./errors";
 
 /** Reads a password from the controlling terminal without echoing any character. */
 export async function readHiddenPassword() {
@@ -8,10 +8,9 @@ export async function readHiddenPassword() {
   try {
     fd = openSync("/dev/tty", "r+");
   } catch {
-    throw new TicketCliError(
+    throw authError(
       "INTERACTIVE_TERMINAL_REQUIRED",
       "Staff login requires an interactive terminal for the hidden password prompt.",
-      EXIT.auth,
       "Run `pnpm ticket login` in an interactive terminal.",
     );
   }
@@ -37,7 +36,7 @@ export async function readHiddenPassword() {
     const onData = (chunk: string) => {
       for (const character of chunk) {
         if (character === "\r" || character === "\n") return finish();
-        if (character === "\u0003") return finish(new TicketCliError("LOGIN_CANCELLED", "Login was cancelled.", EXIT.auth));
+        if (character === "\u0003") return finish(authError("LOGIN_CANCELLED", "Login was cancelled."));
         if (character === "\u007f" || character === "\b") password = password.slice(0, -1);
         else if (character >= " ") password += character;
       }

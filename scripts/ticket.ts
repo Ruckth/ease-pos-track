@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { config as loadEnvironment } from "dotenv";
+import { FileConfigStore } from "./ticket/config";
+import { MacOsKeychainCredentialStore } from "./ticket/keychain";
 import { readHiddenPassword } from "./ticket/prompt";
 import { ConvexTicketRemote } from "./ticket/remote";
 import { runTicketCli } from "./ticket/run";
-import { FileConfigStore, MacOsKeychainCredentialStore } from "./ticket/stores";
 
 loadEnvironment({ path: [".env.local", ".env"], quiet: true });
 

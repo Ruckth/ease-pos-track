@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { TicketCliError } from "../scripts/ticket/cli";
-import {
-  deploymentUrl,
-  FileConfigStore,
-  loadOrCreateConfig,
-  MacOsKeychainCredentialStore,
-  normalizeDeploymentUrl,
-  type ProcessResult,
-} from "../scripts/ticket/stores";
+import { FileConfigStore, loadOrCreateConfig } from "../scripts/ticket/config";
+import { deploymentUrl, normalizeDeploymentUrl } from "../scripts/ticket/deployment";
+import { TicketCliError } from "../scripts/ticket/errors";
+import { MacOsKeychainCredentialStore, type ProcessResult } from "../scripts/ticket/keychain";
 
 test("file configuration persists only non-secret data with restrictive permissions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ticket-config-"));
@@ -33,12 +28,52 @@ test("file configuration persists only non-secret data with restrictive permissi
   }
 });
 
+test("missing configuration reads as absent while unrecognized content fails closed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ticket-config-invalid-"));
+  try {
+    const path = join(directory, "ticket.json");
+    const store = new FileConfigStore(path);
+    assert.equal(await store.load(), null);
+    const rejected = [
+      "not json",
+      "null",
+      "[]",
+      '{"version":2,"clientId":"client","deployments":{}}',
+      '{"version":1,"deployments":{}}',
+      '{"version":1,"clientId":"client"}',
+    ];
+    for (const raw of rejected) {
+      await writeFile(path, raw, "utf8");
+      await assert.rejects(
+        () => store.load(),
+        (error: unknown) => error instanceof TicketCliError && error.code === "CONFIG_INVALID",
+        raw,
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("deployment selection prefers explicit and saved URLs while production remains separate", () => {
   const config = { version: 1 as const, clientId: "client", deployments: { dev: { url: "https://saved-dev.example.com" } } };
   assert.equal(deploymentUrl(config, "dev", undefined, { VITE_CONVEX_URL: "https://env-dev.example.com" }), "https://saved-dev.example.com");
   assert.equal(deploymentUrl(config, "dev", "https://explicit.example.com/", {}), "https://explicit.example.com");
   assert.throws(() => deploymentUrl(config, "prod", undefined, { CONVEX_URL: "https://must-not-be-prod.example.com" }), (error: unknown) => error instanceof TicketCliError && error.code === "DEPLOYMENT_NOT_CONFIGURED");
   assert.equal(deploymentUrl(config, "prod", undefined, { TICKET_CONVEX_PROD_URL: "https://prod.example.com" }), "https://prod.example.com");
+});
+
+test("a development URL from the environment follows a fixed variable precedence", () => {
+  const unsaved = { version: 1 as const, clientId: "client", deployments: {} };
+  const environment = {
+    TICKET_CONVEX_URL: "https://ticket.example.com",
+    CONVEX_URL: "https://convex.example.com",
+    VITE_CONVEX_URL: "https://vite.example.com",
+  };
+  assert.equal(deploymentUrl(unsaved, "dev", undefined, environment), "https://ticket.example.com");
+  assert.equal(deploymentUrl(unsaved, "dev", undefined, { CONVEX_URL: environment.CONVEX_URL, VITE_CONVEX_URL: environment.VITE_CONVEX_URL }), "https://convex.example.com");
+  assert.equal(deploymentUrl(unsaved, "dev", undefined, { VITE_CONVEX_URL: environment.VITE_CONVEX_URL }), "https://vite.example.com");
+  assert.throws(() => deploymentUrl(unsaved, "prod", undefined, environment), (error: unknown) => error instanceof TicketCliError && error.code === "DEPLOYMENT_NOT_CONFIGURED");
 });
 
 test("deployment URLs refuse embedded credentials and non-http protocols", () => {

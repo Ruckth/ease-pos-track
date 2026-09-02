@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { parseTicketArgs, EXIT, HELP, TicketCliError } from "../scripts/ticket/cli";
-import { COMMAND_REGISTRY, commandDiscoveryOutput } from "../scripts/ticket/registry";
+import { parseTicketArgs } from "../scripts/ticket/cli";
+import type { ConfigStore, TicketConfig } from "../scripts/ticket/config";
+import { EXIT, TicketCliError } from "../scripts/ticket/errors";
+import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
+import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
 import type { TicketDocument, TicketRemote } from "../scripts/ticket/remote";
 import { classifyRemoteError, runTicketCli, type TicketCliDeps } from "../scripts/ticket/run";
 import { toStoredTicketStatus, type TicketStatus } from "../scripts/ticket/status";
-import type { ConfigStore, CredentialStore, StoredCredential, TicketConfig } from "../scripts/ticket/stores";
+
+const HELP = humanHelp();
 
 function ticket(overrides: Partial<TicketDocument> = {}) {
   return {
