@@ -20,7 +20,6 @@ test("Thai and English cover exactly the same keys with real copy", () => {
 
 test("new customer portal and board screens are translated in both languages", () => {
   const keys = [
-    "chooseAccountType",
     "staffSignIn",
     "customerSignIn",
     "customerSignUp",

@@ -2,5 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "buildCommand": "pnpm exec convex deploy --cmd 'pnpm run build'",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/staff", "destination": "/index.html" },
+    { "source": "/staff/login", "destination": "/index.html" },
+    { "source": "/customer", "destination": "/index.html" },
+    { "source": "/customer/login", "destination": "/index.html" },
+    { "source": "/customer/register", "destination": "/index.html" }
+  ]
 }

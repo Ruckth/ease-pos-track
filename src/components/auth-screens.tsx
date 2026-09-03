@@ -1,14 +1,15 @@
 import { FormEvent, useState } from "react";
 import { useAction, useMutation } from "convex/react";
-import { ArrowLeft, ChevronRight, Headphones, Loader2, ShieldCheck, UserRound } from "lucide-react";
+import { Headphones, Loader2 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { APP_PATHS } from "@/lib/app-routes";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { getClientId, storeToken } from "@/lib/session";
+import { getClientId } from "@/lib/session";
 
-type Screen = "choose" | "staff" | "customer";
+export type AuthPageKind = "staff-login" | "customer-login" | "customer-register";
 
 export function LanguageSelector({
   language,
@@ -26,13 +27,19 @@ export function LanguageSelector({
   );
 }
 
-/**
- * Sign-in entry point. Staff keep the shared-password gate; customers get their
- * own email and password screens. The two paths never share a form.
- */
-export function AuthGate({ onSignedIn }: { onSignedIn: (token: string) => void }) {
+/** A route-specific auth page. Role choice is made by the URL, not by UI state. */
+export function AuthPage({
+  page,
+  onSignedIn,
+  onNavigate,
+}: {
+  page: AuthPageKind;
+  onSignedIn: (token: string) => void;
+  onNavigate: (path: string) => void;
+}) {
   const { language, setLanguage, t } = useI18n();
-  const [screen, setScreen] = useState<Screen>("choose");
+  const isStaff = page === "staff-login";
+  const isRegistering = page === "customer-register";
 
   return (
     <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)),transparent_32rem)] px-4 py-8 sm:py-12">
@@ -49,37 +56,26 @@ export function AuthGate({ onSignedIn }: { onSignedIn: (token: string) => void }
           </div>
           <div>
             <CardTitle className="text-xl leading-7">
-              {screen === "choose" ? t("chooseAccountType") : screen === "staff" ? t("staffSignIn") : t("customerSignIn")}
+              {isStaff ? t("staffSignIn") : isRegistering ? t("customerSignUp") : t("customerSignIn")}
             </CardTitle>
             <CardDescription className="mt-1.5 leading-5">
-            {screen === "choose" ? t("chooseAccountTypeDescription") : screen === "staff" ? t("staffSignInDescription") : t("customerSignInDescription")}
+              {isStaff
+                ? t("staffSignInDescription")
+                : isRegistering
+                  ? t("customerSignUpDescription")
+                  : t("customerSignInDescription")}
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="p-5 sm:p-6">
-          {screen === "choose" ? (
-            <div className="space-y-3">
-              <Button type="button" className="h-auto w-full justify-start rounded-xl p-4 text-start" variant="outline" onClick={() => setScreen("customer")}>
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><UserRound /></span>
-                <span className="min-w-0 flex-1 whitespace-normal">
-                  <span className="block font-semibold">{t("customerAccess")}</span>
-                  <span className="mt-0.5 block text-xs font-normal leading-5 text-muted-foreground">{t("customerAccessDescription")}</span>
-                </span>
-                <ChevronRight className="text-muted-foreground" />
-              </Button>
-              <Button type="button" className="h-auto w-full justify-start rounded-xl p-4 text-start" variant="outline" onClick={() => setScreen("staff")}>
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><ShieldCheck /></span>
-                <span className="min-w-0 flex-1 whitespace-normal">
-                  <span className="block font-semibold">{t("staffAccess")}</span>
-                  <span className="mt-0.5 block text-xs font-normal leading-5 text-muted-foreground">{t("staffAccessDescription")}</span>
-                </span>
-                <ChevronRight className="text-muted-foreground" />
-              </Button>
-            </div>
-          ) : screen === "staff" ? (
-            <StaffSignInForm onSignedIn={onSignedIn} onSwitch={() => setScreen("customer")} />
+          {isStaff ? (
+            <StaffSignInForm onSignedIn={onSignedIn} />
           ) : (
-            <CustomerSignInForm onSignedIn={onSignedIn} onSwitch={() => setScreen("staff")} />
+            <CustomerSignInForm
+              mode={isRegistering ? "register" : "login"}
+              onSignedIn={onSignedIn}
+              onNavigate={onNavigate}
+            />
           )}
         </CardContent>
       </Card>
@@ -88,7 +84,7 @@ export function AuthGate({ onSignedIn }: { onSignedIn: (token: string) => void }
 }
 
 /** The original shared-password staff gate, unchanged in behaviour. */
-function StaffSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: string) => void; onSwitch: () => void }) {
+function StaffSignInForm({ onSignedIn }: { onSignedIn: (token: string) => void }) {
   const { t } = useI18n();
   const login = useMutation(api.auth.login);
   const [password, setPassword] = useState("");
@@ -101,7 +97,6 @@ function StaffSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: string)
     setError("");
     try {
       const result = await login({ password, clientId: getClientId() });
-      storeToken(result.token);
       onSignedIn(result.token);
     } catch (err) {
       setError(localizeError(err, t));
@@ -127,19 +122,23 @@ function StaffSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: string)
       <Button className="h-11 w-full rounded-xl" disabled={isSubmitting || !password}>
         {isSubmitting ? <Loader2 className="animate-spin" /> : null}{isSubmitting ? t("signingIn") : t("enter")}
       </Button>
-      <Button type="button" variant="ghost" className="w-full" onClick={onSwitch}>
-        <ArrowLeft /> {t("useCustomerAccount")}
-      </Button>
     </form>
   );
 }
 
 /** Self-serve customer sign-in and sign-up. */
-function CustomerSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: string) => void; onSwitch: () => void }) {
+function CustomerSignInForm({
+  mode,
+  onSignedIn,
+  onNavigate,
+}: {
+  mode: "login" | "register";
+  onSignedIn: (token: string) => void;
+  onNavigate: (path: string) => void;
+}) {
   const { t } = useI18n();
   const register = useAction(api.customers.register);
   const login = useAction(api.customers.login);
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -160,7 +159,6 @@ function CustomerSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: stri
       const result = isRegistering
         ? await register({ email, password, clientId })
         : await login({ email, password, clientId });
-      storeToken(result.token);
       onSignedIn(result.token);
     } catch (err) {
       setError(localizeError(err, t));
@@ -183,7 +181,7 @@ function CustomerSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: stri
         />
       </div>
       <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="customer-password">{t("newPassword")}</label>
+        <label className="text-sm font-medium" htmlFor="customer-password">{t(isRegistering ? "newPassword" : "password")}</label>
         <Input
           id="customer-password"
           type="password"
@@ -212,21 +210,18 @@ function CustomerSignInForm({ onSignedIn, onSwitch }: { onSignedIn: (token: stri
           ? (isRegistering ? t("creatingAccount") : t("signingIn"))
           : (isRegistering ? t("createAccount") : t("signIn"))}
       </Button>
-      <div className="space-y-1 text-center">
+      <div className="text-center">
         <Button
           type="button"
           variant="ghost"
           className="w-full"
           onClick={() => {
-            setMode(isRegistering ? "login" : "register");
             setError("");
             setConfirmation("");
+            onNavigate(isRegistering ? APP_PATHS.customerLogin : APP_PATHS.customerRegister);
           }}
         >
           {isRegistering ? t("haveAccountQuestion") : t("noAccountQuestion")}
-        </Button>
-        <Button type="button" variant="ghost" className="w-full" onClick={onSwitch}>
-          <ArrowLeft /> {t("useStaffPassword")}
         </Button>
       </div>
     </form>

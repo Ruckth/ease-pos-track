@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { Toaster, toast } from "sonner";
 import {
@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { AnnotationActivityList } from "@/components/annotation-activity";
 import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
-import { AuthGate, LanguageSelector } from "@/components/auth-screens";
+import { AuthPage, LanguageSelector } from "@/components/auth-screens";
 import { CustomerPortal } from "@/components/customer-portal";
 import { FeedbackActivityList } from "@/components/feedback-activity";
 import { statuses, statusMeta } from "@/components/feedback-status";
@@ -33,6 +33,7 @@ import {
   type MediaViewerHandle,
 } from "@/components/media-viewer";
 import { StaffBoard } from "@/components/staff-board";
+import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "@/lib/feedback-ui";
 import { submitFeedbackDraft } from "@/lib/feedback-submit";
@@ -46,14 +47,37 @@ import { clearToken, getStoredToken, storeToken } from "@/lib/session";
 import { isActiveAnnotation, type Feedback, type FeedbackStatus } from "@/lib/types";
 import { localizeError, useI18n } from "@/lib/i18n";
 
-/**
- * Routes by session role. `currentSession` resolves a missing role to staff, so
- * sessions created before the customer portal still land in the workspace.
- */
+function useAppPathname() {
+  const [pathname, setPathname] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const updatePathname = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", updatePathname);
+    return () => window.removeEventListener("popstate", updatePathname);
+  }, []);
+
+  const navigate = useCallback((path: string, replace = false) => {
+    if (window.location.pathname === path) return;
+    window.history[replace ? "replaceState" : "pushState"](null, "", path);
+    setPathname(path);
+  }, []);
+
+  return { pathname, navigate };
+}
+
+/** Routes by both URL namespace and the server-validated session role. */
 function AppContent() {
   const [token, setToken] = useState(getStoredToken);
+  const { pathname, navigate } = useAppPathname();
   const logout = useMutation(api.auth.logout);
   const session = useQuery(api.auth.currentSession, { token: token || undefined });
+  const route = resolveAppRoute(
+    pathname,
+    token && session === undefined
+      ? "loading"
+      : session?.role ?? "signed-out",
+  );
+  const redirectTo = route.page === "redirect" ? route.to : null;
 
   useEffect(() => {
     if (token && session === null) {
@@ -62,18 +86,33 @@ function AppContent() {
     }
   }, [session, token]);
 
-  async function signOut() {
+  useEffect(() => {
+    if (redirectTo) navigate(redirectTo, true);
+  }, [navigate, redirectTo]);
+
+  async function signOut(role: "staff" | "customer") {
     try {
       await logout({ token });
     } finally {
       clearToken();
       setToken("");
+      navigate(loginPathForRole(role), true);
     }
   }
 
-  if (!token || session === null) {
+  if (route.page === "loading" || route.page === "redirect") {
     return (
-      <AuthGate
+      <main className="grid min-h-screen place-items-center">
+        <Loader2 className="size-7 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+
+  if (route.page === "staff-login" || route.page === "customer-login" || route.page === "customer-register") {
+    return (
+      <AuthPage
+        page={route.page}
+        onNavigate={(path) => navigate(path)}
         onSignedIn={(nextToken) => {
           storeToken(nextToken);
           setToken(nextToken);
@@ -82,19 +121,19 @@ function AppContent() {
     );
   }
 
-  if (session === undefined) {
-    return (
-      <main className="grid min-h-screen place-items-center">
-        <Loader2 className="size-7 animate-spin text-muted-foreground" />
-      </main>
-    );
+  if (route.page === "customer-home" && session?.role === "customer") {
+    return <CustomerPortal token={token} email={session.email} onLogout={() => signOut("customer")} />;
   }
 
-  if (session.role === "customer") {
-    return <CustomerPortal token={token} email={session.email} onLogout={signOut} />;
+  if (route.page === "staff-home" && session?.role === "staff") {
+    return <TrackingWorkspace token={token} onLogout={() => signOut("staff")} />;
   }
 
-  return <TrackingWorkspace token={token} onLogout={signOut} />;
+  return (
+    <main className="grid min-h-screen place-items-center">
+      <Loader2 className="size-7 animate-spin text-muted-foreground" />
+    </main>
+  );
 }
 
 function App() {

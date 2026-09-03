@@ -22,12 +22,6 @@ const en = {
   archivedOn: "Archived {{date}}", feedback: "Ticket", feedbackUpdated: "Ticket updated", commentUpdated: "Comment updated", commentRestored: "Comment restored", commentDeleted: "Comment deleted", pinAdded: "Note added to your Ticket", annotateMedia: "Mark a photo or video", annotateDescription: "Tap the exact spot, then add a short note.", pinSummary: "{{count}} notes added. Tap any photo or video to review them.", pinHint: "Tap a photo or video to point out exactly where the problem appears.", cancelUpload: "Cancel upload", mediaUnavailable: "This file is no longer available.", uploadCleanupFailed: "Unable to clean up uploaded files.", submitFailed: "Unable to submit the Ticket.", removeMediaDescription: "{{name}} has {{count}} notes. Removing the file will also remove those notes.", archiveConfirm: "Archive this Ticket? It can be restored for 30 days.", mediaLinkHint: "Use [1], [2], and similar labels to link to comments on your files.", movedTo: "Move {{ticket}} to {{status}}", ticketComplete: "{{ticket}} is resolved", ticketCompleteTitle: "Ticket is resolved", createdAt: "Created {{date}}", language: "Language", cover: "First", addMedia: "Add more photos or videos", dropMedia: "Drag and drop here, paste, or choose files from your device.", mediaOrderHint: "You can add up to 10 photos and 3 videos.", fileCount: "{{count}} files added", chooseFiles: "Choose files", addPhotosTitle: "Add photos or videos", uploadLimits: "Up to 10 photos (8 MB each) and 3 videos (64 MB each)", filesReady: "{{count}} files ready", reorderHint: "Drag to reorder. The first file becomes the cover.", addMore: "Add more", openMedia: "Open {{name}} to add a note", removeFile: "Remove {{name}}", imageLimit: "You can add up to 10 photos.", videoLimit: "You can add up to 3 videos.", showComment: "Show comment {{label}} on media", editComment: "Edit comment {{label}}", deleteComment: "Delete comment {{label}}", deleteCommentConfirm: "Delete comment {{label}}? You can undo this afterwards.", videoAt: "video at {{time}}", imageNumber: "image {{number}}", unableUpdateComment: "Unable to update the comment.", unableDeleteComment: "Unable to delete the comment.", unableRestoreComment: "Unable to restore the comment.", comment: "Comment {{label}}", positionChanged: "position changed", mediaNumber: "Show media {{number}}", describeIssue: "Describe what is happening here", markPoint: "Mark the exact spot", placePin: "Tap the photo to place a marker", moveComment: "Tap a new spot to move this comment.", unableMoveComment: "Unable to move this comment.", unableSaveComment: "Unable to save this comment.", previousSlide: "Previous file", nextSlide: "Next file", closeDialog: "Close dialog", reload: "Reload", appError: "Something went wrong", appErrorDescription: "Reload the app to recover the workspace before trying again.",
 
   // Sign-in surfaces
-  chooseAccountType: "How do you want to sign in?",
-  chooseAccountTypeDescription: "Choose the space that matches what you need to do.",
-  staffAccess: "Staff",
-  staffAccessDescription: "Manage and update every Ticket.",
-  customerAccess: "Customer",
-  customerAccessDescription: "Create a Ticket and follow its progress.",
   staffSignIn: "Staff sign in",
   staffSignInDescription: "Enter the shared staff password to open the internal board.",
   customerSignIn: "Customer sign in",
@@ -43,8 +37,6 @@ const en = {
   creatingAccount: "Creating account…",
   haveAccountQuestion: "Already have an account?",
   noAccountQuestion: "No account yet?",
-  useStaffPassword: "Sign in as staff instead",
-  useCustomerAccount: "Sign in as a customer instead",
 
   // Customer portal
   customerPortal: "My tickets",
@@ -156,12 +148,6 @@ const th: Record<keyof typeof en, string> = {
   archivedOn: "เก็บเข้าคลังเมื่อ {{date}}", feedback: "เรื่อง", feedbackUpdated: "อัปเดตเรื่องแล้ว", commentUpdated: "อัปเดตความเห็นแล้ว", commentRestored: "กู้คืนความเห็นแล้ว", commentDeleted: "ลบความเห็นแล้ว", pinAdded: "เพิ่มหมายเหตุในเรื่องแล้ว", annotateMedia: "ทำเครื่องหมายบนรูปหรือวิดีโอ", annotateDescription: "แตะตำแหน่งที่มีปัญหา แล้วเพิ่มหมายเหตุสั้นๆ", pinSummary: "เพิ่มหมายเหตุแล้ว {{count}} จุด แตะรูปหรือวิดีโอเพื่อตรวจสอบ", pinHint: "แตะรูปหรือวิดีโอเพื่อชี้ตำแหน่งที่มีปัญหาให้ชัดเจน", cancelUpload: "ยกเลิกอัปโหลด", mediaUnavailable: "ไม่พบไฟล์นี้แล้ว", uploadCleanupFailed: "ล้างไฟล์ที่อัปโหลดไม่สำเร็จ", submitFailed: "ส่งเรื่องไม่สำเร็จ", removeMediaDescription: "{{name}} มีหมายเหตุ {{count}} จุด การลบไฟล์จะลบหมายเหตุเหล่านั้นด้วย", archiveConfirm: "เก็บเรื่องนี้เข้าคลัง? สามารถกู้คืนได้ภายใน 30 วัน", mediaLinkHint: "ใช้ [1], [2] และตัวเลขอื่นเพื่อเชื่อมกับความเห็นบนไฟล์", movedTo: "ย้าย {{ticket}} ไป {{status}}", ticketComplete: "{{ticket}} แก้ไขแล้ว", ticketCompleteTitle: "เรื่องได้รับการแก้ไขแล้ว", createdAt: "สร้างเมื่อ {{date}}", language: "ภาษา", cover: "ไฟล์แรก", addMedia: "เพิ่มรูปหรือวิดีโอ", dropMedia: "ลากไฟล์มาวาง วางจากคลิปบอร์ด หรือเลือกไฟล์จากอุปกรณ์", mediaOrderHint: "เพิ่มรูปได้สูงสุด 10 รูป และวิดีโอ 3 ไฟล์", fileCount: "เพิ่มแล้ว {{count}} ไฟล์", chooseFiles: "เลือกไฟล์", addPhotosTitle: "เพิ่มรูปหรือวิดีโอ", uploadLimits: "รูปสูงสุด 10 รูป (ไฟล์ละ 8 MB) และวิดีโอ 3 ไฟล์ (ไฟล์ละ 64 MB)", filesReady: "พร้อมแล้ว {{count}} ไฟล์", reorderHint: "ลากเพื่อเรียงลำดับ ไฟล์แรกจะเป็นภาพปก", addMore: "เพิ่มอีก", openMedia: "เปิด {{name}} เพื่อเพิ่มหมายเหตุ", removeFile: "ลบ {{name}}", imageLimit: "เพิ่มรูปได้สูงสุด 10 รูป", videoLimit: "เพิ่มวิดีโอได้สูงสุด 3 ไฟล์", showComment: "แสดงความเห็น {{label}} บนไฟล์", editComment: "แก้ไขความเห็น {{label}}", deleteComment: "ลบความเห็น {{label}}", deleteCommentConfirm: "ลบความเห็น {{label}}? สามารถเลิกทำภายหลังได้", videoAt: "วิดีโอที่ {{time}}", imageNumber: "รูป {{number}}", unableUpdateComment: "อัปเดตความเห็นไม่สำเร็จ", unableDeleteComment: "ลบความเห็นไม่สำเร็จ", unableRestoreComment: "กู้คืนความเห็นไม่สำเร็จ", comment: "ความเห็น {{label}}", positionChanged: "เปลี่ยนตำแหน่งแล้ว", mediaNumber: "แสดงไฟล์ {{number}}", describeIssue: "อธิบายสิ่งที่เกิดขึ้นตรงนี้", markPoint: "ทำเครื่องหมายตำแหน่งที่มีปัญหา", placePin: "แตะบนรูปเพื่อวางจุด", moveComment: "แตะตำแหน่งใหม่เพื่อย้ายความเห็น", unableMoveComment: "ย้ายความเห็นไม่สำเร็จ", unableSaveComment: "บันทึกความเห็นไม่สำเร็จ", previousSlide: "ไฟล์ก่อนหน้า", nextSlide: "ไฟล์ถัดไป", closeDialog: "ปิดหน้าต่าง", reload: "โหลดใหม่", appError: "เกิดข้อผิดพลาด", appErrorDescription: "โหลดแอปใหม่เพื่อกลับไปทำงานต่อ",
 
   // Sign-in surfaces
-  chooseAccountType: "เข้าสู่ระบบแบบไหน",
-  chooseAccountTypeDescription: "เลือกพื้นที่ให้ตรงกับสิ่งที่คุณต้องการทำ",
-  staffAccess: "เจ้าหน้าที่",
-  staffAccessDescription: "จัดการและอัปเดตเรื่องทั้งหมด",
-  customerAccess: "ลูกค้า",
-  customerAccessDescription: "แจ้งเรื่องและติดตามความคืบหน้า",
   staffSignIn: "เข้าสู่ระบบสำหรับเจ้าหน้าที่",
   staffSignInDescription: "กรอกรหัสผ่านร่วมเพื่อเข้ากระดานภายใน",
   customerSignIn: "เข้าสู่ระบบสำหรับลูกค้า",
@@ -177,8 +163,6 @@ const th: Record<keyof typeof en, string> = {
   creatingAccount: "กำลังสร้างบัญชี…",
   haveAccountQuestion: "มีบัญชีอยู่แล้ว?",
   noAccountQuestion: "ยังไม่มีบัญชี?",
-  useStaffPassword: "เข้าสู่ระบบเจ้าหน้าที่แทน",
-  useCustomerAccount: "เข้าสู่ระบบลูกค้าแทน",
 
   // Customer portal
   customerPortal: "เรื่องของฉัน",
