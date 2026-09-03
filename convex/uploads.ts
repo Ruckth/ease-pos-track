@@ -41,6 +41,15 @@ export function validateFiles(files: Array<{ name: string; size: number; type: s
   }
 }
 
+export function validateMediaItems(
+  media: Array<{ key: string; name: string; size: number; type: string; url: string }>,
+) {
+  validateFiles(media);
+  if (media.some((item) => !item.key.trim() || !item.url.startsWith("https://"))) {
+    throw new Error("INVALID_MEDIA_REFERENCE");
+  }
+}
+
 function fileSignature(file: { name: string; size: number; type: string }) {
   return `${file.name}\u0000${file.size}\u0000${file.type}`;
 }
@@ -73,11 +82,14 @@ export const createUploadIntent = mutation({
       .withIndex("by_idempotency", (q) => q.eq("sessionId", session._id).eq("idempotencyKey", idempotencyKey))
       .order("desc")
       .first();
+    if (existing && !sameFiles(existing.expectedFiles, args.files)) {
+      throw new Error("UPLOAD_REQUEST_CONFLICT");
+    }
     if (existing && existing.status === "pending" && existing.expiresAt > Date.now()) {
-      return { intentId: existing._id, secret: existing.secret, feedbackId: existing.feedbackId };
+      return { intentId: existing._id, secret: existing.secret, feedbackId: existing.feedbackId, uploadedFiles: existing.uploadedFiles };
     }
     if (existing?.status === "attached" && existing.feedbackId) {
-      return { intentId: existing._id, secret: existing.secret, feedbackId: existing.feedbackId };
+      return { intentId: existing._id, secret: existing.secret, feedbackId: existing.feedbackId, uploadedFiles: existing.uploadedFiles };
     }
 
     const now = Date.now();
@@ -97,7 +109,7 @@ export const createUploadIntent = mutation({
       expiresAt: now + INTENT_TTL_MS,
       updatedAt: now,
     });
-    return { intentId, secret, feedbackId: undefined };
+    return { intentId, secret, feedbackId: undefined, uploadedFiles: [] };
   },
 });
 

@@ -73,6 +73,11 @@ const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
   REQUIRED_REQUEST_ID: { code: "REQUEST_ID_REQUIRED", message: "--request-id cannot be blank." },
   REQUEST_ID_TOO_LONG: { code: "REQUEST_ID_TOO_LONG", message: `--request-id must be ${MAX_REQUEST_ID_LENGTH} characters or fewer.` },
   INVALID_REQUEST_ID: { code: "INVALID_REQUEST_ID", message: "--request-id must not contain control characters." },
+  IMAGE_VIDEO_ONLY: { code: "IMAGE_TYPE_UNSUPPORTED", message: "--image accepts image files only." },
+  MEDIA_LIMIT_EXCEEDED: { code: "IMAGE_LIMIT_EXCEEDED", message: "A Ticket can contain at most 10 images." },
+  IMAGE_TOO_LARGE: { code: "IMAGE_SIZE_INVALID", message: "Each --image must be larger than zero and no more than 8 MB." },
+  INVALID_FILE_METADATA: { code: "INVALID_IMAGE_SOURCE", message: "An image has invalid file metadata." },
+  INVALID_MEDIA_REFERENCE: { code: "INVALID_IMAGE_SOURCE", message: "An image upload did not produce a valid HTTPS reference." },
 };
 
 /** The validation codes a remote call can also report, for error classification. */

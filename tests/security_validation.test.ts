@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { requireCurrentVersion, validateFeedbackText } from "../convex/feedback_state";
-import { sameFiles, validateFiles } from "../convex/uploads";
+import { sameFiles, validateFiles, validateMediaItems } from "../convex/uploads";
 
 test("feedback text is trimmed and bounded on the server", () => {
   assert.deepEqual(validateFeedbackText("  Printer issue  ", "  Receipt is blank  "), {
@@ -41,4 +41,22 @@ test("upload intent comparison detects metadata tampering", () => {
   assert.equal(sameFiles(expected, [...expected].reverse()), true);
   assert.equal(sameFiles(expected, [{ ...expected[0], size: 101 }, expected[1]]), false);
   assert.equal(sameFiles(expected, [expected[0]]), false);
+});
+
+test("stored media references require verified HTTPS uploads and obey combined limits", () => {
+  const image = {
+    key: "upload-key",
+    name: "evidence.png",
+    size: 1_024,
+    type: "image/png",
+    url: "https://cdn.example.com/evidence.png",
+  };
+
+  assert.doesNotThrow(() => validateMediaItems([image]));
+  assert.throws(() => validateMediaItems([{ ...image, key: "" }]), /INVALID_MEDIA_REFERENCE/);
+  assert.throws(() => validateMediaItems([{ ...image, url: "http://cdn.example.com/evidence.png" }]), /INVALID_MEDIA_REFERENCE/);
+  assert.throws(
+    () => validateMediaItems(Array.from({ length: 11 }, (_, index) => ({ ...image, key: `key-${index}` }))),
+    /MEDIA_LIMIT_EXCEEDED/,
+  );
 });

@@ -85,11 +85,14 @@ pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
 ```
 
-Create is text-only, starts in status `new`, attaches no media, and records staff
-ownership plus `createdVia: "codex"` in the existing Ticket and audit path:
+Create starts in status `new` and records staff ownership plus
+`createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
+attach up to 10 original image files. Each source may be a local path or an HTTPS
+URL:
 
 ```bash
 pnpm ticket create --title "Printer jams" --description "Receipt printer jams on long receipts"
+pnpm ticket create --title "Calendar overlap" --image ./first.png --image https://example.com/second.jpg
 pnpm ticket create --json '{"title":"Printer jams","description":"Long receipts","requestId":"req-42"}'
 pnpm ticket create --title "Printer jams" --dry-run
 ```
@@ -106,6 +109,21 @@ pnpm ticket create --title "Printer jams" --dry-run
 
 If a caller is uncertain whether a create completed, it must retry with the
 reported request id. A different request id can create a second Ticket.
+
+Images can also be added to an existing Ticket. Read its latest version first,
+then provide a retry key when the operation may need to be repeated:
+
+```bash
+pnpm ticket get TKT-0007
+pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/detail.webp --expected-version 0 --request-id attach-images-0007
+```
+
+Local files and downloaded HTTPS images are uploaded without resizing or
+re-encoding. Images must be non-empty, no larger than 8 MB each, and the Ticket
+may contain at most 10 images in total. The upload intent is bound to the staff
+session and retry key; an interrupted retry reuses files already recorded by the
+intent instead of uploading or attaching them twice. Image upload requires
+`UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
 
 Every state-changing command requires the latest `version` returned by create,
 list, or get. This preserves the existing optimistic concurrency check:
@@ -186,10 +204,11 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/keychain.ts` | Injectable macOS Keychain credential adapter. |
 | `scripts/ticket/prompt.ts` | Controlling-terminal password input with echo disabled. |
 | `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
+| `scripts/ticket/images.ts` | Original-byte local/HTTPS image loading and UploadThing storage. |
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
-| `convex/feedback.ts` | Existing Ticket domain functions plus authenticated text create and Ticket-number lookup. |
+| `convex/feedback.ts` | Existing Ticket domain functions plus authenticated create, image attachment, and Ticket-number lookup. |
 | `convex/feedback_state.ts` | Ticket text limits and the optimistic-version check. |
 | `convex/tickets.ts` | Shared Ticket allocation and audit-record helpers. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |

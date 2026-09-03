@@ -8,6 +8,7 @@
  */
 
 import { formatTicketNumber } from "../../convex/ticket_numbers";
+import { createHash } from "node:crypto";
 import { parseTicketArgs, type TicketCommand } from "./cli";
 import type { ConfigStore } from "./config";
 import { authHint, type Deployment } from "./deployment";
@@ -25,6 +26,7 @@ import {
 import type { CredentialStore } from "./keychain";
 import {
   createOutput,
+  attachmentOutput,
   dryRunOutput,
   errorOutput,
   jsonLine,
@@ -36,6 +38,7 @@ import {
 } from "./output";
 import { commandDiscoveryOutput, humanHelp } from "./registry";
 import type { TicketRemote } from "./remote";
+import type { TicketImages } from "./images";
 import { TicketSessions, credentialError, type StaffAccess } from "./session";
 
 export type TicketCliDeps = {
@@ -46,6 +49,7 @@ export type TicketCliDeps = {
   newRequestId: () => string;
   now: () => number;
   env: NodeJS.ProcessEnv;
+  images: TicketImages;
 };
 
 export type TicketCliOutcome = { exitCode: number; stdout: string; stderr: string };
@@ -57,7 +61,55 @@ type SessionCommand = Extract<TicketCommand, { kind: "login" | "logout" }>;
  * separately because its idempotency key must exist before authentication, so a
  * failed run can still report which key was in play.
  */
-type StaffCommand = Exclude<TicketCommand, { kind: "help" | "commands" | "login" | "logout" | "create" }>;
+type StaffCommand = Exclude<TicketCommand, { kind: "help" | "commands" | "login" | "logout" | "create" | "attach" }>;
+
+function uploadRequestId(requestId: string) {
+  return createHash("sha256").update(`ticket-images\0${requestId}`).digest("hex");
+}
+
+function sameFileMetadata(file: File, media: { name: string; size: number; type: string }) {
+  return file.name === media.name && file.size === media.size && file.type === media.type;
+}
+
+async function attachTicketImages(
+  input: { ticketNumber: number; expectedVersion: number; images: string[]; requestId: string },
+  access: StaffAccess,
+  deps: TicketCliDeps,
+) {
+  const files = await deps.images.prepare(input.images);
+  const intent = await deps.remote.createUploadIntent(access.url, access.token, {
+    requestId: uploadRequestId(input.requestId),
+    files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+  });
+  if (intent.feedbackId) {
+    const existing = await deps.remote.get(access.url, access.token, input.ticketNumber, false);
+    if (!existing || existing._id !== intent.feedbackId) throw inputError("UPLOAD_INTENT_MISMATCH", "The image retry belongs to a different Ticket.");
+    return existing;
+  }
+  const reusable = [...intent.uploadedFiles];
+  const resolved = files.map((file) => {
+    const index = reusable.findIndex((media) => sameFileMetadata(file, media));
+    if (index < 0) return undefined;
+    return reusable.splice(index, 1)[0];
+  });
+  const missing = files.flatMap((file, index) => resolved[index] ? [] : [{ file, index }]);
+  const uploaded = missing.length === 0 ? [] : await deps.images.upload(missing.map(({ file }) => file));
+  uploaded.forEach((media, offset) => {
+    resolved[missing[offset].index] = media;
+  });
+  for (const file of uploaded) {
+    await deps.remote.recordUploadedFile(access.url, { intentId: intent.intentId, secret: intent.secret, file });
+  }
+  const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
+  if (media.length !== files.length) throw internalError("The image upload result did not match the requested files.");
+  return await deps.remote.attachImages(access.url, access.token, {
+    ticketNumber: input.ticketNumber,
+    expectedVersion: input.expectedVersion,
+    intentId: intent.intentId,
+    secret: intent.secret,
+    media,
+  });
+}
 
 function unreachable(command: never): never {
   const { kind } = command as { kind: string };
@@ -77,6 +129,10 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
   {
     codes: ["VERSION_CONFLICT"],
     toError: () => conflictError("VERSION_CONFLICT", "The Ticket changed after it was read.", "Run `pnpm ticket get TKT-####`, then retry with its current version."),
+  },
+  {
+    codes: ["UPLOAD_REQUEST_CONFLICT"],
+    toError: () => conflictError("UPLOAD_REQUEST_CONFLICT", "This request id was already used with different images.", "Use the same --request-id only when retrying the same images."),
   },
   {
     codes: ["INCORRECT_PASSWORD"],
@@ -179,9 +235,24 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       const idempotencyKey = command.request.requestId ?? deps.newRequestId();
       requestId = idempotencyKey;
       if (command.dryRun) return succeed(jsonLine(dryRunOutput(target, command.request, idempotencyKey)));
-      const { url, token } = await sessions.requireStaff(target);
+      const access = await sessions.requireStaff(target);
+      const { url, token } = access;
       const created = await deps.remote.create(url, token, { ...command.request, requestId: idempotencyKey });
+      if (command.images.length > 0) {
+        created.ticket = await attachTicketImages({
+          ticketNumber: created.ticket.ticketNumber!,
+          expectedVersion: created.ticket.version ?? 0,
+          images: command.images,
+          requestId: idempotencyKey,
+        }, access, deps);
+      }
       return succeed(jsonLine(createOutput(target, created)));
+    }
+    if (command.kind === "attach") {
+      requestId = command.requestId ?? deps.newRequestId();
+      const access = await sessions.requireStaff(target);
+      const attached = await attachTicketImages({ ...command, requestId }, access, deps);
+      return succeed(jsonLine(attachmentOutput(target, attached, requestId)));
     }
     return succeed(jsonLine(await runStaffCommand(command, await sessions.requireStaff(target), deps)));
   } catch (error) {

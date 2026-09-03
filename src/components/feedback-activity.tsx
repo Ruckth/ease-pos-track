@@ -3,7 +3,7 @@ import { statusMeta } from "@/components/feedback-status";
 import type { FeedbackEvent } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-const actionKeys = { created: "actionCreated", edited: "actionEdited", edit_undone: "actionEditUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored" } as const;
+const actionKeys = { created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored" } as const;
 
 export function FeedbackActivityList({ events }: { events: FeedbackEvent[] }) {
   const { t, formatDate } = useI18n();

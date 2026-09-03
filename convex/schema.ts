@@ -61,6 +61,7 @@ export const annotationEventAction = v.union(
 
 export const feedbackEventAction = v.union(
   v.literal("created"),
+  v.literal("media_attached"),
   v.literal("edited"),
   v.literal("edit_undone"),
   v.literal("status_changed"),
@@ -74,6 +75,7 @@ export const feedbackStateValidator = v.object({
   description: v.string(),
   status: feedbackStatus,
   version: v.number(),
+  mediaCount: v.optional(v.number()),
   deletedAt: v.optional(v.number()),
 });
 

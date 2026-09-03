@@ -2,6 +2,7 @@ export type CommandOption = {
   name: `--${string}`;
   value?: string;
   description: string;
+  repeatable?: boolean;
   required?: boolean;
   requiredUnless?: string;
 };
@@ -110,7 +111,7 @@ export const COMMAND_REGISTRY = [
   },
   {
     name: "create",
-    summary: "Create an idempotent text-only Ticket.",
+    summary: "Create an idempotent Ticket with optional images.",
     authentication: "staff",
     interactive: false,
     arguments: [],
@@ -119,7 +120,21 @@ export const COMMAND_REGISTRY = [
       { name: "--description", value: "text", description: "Ticket description (up to 10000 characters)." },
       { name: "--json", value: "object", description: "JSON object with title, description, and requestId." },
       { name: "--request-id", value: "id", description: "Idempotency key; generated when omitted." },
+      { name: "--image", value: "path-or-https-url", description: "Attach an image from a local path or HTTPS URL; repeat up to 10 times.", repeatable: true },
       { name: "--dry-run", description: "Validate and print the Ticket without writing." },
+      PROD,
+    ],
+  },
+  {
+    name: "attach",
+    summary: "Attach images to an existing Ticket.",
+    authentication: "staff",
+    interactive: false,
+    arguments: [TICKET_ARGUMENT],
+    options: [
+      { name: "--image", value: "path-or-https-url", description: "Image from a local path or HTTPS URL; repeat up to 10 times.", repeatable: true, required: true },
+      { name: "--request-id", value: "id", description: "Retry key; generated when omitted." },
+      EXPECTED_VERSION,
       PROD,
     ],
   },

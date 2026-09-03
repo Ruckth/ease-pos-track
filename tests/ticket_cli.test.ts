@@ -68,6 +68,18 @@ class FakeRemote implements TicketRemote {
     this.record("create", url, token, input);
     return { ticket: this.rows[0], created: true, requestId: input.requestId };
   }
+  async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
+    this.record("createUploadIntent", url, token, input);
+    return { intentId: "intent-id" as never, secret: "s".repeat(48), uploadedFiles: [] };
+  }
+  async recordUploadedFile(url: string, input: { intentId: string; secret: string; file: TicketDocument["media"][number] }) {
+    this.record("recordUploadedFile", url, input);
+  }
+  async attachImages(url: string, token: string, input: { ticketNumber: number; expectedVersion: number; intentId: string; secret: string; media: TicketDocument["media"] }) {
+    this.record("attachImages", url, token, input);
+    this.rows[0] = ticket({ ...this.rows[0], media: [...this.rows[0].media, ...input.media], version: input.expectedVersion + 1 });
+    return this.rows[0];
+  }
   async update(url: string, token: string, input: { ticketNumber: number; title?: string; description?: string; expectedVersion: number }) {
     this.record("update", url, token, input);
     if (input.expectedVersion !== (this.rows[0].version ?? 0)) throw new Error("VERSION_CONFLICT");
@@ -107,6 +119,16 @@ function fixture() {
     newRequestId: () => "generated-request-id",
     now: () => 10_000,
     env: {},
+    images: {
+      prepare: async (sources: string[]) => sources.map((source, index) => new File([`image-${index}`], source.split("/").at(-1) ?? `image-${index}.png`, { type: "image/png" })),
+      upload: async (files: File[]) => files.map((file, index) => ({
+        key: `image-key-${index}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        url: `https://files.example.com/image-${index}.png`,
+      })),
+    },
   };
   return { deps, remote, config, credentials };
 }
@@ -155,6 +177,49 @@ test("parsing covers deployment selection, Ticket references, versions, and oper
   assert.deepEqual(parseTicketArgs(["archive", "TKT-0007", "--expected-version=3"]), { kind: "archive", deployment: "dev", ticketNumber: 7, expectedVersion: 3 });
   assert.deepEqual(parseTicketArgs(["restore", "TKT-0007", "--expected-version", "4"]), { kind: "restore", deployment: "dev", ticketNumber: 7, expectedVersion: 4 });
   assert.deepEqual(parseTicketArgs(["update", "TKT-0007", "--title", " New title ", "--expected-version", "1"]), { kind: "update", deployment: "dev", ticketNumber: 7, title: "New title", expectedVersion: 1 });
+});
+
+test("create and attach accept repeatable local or HTTPS image sources", () => {
+  assert.deepEqual(
+    parseTicketArgs([
+      "create",
+      "--title",
+      "Calendar overlap",
+      "--image",
+      "/tmp/first.png",
+      "--image=https://images.example.com/second.png",
+    ]),
+    {
+      kind: "create",
+      deployment: "dev",
+      request: { title: "Calendar overlap", description: "" },
+      images: ["/tmp/first.png", "https://images.example.com/second.png"],
+      dryRun: false,
+    },
+  );
+  assert.deepEqual(
+    parseTicketArgs([
+      "attach",
+      "TKT-0007",
+      "--image",
+      "/tmp/first.png",
+      "--image",
+      "https://images.example.com/second.png",
+      "--expected-version",
+      "2",
+      "--request-id",
+      "attach-images-0001",
+      "--prod",
+    ]),
+    {
+      kind: "attach",
+      deployment: "prod",
+      ticketNumber: 7,
+      expectedVersion: 2,
+      images: ["/tmp/first.png", "https://images.example.com/second.png"],
+      requestId: "attach-images-0001",
+    },
+  );
 });
 
 test("parsing rejects unstable or unsafe operation inputs with stable codes", () => {
@@ -311,6 +376,81 @@ test("authenticated create is direct, idempotency-shaped, and keeps production e
   assert.equal(classifyRemoteError(new Error("REQUEST_ID_CONFLICT"), "dev").exitCode, EXIT.conflict);
 });
 
+test("attach uploads images through a verified intent and returns the updated Ticket", async () => {
+  const { deps, remote } = fixture();
+  const result = await runTicketCli([
+    "attach",
+    "TKT-0007",
+    "--image",
+    "/tmp/first.png",
+    "--image",
+    "https://images.example.com/second.png",
+    "--expected-version",
+    "0",
+    "--request-id",
+    "attach-images-0001",
+  ], deps);
+
+  assert.equal(result.exitCode, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.requestId, "attach-images-0001");
+  assert.equal(output.ticket.mediaCount, 2);
+  assert.equal(output.ticket.version, 1);
+  assert.deepEqual(
+    remote.calls.map((call) => call.method),
+    ["currentSession", "createUploadIntent", "recordUploadedFile", "recordUploadedFile", "attachImages"],
+  );
+});
+
+test("create with images creates the Ticket first then attaches media with the same retry id", async () => {
+  const { deps, remote } = fixture();
+  const result = await runTicketCli([
+    "create",
+    "--title",
+    "Calendar overlap",
+    "--image",
+    "/tmp/first.png",
+    "--request-id",
+    "create-images-0001",
+  ], deps);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(JSON.parse(result.stdout).version, 1);
+  assert.equal(JSON.parse(result.stdout).requestId, "create-images-0001");
+  assert.deepEqual(
+    remote.calls.map((call) => call.method),
+    ["currentSession", "create", "createUploadIntent", "recordUploadedFile", "attachImages"],
+  );
+});
+
+test("an interrupted attachment retry reuses files already recorded by its upload intent", async () => {
+  const { deps, remote } = fixture();
+  const uploaded = {
+    key: "existing-key",
+    name: "first.png",
+    size: 7,
+    type: "image/png",
+    url: "https://files.example.com/existing.png",
+  };
+  remote.createUploadIntent = async () => ({
+    intentId: "intent-id" as never,
+    secret: "s".repeat(48),
+    uploadedFiles: [uploaded],
+  });
+  deps.images.upload = async () => {
+    throw new Error("already recorded images must not be uploaded again");
+  };
+
+  const result = await runTicketCli([
+    "attach", "TKT-0007", "--image", "/tmp/first.png",
+    "--expected-version", "0", "--request-id", "attach-images-retry-0001",
+  ], deps);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(remote.calls.some((call) => call.method === "recordUploadedFile"), false);
+  assert.equal(remote.calls.at(-1)?.method, "attachImages");
+});
+
 test("an idempotent create retry reports the original Ticket without claiming a new write", async () => {
   const { deps, remote } = fixture();
   remote.create = async (_url, _token, input) => ({ ticket: remote.rows[0], created: false, requestId: input.requestId });
@@ -342,4 +482,18 @@ test("version and authorization failures retain stable JSON and exit codes", asy
   assert.match(JSON.parse(conflict.stderr).hint, /pnpm ticket get/);
   assert.equal(classifyRemoteError(new Error("STAFF_ONLY"), "dev").code, "NOT_AUTHORIZED");
   assert.equal(classifyRemoteError(new Error("FEEDBACK_NOT_FOUND"), "dev").code, "TICKET_NOT_FOUND");
+  assert.equal(classifyRemoteError(new Error("UPLOAD_REQUEST_CONFLICT"), "dev").code, "UPLOAD_REQUEST_CONFLICT");
+  assert.equal(classifyRemoteError(new Error("UPLOAD_REQUEST_CONFLICT"), "dev").exitCode, EXIT.conflict);
+});
+
+test("an attachment failure reports its generated retry id", async () => {
+  const { deps } = fixture();
+  deps.images.upload = async () => { throw new Error("network unavailable"); };
+
+  const result = await runTicketCli([
+    "attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0",
+  ], deps);
+
+  assert.equal(result.exitCode, EXIT.remote);
+  assert.equal(JSON.parse(result.stderr).requestId, "generated-request-id");
 });

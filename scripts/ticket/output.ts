@@ -54,6 +54,10 @@ export function ticketOutput(deployment: Deployment, ticket: TicketDocument) {
   return { ok: true as const, deployment, ticket: ticketDetail(ticket) };
 }
 
+export function attachmentOutput(deployment: Deployment, ticket: TicketDocument, requestId: string) {
+  return { ...ticketOutput(deployment, ticket), requestId };
+}
+
 export function createOutput(
   deployment: Deployment,
   result: { ticket: TicketDocument; created: boolean; requestId: string },

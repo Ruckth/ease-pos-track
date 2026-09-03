@@ -5,6 +5,7 @@ import { FileConfigStore } from "./ticket/config";
 import { MacOsKeychainCredentialStore } from "./ticket/keychain";
 import { readHiddenPassword } from "./ticket/prompt";
 import { ConvexTicketRemote } from "./ticket/remote";
+import { UploadThingTicketImages } from "./ticket/images";
 import { runTicketCli } from "./ticket/run";
 
 loadEnvironment({ path: [".env.local", ".env"], quiet: true });
@@ -17,6 +18,7 @@ runTicketCli(process.argv.slice(2), {
   newRequestId: randomUUID,
   now: Date.now,
   env: process.env,
+  images: new UploadThingTicketImages(process.env.UPLOADTHING_TOKEN),
 }).then((outcome) => {
   if (outcome.stdout) process.stdout.write(outcome.stdout);
   if (outcome.stderr) process.stderr.write(outcome.stderr);
