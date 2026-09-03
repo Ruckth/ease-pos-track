@@ -9,6 +9,8 @@
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
+import type { Id } from "../../convex/_generated/dataModel";
+import type { TicketMediaItem } from "./images";
 import { toStoredTicketStatus, type TicketStatus } from "./status";
 
 export type TicketDocument = Doc<"feedback">;
@@ -24,6 +26,18 @@ export type TicketCreateInput = { title: string; description: string; requestId:
 export type TicketCreateResult = { ticket: TicketDocument; created: boolean; requestId: string };
 export type TicketUpdateInput = { ticketNumber: number; title?: string; description?: string; expectedVersion: number };
 export type TicketStatusInput = { ticketNumber: number; status: TicketStatus; expectedVersion: number };
+export type TicketUploadIntent = {
+  intentId: Id<"uploadIntents">;
+  secret: string;
+  feedbackId?: Id<"feedback">;
+  uploadedFiles: TicketMediaItem[];
+};
+export type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
+export type TicketAttachInput = TicketUploadCredentials & {
+  ticketNumber: number;
+  expectedVersion: number;
+  media: TicketMediaItem[];
+};
 
 export interface TicketRemote {
   login(url: string, password: string, clientId: string): Promise<{ token: string; expiresAt: number }>;
@@ -32,6 +46,9 @@ export interface TicketRemote {
   list(url: string, token: string, includeArchived: boolean): Promise<TicketDocument[]>;
   get(url: string, token: string, ticketNumber: number, includeArchived: boolean): Promise<TicketDocument | null>;
   create(url: string, token: string, input: TicketCreateInput): Promise<TicketCreateResult>;
+  createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): Promise<TicketUploadIntent>;
+  recordUploadedFile(url: string, input: TicketUploadCredentials & { file: TicketMediaItem }): Promise<void>;
+  attachImages(url: string, token: string, input: TicketAttachInput): Promise<TicketDocument>;
   update(url: string, token: string, input: TicketUpdateInput): Promise<TicketDocument>;
   changeStatus(url: string, token: string, input: TicketStatusInput): Promise<TicketDocument>;
   archive(url: string, token: string, ticketNumber: number, expectedVersion: number): Promise<TicketDocument>;
@@ -89,6 +106,31 @@ export class ConvexTicketRemote implements TicketRemote {
 
   async create(url: string, token: string, input: TicketCreateInput) {
     return await this.client(url).mutation(api.feedback.createTextFeedback, { token, ...input });
+  }
+
+  async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
+    return await this.client(url).mutation(api.uploads.createUploadIntent, {
+      token,
+      idempotencyKey: input.requestId,
+      files: input.files,
+    });
+  }
+
+  async recordUploadedFile(url: string, input: TicketUploadCredentials & { file: TicketMediaItem }) {
+    await this.client(url).mutation(api.uploads.recordUploadedFile, input);
+  }
+
+  async attachImages(url: string, token: string, input: TicketAttachInput) {
+    return await this.write(url, token, input.ticketNumber, WITHIN_ACTIVE, async (current) => {
+      await this.client(url).mutation(api.feedback.attachFeedbackMedia, {
+        token,
+        id: current._id,
+        media: input.media,
+        uploadIntentId: input.intentId,
+        uploadIntentSecret: input.secret,
+        expectedVersion: input.expectedVersion,
+      });
+    });
   }
 
   async update(url: string, token: string, input: TicketUpdateInput) {

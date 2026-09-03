@@ -22,6 +22,7 @@ import {
 } from "./annotation_state";
 import { requireCurrentVersion, validateFeedbackText } from "./feedback_state";
 import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
+import { validateMediaItems } from "./uploads";
 import {
   applyTicketChange,
   createTicketRecord,
@@ -103,6 +104,47 @@ async function requireWritableFeedback(
   if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
   assertCanWriteFeedback(actor, doc);
   return doc;
+}
+
+function requireOwnedUploadIntent(
+  intent: Doc<"uploadIntents"> | null,
+  session: Doc<"sessions">,
+  actor: Actor<Id<"customers">>,
+  secret: string,
+) {
+  if (
+    !intent
+    || intent.sessionId !== session._id
+    || intent.secret !== secret
+    || (intent.actorRole !== undefined && intent.actorRole !== actor.role)
+    || (intent.actorCustomerId !== undefined && intent.actorCustomerId !== actor.customerId)
+  ) {
+    throw new Error("UPLOAD_INTENT_NOT_FOUND");
+  }
+  return intent;
+}
+
+function verifyPendingUploadIntent(
+  intent: Doc<"uploadIntents">,
+  media: Doc<"feedback">["media"],
+) {
+  if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
+    throw new Error("UPLOAD_INTENT_INVALID");
+  }
+  validateMediaItems(media);
+  if (intent.uploadedFiles.length !== media.length) throw new Error("UPLOAD_INCOMPLETE");
+  const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
+  const verified = media.every((item) => {
+    const uploaded = uploadedByKey.get(item.key);
+    return uploaded
+      && uploaded.url === item.url
+      && uploaded.name === item.name
+      && uploaded.size === item.size
+      && uploaded.type === item.type;
+  });
+  if (!verified || new Set(media.map((item) => item.key)).size !== media.length) {
+    throw new Error("UPLOAD_VERIFICATION_FAILED");
+  }
 }
 
 export const listFeedback = query({
@@ -224,48 +266,16 @@ export const createFeedback = mutation({
     const { session, actor } = await requireActor(ctx, args.token);
 
     const { title, description } = validateFeedbackText(args.title, args.description);
-    const imageCount = args.media.filter((item) => item.type.startsWith("image/")).length;
-    const videoCount = args.media.filter((item) => item.type.startsWith("video/")).length;
-    if (imageCount + videoCount !== args.media.length) {
-      throw new Error("IMAGE_VIDEO_ONLY");
-    }
-    if (imageCount > 10 || videoCount > 3) {
-      throw new Error("MEDIA_LIMIT_EXCEEDED");
-    }
-    for (const item of args.media) {
-      const sizeLimit = item.type.startsWith("image/") ? 8 * 1024 * 1024 : 64 * 1024 * 1024;
-      if (!item.key || !item.url.startsWith("https://") || item.size <= 0 || item.size > sizeLimit) {
-        throw new Error("INVALID_MEDIA_REFERENCE");
-      }
-    }
-
-    const intent = await ctx.db.get(args.uploadIntentId);
+    const intent = requireOwnedUploadIntent(
+      await ctx.db.get(args.uploadIntentId),
+      session,
+      actor,
+      args.uploadIntentSecret,
+    );
     // The intent stays bound to the session that created it, and therefore to
     // the same actor; the actor columns are re-checked as defence in depth.
-    if (
-      !intent
-      || intent.sessionId !== session._id
-      || intent.secret !== args.uploadIntentSecret
-      || (intent.actorRole !== undefined && intent.actorRole !== actor.role)
-      || (intent.actorCustomerId !== undefined && intent.actorCustomerId !== actor.customerId)
-    ) {
-      throw new Error("UPLOAD_INTENT_NOT_FOUND");
-    }
     if (intent.status === "attached" && intent.feedbackId) return intent.feedbackId;
-    if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
-      throw new Error("UPLOAD_INTENT_INVALID");
-    }
-    if (intent.uploadedFiles.length !== args.media.length) throw new Error("UPLOAD_INCOMPLETE");
-    const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
-    const verified = args.media.every((item) => {
-      const uploaded = uploadedByKey.get(item.key);
-      return uploaded
-        && uploaded.url === item.url
-        && uploaded.name === item.name
-        && uploaded.size === item.size
-        && uploaded.type === item.type;
-    });
-    if (!verified) throw new Error("UPLOAD_VERIFICATION_FAILED");
+    verifyPendingUploadIntent(intent, args.media);
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
@@ -322,6 +332,47 @@ export const createTextFeedback = mutation({
       now: Date.now(),
     });
     return { ticket: created, created: true, requestId };
+  },
+});
+
+export const attachFeedbackMedia = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("feedback"),
+    media: v.array(mediaItemValidator),
+    uploadIntentId: v.id("uploadIntents"),
+    uploadIntentSecret: v.string(),
+    expectedVersion: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const { session, actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const intent = requireOwnedUploadIntent(
+      await ctx.db.get(args.uploadIntentId),
+      session,
+      actor,
+      args.uploadIntentSecret,
+    );
+    if (intent.status === "attached") {
+      if (intent.feedbackId !== doc._id) throw new Error("UPLOAD_INTENT_MISMATCH");
+      return { eventId: null, version: doc.version ?? 0 };
+    }
+    if (args.media.length === 0) throw new Error("UPLOAD_INCOMPLETE");
+    validateMediaItems([...doc.media, ...args.media]);
+    verifyPendingUploadIntent(intent, args.media);
+
+    const now = Date.now();
+    const changed = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { media: [...doc.media, ...args.media] },
+      action: "media_attached",
+      author: { sessionId: session._id, ...actorFields(actor), createdVia: "codex" },
+      now,
+    });
+    await ctx.db.patch(intent._id, { status: "attached", feedbackId: doc._id, updatedAt: now });
+    return changed;
   },
 });
 

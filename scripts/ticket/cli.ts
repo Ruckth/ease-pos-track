@@ -25,7 +25,8 @@ export type TicketCommand =
   | { kind: "logout"; deployment: Deployment }
   | { kind: "list"; deployment: Deployment; includeArchived: boolean }
   | { kind: "get"; deployment: Deployment; ticketNumber: number; includeArchived: boolean }
-  | { kind: "create"; deployment: Deployment; request: TicketRequest; dryRun: boolean }
+  | { kind: "create"; deployment: Deployment; request: TicketRequest; images: string[]; dryRun: boolean }
+  | { kind: "attach"; deployment: Deployment; ticketNumber: number; expectedVersion: number; images: string[]; requestId?: string }
   | { kind: "update"; deployment: Deployment; ticketNumber: number; title?: string; description?: string; expectedVersion: number }
   | { kind: "status"; deployment: Deployment; ticketNumber: number; status: TicketStatus; expectedVersion: number }
   | { kind: "archive"; deployment: Deployment; ticketNumber: number; expectedVersion: number }
@@ -34,7 +35,7 @@ export type TicketCommand =
 /** A single Ticket plus the optimistic-lock version every write must carry. */
 type VersionedTicket = { deployment: Deployment; ticketNumber: number; expectedVersion: number };
 
-type ScannedArguments = { values: Map<string, string>; flags: Set<string>; positionals: string[] };
+type ScannedArguments = { values: Map<string, string[]>; flags: Set<string>; positionals: string[] };
 
 const TICKET_REFERENCE = /^TKT-(\d{4,})$/;
 const JSON_KEYS = ["title", "description", "requestId"] as const;
@@ -54,7 +55,7 @@ function splitFlag(arg: string) {
 /** Splits argv into option values, boolean flags, and positionals for one command. */
 function scanArguments(definition: TicketCommandDefinition, argv: string[]): ScannedArguments {
   const allowed = new Map<string, CommandOption>(definition.options.map((option) => [option.name, option]));
-  const values = new Map<string, string>();
+  const values = new Map<string, string[]>();
   const flags = new Set<string>();
   const positionals: string[] = [];
 
@@ -67,19 +68,21 @@ function scanArguments(definition: TicketCommandDefinition, argv: string[]): Sca
     const { name, value } = splitFlag(arg);
     const option = allowed.get(name);
     if (!option) throw usageError("UNKNOWN_FLAG", `Unknown option "${name}" for ${definition.name}.`);
-    if (values.has(name) || flags.has(name)) throw usageError("DUPLICATE_FLAG", `${name} was given more than once.`);
+    if ((values.has(name) || flags.has(name)) && !option.repeatable) {
+      throw usageError("DUPLICATE_FLAG", `${name} was given more than once.`);
+    }
     if (!option.value) {
       if (value !== undefined) throw usageError("UNEXPECTED_VALUE", `${name} does not take a value.`);
       flags.add(name);
       continue;
     }
     if (value !== undefined) {
-      values.set(name, value);
+      values.set(name, [...(values.get(name) ?? []), value]);
       continue;
     }
     const next = argv[index + 1];
     if (next === undefined || next.startsWith("--")) throw usageError("MISSING_VALUE", `${name} requires a value.`);
-    values.set(name, next);
+    values.set(name, [...(values.get(name) ?? []), next]);
     index += 1;
   }
 
@@ -137,7 +140,11 @@ class CommandInput {
   }
 
   text(name: `--${string}`) {
-    return this.scanned.values.get(name);
+    return this.scanned.values.get(name)?.at(-1);
+  }
+
+  texts(name: `--${string}`) {
+    return this.scanned.values.get(name) ?? [];
   }
 
   /** The `TKT-####` reference and `--expected-version` a Ticket write needs. */
@@ -237,7 +244,16 @@ function buildCommand(input: CommandInput): TicketCommand {
     case "get":
       return { kind: "get", deployment, ticketNumber: input.ticketNumber(), includeArchived: input.flag("--include-archived") };
     case "create":
-      return { kind: "create", deployment, request: createRequest(input), dryRun: input.flag("--dry-run") };
+      return { kind: "create", deployment, request: createRequest(input), images: input.texts("--image"), dryRun: input.flag("--dry-run") };
+    case "attach": {
+      const requestId = input.text("--request-id");
+      return {
+        kind: "attach",
+        ...input.versionedTicket(),
+        images: input.texts("--image"),
+        ...(requestId === undefined ? {} : { requestId: validated(() => normalizeRequestId(requestId)) }),
+      };
+    }
     case "update":
       return updateCommand(input);
     case "status":

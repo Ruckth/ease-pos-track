@@ -71,6 +71,12 @@ Create it:
 pnpm ticket create --title "Printer jams" --description "Long receipts get stuck"
 ```
 
+Add one or more images from local files or HTTPS links by repeating `--image`:
+
+```bash
+pnpm ticket create --title "Calendar overlap" --image ./calendar.png --image https://example.com/checkout.jpg
+```
+
 The result includes the new Ticket reference, version, and request ID. If a
 create may have been interrupted, retry with the same request ID:
 
@@ -81,7 +87,20 @@ pnpm ticket create --title "Printer jams" --description "Long receipts get stuck
 Using the same request ID prevents an uncertain retry from creating a duplicate
 Ticket.
 
-## 5. Update a Ticket
+## 5. Attach images to an existing Ticket
+
+Read the latest version, then attach up to 10 images. Each image can be a local
+path or an HTTPS URL and must be 8 MB or smaller:
+
+```bash
+pnpm ticket get TKT-0007
+pnpm ticket attach TKT-0007 --image ./first.png --image https://example.com/second.jpg --expected-version 0 --request-id attach-images-0007
+```
+
+If the command is interrupted, retry with the same request ID. This prevents
+already recorded images from being uploaded or attached twice.
+
+## 6. Update a Ticket
 
 Read the Ticket first to get its latest version:
 
@@ -99,7 +118,7 @@ pnpm ticket update TKT-0007 --description "Long receipts get stuck" --expected-v
 Each successful change returns a new version. Use that new version for the next
 change.
 
-## 6. Change status
+## 7. Change status
 
 Available statuses are:
 
@@ -116,7 +135,7 @@ pnpm ticket status TKT-0007 --status in_progress --expected-version 2
 pnpm ticket status TKT-0007 --status resolved --expected-version 3
 ```
 
-## 7. Archive or restore
+## 8. Archive or restore
 
 Archiving is recoverable:
 
@@ -131,7 +150,7 @@ pnpm ticket get TKT-0007 --include-archived
 pnpm ticket restore TKT-0007 --expected-version 5
 ```
 
-## 8. Use production carefully
+## 9. Use production carefully
 
 Production is never selected automatically. Sign in explicitly:
 
@@ -148,7 +167,7 @@ pnpm ticket get TKT-0007 --prod
 
 Without `--prod`, a command always uses development.
 
-## 9. Sign out
+## 10. Sign out
 
 ```bash
 pnpm ticket logout
@@ -177,6 +196,7 @@ pnpm ticket logout --prod
 ```bash
 pnpm ticket --help
 pnpm ticket help create
+pnpm ticket help attach
 pnpm ticket help status
 pnpm ticket commands
 ```

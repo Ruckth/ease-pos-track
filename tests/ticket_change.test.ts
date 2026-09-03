@@ -74,6 +74,7 @@ test("the patch and the audit after state cannot disagree", () => {
     description: "Lane 3 and lane 4",
     status: "acknowledged",
     version: 4,
+    mediaCount: 0,
   });
 });
 
@@ -121,4 +122,21 @@ test("leaves the ticket and the changes it was given untouched", () => {
   plan.patch.status = "waiting";
   assert.equal(doc.status, "new");
   assert.equal(plan.after.status, "done");
+});
+
+test("attaching media updates the row and records only media counts in the audit snapshot", () => {
+  const doc = ticket();
+  const media = [{
+    key: "upload-key",
+    name: "evidence.png",
+    size: 1_024,
+    type: "image/png",
+    url: "https://cdn.example.com/evidence.png",
+  }];
+
+  const plan = planTicketChange({ doc, expectedVersion: 3, changes: { media }, now: 500 });
+
+  assert.deepEqual(plan.patch.media, media);
+  assert.equal(plan.before.mediaCount, 0);
+  assert.equal(plan.after.mediaCount, 1);
 });
