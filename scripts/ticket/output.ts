@@ -76,7 +76,12 @@ export function createOutput(
 }
 
 /** The Ticket a create would write, without contacting the deployment. */
-export function dryRunOutput(deployment: Deployment, request: TicketContent, requestId: string) {
+export function dryRunOutput(
+  deployment: Deployment,
+  request: TicketContent,
+  requestId: string,
+  files: Array<Pick<File, "name" | "size" | "type">> = [],
+) {
   return {
     ok: true as const,
     dryRun: true as const,
@@ -86,7 +91,7 @@ export function dryRunOutput(deployment: Deployment, request: TicketContent, req
       title: request.title,
       description: request.description,
       status: "new" as const,
-      media: [] as const,
+      media: files.map(({ name, size, type }) => ({ name, size, type })),
       origin: "staff" as const,
       createdVia: "codex" as const,
       requestId,

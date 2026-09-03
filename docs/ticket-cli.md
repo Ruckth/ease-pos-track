@@ -124,6 +124,8 @@ may contain at most 10 images in total. The upload intent is bound to the staff
 session and retry key; an interrupted retry reuses files already recorded by the
 intent instead of uploading or attaching them twice. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
+`create --dry-run` reads or downloads each image and reports its original name,
+size, and type, but does not upload it or contact the deployment.
 
 Every state-changing command requires the latest `version` returned by create,
 list, or get. This preserves the existing optimistic concurrency check:

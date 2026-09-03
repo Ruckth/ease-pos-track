@@ -106,6 +106,47 @@ async function requireWritableFeedback(
   return doc;
 }
 
+function requireOwnedUploadIntent(
+  intent: Doc<"uploadIntents"> | null,
+  session: Doc<"sessions">,
+  actor: Actor<Id<"customers">>,
+  secret: string,
+) {
+  if (
+    !intent
+    || intent.sessionId !== session._id
+    || intent.secret !== secret
+    || (intent.actorRole !== undefined && intent.actorRole !== actor.role)
+    || (intent.actorCustomerId !== undefined && intent.actorCustomerId !== actor.customerId)
+  ) {
+    throw new Error("UPLOAD_INTENT_NOT_FOUND");
+  }
+  return intent;
+}
+
+function verifyPendingUploadIntent(
+  intent: Doc<"uploadIntents">,
+  media: Doc<"feedback">["media"],
+) {
+  if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
+    throw new Error("UPLOAD_INTENT_INVALID");
+  }
+  validateMediaItems(media);
+  if (intent.uploadedFiles.length !== media.length) throw new Error("UPLOAD_INCOMPLETE");
+  const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
+  const verified = media.every((item) => {
+    const uploaded = uploadedByKey.get(item.key);
+    return uploaded
+      && uploaded.url === item.url
+      && uploaded.name === item.name
+      && uploaded.size === item.size
+      && uploaded.type === item.type;
+  });
+  if (!verified || new Set(media.map((item) => item.key)).size !== media.length) {
+    throw new Error("UPLOAD_VERIFICATION_FAILED");
+  }
+}
+
 export const listFeedback = query({
   args: {
     token: v.string(),
@@ -225,35 +266,16 @@ export const createFeedback = mutation({
     const { session, actor } = await requireActor(ctx, args.token);
 
     const { title, description } = validateFeedbackText(args.title, args.description);
-    validateMediaItems(args.media);
-
-    const intent = await ctx.db.get(args.uploadIntentId);
+    const intent = requireOwnedUploadIntent(
+      await ctx.db.get(args.uploadIntentId),
+      session,
+      actor,
+      args.uploadIntentSecret,
+    );
     // The intent stays bound to the session that created it, and therefore to
     // the same actor; the actor columns are re-checked as defence in depth.
-    if (
-      !intent
-      || intent.sessionId !== session._id
-      || intent.secret !== args.uploadIntentSecret
-      || (intent.actorRole !== undefined && intent.actorRole !== actor.role)
-      || (intent.actorCustomerId !== undefined && intent.actorCustomerId !== actor.customerId)
-    ) {
-      throw new Error("UPLOAD_INTENT_NOT_FOUND");
-    }
     if (intent.status === "attached" && intent.feedbackId) return intent.feedbackId;
-    if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
-      throw new Error("UPLOAD_INTENT_INVALID");
-    }
-    if (intent.uploadedFiles.length !== args.media.length) throw new Error("UPLOAD_INCOMPLETE");
-    const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
-    const verified = args.media.every((item) => {
-      const uploaded = uploadedByKey.get(item.key);
-      return uploaded
-        && uploaded.url === item.url
-        && uploaded.name === item.name
-        && uploaded.size === item.size
-        && uploaded.type === item.type;
-    });
-    if (!verified) throw new Error("UPLOAD_VERIFICATION_FAILED");
+    verifyPendingUploadIntent(intent, args.media);
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
@@ -326,39 +348,19 @@ export const attachFeedbackMedia = mutation({
     const { session, actor } = await requireActor(ctx, args.token);
     assertStaffActor(actor);
     const doc = await requireWritableFeedback(ctx, actor, args.id);
-    const intent = await ctx.db.get(args.uploadIntentId);
-    if (
-      !intent
-      || intent.sessionId !== session._id
-      || intent.secret !== args.uploadIntentSecret
-      || (intent.actorRole !== undefined && intent.actorRole !== actor.role)
-      || (intent.actorCustomerId !== undefined && intent.actorCustomerId !== actor.customerId)
-    ) {
-      throw new Error("UPLOAD_INTENT_NOT_FOUND");
-    }
+    const intent = requireOwnedUploadIntent(
+      await ctx.db.get(args.uploadIntentId),
+      session,
+      actor,
+      args.uploadIntentSecret,
+    );
     if (intent.status === "attached") {
       if (intent.feedbackId !== doc._id) throw new Error("UPLOAD_INTENT_MISMATCH");
       return { eventId: null, version: doc.version ?? 0 };
     }
-    if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
-      throw new Error("UPLOAD_INTENT_INVALID");
-    }
-    if (args.media.length === 0 || intent.uploadedFiles.length !== args.media.length) {
-      throw new Error("UPLOAD_INCOMPLETE");
-    }
+    if (args.media.length === 0) throw new Error("UPLOAD_INCOMPLETE");
     validateMediaItems([...doc.media, ...args.media]);
-    const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
-    const verified = args.media.every((item) => {
-      const uploaded = uploadedByKey.get(item.key);
-      return uploaded
-        && uploaded.url === item.url
-        && uploaded.name === item.name
-        && uploaded.size === item.size
-        && uploaded.type === item.type;
-    });
-    if (!verified || new Set(args.media.map((item) => item.key)).size !== args.media.length) {
-      throw new Error("UPLOAD_VERIFICATION_FAILED");
-    }
+    verifyPendingUploadIntent(intent, args.media);
 
     const now = Date.now();
     const changed = await applyTicketChange(ctx, {

@@ -234,7 +234,10 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
     if (command.kind === "create") {
       const idempotencyKey = command.request.requestId ?? deps.newRequestId();
       requestId = idempotencyKey;
-      if (command.dryRun) return succeed(jsonLine(dryRunOutput(target, command.request, idempotencyKey)));
+      if (command.dryRun) {
+        const files = await deps.images.prepare(command.images);
+        return succeed(jsonLine(dryRunOutput(target, command.request, idempotencyKey, files)));
+      }
       const access = await sessions.requireStaff(target);
       const { url, token } = access;
       const created = await deps.remote.create(url, token, { ...command.request, requestId: idempotencyKey });

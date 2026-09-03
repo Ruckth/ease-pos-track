@@ -307,6 +307,30 @@ test("a read-only auth command does not create configuration before setup is com
   assert.equal(config.value, null);
 });
 
+test("create dry-run validates image inputs and previews their original metadata without uploading", async () => {
+  const { deps, remote } = fixture();
+  let uploaded = false;
+  deps.images.upload = async () => { uploaded = true; return []; };
+
+  const result = await runTicketCli([
+    "create", "--title", "Calendar overlap", "--image", "/tmp/first.png", "--dry-run",
+  ], deps);
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout).ticket.media, [
+    { name: "first.png", size: 7, type: "image/png" },
+  ]);
+  assert.equal(uploaded, false);
+  assert.deepEqual(remote.calls, []);
+
+  deps.images.prepare = async () => { throw new TicketCliError("IMAGE_FILE_NOT_FOUND", "missing", EXIT.invalidInput); };
+  const invalid = await runTicketCli([
+    "create", "--title", "Calendar overlap", "--image", "/tmp/missing.png", "--dry-run",
+  ], deps);
+  assert.equal(invalid.exitCode, EXIT.invalidInput);
+  assert.equal(JSON.parse(invalid.stderr).code, "IMAGE_FILE_NOT_FOUND");
+});
+
 test("logout can revoke a Keychain session even when non-secret configuration was removed", async () => {
   const { deps, remote, config, credentials } = fixture();
   config.value = null;
