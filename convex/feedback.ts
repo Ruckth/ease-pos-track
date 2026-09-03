@@ -23,6 +23,7 @@ import {
 import { requireCurrentVersion, validateFeedbackText } from "./feedback_state";
 import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
 import {
+  applyTicketChange,
   createTicketRecord,
   ensureTicketNumbersInDb,
   feedbackState,
@@ -339,23 +340,15 @@ export const updateFeedbackStatus = mutation({
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status === args.status) return { eventId: null, version: currentVersion };
 
-    const now = Date.now();
-    const after = { ...doc, status: args.status, version: currentVersion + 1, updatedAt: now };
-    await ctx.db.patch(args.id, {
-      status: args.status,
-      version: currentVersion + 1,
-      updatedAt: now,
-    });
-    const eventId = await recordFeedbackEvent(ctx, {
-      feedbackId: args.id,
+    const { eventId, version } = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { status: args.status },
       action: "status_changed",
-      before: feedbackState(doc),
-      after: feedbackState(after),
-      sessionId: session._id,
-      ...actorFields(actor),
-      createdAt: now,
+      author: { sessionId: session._id, ...actorFields(actor) },
+      now: Date.now(),
     });
-    return { eventId, version: currentVersion + 1 };
+    return { eventId, version };
   },
 });
 
@@ -374,23 +367,19 @@ export const undoFeedbackStatus = mutation({
     }
     const doc = await ctx.db.get(event.feedbackId);
     if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
-    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status !== event.after.status) throw new Error("STATUS_UNDO_UNAVAILABLE");
 
-    const now = Date.now();
-    const after = { ...doc, status: event.before.status, version: currentVersion + 1, updatedAt: now };
-    await ctx.db.patch(doc._id, { status: event.before.status, version: currentVersion + 1, updatedAt: now });
-    await recordFeedbackEvent(ctx, {
-      feedbackId: doc._id,
+    const { version } = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { status: event.before.status },
       action: "status_undone",
-      before: feedbackState(doc),
-      after: feedbackState(after),
-      sessionId: session._id,
-      ...actorFields(actor),
+      author: { sessionId: session._id, ...actorFields(actor) },
       sourceEventId: event._id,
-      createdAt: now,
+      now: Date.now(),
     });
-    return { version: currentVersion + 1 };
+    return { version };
   },
 });
 
@@ -406,35 +395,20 @@ export const undoFeedbackEdit = mutation({
     if (event.action !== "edited" || !event.before || !event.after) {
       throw new Error("EDIT_UNDO_UNAVAILABLE");
     }
-    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    requireCurrentVersion(doc, args.expectedVersion);
     if (doc.title !== event.after.title || doc.description !== event.after.description) {
       throw new Error("EDIT_UNDO_UNAVAILABLE");
     }
-    const now = Date.now();
-    const after = {
-      ...doc,
-      title: event.before.title,
-      description: event.before.description,
-      version: currentVersion + 1,
-      updatedAt: now,
-    };
-    await ctx.db.patch(doc._id, {
-      title: event.before.title,
-      description: event.before.description,
-      version: currentVersion + 1,
-      updatedAt: now,
-    });
-    await recordFeedbackEvent(ctx, {
-      feedbackId: doc._id,
+    const { version } = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { title: event.before.title, description: event.before.description },
       action: "edit_undone",
-      before: feedbackState(doc),
-      after: feedbackState(after),
-      sessionId: session._id,
-      ...actorFields(actor),
+      author: { sessionId: session._id, ...actorFields(actor) },
       sourceEventId: event._id,
-      createdAt: now,
+      now: Date.now(),
     });
-    return { version: currentVersion + 1 };
+    return { version };
   },
 });
 
@@ -453,19 +427,15 @@ export const editFeedback = mutation({
     const { title, description } = validateFeedbackText(args.title, args.description);
     if (title === doc.title && description === doc.description) return { version: currentVersion };
 
-    const now = Date.now();
-    const after = { ...doc, title, description, version: currentVersion + 1, updatedAt: now };
-    await ctx.db.patch(doc._id, { title, description, version: currentVersion + 1, updatedAt: now });
-    const eventId = await recordFeedbackEvent(ctx, {
-      feedbackId: doc._id,
+    const { eventId, version } = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { title, description },
       action: "edited",
-      before: feedbackState(doc),
-      after: feedbackState(after),
-      sessionId: session._id,
-      ...actorFields(actor),
-      createdAt: now,
+      author: { sessionId: session._id, ...actorFields(actor) },
+      now: Date.now(),
     });
-    return { eventId, version: currentVersion + 1 };
+    return { eventId, version };
   },
 });
 
@@ -474,20 +444,16 @@ export const archiveFeedback = mutation({
   handler: async (ctx, args) => {
     const { session, actor } = await requireActor(ctx, args.token);
     const doc = await requireWritableFeedback(ctx, actor, args.id);
-    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     const now = Date.now();
-    const after = { ...doc, deletedAt: now, version: currentVersion + 1, updatedAt: now };
-    await ctx.db.patch(doc._id, { deletedAt: now, version: currentVersion + 1, updatedAt: now });
-    await recordFeedbackEvent(ctx, {
-      feedbackId: doc._id,
+    const { version } = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { deletedAt: now },
       action: "archived",
-      before: feedbackState(doc),
-      after: feedbackState(after),
-      sessionId: session._id,
-      ...actorFields(actor),
-      createdAt: now,
+      author: { sessionId: session._id, ...actorFields(actor) },
+      now,
     });
-    return { version: currentVersion + 1 };
+    return { version };
   },
 });
 
