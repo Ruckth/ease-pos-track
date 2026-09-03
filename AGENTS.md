@@ -9,7 +9,7 @@ Project vocabulary: the unit of work is a **Ticket**. Do not introduce "feedback
 Only run this when the user explicitly asks for a Ticket to be created.
 
 ```bash
-pnpm run --silent ticket -- create --title "<title>" --description "<description>"
+pnpm ticket create --title "<title>" --description "<description>"
 ```
 
 - Draft or unsure? Add `--dry-run`. It validates and prints the Ticket it would
@@ -25,7 +25,7 @@ pnpm run --silent ticket -- create --title "<title>" --description "<description
 - If a run fails and you want to retry it, reuse the `requestId` from the output.
   Never retry with a different request id: that can create a duplicate Ticket.
 
-`pnpm run --silent ticket -- --help` documents every flag. Details and setup: [docs/ticket-cli.md](docs/ticket-cli.md).
+`pnpm ticket --help` documents every flag. Details and setup: [docs/ticket-cli.md](docs/ticket-cli.md).
 
 ## Checks
 
