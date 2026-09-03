@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const GUARD = fileURLToPath(new URL("../scripts/ensure-pnpm.mjs", import.meta.url));
+const AGENT_INSTRUCTIONS = fileURLToPath(new URL("../AGENTS.md", import.meta.url));
 
 /**
  * Runs the guard the way a lifecycle script would, with only the two variables a
@@ -58,4 +60,11 @@ test("a wrapper that drops the user agent is still identified by its executable"
 test("an unrecognised caller is allowed rather than guessed at", () => {
   assert.equal(runGuard({}).status, 0);
   assert.equal(runGuard({ npm_config_user_agent: "deno/2.0.0" }).status, 0);
+});
+
+test("Ticket instructions use pnpm's direct script shorthand without forwarding a separator", () => {
+  const instructions = readFileSync(AGENT_INSTRUCTIONS, "utf8");
+  assert.match(instructions, /pnpm ticket create --title/);
+  assert.match(instructions, /`pnpm ticket --help`/);
+  assert.doesNotMatch(instructions, /pnpm run --silent ticket --/);
 });
