@@ -46,5 +46,5 @@ export function TicketExplorerFilters({ query, onChange, tags }: { query: Filter
     { id: "urgencyScore", label: c.urgency, icon: <Gauge />, type: "range", operators: [{ value: "between", label: c.between, arity: "range" }, { value: "unset", label: c.unset, arity: "none" }], defaultOperator: "between", editor: UrgencyEditor },
     ...(["createdAt", "updatedAt"] as const).map((id) => ({ id, label: id === "createdAt" ? c.createdDate : c.updatedDate, icon: <CalendarDays />, type: "range" as const, operators: [{ value: "between", label: c.between, arity: "range" as const }], defaultOperator: "between", editor: DateRangeEditor, valueText: ({ value }: { value: unknown }) => Array.isArray(value) ? value.map((date) => { const time = dateBoundary(date); return time === null ? "…" : formatDate(time); }).join(` ${c.to} `) : "…" })),
   ], [tags, c, t, formatDate]);
-  return <Filters fields={fields} query={query} onQueryChange={onChange} labels={language === "th" ? thaiFilterLabels : undefined} />;
+  return <Filters className="[&_[data-slot=filter-chip]]:max-w-full [&_[data-slot=filter-chip]]:overflow-x-auto [&_[data-slot=filter-chip]>*]:shrink-0 [&_[data-slot=filter-chip]>*]:whitespace-nowrap" fields={fields} query={query} onQueryChange={onChange} labels={language === "th" ? thaiFilterLabels : undefined} />;
 }

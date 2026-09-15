@@ -39,3 +39,12 @@ test("sort before pagination, stable ties, no mutation, and clamp on live deleti
   assert.deepEqual(paginateTickets([],9,10),{page:1,pages:1,rows:[]});
   assert.deepEqual(sortTickets([ticket(2),ticket(1)],{field:"createdAt",direction:"desc"},[],"en").map(r=>r.ticketNumber),[1,2]);
 });
+
+test("urgency ranges never treat unset as zero and unset sorts last in either direction", () => {
+  const rows=[ticket(1),ticket(2,{urgencyScore:1}),ticket(3,{urgencyScore:100}),ticket(4,{urgencyScore:50})];
+  const range=createFilterQuery([createFilterRule({path:["urgencyScore"],operator:"between",value:[1,50]})]);
+  assert.deepEqual(filterTickets(rows,"",range).map(r=>r.ticketNumber),[2,4]);
+  assert.deepEqual(filterTickets(rows,"",createFilterQuery([createFilterRule({path:["urgencyScore"],operator:"unset"})])).map(r=>r.ticketNumber),[1]);
+  assert.deepEqual(sortTickets(rows,{field:"urgencyScore",direction:"asc"},[],"en").map(r=>r.ticketNumber),[2,4,3,1]);
+  assert.deepEqual(sortTickets(rows,{field:"urgencyScore",direction:"desc"},[],"en").map(r=>r.ticketNumber),[3,4,2,1]);
+});

@@ -33,7 +33,7 @@ export function TicketExplorer({ items, tags = [], search, onSearch, showArchive
   return (        <section className="min-w-0">
           <div className="mb-4 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1"><TicketExplorerFilters query={filterQuery} onChange={setFilterQuery} tags={tags} /></div>
+              <div className="order-2 w-full min-w-0 sm:order-none sm:w-auto sm:flex-1"><TicketExplorerFilters query={filterQuery} onChange={setFilterQuery} tags={tags} /></div>
               <div className="flex items-center gap-2">
                 {(search || filterQuery.rules.length > 0) && <Button variant="ghost" size="sm" onClick={() => { onSearch(""); setFilterQuery(createFilterQuery()); }}>{explorerCopy.clearAll}</Button>}
                 <div className="flex rounded-md border bg-card p-1" role="group" aria-label={explorerCopy.view}>
@@ -49,7 +49,7 @@ export function TicketExplorer({ items, tags = [], search, onSearch, showArchive
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
           ) : view === "table" ? (
-            <TicketTable items={sorted} tags={tags} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect} />
+            <TicketTable items={sorted} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect} />
           ) : (
             <StaffBoard items={activeItems} onSelect={onSelect} onMoveCard={onMove} />
           )}

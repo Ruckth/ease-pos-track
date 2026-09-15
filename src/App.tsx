@@ -31,6 +31,7 @@ import {
   type AnnotationUpdateInput,
   type MediaViewerHandle,
 } from "@/components/media-viewer";
+import { ArchivedTicketDialog } from "@/components/archived-ticket-dialog";
 import { TicketExplorer } from "@/components/ticket-explorer";
 import { TicketTagEditor } from "@/components/ticket-tag-editor";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
@@ -276,13 +277,13 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         />
       </Dialog>
 
-      <FeedbackDialog
+      {selected?.deletedAt !== undefined ? <ArchivedTicketDialog item={selected} onClose={() => setSelectedId(null)} onRestore={() => restoreItem(selected._id)} /> : <FeedbackDialog
         feedback={selected}
         token={token}
         onClose={() => setSelectedId(null)}
         onMove={(id, status) => void moveItem(id, status)}
         onArchive={archiveItem}
-      />
+      />}
     </main>
   );
 }

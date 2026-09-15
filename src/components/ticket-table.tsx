@@ -8,11 +8,11 @@ import { statusMeta } from "@/components/feedback-status";
 import { useI18n } from "@/lib/i18n";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { formatTicketNumber } from "@/lib/feedback-ui";
-import { paginateTickets, type ExplorerSort, type ExplorerTag, type ExplorerTicket, type SortField } from "@/lib/ticket-explorer";
+import { paginateTickets, type ExplorerSort, type ExplorerTicket, type SortField } from "@/lib/ticket-explorer";
 
 /** Adapted from @reui/c-table-14 and @reui/c-pagination-15 for real Tickets. */
-export function TicketTable({ items, tags, sort, onSort, page, onPage, pageSize, onPageSize, onSelect }: {
-  items: ExplorerTicket[]; tags: ExplorerTag[]; sort: ExplorerSort; onSort: (sort: ExplorerSort) => void;
+export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPageSize, onSelect }: {
+  items: ExplorerTicket[]; sort: ExplorerSort; onSort: (sort: ExplorerSort) => void;
   page: number; onPage: (page: number) => void; pageSize: number; onPageSize: (size: number) => void;
   onSelect: (id: Id<"feedback">) => void;
 }) {

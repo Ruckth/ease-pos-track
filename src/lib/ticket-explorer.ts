@@ -1,9 +1,9 @@
 import type { FilterNode, FilterQuery, FilterRule } from "@/components/reui/filters/filters-types";
 import { formatTicketNumber } from "./feedback-ui";
-import type { Feedback } from "./types";
+import type { Feedback, TicketTag } from "./types";
 
 export type ExplorerTicket = Feedback;
-export type ExplorerTag = { _id: string; name: string; color: string };
+export type ExplorerTag = TicketTag;
 export type SortField = "ticketNumber" | "title" | "tags" | "status" | "createdAt" | "updatedAt" | "urgencyScore";
 export type ExplorerSort = { field: SortField; direction: "asc" | "desc" };
 
