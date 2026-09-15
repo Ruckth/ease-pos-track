@@ -1,6 +1,7 @@
 import type { Doc } from "@convex/_generated/dataModel";
 
-export type Feedback = Doc<"feedback">;
+export type TicketTag = Pick<Doc<"ticketTags">, "_id" | "name" | "color">;
+export type Feedback = Doc<"feedback"> & { tags?: TicketTag[] };
 export type FeedbackStatus = Feedback["status"];
 export type MediaItem = Feedback["media"][number];
 export type Annotation = NonNullable<Feedback["annotations"]>[number];
