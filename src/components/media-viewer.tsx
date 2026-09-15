@@ -407,7 +407,7 @@ function ImageSlide({
             <PinMarker
               key={annotation.id}
               annotation={annotation}
-              highlighted={focus?.id === annotation.id}
+              highlighted={focus?.id === annotation.id || openId === annotation.id}
               onClick={() => onOpenChange(openId === annotation.id ? null : annotation.id)}
             />
           ),
@@ -522,7 +522,7 @@ function VideoSlide({
             <PinMarker
               key={annotation.id}
               annotation={annotation}
-              highlighted={focus?.id === annotation.id}
+              highlighted={focus?.id === annotation.id || openId === annotation.id}
               onClick={() => onOpenChange(openId === annotation.id ? null : annotation.id)}
             />
           ),
@@ -601,7 +601,7 @@ function PinMarker({
       }}
       aria-label={`${t("comment", { label: annotation.label })}: ${annotation.text}`}
       className={cn(
-        "absolute z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-xs font-bold text-primary-foreground shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/80",
+        "absolute z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full annotation-glass-marker border border-white/70 text-xs font-bold text-primary-foreground shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/80",
         highlighted && "scale-125 ring-4 ring-amber-400/80",
       )}
       style={{ left: `${(annotation.x ?? 0) * 100}%`, top: `${(annotation.y ?? 0) * 100}%` }}
@@ -652,7 +652,7 @@ function PinPopover({
   const below = annotation.y <= 0.6;
   return (
     <div
-      className="absolute z-20 w-52 rounded-md border bg-background p-2.5 text-sm shadow-lg"
+      className="annotation-glass-popover absolute z-20 w-52 max-w-[calc(100%_-_16px)] rounded-lg border border-white/60 p-2.5 text-sm text-popover-foreground shadow-lg"
       style={{
         left: `clamp(112px, ${annotation.x * 100}%, calc(100% - 112px))`,
         top: `${annotation.y * 100}%`,
@@ -738,7 +738,7 @@ function PinPopover({
             </Button>
           </div>
         </div>
-      ) : <p className="mt-1.5 whitespace-pre-wrap leading-5">{annotation.text}</p>}
+      ) : <p className="mt-1.5 whitespace-pre-wrap break-words leading-5">{annotation.text}</p>}
       {error ? <p role="alert" className="mt-2 text-destructive">{error}</p> : null}
       {annotation.time !== undefined ? (
         <p className="mt-1 text-muted-foreground">{t("videoAt", { time: formatClock(annotation.time) })}</p>
