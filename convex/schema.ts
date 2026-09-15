@@ -1,6 +1,8 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+export const tagColor = v.union(v.literal("slate"), v.literal("red"), v.literal("orange"), v.literal("green"), v.literal("blue"), v.literal("violet"));
+
 export const feedbackStatus = v.union(
   v.literal("new"),
   v.literal("acknowledged"),
@@ -60,6 +62,7 @@ export const annotationEventAction = v.union(
 );
 
 export const feedbackEventAction = v.union(
+  v.literal("tags_changed"),
   v.literal("created"),
   v.literal("media_attached"),
   v.literal("edited"),
@@ -80,6 +83,7 @@ export const feedbackStateValidator = v.object({
   urgencyScore: v.optional(v.number()),
   version: v.number(),
   mediaCount: v.optional(v.number()),
+  tagIds: v.optional(v.array(v.id("ticketTags"))),
   deletedAt: v.optional(v.number()),
 });
 
@@ -98,12 +102,20 @@ export const uploadIntentStatus = v.union(
 );
 
 export default defineSchema({
+  ticketTags: defineTable({
+    name: v.string(),
+    normalizedName: v.string(),
+    color: tagColor,
+    createdBy: v.id("sessions"),
+    createdAt: v.number(),
+  }).index("by_normalized_name", ["normalizedName"]),
   feedback: defineTable({
     title: v.string(),
     description: v.string(),
     status: feedbackStatus,
     urgencyScore: v.optional(v.number()),
     ticketNumber: v.optional(v.number()),
+    tagIds: v.optional(v.array(v.id("ticketTags"))),
     media: v.array(mediaItemValidator),
     annotations: v.optional(v.array(annotationValidator)),
     version: v.optional(v.number()),

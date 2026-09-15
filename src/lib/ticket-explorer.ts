@@ -2,7 +2,7 @@ import type { FilterNode, FilterQuery, FilterRule } from "@/components/reui/filt
 import { formatTicketNumber } from "./feedback-ui";
 import type { Feedback } from "./types";
 
-export type ExplorerTicket = Feedback & { tagIds?: string[] };
+export type ExplorerTicket = Feedback;
 export type ExplorerTag = { _id: string; name: string; color: string };
 export type SortField = "ticketNumber" | "title" | "tags" | "status" | "createdAt" | "updatedAt" | "urgencyScore";
 export type ExplorerSort = { field: SortField; direction: "asc" | "desc" };

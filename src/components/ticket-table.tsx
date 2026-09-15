@@ -3,6 +3,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TicketTagList } from "@/components/ticket-tags";
 import { statusMeta } from "@/components/feedback-status";
 import { useI18n } from "@/lib/i18n";
 import { useExplorerCopy } from "@/lib/explorer-copy";
@@ -28,7 +29,7 @@ export function TicketTable({ items, tags, sort, onSort, page, onPage, pageSize,
         <TableBody>{result.rows.map((item) => <TableRow key={item._id}>
           <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber)}</TableCell>
           <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber)}: ${item.title}`}>{item.title}</button>{item.deletedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
-          <TableCell><div className="flex min-w-24 flex-wrap gap-1">{(item.tagIds ?? []).map((id) => { const tag = tags.find((tag) => tag._id === id); return tag ? <Badge key={id}>{tag.name}</Badge> : null; })}</div></TableCell>
+          <TableCell><div className="min-w-24"><TicketTagList tags={item.tags ?? []} /></div></TableCell>
           <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge></TableCell>
           <TableCell className="tabular-nums">{item.urgencyScore === undefined ? <span className="text-muted-foreground">{c.unset}</span> : `${item.urgencyScore} / 100`}</TableCell>
           <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.createdAt)}</TableCell>

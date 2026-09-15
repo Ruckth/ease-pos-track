@@ -32,6 +32,7 @@ import {
   type MediaViewerHandle,
 } from "@/components/media-viewer";
 import { TicketExplorer } from "@/components/ticket-explorer";
+import { TicketTagEditor } from "@/components/ticket-tag-editor";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "@/lib/feedback-ui";
@@ -146,6 +147,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   const [composerHasDraft, setComposerHasDraft] = useState(false);
   const [composerBusy, setComposerBusy] = useState(false);
   const feedback = useQuery(api.feedback.listFeedback, { token, includeDeleted: showArchived });
+  const ticketTags = useQuery(api.feedback.listTicketTags, { token });
   const updateStatus = useMutation(api.feedback.updateFeedbackStatus);
   const undoStatus = useMutation(api.feedback.undoFeedbackStatus);
   const archiveFeedback = useMutation(api.feedback.archiveFeedback);
@@ -250,7 +252,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6">
-        <TicketExplorer items={feedback} search={search} onSearch={setSearch} showArchived={showArchived} onSelect={setSelectedId} onMove={moveItem} onRestore={(id) => void restoreItem(id).catch((error) => toast.error(localizeError(error, t)))} />
+        <TicketExplorer items={feedback} tags={ticketTags} search={search} onSearch={setSearch} showArchived={showArchived} onSelect={setSelectedId} onMove={moveItem} onRestore={(id) => void restoreItem(id).catch((error) => toast.error(localizeError(error, t)))} />
       </div>
 
       <Dialog
@@ -540,6 +542,7 @@ function FeedbackDialog({
   const { t, formatDate } = useI18n();
   const detail = useQuery(api.feedback.getFeedback, feedback ? { token, id: feedback._id } : "skip");
   const activity = useQuery(api.feedback.listAnnotationActivity, feedback ? { token, id: feedback._id } : "skip");
+  const ticketTags = useQuery(api.feedback.listTicketTags, feedback ? { token } : "skip");
   const feedbackActivity = useQuery(api.feedback.listFeedbackActivity, feedback ? { token, id: feedback._id } : "skip");
   const editFeedback = useMutation(api.feedback.editFeedback);
   const undoFeedbackEdit = useMutation(api.feedback.undoFeedbackEdit);
@@ -657,6 +660,7 @@ function FeedbackDialog({
               <Copy /> {t("copy")}
             </Button>
           </div>
+          <TicketTagEditor key={item._id} item={item} token={token} />
           <MediaViewer
             key={item._id}
             ref={viewerRef}
@@ -742,7 +746,7 @@ function FeedbackDialog({
               onRestore={handleRestoreAnnotation}
             />
             <AnnotationActivityList events={activity ?? []} />
-            <FeedbackActivityList events={feedbackActivity ?? []} />
+            <FeedbackActivityList events={feedbackActivity ?? []} tags={ticketTags ?? []} />
             <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
           </div>
         </div>

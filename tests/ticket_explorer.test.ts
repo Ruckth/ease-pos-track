@@ -7,7 +7,7 @@ const ticket = (n: number, extra: Partial<ExplorerTicket> = {}): ExplorerTicket 
 const rule = (field: string, value: unknown) => createFilterRule({ path: [field], operator: field.endsWith("At") ? "between" : "in", value });
 
 test("search and multiple filters combine, any selected tag matches, missing tags do not", () => {
-  const rows = [ticket(1,{tagIds:["a"]}),ticket(2,{tagIds:["b"],status:"done"}),ticket(3),ticket(4,{tagIds:["c"]})];
+  const rows = [ticket(1,{tagIds:["a" as Id<"ticketTags">]}),ticket(2,{tagIds:["b" as Id<"ticketTags">],status:"done"}),ticket(3),ticket(4,{tagIds:["c" as Id<"ticketTags">]})];
   const query=createFilterQuery([rule("tags",["a","b"]),rule("status",["new"])]);
   assert.deepEqual(filterTickets(rows,"printer",query).map(r=>r.ticketNumber),[1]);
   assert.deepEqual(filterTickets(rows,"TKT-0001",query).map(r=>r.ticketNumber),[1]);
