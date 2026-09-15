@@ -8,6 +8,7 @@ import { statusMeta } from "@/components/feedback-status";
 import { cn } from "@/lib/utils";
 import { feedbackProgress, formatTicketNumber, nextFeedbackStatus } from "@/lib/feedback-ui";
 import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus } from "@/lib/types";
+import { TicketTagList } from "@/components/ticket-tags";
 import { useI18n } from "@/lib/i18n";
 
 /** Compact Ticket summary with an independent attachment popup and status action. */
@@ -44,6 +45,7 @@ export function FeedbackCard({
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
           {item.description ? <p className="truncate text-sm leading-5 text-muted-foreground">{item.description}</p> : null}
+          <TicketTagList tags={item.tags ?? []} />
           {/* The bar is labelled with the whole sentence, so the percent and step
               beside it are decoration a screen reader would only repeat. */}
           <Progress

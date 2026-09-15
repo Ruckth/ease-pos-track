@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { annotationCreateInputValidator, feedbackStatus, mediaItemValidator } from "./schema";
+import { annotationCreateInputValidator, feedbackStatus, mediaItemValidator, tagColor } from "./schema";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -20,6 +20,7 @@ import {
   updateAnnotationRecord,
   type AnnotationRecord,
 } from "./annotation_state";
+import { normalizeTagIds, normalizeTagName } from "./tag_rules";
 import { requireCurrentVersion, validateFeedbackText } from "./feedback_state";
 import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
 import { validateMediaItems } from "./uploads";
@@ -147,6 +148,50 @@ function verifyPendingUploadIntent(
   }
 }
 
+export const listTicketTags = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const { actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    return (await ctx.db.query("ticketTags").withIndex("by_normalized_name").collect())
+      .map(({ _id, name, color }) => ({ _id, name, color }));
+  },
+});
+
+export const createTicketTag = mutation({
+  args: { token: v.string(), name: v.string(), color: tagColor },
+  handler: async (ctx, args) => {
+    const { session, actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const name = normalizeTagName(args.name);
+    // The indexed read and insert share a transaction: racing creators cannot
+    // produce two tags with the same normalized name.
+    const existing = await ctx.db.query("ticketTags")
+      .withIndex("by_normalized_name", (q) => q.eq("normalizedName", name.normalizedName)).unique();
+    if (existing) throw new Error("TAG_ALREADY_EXISTS");
+    return await ctx.db.insert("ticketTags", { ...name, color: args.color, createdBy: session._id, createdAt: Date.now() });
+  },
+});
+
+export const setTicketTags = mutation({
+  args: { token: v.string(), id: v.id("feedback"), tagIds: v.array(v.id("ticketTags")), expectedVersion: v.number() },
+  handler: async (ctx, args) => {
+    const { session, actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const version = requireCurrentVersion(doc, args.expectedVersion);
+    const tagIds = normalizeTagIds(args.tagIds);
+    for (const id of tagIds) {
+      if (!(await ctx.db.get(id))) throw new Error("TAG_NOT_FOUND");
+    }
+    if (JSON.stringify(tagIds) === JSON.stringify(normalizeTagIds(doc.tagIds ?? []))) return { eventId: null, version };
+    return await applyTicketChange(ctx, {
+      doc, expectedVersion: args.expectedVersion, changes: { tagIds }, action: "tags_changed",
+      author: { sessionId: session._id, ...actorFields(actor) }, now: Date.now(),
+    });
+  },
+});
+
 export const listFeedback = query({
   args: {
     token: v.string(),
@@ -158,7 +203,10 @@ export const listFeedback = query({
     assertStaffActor(actor);
 
     const rows = await ctx.db.query("feedback").withIndex("by_created_at").order("desc").collect();
-    return args.includeDeleted ? rows : rows.filter((item) => item.deletedAt === undefined);
+    const tags = await ctx.db.query("ticketTags").collect();
+    const byId = new Map(tags.map((tag) => [tag._id, tag]));
+    return (args.includeDeleted ? rows : rows.filter((item) => item.deletedAt === undefined))
+      .map((row) => ({ ...row, tags: (row.tagIds ?? []).flatMap((id) => { const tag = byId.get(id); return tag ? [{ _id: tag._id, name: tag.name, color: tag.color }] : []; }) }));
   },
 });
 

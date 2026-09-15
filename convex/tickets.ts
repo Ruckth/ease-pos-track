@@ -64,6 +64,7 @@ export function feedbackState(doc: Doc<"feedback">) {
     status: doc.status,
     version: doc.version ?? 0,
     mediaCount: doc.media.length,
+    ...(doc.tagIds === undefined ? {} : { tagIds: doc.tagIds }),
     ...(doc.deletedAt === undefined ? {} : { deletedAt: doc.deletedAt }),
   };
 }
@@ -97,7 +98,7 @@ export async function recordFeedbackEvent(
   ctx: MutationCtx,
   input: {
     feedbackId: Id<"feedback">;
-    action: "created" | "media_attached" | "edited" | "edit_undone" | "status_changed" | "status_undone" | "archived" | "restored";
+    action: "tags_changed" | "created" | "media_attached" | "edited" | "edit_undone" | "status_changed" | "status_undone" | "archived" | "restored";
     before?: ReturnType<typeof feedbackState>;
     after?: ReturnType<typeof feedbackState>;
     sourceEventId?: Id<"feedbackEvents">;
@@ -112,10 +113,11 @@ export type TicketState = ReturnType<typeof feedbackState>;
 
 /** Ticket fields that versioned state mutations may change. */
 export type TicketChanges = Partial<
-  Pick<Doc<"feedback">, "title" | "description" | "status" | "media" | "deletedAt">
+  Pick<Doc<"feedback">, "title" | "description" | "status" | "media" | "deletedAt" | "tagIds">
 >;
 
 type TicketChangeAction =
+  | "tags_changed"
   | "media_attached"
   | "edited"
   | "edit_undone"

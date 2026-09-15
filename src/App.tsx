@@ -32,6 +32,7 @@ import {
   type AnnotationUpdateInput,
   type MediaViewerHandle,
 } from "@/components/media-viewer";
+import { TicketTagEditor } from "@/components/ticket-tag-editor";
 import { StaffBoard } from "@/components/staff-board";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { cn } from "@/lib/utils";
@@ -580,6 +581,7 @@ function FeedbackDialog({
   const { t, formatDate } = useI18n();
   const detail = useQuery(api.feedback.getFeedback, feedback ? { token, id: feedback._id } : "skip");
   const activity = useQuery(api.feedback.listAnnotationActivity, feedback ? { token, id: feedback._id } : "skip");
+  const ticketTags = useQuery(api.feedback.listTicketTags, feedback ? { token } : "skip");
   const feedbackActivity = useQuery(api.feedback.listFeedbackActivity, feedback ? { token, id: feedback._id } : "skip");
   const editFeedback = useMutation(api.feedback.editFeedback);
   const undoFeedbackEdit = useMutation(api.feedback.undoFeedbackEdit);
@@ -697,6 +699,7 @@ function FeedbackDialog({
               <Copy /> {t("copy")}
             </Button>
           </div>
+          <TicketTagEditor key={item._id} item={item} token={token} />
           <MediaViewer
             key={item._id}
             ref={viewerRef}
@@ -782,7 +785,7 @@ function FeedbackDialog({
               onRestore={handleRestoreAnnotation}
             />
             <AnnotationActivityList events={activity ?? []} />
-            <FeedbackActivityList events={feedbackActivity ?? []} />
+            <FeedbackActivityList events={feedbackActivity ?? []} tags={ticketTags ?? []} />
             <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
           </div>
         </div>
