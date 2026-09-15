@@ -7,7 +7,10 @@ const actionKeys = { tags_changed: "actionTagsChanged", created: "actionCreated"
 
 export function FeedbackActivityList({ events, tags = [] }: { events: FeedbackEvent[]; tags?: TicketTag[] }) {
   const { t, formatDate } = useI18n();
-  const tagNames = (ids: string[] = []) => ids.map((id) => tags.find((tag) => tag._id === id)?.name ?? id).join(", ") || t("noTicketTags");
+  const tagNames = (ids: string[] = []) => {
+    const names = ids.map((id) => tags.find((tag) => tag._id === id)?.name);
+    return names.some((name) => name === undefined) ? null : names.join(", ") || t("noTicketTags");
+  };
   if (events.length === 0) return null;
   return (
     <details className="rounded-md border bg-muted/20 px-3 py-2">
@@ -21,7 +24,7 @@ export function FeedbackActivityList({ events, tags = [] }: { events: FeedbackEv
             {event.before?.status !== event.after?.status && event.before && event.after
               ? ` · ${t(statusMeta(event.before.status).labelKey)} → ${t(statusMeta(event.after.status).labelKey)}`
               : ""}
-            {event.action === "tags_changed" ? <span className="break-words">{` · ${tagNames(event.before?.tagIds)} → ${tagNames(event.after?.tagIds)}`}</span> : null}
+            {event.action === "tags_changed" && tagNames(event.before?.tagIds) !== null && tagNames(event.after?.tagIds) !== null ? <span className="break-words">{` · ${tagNames(event.before?.tagIds)} → ${tagNames(event.after?.tagIds)}`}</span> : null}
             <span className="ml-1">{formatDate(event.createdAt)}</span>
           </li>
         ))}
