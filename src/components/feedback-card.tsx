@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
-import { ChevronRight, Images, MapPin, PlayCircle } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Images, MapPin } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { statusMeta } from "@/components/feedback-status";
 import { cn } from "@/lib/utils";
@@ -9,23 +10,7 @@ import { feedbackProgress, formatTicketNumber, nextFeedbackStatus } from "@/lib/
 import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * A ticket tile: cover media carrying the ticket number and creation time, the
- * title and a one-line description, the workflow progress bar, the media and pin
- * counts, and the status button that advances the workflow without dragging.
- *
- * The ticket number and time are laid over the bottom of the cover on a dark
- * scrim, so they read over any photo and over the empty-cover placeholder alike,
- * and the space below stays free for the title and description. The scrim never
- * takes pointer events, so it cannot swallow a click meant for the card.
- *
- * The card body is opened by a transparent button stretched over media and text
- * - it is the only tab stop for "open details", it carries the ticket number as
- * its accessible name, and it sits below the drag grip (`z-10`) and outside the
- * status footer, so neither control is covered by it.
- *
- * `handle` receives the board's drag grip.
- */
+/** Compact Ticket summary with an independent attachment popup and status action. */
 export function FeedbackCard({
   item,
   onSelect,
@@ -38,7 +23,9 @@ export function FeedbackCard({
   handle?: ReactNode;
 }) {
   const { t, formatDate } = useI18n();
-  const cover = item.media[0];
+  const [mediaOpen, setMediaOpen] = useState(false);
+  const [mediaIndex, setMediaIndex] = useState(0);
+  const selectedMedia = item.media[mediaIndex] ?? item.media[0];
   const mediaCount = item.media.length;
   const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
   const ticketLabel = formatTicketNumber(item.ticketNumber);
@@ -50,23 +37,9 @@ export function FeedbackCard({
   return (
     <article className="rounded-md border bg-background shadow-sm">
       <div className="relative">
-        <div className="relative overflow-hidden rounded-t-md bg-black">
-          {cover ? (
-            isVideoMedia(cover) ? (
-              <div className="relative">
-                <video className="aspect-video w-full object-cover opacity-80" src={cover.url} muted playsInline preload="metadata" />
-                <PlayCircle className="absolute left-1/2 top-1/2 size-9 -translate-x-1/2 -translate-y-1/2 text-white" aria-hidden="true" />
-              </div>
-            ) : (
-              <img className="aspect-video w-full object-cover" src={cover.url} alt="" loading="lazy" />
-            )
-          ) : (
-            <div className="grid aspect-video w-full place-items-center text-sm text-white/60">{t("noMedia")}</div>
-          )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-2 pt-8">
-            <span className="font-mono text-sm font-semibold leading-5 text-white drop-shadow-sm">{ticketLabel}</span>
-            <span className="truncate text-xs leading-5 text-white/85 drop-shadow-sm">{formatDate(item.createdAt)}</span>
-          </div>
+        <div className={cn("flex items-center justify-between gap-3 px-3 pt-3", handle && "pr-10")}>
+          <span className="font-mono text-sm font-semibold leading-5">{ticketLabel}</span>
+          <span className="truncate text-xs leading-5 text-muted-foreground">{formatDate(item.createdAt)}</span>
         </div>
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
@@ -89,10 +62,19 @@ export function FeedbackCard({
               <span className="tabular-nums">{t("ticketStep", { step: progress.step, total: progress.total })}</span>
             </span>
             {mediaCount > 0 ? (
-              <span className="ml-auto flex items-center gap-1" aria-label={t("reviewMedia", { count: mediaCount })}>
+              <button
+                type="button"
+                className="relative z-10 ml-auto flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-md px-2 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={t("viewTicketMedia", { ticket: ticketLabel, count: mediaCount })}
+                aria-haspopup="dialog"
+                onClick={() => {
+                  setMediaIndex(0);
+                  setMediaOpen(true);
+                }}
+              >
                 <Images className="size-3.5" aria-hidden="true" />
                 {mediaCount}
-              </span>
+              </button>
             ) : null}
             {pinCount > 0 ? (
               <span className={cn("flex items-center gap-1", mediaCount > 0 ? null : "ml-auto")} aria-label={t("reviewPins", { count: pinCount })}>
@@ -132,6 +114,36 @@ export function FeedbackCard({
           </Button>
         </div>
       ) : null}
+      <Dialog
+        open={mediaOpen}
+        onOpenChange={setMediaOpen}
+        title={ticketLabel}
+        description={t("reviewMedia", { count: mediaCount })}
+      >
+        {mediaOpen && selectedMedia ? (
+          <div className="space-y-3">
+            <div className="flex h-[55dvh] items-center justify-center overflow-hidden rounded-lg bg-black">
+              {isVideoMedia(selectedMedia) ? (
+                <video key={selectedMedia.key} src={selectedMedia.url} controls playsInline preload="metadata" className="max-h-full max-w-full" />
+              ) : (
+                <img src={selectedMedia.url} alt={selectedMedia.name} className="h-full w-full object-contain" />
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <Button type="button" variant="outline" size="icon" aria-label={t("previousSlide")} disabled={mediaIndex === 0} onClick={() => setMediaIndex((index) => index - 1)}>
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="min-w-0 text-center text-sm" aria-live="polite">
+                <span className="block truncate">{selectedMedia.name}</span>
+                <span className="text-muted-foreground">{Math.min(mediaIndex + 1, mediaCount)} / {mediaCount}</span>
+              </span>
+              <Button type="button" variant="outline" size="icon" aria-label={t("nextSlide")} disabled={mediaIndex >= mediaCount - 1} onClick={() => setMediaIndex((index) => index + 1)}>
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </article>
   );
 }
