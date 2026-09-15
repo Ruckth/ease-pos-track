@@ -4,7 +4,7 @@ import type { Feedback } from "./types";
 
 export type ExplorerTicket = Feedback & { tagIds?: string[] };
 export type ExplorerTag = { _id: string; name: string; color: string };
-export type SortField = "ticketNumber" | "title" | "tags" | "status" | "createdAt" | "updatedAt";
+export type SortField = "ticketNumber" | "title" | "tags" | "status" | "createdAt" | "updatedAt" | "urgencyScore";
 export type ExplorerSort = { field: SortField; direction: "asc" | "desc" };
 
 /** Calendar arithmetic, rather than 24 hours, keeps inclusive dates correct across DST. */
@@ -21,14 +21,18 @@ function matchRule(item: ExplorerTicket, rule: FilterRule): boolean {
   const field = rule.path[0];
   let match = true;
   const values = Array.isArray(rule.value) ? rule.value : [];
+  if (!rule.operator || (rule.operator !== "unset" && values.length === 0)) return true;
   if (field === "tags" || field === "status") {
     const actual = field === "tags" ? item.tagIds ?? [] : [item.status];
     match = values.length === 0 || values.some((value) => actual.includes(value));
+  } else if (field === "urgencyScore") {
+    match = rule.operator === "unset" ? item.urgencyScore === undefined : typeof item.urgencyScore === "number" && values.length === 2 && item.urgencyScore >= Number(values[0]) && item.urgencyScore <= Number(values[1]);
   } else if (field === "createdAt" || field === "updatedAt") {
     const from = dateBoundary(values[0]);
     const until = dateBoundary(values[1], true);
     // An incomplete editor draft never narrows the list.
-    if (from !== null && until !== null) match = item[field] >= from && item[field] < until;
+    if (from === null || until === null) return true;
+    match = item[field] >= from && item[field] < until;
   }
   return rule.negated ? !match : match;
 }
@@ -51,6 +55,9 @@ export function sortTickets<T extends ExplorerTicket>(items: T[], sort: Explorer
     ? (item.tagIds ?? []).map((id) => tagNames.get(id) ?? "").sort(collator.compare).join(", ")
     : item[sort.field] ?? 0;
   return [...items].sort((a, b) => {
+    if (sort.field === "urgencyScore" && (a.urgencyScore === undefined || b.urgencyScore === undefined)) {
+      if (a.urgencyScore !== b.urgencyScore) return a.urgencyScore === undefined ? 1 : -1;
+    }
     const av = value(a); const bv = value(b);
     const order = typeof av === "number" && typeof bv === "number" ? av - bv : collator.compare(String(av), String(bv));
     return (sort.direction === "asc" ? order : -order) || String(a._id).localeCompare(String(b._id));

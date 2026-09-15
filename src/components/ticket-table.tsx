@@ -17,7 +17,7 @@ export function TicketTable({ items, tags, sort, onSort, page, onPage, pageSize,
 }) {
   const { t, formatDate } = useI18n(); const c = useExplorerCopy();
   const result = paginateTickets(items, page, pageSize);
-  const columns: { field: SortField; label: string }[] = [{ field: "ticketNumber", label: c.ticketNumber }, { field: "title", label: c.title }, { field: "tags", label: c.tags }, { field: "status", label: c.status }, { field: "createdAt", label: c.createdDate }, { field: "updatedAt", label: c.updatedDate }];
+  const columns: { field: SortField; label: string }[] = [{ field: "ticketNumber", label: c.ticketNumber }, { field: "title", label: c.title }, { field: "tags", label: c.tags }, { field: "status", label: c.status }, { field: "urgencyScore", label: c.urgency }, { field: "createdAt", label: c.createdDate }, { field: "updatedAt", label: c.updatedDate }];
   const visiblePages = [...new Set([1, result.page - 1, result.page, result.page + 1, result.pages])].filter((n) => n > 0 && n <= result.pages).sort((a,b) => a-b);
   return <section className="min-w-0 space-y-3" aria-label={c.table}>
     <div className="overflow-hidden rounded-lg border bg-card">
@@ -30,6 +30,7 @@ export function TicketTable({ items, tags, sort, onSort, page, onPage, pageSize,
           <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber)}: ${item.title}`}>{item.title}</button>{item.deletedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
           <TableCell><div className="flex min-w-24 flex-wrap gap-1">{(item.tagIds ?? []).map((id) => { const tag = tags.find((tag) => tag._id === id); return tag ? <Badge key={id}>{tag.name}</Badge> : null; })}</div></TableCell>
           <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge></TableCell>
+          <TableCell className="tabular-nums">{item.urgencyScore === undefined ? <span className="text-muted-foreground">{c.unset}</span> : `${item.urgencyScore} / 100`}</TableCell>
           <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.createdAt)}</TableCell>
           <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.updatedAt)}</TableCell>
         </TableRow>)}{!result.rows.length && <TableRow><TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">{c.noResults}</TableCell></TableRow>}</TableBody>

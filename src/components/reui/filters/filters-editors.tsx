@@ -993,6 +993,9 @@ export function FilterMenu({
       retry: labels.retry,
       // Named after the field, not the cascader's own "Top level" wording.
       rootLevel: ariaLabel,
+      rootAnnouncement: (count: number) => `${ariaLabel}, ${labels.itemCount(count)}`,
+      itemCount: labels.itemCount,
+      selectedCount: labels.valueCount,
       panelLabel: ariaLabel,
       // Run FLAT, so the default hint would teach branch keys that do not exist.
       keyboardHint: () => "",
