@@ -3,7 +3,6 @@ import { useMutation, useQuery } from "convex/react";
 import { Toaster, toast } from "sonner";
 import {
   Archive,
-  ArchiveRestore,
   Copy,
   ImagePlus,
   Loader2,
@@ -32,8 +31,9 @@ import {
   type AnnotationUpdateInput,
   type MediaViewerHandle,
 } from "@/components/media-viewer";
+import { ArchivedTicketDialog } from "@/components/archived-ticket-dialog";
+import { TicketExplorer } from "@/components/ticket-explorer";
 import { TicketTagEditor } from "@/components/ticket-tag-editor";
-import { StaffBoard } from "@/components/staff-board";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "@/lib/feedback-ui";
@@ -148,6 +148,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   const [composerHasDraft, setComposerHasDraft] = useState(false);
   const [composerBusy, setComposerBusy] = useState(false);
   const feedback = useQuery(api.feedback.listFeedback, { token, includeDeleted: showArchived });
+  const ticketTags = useQuery(api.feedback.listTicketTags, { token });
   const updateStatus = useMutation(api.feedback.updateFeedbackStatus);
   const undoStatus = useMutation(api.feedback.undoFeedbackStatus);
   const archiveFeedback = useMutation(api.feedback.archiveFeedback);
@@ -157,14 +158,6 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   const [selectedId, setSelectedId] = useState<Id<"feedback"> | null>(null);
   const [search, setSearch] = useState("");
 
-  const filtered = useMemo(() => {
-    const rows = feedback ?? [];
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((item) =>
-      `${formatTicketNumber(item.ticketNumber)} ${item.title} ${item.description}`.toLowerCase().includes(q)
-    );
-  }, [feedback, search]);
 
   useEffect(() => {
     if (!feedback?.some((item) => item.ticketNumber === undefined) || ticketBackfillRunningRef.current) return;
@@ -177,8 +170,6 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   }, [ensureTicketNumbers, feedback, token]);
 
   const selected = feedback?.find((item) => item._id === selectedId) ?? null;
-  const activeItems = useMemo(() => filtered.filter((item) => item.deletedAt === undefined), [filtered]);
-  const archivedItems = useMemo(() => filtered.filter((item) => item.deletedAt !== undefined), [filtered]);
 
   /** Persists a status change and offers an undo. False means it was rejected. */
   async function moveItem(id: Id<"feedback">, status: FeedbackStatus) {
@@ -262,36 +253,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6">
-        <section className="min-w-0">
-          {feedback === undefined ? (
-            <div className="grid min-h-72 place-items-center rounded-lg border bg-card">
-              <Loader2 className="size-7 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <StaffBoard items={activeItems} onSelect={setSelectedId} onMoveCard={moveItem} />
-          )}
-          {showArchived && archivedItems.length > 0 ? (
-            <section className="mt-5 rounded-lg border bg-card p-4">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedFeedback")}</h2>
-              <div className="space-y-2">
-                {archivedItems.map((item) => (
-                  <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{item.title}</span>
-                      <span className="text-sm leading-5 text-muted-foreground">
-                        <span className="font-mono">{formatTicketNumber(item.ticketNumber)}</span>
-                        {" · "}{t("archivedOn", { date: formatDate(item.deletedAt ?? item.updatedAt) })}
-                      </span>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(localizeError(error, t)))}>
-                      <ArchiveRestore /> {t("restore")}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </section>
+        <TicketExplorer items={feedback} tags={ticketTags} search={search} onSearch={setSearch} showArchived={showArchived} onSelect={setSelectedId} onMove={moveItem} onRestore={(id) => void restoreItem(id).catch((error) => toast.error(localizeError(error, t)))} />
       </div>
 
       <Dialog
@@ -315,13 +277,13 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         />
       </Dialog>
 
-      <FeedbackDialog
+      {selected?.deletedAt !== undefined ? <ArchivedTicketDialog item={selected} onClose={() => setSelectedId(null)} onRestore={() => restoreItem(selected._id)} /> : <FeedbackDialog
         feedback={selected}
         token={token}
         onClose={() => setSelectedId(null)}
         onMove={(id, status) => void moveItem(id, status)}
         onArchive={archiveItem}
-      />
+      />}
     </main>
   );
 }

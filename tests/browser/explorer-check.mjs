@@ -1,0 +1,56 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const errors=[]; page.on("pageerror", error => errors.push(error.message));
+const button = name => page.getByRole("button", { name, exact: true });
+const countRows = async n => { await page.waitForFunction(n => document.querySelectorAll('tbody tr').length === n,n); };
+const summary = async text => { await page.getByText(text,{exact:true}).waitFor(); };
+async function add(field, operator) {
+  await button("Add filter").click();
+  await page.getByRole("option", { name: field, exact: true }).click();
+  await page.getByRole("option", { name: operator, exact: true }).click();
+}
+try {
+  await page.goto("http://127.0.0.1:5193/tests/browser/explorer.html");
+  await button("Language").click(); await button("Table").click(); await countRows(10);
+  await button("Next page").click(); await summary("Page 2 of 6 · 54 Tickets");
+  await page.getByRole("combobox",{name:"Rows per page"}).selectOption("25"); await countRows(25); await summary("Page 1 of 3 · 54 Tickets");
+  await button("Last page").click(); await countRows(4);
+  await button("Ticket number").click(); await countRows(25);
+  assert.match(await page.locator("tbody tr").first().innerText(),/TKT-0001/);
+  await page.getByRole("button",{name:/Open Ticket TKT-0001:/}).click(); assert.equal(await page.locator("output").innerText(),"0");
+  await add("Tags","is any of"); await page.getByRole("option",{name:"Printer",exact:true}).click(); await page.keyboard.press("Escape"); await summary("Page 1 of 2 · 27 Tickets");
+  await button("Board").click(); assert.equal(await button("Board").getAttribute("aria-pressed"),"true");
+  await button("Table").click(); await summary("Page 1 of 2 · 27 Tickets");
+  await add("Status","is any of"); await page.getByRole("option",{name:"Resolved",exact:true}).click(); await page.keyboard.press("Escape"); await countRows(9);
+  await button("Status filter options").click(); await page.getByRole("menuitem",{name:"Remove",exact:true}).click(); await summary("Page 1 of 2 · 27 Tickets");
+  await button("Clear all").click(); await countRows(25);
+  await add("Created date","between");
+  await page.getByLabel("Created date · From",{exact:true}).fill("2026-09-15");
+  await page.getByLabel("Created date · Through",{exact:true}).fill("2026-09-16");
+  await button("Apply").click(); await countRows(2);
+  await button("Clear all").click();
+  await add("Urgency","Unset"); await countRows(14);
+  await button("Clear all").click();
+  await add("Urgency","between");
+  const slider=page.getByRole("slider").first(); await slider.focus(); await page.keyboard.press("End");
+  await button("Apply").click(); await page.getByText("No Tickets match these filters.",{exact:true}).waitFor();
+  await button("Clear all").click();
+  await button("Archives").click(); await summary("Page 1 of 3 · 55 Tickets");
+  await page.getByRole("textbox",{name:"Search",exact:true}).fill("TKT-0055"); await countRows(1); assert.match(await page.locator("tbody").innerText(),/Archived/);
+  await page.getByRole("button",{name:/Open Ticket TKT-0055:/}).click();
+  const archivedDialog=page.getByRole("dialog"); await archivedDialog.waitFor();
+  assert.equal(await archivedDialog.getByRole("button",{name:"Edit",exact:true}).count(),0);
+  await archivedDialog.getByRole("button",{name:"Restore",exact:true}).click(); await archivedDialog.waitFor({state:"hidden"});
+  assert.doesNotMatch(await page.locator("tbody").innerText(),/Archived/);
+  await button("Clear all").click(); await button("Last page").click(); await button("Shrink").click(); await summary("Page 1 of 1 · 5 Tickets");
+  assert.equal(await button("Next page").isDisabled(),true);
+  await page.screenshot({path:"/tmp/ticket-explorer-desktop.png",fullPage:true});
+  await button("Language").click(); await button("เพิ่มตัวกรอง").click();
+  await page.getByRole("option",{name:"สถานะ",exact:true}).click(); await page.getByRole("option",{name:"ตรงกับรายการใดก็ได้",exact:true}).click(); await page.keyboard.press("Escape");
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:"/tmp/ticket-explorer-mobile.png",fullPage:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,"no horizontal page overflow");
+  assert.deepEqual(errors,[]); console.log("Explorer browser checks passed: table, board, filters, dates, urgency, pagination, archives, details, Thai and mobile.");
+} finally { await browser.close(); }
