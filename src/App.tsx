@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { MAX_URGENCY_SCORE, MIN_URGENCY_SCORE } from "../convex/feedback_state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -583,6 +584,8 @@ function FeedbackDialog({
   const feedbackActivity = useQuery(api.feedback.listFeedbackActivity, feedback ? { token, id: feedback._id } : "skip");
   const editFeedback = useMutation(api.feedback.editFeedback);
   const undoFeedbackEdit = useMutation(api.feedback.undoFeedbackEdit);
+  const updateUrgencyScore = useMutation(api.feedback.updateUrgencyScore);
+  const undoUrgencyScore = useMutation(api.feedback.undoUrgencyScore);
   const addAnnotation = useMutation(api.feedback.addAnnotation);
   const updateAnnotation = useMutation(api.feedback.updateAnnotation);
   const undoAnnotationUpdate = useMutation(api.feedback.undoAnnotationUpdate);
@@ -594,6 +597,8 @@ function FeedbackDialog({
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [savingFeedback, setSavingFeedback] = useState(false);
+  const [urgencyDraft, setUrgencyDraft] = useState("");
+  const [savingUrgency, setSavingUrgency] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
   const allAnnotations = item?.annotations ?? [];
   const annotations = allAnnotations.filter(isActiveAnnotation);
@@ -605,6 +610,50 @@ function FeedbackDialog({
     setEditDescription(item?.description ?? "");
     setFeedbackError("");
   }, [item?._id]);
+
+  useEffect(() => {
+    setUrgencyDraft(item?.urgencyScore?.toString() ?? "");
+  }, [item?._id, item?.urgencyScore]);
+
+  async function saveUrgencyScore() {
+    if (!item) return;
+    const trimmed = urgencyDraft.trim();
+    const urgencyScore = trimmed === "" ? undefined : Number(trimmed);
+    if (
+      urgencyScore !== undefined
+      && (!Number.isInteger(urgencyScore) || urgencyScore < MIN_URGENCY_SCORE || urgencyScore > MAX_URGENCY_SCORE)
+    ) {
+      setFeedbackError(t("invalidUrgencyScore"));
+      return;
+    }
+
+    setSavingUrgency(true);
+    setFeedbackError("");
+    try {
+      const result = await updateUrgencyScore({
+        token,
+        id: item._id,
+        urgencyScore,
+        expectedVersion: item.version ?? 0,
+      });
+      setUrgencyDraft(urgencyScore?.toString() ?? "");
+      if (result.eventId) {
+        toast.success(t("urgencySaved"), {
+          action: {
+            label: t("undo"),
+            onClick: () => {
+              void undoUrgencyScore({ token, eventId: result.eventId, expectedVersion: result.version })
+                .catch((error) => toast.error(localizeError(error, t)));
+            },
+          },
+        });
+      }
+    } catch (error) {
+      setFeedbackError(localizeError(error, t));
+    } finally {
+      setSavingUrgency(false);
+    }
+  }
 
   async function saveFeedbackEdits() {
     if (!item) return;
@@ -696,6 +745,29 @@ function FeedbackDialog({
             <Button type="button" variant="outline" size="sm" onClick={() => void copyTicketNumber()}>
               <Copy /> {t("copy")}
             </Button>
+          </div>
+          <div className="rounded-md border bg-muted/20 px-3 py-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-40 flex-1 space-y-1.5">
+                <label htmlFor="ticket-urgency-score" className="text-sm font-medium">{t("urgencyScore")}</label>
+                <Input
+                  id="ticket-urgency-score"
+                  type="number"
+                  inputMode="numeric"
+                  min={MIN_URGENCY_SCORE}
+                  max={MAX_URGENCY_SCORE}
+                  step={1}
+                  value={urgencyDraft}
+                  placeholder="—"
+                  onChange={(event) => setUrgencyDraft(event.target.value)}
+                  aria-describedby="ticket-urgency-hint"
+                />
+              </div>
+              <Button type="button" onClick={() => void saveUrgencyScore()} disabled={savingUrgency}>
+                {savingUrgency ? <Loader2 className="animate-spin" /> : null} {t("saveUrgency")}
+              </Button>
+            </div>
+            <p id="ticket-urgency-hint" className="mt-2 text-xs leading-5 text-muted-foreground">{t("urgencyScoreHint")}</p>
           </div>
           <MediaViewer
             key={item._id}

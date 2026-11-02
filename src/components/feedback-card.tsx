@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Images, MapPin } from "lucide-react";
+import { ChevronLeft, ChevronRight, Gauge, Images, MapPin } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { statusMeta } from "@/components/feedback-status";
 import { cn } from "@/lib/utils";
 import { feedbackProgress, formatTicketNumber, nextFeedbackStatus } from "@/lib/feedback-ui";
+import { urgencyBand, urgencyTone } from "@/lib/urgency-score";
 import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
@@ -33,6 +35,7 @@ export function FeedbackCard({
   const currentStatus = statusMeta(item.status);
   const nextStatusLabel = nextStatus ? t(statusMeta(nextStatus).labelKey) : null;
   const progress = feedbackProgress(item.status);
+  const urgency = urgencyBand(item.urgencyScore);
 
   return (
     <article className="rounded-md border bg-background shadow-sm">
@@ -95,9 +98,20 @@ export function FeedbackCard({
         />
         {handle ? <div className="absolute right-1.5 top-1.5 z-10">{handle}</div> : null}
       </div>
-      {onMove ? (
-        <div className="flex items-center justify-end gap-2 border-t p-2">
-          <Button
+      <div className="flex items-center justify-between gap-2 border-t p-2">
+          <Badge
+            variant="outline"
+            className={cn("gap-1 rounded-full px-2.5 py-1 font-semibold tabular-nums", urgencyTone[urgency])}
+            aria-label={item.urgencyScore === undefined
+              ? t("urgencyUnscored")
+              : t("urgencyScoreValue", { score: item.urgencyScore })}
+          >
+            <Gauge className="size-3.5" aria-hidden="true" />
+            {item.urgencyScore === undefined
+              ? t("urgencyUnscoredShort")
+              : t("urgencyScoreShort", { score: item.urgencyScore })}
+          </Badge>
+          {onMove ? <Button
             type="button"
             variant="outline"
             size="sm"
@@ -111,9 +125,8 @@ export function FeedbackCard({
           >
             {t(currentStatus.labelKey)}
             {nextStatus ? <ChevronRight className="size-3" /> : null}
-          </Button>
-        </div>
-      ) : null}
+          </Button> : null}
+      </div>
       <Dialog
         open={mediaOpen}
         onOpenChange={setMediaOpen}

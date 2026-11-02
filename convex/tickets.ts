@@ -62,6 +62,7 @@ export function feedbackState(doc: Doc<"feedback">) {
     title: doc.title,
     description: doc.description,
     status: doc.status,
+    ...(doc.urgencyScore === undefined ? {} : { urgencyScore: doc.urgencyScore }),
     version: doc.version ?? 0,
     mediaCount: doc.media.length,
     ...(doc.deletedAt === undefined ? {} : { deletedAt: doc.deletedAt }),
@@ -97,7 +98,7 @@ export async function recordFeedbackEvent(
   ctx: MutationCtx,
   input: {
     feedbackId: Id<"feedback">;
-    action: "created" | "media_attached" | "edited" | "edit_undone" | "status_changed" | "status_undone" | "archived" | "restored";
+    action: "created" | "media_attached" | "edited" | "edit_undone" | "urgency_changed" | "urgency_undone" | "status_changed" | "status_undone" | "archived" | "restored";
     before?: ReturnType<typeof feedbackState>;
     after?: ReturnType<typeof feedbackState>;
     sourceEventId?: Id<"feedbackEvents">;
@@ -112,13 +113,15 @@ export type TicketState = ReturnType<typeof feedbackState>;
 
 /** Ticket fields that versioned state mutations may change. */
 export type TicketChanges = Partial<
-  Pick<Doc<"feedback">, "title" | "description" | "status" | "media" | "deletedAt">
+  Pick<Doc<"feedback">, "title" | "description" | "status" | "urgencyScore" | "media" | "deletedAt">
 >;
 
 type TicketChangeAction =
   | "media_attached"
   | "edited"
   | "edit_undone"
+  | "urgency_changed"
+  | "urgency_undone"
   | "status_changed"
   | "status_undone"
   | "archived";

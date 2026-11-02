@@ -140,3 +140,34 @@ test("attaching media updates the row and records only media counts in the audit
   assert.equal(plan.before.mediaCount, 0);
   assert.equal(plan.after.mediaCount, 1);
 });
+
+test("urgency changes stay versioned and visible in the audit snapshot", () => {
+  const doc = ticket({ urgencyScore: 24 });
+
+  const plan = planTicketChange({
+    doc,
+    expectedVersion: 3,
+    changes: { urgencyScore: 88 },
+    now: 500,
+  });
+
+  assert.equal(plan.patch.urgencyScore, 88);
+  assert.equal(plan.before.urgencyScore, 24);
+  assert.equal(plan.after.urgencyScore, 88);
+  assert.equal(plan.version, 4);
+});
+
+test("clearing urgency returns a Ticket to the unscored state", () => {
+  const doc = ticket({ urgencyScore: 60 });
+
+  const plan = planTicketChange({
+    doc,
+    expectedVersion: 3,
+    changes: { urgencyScore: undefined },
+    now: 500,
+  });
+
+  assert.equal(plan.patch.urgencyScore, undefined);
+  assert.equal(plan.before.urgencyScore, 60);
+  assert.equal(plan.after.urgencyScore, undefined);
+});

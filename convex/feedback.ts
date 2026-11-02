@@ -20,7 +20,7 @@ import {
   updateAnnotationRecord,
   type AnnotationRecord,
 } from "./annotation_state";
-import { requireCurrentVersion, validateFeedbackText } from "./feedback_state";
+import { requireCurrentVersion, validateFeedbackText, validateUrgencyScore } from "./feedback_state";
 import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
 import { validateMediaItems } from "./uploads";
 import {
@@ -400,6 +400,63 @@ export const updateFeedbackStatus = mutation({
       now: Date.now(),
     });
     return { eventId, version };
+  },
+});
+
+/** Staff triage control for the optional 1-100 urgency score. */
+export const updateUrgencyScore = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("feedback"),
+    urgencyScore: v.optional(v.number()),
+    expectedVersion: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const { session, actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
+    const urgencyScore = validateUrgencyScore(args.urgencyScore);
+    if (doc.urgencyScore === urgencyScore) return { eventId: null, version: currentVersion };
+
+    return await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { urgencyScore },
+      action: "urgency_changed",
+      author: { sessionId: session._id, ...actorFields(actor) },
+      now: Date.now(),
+    });
+  },
+});
+
+export const undoUrgencyScore = mutation({
+  args: {
+    token: v.string(),
+    eventId: v.id("feedbackEvents"),
+    expectedVersion: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const { session, actor } = await requireActor(ctx, args.token);
+    assertStaffActor(actor);
+    const event = await ctx.db.get(args.eventId);
+    if (!event || event.action !== "urgency_changed" || !event.before || !event.after) {
+      throw new Error("URGENCY_UNDO_UNAVAILABLE");
+    }
+    const doc = await requireWritableFeedback(ctx, actor, event.feedbackId);
+    requireCurrentVersion(doc, args.expectedVersion);
+    if (doc.urgencyScore !== event.after.urgencyScore) throw new Error("URGENCY_UNDO_UNAVAILABLE");
+
+    const { version } = await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { urgencyScore: event.before.urgencyScore },
+      action: "urgency_undone",
+      author: { sessionId: session._id, ...actorFields(actor) },
+      sourceEventId: event._id,
+      now: Date.now(),
+    });
+    return { version };
   },
 });
 

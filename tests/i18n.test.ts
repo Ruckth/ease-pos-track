@@ -36,6 +36,10 @@ test("new customer portal and board screens are translated in both languages", (
     "boardStatusTabs",
     "ticketProgress",
     "ticketStep",
+    "urgencyScore",
+    "urgencyScoreShort",
+    "urgencyUnscored",
+    "saveUrgency",
     "moveConflict",
     "invalidCredentials",
   ] as const;

@@ -3,7 +3,7 @@ import { statusMeta } from "@/components/feedback-status";
 import type { FeedbackEvent } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-const actionKeys = { created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored" } as const;
+const actionKeys = { created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", urgency_changed: "actionUrgencyChanged", urgency_undone: "actionUrgencyUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored" } as const;
 
 export function FeedbackActivityList({ events }: { events: FeedbackEvent[] }) {
   const { t, formatDate } = useI18n();
@@ -19,6 +19,9 @@ export function FeedbackActivityList({ events }: { events: FeedbackEvent[] }) {
             <span className="font-medium text-foreground">{t(actionKeys[event.action])}</span>
             {event.before?.status !== event.after?.status && event.before && event.after
               ? ` · ${t(statusMeta(event.before.status).labelKey)} → ${t(statusMeta(event.after.status).labelKey)}`
+              : ""}
+            {event.before?.urgencyScore !== event.after?.urgencyScore && event.before && event.after
+              ? ` · ${event.before.urgencyScore ?? "—"} → ${event.after.urgencyScore ?? "—"}`
               : ""}
             <span className="ml-1">{formatDate(event.createdAt)}</span>
           </li>
