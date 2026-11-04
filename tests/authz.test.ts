@@ -7,6 +7,7 @@ import {
   assertCustomerActor,
   assertStaffActor,
   canReadFeedback,
+  canUseProject,
   canUseStaffControls,
   canWriteFeedback,
   newFeedbackOwnership,
@@ -92,4 +93,16 @@ test("no customer path grants access to a ticket they do not own", () => {
     () => assertStaffActor(alice),
   ];
   for (const attempt of attempts) assert.throws(attempt);
+});
+
+test("staff use every active Project; customers only ones they were added to", () => {
+  const staff = actorFromSession({ role: "staff" });
+  const customer = actorFromSession({ role: "customer", customerId: "c1" });
+  const active = {};
+  const archived = { archivedAt: 1 };
+  assert.equal(canUseProject(staff, active, false), true);
+  assert.equal(canUseProject(customer, active, true), true);
+  assert.equal(canUseProject(customer, active, false), false);
+  assert.equal(canUseProject(staff, archived, false), false);
+  assert.equal(canUseProject(customer, archived, true), false);
 });

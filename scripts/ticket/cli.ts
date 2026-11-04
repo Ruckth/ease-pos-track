@@ -10,12 +10,16 @@
 
 import { validateFeedbackText } from "../../convex/feedback_state";
 import { normalizeRequestId, type TicketContent } from "../../convex/ticket_requests";
+import { normalizeProjectKey, parseTicketReference } from "../../convex/ticket_numbers";
 import type { Deployment } from "./deployment";
 import { inputError, usageError, validated } from "./errors";
 import { commandDefinition, type CommandOption, type TicketCommandDefinition } from "./registry";
 import { isTicketStatus, type TicketStatus } from "./status";
 
-export type TicketRequest = TicketContent & { requestId?: string };
+export type TicketRequest = TicketContent & { requestId?: string; projectKey?: string };
+
+/** A parsed `POS-0012` reference. */
+export type TicketRef = { projectKey: string; ticketNumber: number };
 
 export type TicketCommand =
   | { kind: "help"; command?: string }
@@ -23,22 +27,21 @@ export type TicketCommand =
   | { kind: "login"; deployment: Deployment; url?: string }
   | { kind: "whoami"; deployment: Deployment }
   | { kind: "logout"; deployment: Deployment }
-  | { kind: "list"; deployment: Deployment; includeArchived: boolean }
-  | { kind: "get"; deployment: Deployment; ticketNumber: number; includeArchived: boolean }
+  | { kind: "list"; deployment: Deployment; projectKey?: string; includeArchived: boolean }
+  | { kind: "get"; deployment: Deployment; ref: TicketRef; includeArchived: boolean }
   | { kind: "create"; deployment: Deployment; request: TicketRequest; images: string[]; dryRun: boolean }
-  | { kind: "attach"; deployment: Deployment; ticketNumber: number; expectedVersion: number; images: string[]; requestId?: string }
-  | { kind: "update"; deployment: Deployment; ticketNumber: number; title?: string; description?: string; expectedVersion: number }
-  | { kind: "status"; deployment: Deployment; ticketNumber: number; status: TicketStatus; expectedVersion: number }
-  | { kind: "archive"; deployment: Deployment; ticketNumber: number; expectedVersion: number }
-  | { kind: "restore"; deployment: Deployment; ticketNumber: number; expectedVersion: number };
+  | { kind: "attach"; deployment: Deployment; ref: TicketRef; expectedVersion: number; images: string[]; requestId?: string }
+  | { kind: "update"; deployment: Deployment; ref: TicketRef; title?: string; description?: string; expectedVersion: number }
+  | { kind: "status"; deployment: Deployment; ref: TicketRef; status: TicketStatus; expectedVersion: number }
+  | { kind: "archive"; deployment: Deployment; ref: TicketRef; expectedVersion: number }
+  | { kind: "restore"; deployment: Deployment; ref: TicketRef; expectedVersion: number };
 
 /** A single Ticket plus the optimistic-lock version every write must carry. */
-type VersionedTicket = { deployment: Deployment; ticketNumber: number; expectedVersion: number };
+type VersionedTicket = { deployment: Deployment; ref: TicketRef; expectedVersion: number };
 
 type ScannedArguments = { values: Map<string, string[]>; flags: Set<string>; positionals: string[] };
 
-const TICKET_REFERENCE = /^TKT-(\d{4,})$/;
-const JSON_KEYS = ["title", "description", "requestId"] as const;
+const JSON_KEYS = ["title", "description", "requestId", "project"] as const;
 type JsonRequest = Partial<Record<(typeof JSON_KEYS)[number], string>>;
 
 /**
@@ -147,19 +150,22 @@ class CommandInput {
     return this.scanned.values.get(name) ?? [];
   }
 
-  /** The `TKT-####` reference and `--expected-version` a Ticket write needs. */
+  /** The `KEY-####` reference and `--expected-version` a Ticket write needs. */
   versionedTicket(): VersionedTicket {
-    return { deployment: this.deployment, ticketNumber: this.ticketNumber(), expectedVersion: this.expectedVersion() };
+    return { deployment: this.deployment, ref: this.ticketRef(), expectedVersion: this.expectedVersion() };
   }
 
-  ticketNumber() {
+  ticketRef(): TicketRef {
     const value = this.scanned.positionals[0] ?? "";
-    const match = TICKET_REFERENCE.exec(value);
-    const ticketNumber = match ? Number(match[1]) : NaN;
-    if (!Number.isSafeInteger(ticketNumber) || ticketNumber < 1) {
-      throw inputError("INVALID_TICKET", `"${value}" is not a Ticket reference. Expected TKT-####.`);
-    }
-    return ticketNumber;
+    const ref = parseTicketReference(value);
+    if (!ref) throw inputError("INVALID_TICKET", `"${value}" is not a Ticket reference. Expected KEY-####, for example TKT-0007.`);
+    return ref;
+  }
+
+  /** `--project` (or `project` in --json), normalized; absent when not given. */
+  projectKey(fallback?: string) {
+    const value = this.text("--project") ?? fallback;
+    return value === undefined ? undefined : validated(() => normalizeProjectKey(value));
   }
 
   expectedVersion() {
@@ -200,9 +206,11 @@ function createRequest(input: CommandInput): TicketRequest {
   if (title === undefined) throw usageError("TITLE_REQUIRED", "--title is required directly or through --json.");
   const description = input.text("--description") ?? json.description ?? "";
   const requestId = input.text("--request-id") ?? json.requestId;
+  const projectKey = input.projectKey(json.project);
   return validated(() => ({
     ...validateFeedbackText(title, description),
     ...(requestId === undefined ? {} : { requestId: normalizeRequestId(requestId) }),
+    ...(projectKey === undefined ? {} : { projectKey }),
   }));
 }
 
@@ -239,10 +247,12 @@ function buildCommand(input: CommandInput): TicketCommand {
       return { kind: "whoami", deployment };
     case "logout":
       return { kind: "logout", deployment };
-    case "list":
-      return { kind: "list", deployment, includeArchived: input.flag("--include-archived") };
+    case "list": {
+      const projectKey = input.projectKey();
+      return { kind: "list", deployment, ...(projectKey === undefined ? {} : { projectKey }), includeArchived: input.flag("--include-archived") };
+    }
     case "get":
-      return { kind: "get", deployment, ticketNumber: input.ticketNumber(), includeArchived: input.flag("--include-archived") };
+      return { kind: "get", deployment, ref: input.ticketRef(), includeArchived: input.flag("--include-archived") };
     case "create":
       return { kind: "create", deployment, request: createRequest(input), images: input.texts("--image"), dryRun: input.flag("--dry-run") };
     case "attach": {

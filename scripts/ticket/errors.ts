@@ -78,6 +78,9 @@ const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
   IMAGE_TOO_LARGE: { code: "IMAGE_SIZE_INVALID", message: "Each --image must be larger than zero and no more than 8 MB." },
   INVALID_FILE_METADATA: { code: "INVALID_IMAGE_SOURCE", message: "An image has invalid file metadata." },
   INVALID_MEDIA_REFERENCE: { code: "INVALID_IMAGE_SOURCE", message: "An image upload did not produce a valid HTTPS reference." },
+  INVALID_PROJECT_KEY: { code: "INVALID_PROJECT", message: "--project must be 2-10 letters or digits, starting with a letter." },
+  PROJECT_NOT_FOUND: { code: "PROJECT_NOT_FOUND", message: "No active Project has that key." },
+  PROJECT_REQUIRED: { code: "PROJECT_REQUIRED", message: "More than one Project exists; pass --project with its key." },
 };
 
 /** The validation codes a remote call can also report, for error classification. */

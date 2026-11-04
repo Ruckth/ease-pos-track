@@ -4,7 +4,7 @@
  *
  * THIS CODE IS AUTOMATICALLY GENERATED.
  *
- * To regenerate, run `pnpm convex dev`.
+ * To regenerate, run `npx convex dev`.
  * @module
  */
 
@@ -18,6 +18,8 @@ import type * as feedback from "../feedback.js";
 import type * as feedback_state from "../feedback_state.js";
 import type * as login_guard from "../login_guard.js";
 import type * as password from "../password.js";
+import type * as projects from "../projects.js";
+import type * as session_auth from "../session_auth.js";
 import type * as ticket_numbers from "../ticket_numbers.js";
 import type * as ticket_requests from "../ticket_requests.js";
 import type * as tickets from "../tickets.js";
@@ -41,6 +43,8 @@ declare const fullApi: ApiFromModules<{
   feedback_state: typeof feedback_state;
   login_guard: typeof login_guard;
   password: typeof password;
+  projects: typeof projects;
+  session_auth: typeof session_auth;
   ticket_numbers: typeof ticket_numbers;
   ticket_requests: typeof ticket_requests;
   tickets: typeof tickets;

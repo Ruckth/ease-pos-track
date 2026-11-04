@@ -97,7 +97,29 @@ export const uploadIntentStatus = v.union(
 );
 
 export default defineSchema({
+  projects: defineTable({
+    name: v.string(),
+    // Immutable once created: it prefixes every Ticket reference in the Project.
+    key: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    archivedAt: v.optional(v.number()),
+  }).index("by_key", ["key"]),
+  // Which customers may see and create Tickets in a Project. Staff need no row.
+  projectMembers: defineTable({
+    projectId: v.id("projects"),
+    customerId: v.id("customers"),
+    createdAt: v.number(),
+  })
+    .index("by_project", ["projectId", "customerId"])
+    .index("by_customer", ["customerId"]),
   feedback: defineTable({
+    // Optional only until `projects:migrateLegacyTickets` has run on every
+    // deployment; every Ticket created since Projects exist has both.
+    projectId: v.optional(v.id("projects")),
+    // Copy of the Project's immutable key, so a Ticket formats and resolves its
+    // own reference without a join.
+    projectKey: v.optional(v.string()),
     title: v.string(),
     description: v.string(),
     status: feedbackStatus,
@@ -118,9 +140,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_status", ["status"])
-    .index("by_created_at", ["createdAt"])
     .index("by_deleted_at", ["deletedAt"])
-    .index("by_ticket_number", ["ticketNumber"])
+    .index("by_project_ticket", ["projectKey", "ticketNumber"])
     .index("by_external_request", ["externalRequestId"])
     .index("by_owner", ["ownerCustomerId", "createdAt"]),
   customers: defineTable({

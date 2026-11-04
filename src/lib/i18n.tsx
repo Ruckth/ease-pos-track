@@ -137,6 +137,21 @@ const en = {
   commentMissing: "That comment is no longer available.",
   undoUnavailable: "This change can no longer be undone.",
   invalidFile: "That file could not be accepted. Please try another.",
+  project: "Project", chooseProject: "Choose Project", newProject: "New Project",
+  newProjectDescription: "Ticket numbers in a Project start with its key, for example POS-0001.",
+  projectName: "Name", projectKey: "Key", projectKeyHint: "2-10 letters or digits, starting with a letter. It can't be changed later.",
+  createProject: "Create Project", creatingProject: "Creating…", projectCreated: "Project {{key}} created",
+  noProjectsTitle: "No Projects yet", noProjectsStaff: "Create a Project to start taking Tickets.",
+  noProjectsCustomer: "You haven't been added to a Project yet. Ask the support team to add your email.",
+  projectMembers: "Customers", projectMembersTitle: "Customers in {{name}}",
+  projectMembersDescription: "Customers only see and create Tickets in Projects they're added to. Staff see every Project.",
+  customerEmail: "Customer email", addMember: "Add", removeMember: "Remove {{email}}", noMembers: "No customers in this Project yet.",
+  memberAdded: "{{email}} added", memberRemoved: "{{email}} removed",
+  projectMissing: "This Project doesn't exist or you no longer have access to it.",
+  projectKeyTaken: "Another Project already uses this key.",
+  invalidProjectKey: "Use 2-10 letters or digits, starting with a letter.",
+  requiredProjectName: "Enter a Project name.", projectNameTooLong: "Project names can be up to 80 characters.",
+  customerNotFound: "No customer account uses that email. Ask them to sign up first.",
 } as const;
 
 const th: Record<keyof typeof en, string> = {
@@ -273,6 +288,21 @@ const th: Record<keyof typeof en, string> = {
   commentMissing: "ไม่พบความเห็นนี้แล้ว",
   undoUnavailable: "ไม่สามารถเลิกทำรายการนี้ได้แล้ว",
   invalidFile: "ไฟล์นี้ใช้ไม่ได้ กรุณาเลือกไฟล์อื่น",
+  project: "โปรเจกต์", chooseProject: "เลือกโปรเจกต์", newProject: "สร้างโปรเจกต์",
+  newProjectDescription: "เลขที่แจ้งในโปรเจกต์จะขึ้นต้นด้วยรหัสโปรเจกต์ เช่น POS-0001",
+  projectName: "ชื่อ", projectKey: "รหัส", projectKeyHint: "ตัวอักษรภาษาอังกฤษหรือตัวเลข 2-10 ตัว ขึ้นต้นด้วยตัวอักษร เปลี่ยนภายหลังไม่ได้",
+  createProject: "สร้างโปรเจกต์", creatingProject: "กำลังสร้าง…", projectCreated: "สร้างโปรเจกต์ {{key}} แล้ว",
+  noProjectsTitle: "ยังไม่มีโปรเจกต์", noProjectsStaff: "สร้างโปรเจกต์เพื่อเริ่มรับเรื่องแจ้ง",
+  noProjectsCustomer: "คุณยังไม่ได้อยู่ในโปรเจกต์ใด โปรดติดต่อทีมซัพพอร์ตให้เพิ่มอีเมลของคุณ",
+  projectMembers: "ลูกค้า", projectMembersTitle: "ลูกค้าใน {{name}}",
+  projectMembersDescription: "ลูกค้าจะเห็นและแจ้งเรื่องได้เฉพาะโปรเจกต์ที่ถูกเพิ่มไว้ ส่วนทีมงานเห็นทุกโปรเจกต์",
+  customerEmail: "อีเมลลูกค้า", addMember: "เพิ่ม", removeMember: "นำ {{email}} ออก", noMembers: "ยังไม่มีลูกค้าในโปรเจกต์นี้",
+  memberAdded: "เพิ่ม {{email}} แล้ว", memberRemoved: "นำ {{email}} ออกแล้ว",
+  projectMissing: "ไม่พบโปรเจกต์นี้ หรือคุณไม่มีสิทธิ์เข้าถึงแล้ว",
+  projectKeyTaken: "รหัสนี้ถูกใช้กับโปรเจกต์อื่นแล้ว",
+  invalidProjectKey: "ใช้ตัวอักษรภาษาอังกฤษหรือตัวเลข 2-10 ตัว ขึ้นต้นด้วยตัวอักษร",
+  requiredProjectName: "กรุณาใส่ชื่อโปรเจกต์", projectNameTooLong: "ชื่อโปรเจกต์ยาวได้ไม่เกิน 80 ตัวอักษร",
+  customerNotFound: "ไม่พบบัญชีลูกค้าที่ใช้อีเมลนี้ โปรดให้ลูกค้าสมัครก่อน",
 };
 
 type Key = keyof typeof en;
@@ -354,6 +384,13 @@ const errorKeys: Record<string, Key> = {
   INVALID_CREDENTIALS: "invalidCredentials",
   PASSWORD_MISMATCH: "passwordMismatch",
   INVALID_PASSWORD_RECORD: "genericError",
+  PROJECT_NOT_FOUND: "projectMissing",
+  PROJECT_REQUIRED: "projectMissing",
+  PROJECT_KEY_TAKEN: "projectKeyTaken",
+  INVALID_PROJECT_KEY: "invalidProjectKey",
+  REQUIRED_PROJECT_NAME: "requiredProjectName",
+  PROJECT_NAME_TOO_LONG: "projectNameTooLong",
+  CUSTOMER_NOT_FOUND: "customerNotFound",
 };
 
 /**

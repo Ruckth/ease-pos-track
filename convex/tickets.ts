@@ -13,48 +13,27 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { newFeedbackOwnership } from "./authz";
 import type { AnnotationRecord } from "./annotation_state";
 import { requireCurrentVersion } from "./feedback_state";
-import { planTicketNumberBackfill } from "./ticket_numbers";
-
-const FEEDBACK_COUNTER_NAME = "feedback";
 
 export type MediaItem = Doc<"feedback">["media"][number];
 
-export async function ensureTicketNumbersInDb(ctx: MutationCtx) {
-  const [rows, counter] = await Promise.all([
-    ctx.db.query("feedback").withIndex("by_created_at").order("asc").collect(),
-    ctx.db
-      .query("ticketCounters")
-      .withIndex("by_name", (q) => q.eq("name", FEEDBACK_COUNTER_NAME))
-      .unique(),
-  ]);
-  const plan = planTicketNumberBackfill(
-    rows.map((row) => ({ id: row._id, createdAt: row.createdAt, ticketNumber: row.ticketNumber })),
-    counter?.nextNumber,
-  );
-  const now = Date.now();
-
-  for (const assignment of plan.assignments) {
-    await ctx.db.patch(assignment.id as Id<"feedback">, { ticketNumber: assignment.ticketNumber });
-  }
-
-  const counterId = counter
-    ? counter._id
-    : await ctx.db.insert("ticketCounters", {
-      name: FEEDBACK_COUNTER_NAME,
-      nextNumber: plan.nextNumber,
-      updatedAt: now,
-    });
-  if (counter && counter.nextNumber !== plan.nextNumber) {
-    await ctx.db.patch(counter._id, { nextNumber: plan.nextNumber, updatedAt: now });
-  }
-
-  return { counterId, assignments: plan.assignments.length, nextNumber: plan.nextNumber };
+/** Each Project numbers its Tickets independently, from 1. */
+export function projectCounterName(projectId: Id<"projects">) {
+  return `project:${projectId}`;
 }
 
-async function allocateTicketNumber(ctx: MutationCtx) {
-  const state = await ensureTicketNumbersInDb(ctx);
-  await ctx.db.patch(state.counterId, { nextNumber: state.nextNumber + 1, updatedAt: Date.now() });
-  return state.nextNumber;
+async function allocateTicketNumber(ctx: MutationCtx, projectId: Id<"projects">) {
+  const name = projectCounterName(projectId);
+  const counter = await ctx.db
+    .query("ticketCounters")
+    .withIndex("by_name", (q) => q.eq("name", name))
+    .unique();
+  const now = Date.now();
+  if (!counter) {
+    await ctx.db.insert("ticketCounters", { name, nextNumber: 2, updatedAt: now });
+    return 1;
+  }
+  await ctx.db.patch(counter._id, { nextNumber: counter.nextNumber + 1, updatedAt: now });
+  return counter.nextNumber;
 }
 
 export function feedbackState(doc: Doc<"feedback">) {
@@ -199,6 +178,8 @@ export async function recordAnnotationEvent(
 }
 
 export type NewTicket = {
+  /** Checked by the caller with `canUseProject`. */
+  project: Pick<Doc<"projects">, "_id" | "key">;
   title: string;
   description: string;
   media: MediaItem[];
@@ -217,8 +198,10 @@ export type NewTicket = {
  */
 export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
   const annotations = input.annotations ?? [];
-  const ticketNumber = await allocateTicketNumber(ctx);
+  const ticketNumber = await allocateTicketNumber(ctx, input.project._id);
   const feedbackId = await ctx.db.insert("feedback", {
+    projectId: input.project._id,
+    projectKey: input.project.key,
     title: input.title,
     description: input.description,
     status: "new",

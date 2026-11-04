@@ -34,6 +34,7 @@ import {
   type MediaViewerHandle,
 } from "@/components/media-viewer";
 import { StaffBoard } from "@/components/staff-board";
+import { NewProjectDialog, NoProjects, StaffProjectControls, useCurrentProject } from "@/components/project-controls";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "@/lib/feedback-ui";
@@ -147,13 +148,16 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerHasDraft, setComposerHasDraft] = useState(false);
   const [composerBusy, setComposerBusy] = useState(false);
-  const feedback = useQuery(api.feedback.listFeedback, { token, includeDeleted: showArchived });
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const { projects, current: project, select: selectProject } = useCurrentProject(token);
+  const feedback = useQuery(
+    api.feedback.listFeedback,
+    project ? { token, projectKey: project.key, includeDeleted: showArchived } : "skip",
+  );
   const updateStatus = useMutation(api.feedback.updateFeedbackStatus);
   const undoStatus = useMutation(api.feedback.undoFeedbackStatus);
   const archiveFeedback = useMutation(api.feedback.archiveFeedback);
   const restoreFeedback = useMutation(api.feedback.restoreFeedback);
-  const ensureTicketNumbers = useMutation(api.feedback.ensureTicketNumbers);
-  const ticketBackfillRunningRef = useRef(false);
   const [selectedId, setSelectedId] = useState<Id<"feedback"> | null>(null);
   const [search, setSearch] = useState("");
 
@@ -162,19 +166,9 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((item) =>
-      `${formatTicketNumber(item.ticketNumber)} ${item.title} ${item.description}`.toLowerCase().includes(q)
+      `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description}`.toLowerCase().includes(q)
     );
   }, [feedback, search]);
-
-  useEffect(() => {
-    if (!feedback?.some((item) => item.ticketNumber === undefined) || ticketBackfillRunningRef.current) return;
-    ticketBackfillRunningRef.current = true;
-    void ensureTicketNumbers({ token })
-      .catch((error) => toast.error(localizeError(error, t)))
-      .finally(() => {
-        ticketBackfillRunningRef.current = false;
-      });
-  }, [ensureTicketNumbers, feedback, token]);
 
   const selected = feedback?.find((item) => item._id === selectedId) ?? null;
   const activeItems = useMemo(() => filtered.filter((item) => item.deletedAt === undefined), [filtered]);
@@ -233,9 +227,18 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal">{t("appName")}</h1>
-            <p className="text-sm text-muted-foreground">{feedback ? t("feedbackItems", { count: feedback.length }) : t("syncing")}</p>
+            <p className="text-sm text-muted-foreground">{feedback ? t("feedbackItems", { count: feedback.length }) : project === null ? t("noProjectsTitle") : t("syncing")}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap">
+            {projects ? (
+              <StaffProjectControls
+                token={token}
+                projects={projects}
+                current={project ?? null}
+                onSelect={selectProject}
+                onCreate={() => setNewProjectOpen(true)}
+              />
+            ) : null}
             <div className="relative min-w-48 flex-1 basis-full sm:basis-auto lg:w-72 lg:flex-none">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input className="pl-9" placeholder={t("search")} value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -244,6 +247,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
               type="button"
               variant="default"
               aria-expanded={composerOpen}
+              disabled={!project}
               onClick={() => setComposerOpen(true)}
             >
               <ImagePlus />
@@ -263,7 +267,9 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
 
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6">
         <section className="min-w-0">
-          {feedback === undefined ? (
+          {project === null ? (
+            <NoProjects action={<Button type="button" onClick={() => setNewProjectOpen(true)}>{t("newProject")}</Button>} />
+          ) : feedback === undefined ? (
             <div className="grid min-h-72 place-items-center rounded-lg border bg-card">
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
@@ -279,7 +285,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
                     <div className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{item.title}</span>
                       <span className="text-sm leading-5 text-muted-foreground">
-                        <span className="font-mono">{formatTicketNumber(item.ticketNumber)}</span>
+                        <span className="font-mono">{formatTicketNumber(item.ticketNumber, item.projectKey)}</span>
                         {" · "}{t("archivedOn", { date: formatDate(item.deletedAt ?? item.updatedAt) })}
                       </span>
                     </div>
@@ -300,11 +306,12 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           if (open || !composerBusy) setComposerOpen(open);
         }}
         title={t("newFeedback")}
-        description={t("internalBoard")}
+        description={project ? `${project.name} (${project.key})` : t("internalBoard")}
         keepMounted
       >
         <SubmitFeedback
           token={token}
+          projectId={project?._id ?? null}
           active={composerOpen}
           onSubmissionComplete={() => {
             setComposerHasDraft(false);
@@ -314,6 +321,8 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           onUploadBusyChange={setComposerBusy}
         />
       </Dialog>
+
+      <NewProjectDialog token={token} open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={selectProject} />
 
       <FeedbackDialog
         feedback={selected}
@@ -328,12 +337,14 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
 
 function SubmitFeedback({
   token,
+  projectId,
   active,
   onSubmissionComplete,
   onDraftStateChange,
   onUploadBusyChange,
 }: {
   token: string;
+  projectId: Id<"projects"> | null;
   active: boolean;
   onSubmissionComplete: () => void;
   onDraftStateChange: (hasDraft: boolean) => void;
@@ -456,6 +467,11 @@ function SubmitFeedback({
       return;
     }
 
+    if (!projectId) {
+      setError(t("projectMissing"));
+      return;
+    }
+
     setProgress(0);
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -464,7 +480,7 @@ function SubmitFeedback({
         {
           token,
           createUploadIntent,
-          createFeedback,
+          createFeedback: (args) => createFeedback({ ...args, projectId }),
           onProgress: setProgress,
           signal: abortController.signal,
           onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),
@@ -722,7 +738,7 @@ function FeedbackDialog({
   async function copyTicketNumber() {
     if (!item) return;
     try {
-      await navigator.clipboard.writeText(formatTicketNumber(item.ticketNumber));
+      await navigator.clipboard.writeText(formatTicketNumber(item.ticketNumber, item.projectKey));
       toast.success(t("ticketCopied"));
     } catch {
       toast.error(t("ticketCopyFailed"));
@@ -733,14 +749,14 @@ function FeedbackDialog({
     <Dialog
       open={Boolean(feedback)}
       onOpenChange={(open) => !open && onClose()}
-      title={item ? `${formatTicketNumber(item.ticketNumber)} · ${item.title}` : t("feedback")}
+      title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("feedback")}
     >
       {item ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2.5">
             <div>
               <p className="text-sm font-medium leading-5 text-muted-foreground">{t("ticketNumber")}</p>
-              <p className="font-mono text-sm font-semibold">{formatTicketNumber(item.ticketNumber)}</p>
+              <p className="font-mono text-sm font-semibold">{formatTicketNumber(item.ticketNumber, item.projectKey)}</p>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => void copyTicketNumber()}>
               <Copy /> {t("copy")}

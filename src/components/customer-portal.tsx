@@ -30,6 +30,7 @@ import { AnnotationActivityList } from "@/components/annotation-activity";
 import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
 import { LanguageSelector } from "@/components/auth-screens";
 import { CustomerTicketWizard } from "@/components/customer-ticket-wizard";
+import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
 import { FeedbackActivityList } from "@/components/feedback-activity";
 import { statusMeta } from "@/components/feedback-status";
 import { MediaViewer, type AnnotationUpdateInput, type MediaViewerHandle } from "@/components/media-viewer";
@@ -62,7 +63,8 @@ export function CustomerPortal({
   onLogout: () => Promise<void>;
 }) {
   const { language, setLanguage, t } = useI18n();
-  const tickets = useQuery(api.feedback.listMyFeedback, { token });
+  const { projects, current: project, select: selectProject } = useCurrentProject(token);
+  const tickets = useQuery(api.feedback.listMyFeedback, project ? { token, projectKey: project.key } : "skip");
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerBusy, setComposerBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"feedback"> | null>(null);
@@ -102,7 +104,8 @@ export function CustomerPortal({
               <p className="truncate text-xs leading-4 text-muted-foreground">{t("customerPortal")}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
             <LanguageSelector language={language} onChange={setLanguage} />
             <Button variant="ghost" size="icon" onClick={() => void onLogout()} aria-label={t("signOut")}>
               <LogOut />
@@ -136,6 +139,7 @@ export function CustomerPortal({
               variant="secondary"
               className="w-full shrink-0 rounded-xl bg-white text-primary shadow-md hover:bg-white/90 md:w-auto"
               aria-expanded={composerOpen}
+              disabled={!project}
               onClick={() => setComposerOpen(true)}
             >
               <Plus className="size-5" />
@@ -155,7 +159,7 @@ export function CustomerPortal({
             <div>
               <h2 className="text-xl font-semibold tracking-tight">{t("yourTickets")}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {tickets ? t("myTicketCount", { count: tickets.length }) : t("syncing")}
+                {tickets ? t("myTicketCount", { count: tickets.length }) : project === null ? t("noProjectsTitle") : t("syncing")}
               </p>
             </div>
             <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border bg-card p-1 shadow-sm" aria-label={t("filterTickets")}>
@@ -181,7 +185,9 @@ export function CustomerPortal({
         </section>
 
         <div className="mt-4">
-        {tickets === undefined ? (
+        {project === null ? (
+          <NoProjects />
+        ) : tickets === undefined ? (
           <div className="grid min-h-72 place-items-center rounded-2xl border bg-card shadow-sm">
             <div className="space-y-3 text-center text-sm text-muted-foreground">
               <Loader2 className="mx-auto size-7 animate-spin" />
@@ -229,12 +235,15 @@ export function CustomerPortal({
         description={t("customerPortalSubtitle")}
         keepMounted
       >
-        <CustomerTicketWizard
-          token={token}
-          active={composerOpen}
-          onSubmitted={() => setComposerOpen(false)}
-          onUploadBusyChange={setComposerBusy}
-        />
+        {project ? (
+          <CustomerTicketWizard
+            token={token}
+            projectId={project._id}
+            active={composerOpen}
+            onSubmitted={() => setComposerOpen(false)}
+            onUploadBusyChange={setComposerBusy}
+          />
+        ) : null}
       </Dialog>
 
       <CustomerTicketDialog
@@ -289,7 +298,7 @@ function CustomerTicketCard({ item, onSelect }: { item: Feedback; onSelect: (id:
   const progress = feedbackProgress(item.status);
   const cover = item.media[0];
   const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
-  const ticketLabel = formatTicketNumber(item.ticketNumber);
+  const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
 
   return (
     <article className={cn("group relative overflow-hidden rounded-2xl border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md", item.status === "waiting" && "border-violet-200 bg-violet-50/20")}>
@@ -463,7 +472,7 @@ function CustomerTicketDialog({
     <Dialog
       open={Boolean(ticket)}
       onOpenChange={(open) => !open && onClose()}
-      title={item ? `${formatTicketNumber(item.ticketNumber)} · ${item.title}` : t("feedback")}
+      title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("feedback")}
     >
       {item ? (
         <div className="space-y-4">

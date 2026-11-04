@@ -102,6 +102,19 @@ export function newFeedbackOwnership<CustomerId extends string>(actor: Actor<Cus
     : { origin: "staff" as const };
 }
 
+/**
+ * Staff use every active Project. A customer uses only the Projects they were
+ * added to, and an archived Project takes no new Tickets from anyone.
+ */
+export function canUseProject(
+  actor: Actor<string>,
+  project: { archivedAt?: number },
+  isMember: boolean,
+) {
+  if (project.archivedAt !== undefined) return false;
+  return isStaffActor(actor) || isMember;
+}
+
 /** Actor columns stamped on audit events and upload intents. */
 export function actorFields<CustomerId extends string>(actor: Actor<CustomerId>) {
   return actor.role === "customer"

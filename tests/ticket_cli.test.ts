@@ -6,6 +6,7 @@ import type { ConfigStore, TicketConfig } from "../scripts/ticket/config";
 import { EXIT, TicketCliError } from "../scripts/ticket/errors";
 import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
 import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
+import type { TicketRef } from "../scripts/ticket/cli";
 import type { TicketDocument, TicketRemote } from "../scripts/ticket/remote";
 import { classifyRemoteError, runTicketCli, type TicketCliDeps } from "../scripts/ticket/run";
 import { toStoredTicketStatus, type TicketStatus } from "../scripts/ticket/status";
@@ -19,6 +20,7 @@ function ticket(overrides: Partial<TicketDocument> = {}) {
     title: "Printer jams",
     description: "On long receipts",
     status: "new",
+    projectKey: "TKT",
     ticketNumber: 7,
     media: [],
     version: 0,
@@ -59,12 +61,17 @@ class FakeRemote implements TicketRemote {
   }
   async currentSession(url: string, token: string) { this.record("currentSession", url, token); return this.session; }
   async logout(url: string, token: string) { this.record("logout", url, token); }
-  async list(url: string, token: string, includeArchived: boolean) { this.record("list", url, token, includeArchived); return this.rows; }
-  async get(url: string, token: string, ticketNumber: number, includeArchived: boolean) {
-    this.record("get", url, token, ticketNumber, includeArchived);
-    return this.rows.find((row) => row.ticketNumber === ticketNumber && (includeArchived || row.deletedAt === undefined)) ?? null;
+  async list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean) {
+    this.record("list", url, token, projectKey, includeArchived);
+    return this.rows;
   }
-  async create(url: string, token: string, input: { title: string; description: string; requestId: string }) {
+  async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
+    this.record("get", url, token, ref, includeArchived);
+    return this.rows.find((row) =>
+      row.projectKey === ref.projectKey && row.ticketNumber === ref.ticketNumber && (includeArchived || row.deletedAt === undefined)
+    ) ?? null;
+  }
+  async create(url: string, token: string, input: { title: string; description: string; requestId: string; projectKey?: string }) {
     this.record("create", url, token, input);
     return { ticket: this.rows[0], created: true, requestId: input.requestId };
   }
@@ -75,29 +82,29 @@ class FakeRemote implements TicketRemote {
   async recordUploadedFile(url: string, input: { intentId: string; secret: string; file: TicketDocument["media"][number] }) {
     this.record("recordUploadedFile", url, input);
   }
-  async attachImages(url: string, token: string, input: { ticketNumber: number; expectedVersion: number; intentId: string; secret: string; media: TicketDocument["media"] }) {
+  async attachImages(url: string, token: string, input: { ref: TicketRef; expectedVersion: number; intentId: string; secret: string; media: TicketDocument["media"] }) {
     this.record("attachImages", url, token, input);
     this.rows[0] = ticket({ ...this.rows[0], media: [...this.rows[0].media, ...input.media], version: input.expectedVersion + 1 });
     return this.rows[0];
   }
-  async update(url: string, token: string, input: { ticketNumber: number; title?: string; description?: string; expectedVersion: number }) {
+  async update(url: string, token: string, input: { ref: TicketRef; title?: string; description?: string; expectedVersion: number }) {
     this.record("update", url, token, input);
     if (input.expectedVersion !== (this.rows[0].version ?? 0)) throw new Error("VERSION_CONFLICT");
     this.rows[0] = ticket({ ...this.rows[0], ...input, version: input.expectedVersion + 1 });
     return this.rows[0];
   }
-  async changeStatus(url: string, token: string, input: { ticketNumber: number; status: TicketStatus; expectedVersion: number }) {
+  async changeStatus(url: string, token: string, input: { ref: TicketRef; status: TicketStatus; expectedVersion: number }) {
     this.record("changeStatus", url, token, input);
     this.rows[0] = ticket({ ...this.rows[0], status: toStoredTicketStatus(input.status), version: input.expectedVersion + 1 });
     return this.rows[0];
   }
-  async archive(url: string, token: string, ticketNumber: number, expectedVersion: number) {
-    this.record("archive", url, token, ticketNumber, expectedVersion);
+  async archive(url: string, token: string, ref: TicketRef, expectedVersion: number) {
+    this.record("archive", url, token, ref, expectedVersion);
     this.rows[0] = ticket({ ...this.rows[0], deletedAt: 5_000, version: expectedVersion + 1 });
     return this.rows[0];
   }
-  async restore(url: string, token: string, ticketNumber: number, expectedVersion: number) {
-    this.record("restore", url, token, ticketNumber, expectedVersion);
+  async restore(url: string, token: string, ref: TicketRef, expectedVersion: number) {
+    this.record("restore", url, token, ref, expectedVersion);
     const { deletedAt: _deletedAt, ...active } = this.rows[0];
     this.rows[0] = ticket({ ...active, version: expectedVersion + 1 });
     return this.rows[0];
@@ -172,11 +179,13 @@ test("the intended pnpm wrapper preserves exact stdout, stderr, and exit-code co
 
 test("parsing covers deployment selection, Ticket references, versions, and operation flags", () => {
   assert.deepEqual(parseTicketArgs(["list"]), { kind: "list", deployment: "dev", includeArchived: false });
-  assert.deepEqual(parseTicketArgs(["get", "TKT-0007", "--include-archived", "--prod"]), { kind: "get", deployment: "prod", ticketNumber: 7, includeArchived: true });
-  assert.deepEqual(parseTicketArgs(["status", "TKT-0007", "--status", "waiting_for_customer", "--expected-version", "2"]), { kind: "status", deployment: "dev", ticketNumber: 7, status: "waiting_for_customer", expectedVersion: 2 });
-  assert.deepEqual(parseTicketArgs(["archive", "TKT-0007", "--expected-version=3"]), { kind: "archive", deployment: "dev", ticketNumber: 7, expectedVersion: 3 });
-  assert.deepEqual(parseTicketArgs(["restore", "TKT-0007", "--expected-version", "4"]), { kind: "restore", deployment: "dev", ticketNumber: 7, expectedVersion: 4 });
-  assert.deepEqual(parseTicketArgs(["update", "TKT-0007", "--title", " New title ", "--expected-version", "1"]), { kind: "update", deployment: "dev", ticketNumber: 7, title: "New title", expectedVersion: 1 });
+  assert.deepEqual(parseTicketArgs(["list", "--project", "pos"]), { kind: "list", deployment: "dev", projectKey: "POS", includeArchived: false });
+  assert.deepEqual(parseTicketArgs(["get", "pos-0012"]), { kind: "get", deployment: "dev", ref: { projectKey: "POS", ticketNumber: 12 }, includeArchived: false });
+  assert.deepEqual(parseTicketArgs(["get", "TKT-0007", "--include-archived", "--prod"]), { kind: "get", deployment: "prod", ref: { projectKey: "TKT", ticketNumber: 7 }, includeArchived: true });
+  assert.deepEqual(parseTicketArgs(["status", "TKT-0007", "--status", "waiting_for_customer", "--expected-version", "2"]), { kind: "status", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, status: "waiting_for_customer", expectedVersion: 2 });
+  assert.deepEqual(parseTicketArgs(["archive", "TKT-0007", "--expected-version=3"]), { kind: "archive", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, expectedVersion: 3 });
+  assert.deepEqual(parseTicketArgs(["restore", "TKT-0007", "--expected-version", "4"]), { kind: "restore", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, expectedVersion: 4 });
+  assert.deepEqual(parseTicketArgs(["update", "TKT-0007", "--title", " New title ", "--expected-version", "1"]), { kind: "update", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, title: "New title", expectedVersion: 1 });
 });
 
 test("create and attach accept repeatable local or HTTPS image sources", () => {
@@ -214,7 +223,7 @@ test("create and attach accept repeatable local or HTTPS image sources", () => {
     {
       kind: "attach",
       deployment: "prod",
-      ticketNumber: 7,
+      ref: { projectKey: "TKT", ticketNumber: 7 },
       expectedVersion: 2,
       images: ["/tmp/first.png", "https://images.example.com/second.png"],
       requestId: "attach-images-0001",
@@ -230,6 +239,8 @@ test("parsing rejects unstable or unsafe operation inputs with stable codes", ()
     [["update", "TKT-0007", "--expected-version", "0"], "UPDATE_REQUIRED", EXIT.usage],
     [["status", "TKT-0007", "--status", "closed", "--expected-version", "0"], "INVALID_STATUS", EXIT.invalidInput],
     [["list", "--nope"], "UNKNOWN_FLAG", EXIT.usage],
+    [["list", "--project", "1X"], "INVALID_PROJECT", EXIT.invalidInput],
+    [["get", "TKT-07"], "INVALID_TICKET", EXIT.invalidInput],
   ];
   for (const [argv, code, exitCode] of cases) {
     assert.throws(() => parseTicketArgs(argv), (error: unknown) => error instanceof TicketCliError && error.code === code && error.exitCode === exitCode);
@@ -240,15 +251,15 @@ test("create supports JSON, validates locally, and dry-run touches no config, cr
   const { deps, remote, config, credentials } = fixture();
   config.value = null;
   credentials.values = {};
-  const parsed = parseTicketArgs(["create", "--json", '{"title":" Printer jams ","description":" Long receipts ","requestId":" req-1 "}']);
+  const parsed = parseTicketArgs(["create", "--json", '{"title":" Printer jams ","description":" Long receipts ","requestId":" req-1 ","project":"pos"}']);
   assert.equal(parsed.kind, "create");
-  if (parsed.kind === "create") assert.deepEqual(parsed.request, { title: "Printer jams", description: "Long receipts", requestId: "req-1" });
+  if (parsed.kind === "create") assert.deepEqual(parsed.request, { title: "Printer jams", description: "Long receipts", requestId: "req-1", projectKey: "POS" });
 
   const result = await runTicketCli(["create", "--title", "Printer jams", "--dry-run"], deps);
   assert.equal(result.exitCode, 0);
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: true, dryRun: true, created: false, deployment: "dev",
-    ticket: { title: "Printer jams", description: "", status: "new", media: [], origin: "staff", createdVia: "codex", requestId: "generated-request-id" },
+    ticket: { project: null, title: "Printer jams", description: "", status: "new", media: [], origin: "staff", createdVia: "codex", requestId: "generated-request-id" },
   });
   assert.deepEqual(remote.calls, []);
   assert.equal(config.saves, 0);
@@ -369,7 +380,7 @@ test("list and get return stable Ticket JSON shapes", async () => {
   const listed = JSON.parse((await runTicketCli(["list"], deps)).stdout);
   assert.equal(listed.count, 1);
   assert.deepEqual(listed.tickets[0], {
-    id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, title: "Printer jams", description: "On long receipts",
+    id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, project: "TKT", title: "Printer jams", description: "On long receipts",
     status: "new", version: 0, archived: false, createdAt: 1_000, updatedAt: 1_000, origin: "staff", createdVia: "codex", mediaCount: 0, annotationCount: 0,
   });
   const found = JSON.parse((await runTicketCli(["get", "TKT-0007"], deps)).stdout);
@@ -396,7 +407,7 @@ test("authenticated create is direct, idempotency-shaped, and keeps production e
   const created = await runTicketCli(["create", "--title", "Printer jams", "--request-id", "req-1", "--prod"], deps);
   assert.equal(remote.calls[0].args[0], "https://prod.example.com");
   assert.equal(remote.calls.find((call) => call.method === "create")?.args[1], "saved-prod-token");
-  assert.deepEqual(JSON.parse(created.stdout), { ok: true, id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, status: "new", version: 0, created: true, deployment: "prod", requestId: "req-1" });
+  assert.deepEqual(JSON.parse(created.stdout), { ok: true, id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, project: "TKT", status: "new", version: 0, created: true, deployment: "prod", requestId: "req-1" });
   assert.equal(classifyRemoteError(new Error("REQUEST_ID_CONFLICT"), "dev").exitCode, EXIT.conflict);
 });
 

@@ -1,3 +1,4 @@
+import type { Id } from "../../convex/_generated/dataModel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "convex/react";
 import { toast } from "sonner";
@@ -52,11 +53,13 @@ import { localizeError, useI18n } from "@/lib/i18n";
  */
 export function CustomerTicketWizard({
   token,
+  projectId,
   active,
   onSubmitted,
   onUploadBusyChange,
 }: {
   token: string;
+  projectId: Id<"projects">;
   active: boolean;
   onSubmitted: () => void;
   onUploadBusyChange: (isBusy: boolean) => void;
@@ -200,7 +203,7 @@ export function CustomerTicketWizard({
         {
           token,
           createUploadIntent,
-          createFeedback,
+          createFeedback: (args) => createFeedback({ ...args, projectId }),
           onProgress: setProgress,
           signal: abortController.signal,
           onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),

@@ -187,7 +187,9 @@ pnpm ticket logout --prod
 | `NOT_LOGGED_IN` | Run `pnpm ticket login`. |
 | `SESSION_EXPIRED` or `SESSION_INVALID` | Sign in again. |
 | `INVALID_CREDENTIALS` | Check the staff password and retry. |
-| `TICKET_NOT_FOUND` | Check the `TKT-####` reference; add `--include-archived` when reading an archived Ticket. |
+| `TICKET_NOT_FOUND` | Check the `KEY-####` reference (for example `POS-0012`); add `--include-archived` when reading an archived Ticket. |
+| `PROJECT_REQUIRED` | More than one Project exists; pass `--project KEY`. |
+| `PROJECT_NOT_FOUND` | No active Project has that key; check it in the staff app. |
 | `VERSION_CONFLICT` | Read the Ticket again and retry with its latest version. |
 | `REQUEST_ID_CONFLICT` | Use a new request ID only when creating different content. |
 

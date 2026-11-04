@@ -30,7 +30,7 @@ export function FeedbackCard({
   const selectedMedia = item.media[mediaIndex] ?? item.media[0];
   const mediaCount = item.media.length;
   const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
-  const ticketLabel = formatTicketNumber(item.ticketNumber);
+  const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
   const nextStatus = nextFeedbackStatus(item.status);
   const currentStatus = statusMeta(item.status);
   const nextStatusLabel = nextStatus ? t(statusMeta(nextStatus).labelKey) : null;
@@ -41,7 +41,7 @@ export function FeedbackCard({
     <article className="rounded-md border bg-background shadow-sm">
       <div className="relative">
         <div className={cn("flex items-center justify-between gap-3 px-3 pt-3", handle && "pr-10")}>
-          <span className="font-mono text-sm font-semibold leading-5">{ticketLabel}</span>
+          <span className="shrink-0 whitespace-nowrap font-mono text-sm font-semibold leading-5">{ticketLabel}</span>
           <span className="truncate text-xs leading-5 text-muted-foreground">{formatDate(item.createdAt)}</span>
         </div>
         <div className="space-y-2 p-3">
@@ -101,7 +101,7 @@ export function FeedbackCard({
       <div className="flex items-center justify-between gap-2 border-t p-2">
           <Badge
             variant="outline"
-            className={cn("gap-1 rounded-full px-2.5 py-1 font-semibold tabular-nums", urgencyTone[urgency])}
+            className={cn("gap-1 whitespace-nowrap rounded-full px-2.5 py-1 font-semibold tabular-nums", urgencyTone[urgency])}
             aria-label={item.urgencyScore === undefined
               ? t("urgencyUnscored")
               : t("urgencyScoreValue", { score: item.urgencyScore })}

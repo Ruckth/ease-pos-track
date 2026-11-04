@@ -74,12 +74,17 @@ separate Keychain items.
 ## Ticket operations
 
 All live Ticket operations require a valid staff session. Development is the
-default; append `--prod` only when production was explicitly requested. List and
-lookup also run the existing authenticated Ticket-number backfill before reading,
-so older Tickets receive stable references through the same allocator.
+default; append `--prod` only when production was explicitly requested.
+
+Every Ticket belongs to a Project, and its reference starts with the Project key:
+`POS-0012` is Ticket 12 in Project `POS`. Numbers count up per Project. Tickets
+created before Projects existed live in Project `TKT`, so their references did
+not change. Keys are case-insensitive on input. Projects are created in the staff
+app; the CLI does not create them.
 
 ```bash
 pnpm ticket list
+pnpm ticket list --project POS
 pnpm ticket list --include-archived
 pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
@@ -92,20 +97,26 @@ URL:
 
 ```bash
 pnpm ticket create --title "Printer jams" --description "Receipt printer jams on long receipts"
+pnpm ticket create --project POS --title "Printer jams"
 pnpm ticket create --title "Calendar overlap" --image ./first.png --image https://example.com/second.jpg
-pnpm ticket create --json '{"title":"Printer jams","description":"Long receipts","requestId":"req-42"}'
+pnpm ticket create --json '{"title":"Printer jams","description":"Long receipts","requestId":"req-42","project":"POS"}'
 pnpm ticket create --title "Printer jams" --dry-run
 ```
 
 ```json
-{"ok":true,"id":"k17f…","ticket":"TKT-0007","ticketNumber":7,"status":"new","version":0,"created":true,"deployment":"dev","requestId":"6f1c…"}
+{"ok":true,"id":"k17f…","ticket":"TKT-0007","ticketNumber":7,"project":"TKT","status":"new","version":0,"created":true,"deployment":"dev","requestId":"6f1c…"}
 ```
+
+`--project` may be left out only while exactly one Project exists. With more than
+one, create fails with `PROJECT_REQUIRED` (exit 3) and writes nothing; an unknown
+key fails with `PROJECT_NOT_FOUND`.
 
 `--request-id` is the idempotency key. If omitted, one is generated and returned:
 
 - same request id, same title and description: the original Ticket is returned
   with `"created":false`;
-- same request id, different content: `REQUEST_ID_CONFLICT`, exit 5, and no write.
+- same request id, different content or a different Project: `REQUEST_ID_CONFLICT`,
+  exit 5, and no write.
 
 If a caller is uncertain whether a create completed, it must retry with the
 reported request id. A different request id can create a second Ticket.

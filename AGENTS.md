@@ -9,15 +9,18 @@ Project vocabulary: the unit of work is a **Ticket**. Do not introduce "feedback
 Only run this when the user explicitly asks for a Ticket to be created.
 
 ```bash
-pnpm ticket create --title "<title>" --description "<description>"
+pnpm ticket create --title "<title>" --description "<description>" --project <KEY>
 ```
 
+- Every Ticket belongs to a Project. `--project` may be left out only while a single
+  Project exists; with several, the command fails with `PROJECT_REQUIRED`. Ask the
+  user which Project when they have not said.
 - Draft or unsure? Add `--dry-run`. It validates and prints the Ticket it would
   create without writing anything.
 - The development deployment is the default. Never pass `--prod` unless the user
   explicitly asks for production.
 - The command prints one JSON object on stdout. Report the `ticket` value (for
-  example `TKT-0007`) back to the user; `created: false` means an existing Ticket
+  example `POS-0007`) back to the user; `created: false` means an existing Ticket
   was returned for that `--request-id`, not a new one.
 - Errors print one JSON object on stderr with a `code`. Exit codes: `2` usage,
   `3` invalid input, `4` Convex setup or auth, `5` `--request-id` reuse with

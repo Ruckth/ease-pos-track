@@ -5,7 +5,6 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   actorFields,
-  actorFromSession,
   assertCanWriteFeedback,
   assertCustomerActor,
   assertStaffActor,
@@ -22,37 +21,17 @@ import {
 } from "./annotation_state";
 import { requireCurrentVersion, validateFeedbackText, validateUrgencyScore } from "./feedback_state";
 import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
+import { normalizeProjectKey } from "./ticket_numbers";
+import { projectByKey, requireUsableProject, resolveStaffProject } from "./projects";
+import { requireActor } from "./session_auth";
 import { validateMediaItems } from "./uploads";
 import {
   applyTicketChange,
   createTicketRecord,
-  ensureTicketNumbersInDb,
   feedbackState,
   recordAnnotationEvent,
   recordFeedbackEvent,
 } from "./tickets";
-
-async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
-  const session = await ctx.db
-    .query("sessions")
-    .withIndex("by_token", (q) => q.eq("token", token))
-    .unique();
-
-  if (!session || session.expiresAt <= Date.now()) {
-    throw new Error("SESSION_EXPIRED");
-  }
-
-  return session;
-}
-
-/**
- * Resolves the session and the actor behind it. Sessions without a role predate
- * the customer portal and resolve to staff.
- */
-async function requireActor(ctx: QueryCtx | MutationCtx, token: string) {
-  const session = await requireSession(ctx, token);
-  return { session, actor: actorFromSession(session) };
-}
 
 /**
  * Loads a ticket the actor may read, or null. Denied and non-existent tickets are
@@ -147,9 +126,14 @@ function verifyPendingUploadIntent(
   }
 }
 
+/**
+ * Staff board and CLI listing, newest first. With `projectKey` it lists one
+ * Project; without it, every Ticket.
+ */
 export const listFeedback = query({
   args: {
     token: v.string(),
+    projectKey: v.optional(v.string()),
     includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -157,15 +141,27 @@ export const listFeedback = query({
     // Customers never see the whole board; they use listMyFeedback instead.
     assertStaffActor(actor);
 
-    const rows = await ctx.db.query("feedback").withIndex("by_created_at").order("desc").collect();
+    let rows: Doc<"feedback">[];
+    if (args.projectKey === undefined) {
+      rows = await ctx.db.query("feedback").order("desc").collect();
+    } else {
+      const project = await projectByKey(ctx, normalizeProjectKey(args.projectKey));
+      if (!project) throw new Error("PROJECT_NOT_FOUND");
+      rows = await ctx.db
+        .query("feedback")
+        .withIndex("by_project_ticket", (q) => q.eq("projectKey", project.key))
+        .order("desc")
+        .collect();
+    }
     return args.includeDeleted ? rows : rows.filter((item) => item.deletedAt === undefined);
   },
 });
 
-/** Tickets owned by the signed-in customer, newest first. */
+/** Tickets owned by the signed-in customer, newest first, optionally in one Project. */
 export const listMyFeedback = query({
   args: {
     token: v.string(),
+    projectKey: v.optional(v.string()),
     includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -177,17 +173,10 @@ export const listMyFeedback = query({
       .withIndex("by_owner", (q) => q.eq("ownerCustomerId", customerId))
       .order("desc")
       .collect();
-    return args.includeDeleted ? rows : rows.filter((item) => item.deletedAt === undefined);
-  },
-});
-
-export const ensureTicketNumbers = mutation({
-  args: { token: v.string() },
-  handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
-    const result = await ensureTicketNumbersInDb(ctx);
-    return { updated: result.assignments };
+    return rows.filter((item) =>
+      (args.includeDeleted || item.deletedAt === undefined)
+      && (args.projectKey === undefined || item.projectKey === args.projectKey)
+    );
   },
 });
 
@@ -202,19 +191,21 @@ export const getFeedback = query({
   },
 });
 
-/** Ticket-number lookup for authenticated staff tools such as the Ticket CLI. */
+/** Ticket-reference lookup (`POS-0012`) for authenticated staff tools such as the Ticket CLI. */
 export const getFeedbackByTicketNumber = query({
   args: {
     token: v.string(),
+    projectKey: v.string(),
     ticketNumber: v.number(),
     includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { actor } = await requireActor(ctx, args.token);
     assertStaffActor(actor);
+    const projectKey = normalizeProjectKey(args.projectKey);
     const doc = await ctx.db
       .query("feedback")
-      .withIndex("by_ticket_number", (q) => q.eq("ticketNumber", args.ticketNumber))
+      .withIndex("by_project_ticket", (q) => q.eq("projectKey", projectKey).eq("ticketNumber", args.ticketNumber))
       .unique();
     if (!doc || (!args.includeDeleted && doc.deletedAt !== undefined)) return null;
     return doc;
@@ -255,6 +246,7 @@ export const listFeedbackActivity = query({
 export const createFeedback = mutation({
   args: {
     token: v.string(),
+    projectId: v.id("projects"),
     title: v.string(),
     description: v.string(),
     media: v.array(mediaItemValidator),
@@ -276,12 +268,14 @@ export const createFeedback = mutation({
     // the same actor; the actor columns are re-checked as defence in depth.
     if (intent.status === "attached" && intent.feedbackId) return intent.feedbackId;
     verifyPendingUploadIntent(intent, args.media);
+    const project = await requireUsableProject(ctx, actor, args.projectId);
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
       createAnnotationRecord(args.media, annotation, index + 1, crypto.randomUUID(), now)
     );
     const created = await createTicketRecord(ctx, {
+      project,
       title,
       description,
       media: args.media,
@@ -299,11 +293,13 @@ export const createFeedback = mutation({
 /**
  * Authenticated text-only creation for the Ticket CLI. It shares staff sessions,
  * validation, ownership, ticket allocation, audit events and request id rules
- * with the rest of the Ticket domain.
+ * with the rest of the Ticket domain. `projectKey` may be omitted only while a
+ * single Project exists.
  */
 export const createTextFeedback = mutation({
   args: {
     token: v.string(),
+    projectKey: v.optional(v.string()),
     title: v.string(),
     description: v.string(),
     requestId: v.string(),
@@ -313,16 +309,19 @@ export const createTextFeedback = mutation({
     assertStaffActor(actor);
     const requestId = normalizeRequestId(args.requestId);
     const { title, description } = validateFeedbackText(args.title, args.description);
+    const project = await resolveStaffProject(ctx, args.projectKey);
     const existing = await ctx.db
       .query("feedback")
       .withIndex("by_external_request", (q) => q.eq("externalRequestId", requestId))
       .unique();
     if (existing) {
       assertSameTicketRequest(existing, { title, description });
+      if (existing.projectKey !== project.key) throw new Error("REQUEST_ID_CONFLICT");
       return { ticket: existing, created: false, requestId };
     }
 
     const created = await createTicketRecord(ctx, {
+      project,
       title,
       description,
       media: [],

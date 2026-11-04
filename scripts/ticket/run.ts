@@ -9,7 +9,7 @@
 
 import { formatTicketNumber } from "../../convex/ticket_numbers";
 import { createHash } from "node:crypto";
-import { parseTicketArgs, type TicketCommand } from "./cli";
+import { parseTicketArgs, type TicketCommand, type TicketRef } from "./cli";
 import type { ConfigStore } from "./config";
 import { authHint, type Deployment } from "./deployment";
 import {
@@ -72,7 +72,7 @@ function sameFileMetadata(file: File, media: { name: string; size: number; type:
 }
 
 async function attachTicketImages(
-  input: { ticketNumber: number; expectedVersion: number; images: string[]; requestId: string },
+  input: { ref: TicketRef; expectedVersion: number; images: string[]; requestId: string },
   access: StaffAccess,
   deps: TicketCliDeps,
 ) {
@@ -82,7 +82,7 @@ async function attachTicketImages(
     files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
   });
   if (intent.feedbackId) {
-    const existing = await deps.remote.get(access.url, access.token, input.ticketNumber, false);
+    const existing = await deps.remote.get(access.url, access.token, input.ref, false);
     if (!existing || existing._id !== intent.feedbackId) throw inputError("UPLOAD_INTENT_MISMATCH", "The image retry belongs to a different Ticket.");
     return existing;
   }
@@ -103,7 +103,7 @@ async function attachTicketImages(
   const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
   if (media.length !== files.length) throw internalError("The image upload result did not match the requested files.");
   return await deps.remote.attachImages(access.url, access.token, {
-    ticketNumber: input.ticketNumber,
+    ref: input.ref,
     expectedVersion: input.expectedVersion,
     intentId: intent.intentId,
     secret: intent.secret,
@@ -128,7 +128,7 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
   },
   {
     codes: ["VERSION_CONFLICT"],
-    toError: () => conflictError("VERSION_CONFLICT", "The Ticket changed after it was read.", "Run `pnpm ticket get TKT-####`, then retry with its current version."),
+    toError: () => conflictError("VERSION_CONFLICT", "The Ticket changed after it was read.", "Run `pnpm ticket get KEY-####`, then retry with its current version."),
   },
   {
     codes: ["UPLOAD_REQUEST_CONFLICT"],
@@ -193,10 +193,12 @@ async function runStaffCommand(command: StaffCommand, access: StaffAccess, deps:
     case "whoami":
       return whoamiOutput(target, url, session);
     case "list":
-      return listOutput(target, await remote.list(url, token, command.includeArchived));
+      return listOutput(target, await remote.list(url, token, command.projectKey, command.includeArchived));
     case "get": {
-      const ticket = await remote.get(url, token, command.ticketNumber, command.includeArchived);
-      if (!ticket) throw inputError("TICKET_NOT_FOUND", `Ticket ${formatTicketNumber(command.ticketNumber)} was not found.`);
+      const ticket = await remote.get(url, token, command.ref, command.includeArchived);
+      if (!ticket) {
+        throw inputError("TICKET_NOT_FOUND", `Ticket ${formatTicketNumber(command.ref.ticketNumber, command.ref.projectKey)} was not found.`);
+      }
       return ticketOutput(target, ticket);
     }
     case "update":
@@ -204,9 +206,9 @@ async function runStaffCommand(command: StaffCommand, access: StaffAccess, deps:
     case "status":
       return ticketOutput(target, await remote.changeStatus(url, token, command));
     case "archive":
-      return ticketOutput(target, await remote.archive(url, token, command.ticketNumber, command.expectedVersion));
+      return ticketOutput(target, await remote.archive(url, token, command.ref, command.expectedVersion));
     case "restore":
-      return ticketOutput(target, await remote.restore(url, token, command.ticketNumber, command.expectedVersion));
+      return ticketOutput(target, await remote.restore(url, token, command.ref, command.expectedVersion));
     default:
       return unreachable(command);
   }
@@ -243,7 +245,7 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       const created = await deps.remote.create(url, token, { ...command.request, requestId: idempotencyKey });
       if (command.images.length > 0) {
         created.ticket = await attachTicketImages({
-          ticketNumber: created.ticket.ticketNumber!,
+          ref: { projectKey: created.ticket.projectKey!, ticketNumber: created.ticket.ticketNumber! },
           expectedVersion: created.ticket.version ?? 0,
           images: command.images,
           requestId: idempotencyKey,

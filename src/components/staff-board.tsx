@@ -280,7 +280,7 @@ function BoardColumn({
                           variant="outline"
                           size="icon"
                           className="size-9 touch-none bg-background/90"
-                          aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber) })}
+                          aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber, item.projectKey) })}
                         >
                           <GripVertical />
                         </Button>

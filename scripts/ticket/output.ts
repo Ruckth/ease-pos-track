@@ -21,8 +21,9 @@ export function jsonLine(payload: unknown) {
 export function ticketSummary(ticket: TicketDocument) {
   return {
     id: ticket._id,
-    ticket: formatTicketNumber(ticket.ticketNumber),
+    ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey),
     ticketNumber: ticket.ticketNumber ?? null,
+    project: ticket.projectKey ?? null,
     title: ticket.title,
     description: ticket.description,
     status: toPublicTicketStatus(ticket.status),
@@ -65,8 +66,9 @@ export function createOutput(
   return {
     ok: true as const,
     id: result.ticket._id,
-    ticket: formatTicketNumber(result.ticket.ticketNumber),
+    ticket: formatTicketNumber(result.ticket.ticketNumber, result.ticket.projectKey),
     ticketNumber: result.ticket.ticketNumber,
+    project: result.ticket.projectKey ?? null,
     status: toPublicTicketStatus(result.ticket.status),
     version: result.ticket.version ?? 0,
     created: result.created,
@@ -78,7 +80,7 @@ export function createOutput(
 /** The Ticket a create would write, without contacting the deployment. */
 export function dryRunOutput(
   deployment: Deployment,
-  request: TicketContent,
+  request: TicketContent & { projectKey?: string },
   requestId: string,
   files: Array<Pick<File, "name" | "size" | "type">> = [],
 ) {
@@ -88,6 +90,7 @@ export function dryRunOutput(
     created: false as const,
     deployment,
     ticket: {
+      project: request.projectKey ?? null,
       title: request.title,
       description: request.description,
       status: "new" as const,
