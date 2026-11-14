@@ -12,6 +12,16 @@ deployment settings. Do not edit `.env.local` or `.env.convex-local` manually.
 Do not deploy or run fixtures against shared development or production.
 
 Local seed and smoke instructions are in [docs/ticket-cli.md](docs/ticket-cli.md).
+P8 reset preparation/rehearsal is documented in [docs/dev-reset.md](docs/dev-reset.md).
+`pnpm dev:reset` defaults to read-only inspection of the recorded development
+identity; use `--target local` during implementation. Execution needs the exact
+`--confirm` identity and `--expect <reviewed inspect manifest>`. The local wrapper
+has no remote mode and accepts only `dev`, `run`, `env`, `import`, `export`,
+`data`, `codegen` and `--help` (no arguments defaults to a local push).
+Only an explicitly authorized development cutover may use the reset tool's isolated development runner and env commands. Remove the target's
+`UPLOADTHING_TOKEN` first and set `MEDIA_CLEANUP_ENABLED` to exactly `false`.
+Keep every unresolved manifest, stop old writers/callbacks/schedulers first, and
+enable cleanup last.
 Every Convex registration uses a policy constructor from `convex/functions.ts`;
 resource ownership and Project access belong in domain operations.
 

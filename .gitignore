@@ -9,6 +9,7 @@ npm-debug.log*
 pnpm-debug.log*
 .vercel
 .env*
+.reset/
 
 # pnpm-lock.yaml is the only lockfile this project keeps.
 package-lock.json

@@ -276,11 +276,19 @@ pnpm run build
 
 ## Disposable local implementation target
 
+For the P8 reset/seed tooling, local rehearsals and the ordered checkpoint 20
+procedure, see [Development reset](dev-reset.md). `pnpm dev:reset` inspects the
+recorded development target by default; implementation rehearsals must explicitly
+use `--target local`. Reset execution also requires `--expect <reviewed inspect manifest>`;
+remove the target's `UPLOADTHING_TOKEN` and set cleanup to exactly `false` first,
+using the reset tool's env commands. This does not change the Ticket CLI's flags or JSON contract.
+
 The implementation target is `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
 The wrapper preserves `.env.local`, which still selects shared development for
 ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
 by these fixtures. Do not run bare Convex commands or edit either environment
-file manually.
+file manually. The local wrapper accepts only `dev`, `run`, `env`, `import`,
+`export`, `data`, `codegen` and `--help`; no arguments defaults to a local push.
 
 ```bash
 pnpm convex:local
