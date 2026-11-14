@@ -176,3 +176,35 @@ test("aborting an upload cancels its guarded intent and renews the draft key", a
     assert.equal(renewals, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("abort during an unknown create never cancels the intent or renews the receipt key", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = 0;
+  let renewed = 0;
+  globalThis.fetch = async () => { cancelled++; throw new Error("Must not cancel"); };
+  const controller = new AbortController();
+  try {
+    await assert.rejects(submitTicketDraft({
+      token: "token", signal: controller.signal, onRequestConflict: () => { renewed++; },
+      createUploadIntent: async () => ({ intentId: "intent" as Id<"uploadIntents">, secret: "secret", uploadedFiles: [] }),
+      createTicket: async () => { controller.abort(); throw new Error("response lost"); },
+    }, { title: "Ticket", description: "", items: [], annotations: [], idempotencyKey: "keep-key" }), /UPLOAD_WRITE_UNKNOWN/);
+    assert.equal(cancelled, 0);
+    assert.equal(renewed, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("abort with an unknown guarded cancellation retains the draft key", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let renewed = 0;
+  globalThis.fetch = async () => { throw new Error("Cancel response lost"); };
+  try {
+    await assert.rejects(submitTicketDraft({
+      token: "token", signal: controller.signal, onRequestConflict: () => { renewed++; },
+      createUploadIntent: async () => { controller.abort(); return { intentId: "intent" as Id<"uploadIntents">, secret: "secret", uploadedFiles: [] }; },
+      createTicket: async () => { assert.fail("Cancelled before create"); },
+    }, { title: "Ticket", description: "", items: [], annotations: [], idempotencyKey: "keep-key" }), { name: "AbortError" });
+    assert.equal(renewed, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});

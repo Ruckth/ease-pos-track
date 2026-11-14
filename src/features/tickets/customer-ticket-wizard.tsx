@@ -1,9 +1,6 @@
-import type { Id } from "../../convex/_generated/dataModel";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "convex/react";
-import { toast } from "sonner";
-import { Check, ImagePlus, Loader2, MapPin, Send } from "lucide-react";
-import { api } from "@convex/_generated/api";
+import type { PendingMedia } from "@/lib/types";
+import { MediaUploadField } from "@/components/media-upload";
+import { MediaViewer } from "@/components/media-viewer";
 import {
   Stepper,
   StepperContent,
@@ -21,9 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { MediaUploadField, releasePendingMedia, type PendingMedia } from "@/components/media-upload";
-import { MediaViewer, type AnnotationDraftInput, type AnnotationUpdateInput } from "@/components/media-viewer";
-import { cn } from "@/lib/utils";
 import {
   canEnterStep,
   clampStep,
@@ -36,189 +30,62 @@ import {
   type CustomerStep,
   type CustomerTicketDraft,
 } from "@/lib/customer-ticket-steps";
-import { submitTicketDraft } from "@/lib/ticket-submit";
-import {
-  pendingAnnotationsForViewer,
-  pendingMediaForViewer,
-  withoutPendingAnnotationsForMedia,
-  type PendingAnnotation,
-} from "@/lib/pending-annotations";
 import { localizeError, useI18n } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { Check, ImagePlus, Loader2, MapPin, Send } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import type { DisposableTicketDraft } from "./draft";
+import { useTicketDraft } from "./use-composer";
 
 /**
  * Customer ticket creation as three gated steps: details, media and pins, then
  * review and submit. A step only opens once the earlier steps are complete, and
- * submitting runs the same upload-intent pipeline as the staff composer, so a
- * failure cancels the intent and cleans up uploaded files.
+ * submitting runs the same upload-intent pipeline as the staff composer, so unknown
+ * writes retain their receipt identity until reconciliation.
  */
 export function CustomerTicketWizard({
   token,
-  projectId,
+  draftOwner,
   active,
   onSubmitted,
-  onUploadBusyChange,
 }: {
   token: string;
-  projectId: Id<"projects">;
+  draftOwner: DisposableTicketDraft;
   active: boolean;
   onSubmitted: () => void;
-  onUploadBusyChange: (isBusy: boolean) => void;
 }) {
   const { t } = useI18n();
-  const createTicket = useMutation(api.tickets.createTicket);
-  const createUploadIntent = useMutation(api.uploads.createUploadIntent);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const idempotencyKeyRef = useRef(crypto.randomUUID());
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState<CustomerStep>(1);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [items, setItems] = useState<PendingMedia[]>([]);
-  const [annotations, setAnnotations] = useState<PendingAnnotation[]>([]);
+  const { owner, title, description, items, annotations, error, progress, setTitle, setDescription,
+    setItems, setError, viewerMedia, viewerAnnotations, annotationCounts,
+    createPendingAnnotation, updatePendingAnnotation, deletePendingAnnotation, submit: submitDraft } = useTicketDraft(token, draftOwner);
+  const [requestedStep, setStep] = useState<CustomerStep>(1);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingMedia | null>(null);
-  const [error, setError] = useState("");
-  const [progress, setProgress] = useState<number | null>(null);
   const isUploading = progress !== null;
-
-  const draft: CustomerTicketDraft = {
-    title,
-    description,
-    mediaCount: items.length,
-    annotationCount: annotations.length,
-  };
+  const draft: CustomerTicketDraft = { title, description, mediaCount: items.length, annotationCount: annotations.length };
+  const step = clampStep(requestedStep, draft);
   const issues = stepIssues(step, draft);
-  const viewerMedia = useMemo(() => pendingMediaForViewer(items), [items]);
-  const viewerAnnotations = useMemo(() => pendingAnnotationsForViewer(items, annotations), [annotations, items]);
-  const selectedMediaIndex = Math.max(0, items.findIndex((item) => item.id === selectedMediaId));
-  const annotationCounts = useMemo(
-    () =>
-      annotations.reduce<Record<string, number>>((counts, annotation) => {
-        counts[annotation.mediaId] = (counts[annotation.mediaId] ?? 0) + 1;
-        return counts;
-      }, {}),
-    [annotations],
-  );
-
-  useEffect(() => {
-    onUploadBusyChange(isUploading);
-  }, [isUploading, onUploadBusyChange]);
-
-  useEffect(() => {
-    if (active && step === 1) titleInputRef.current?.focus();
-  }, [active, step]);
-
-  useEffect(() => {
-    if (active) return;
-    setSelectedMediaId(null);
-    setPendingRemoval(null);
-  }, [active]);
-
-  // Editing an earlier step back into an invalid state pulls the flow back. Every
-  // field the step gates read is a dependency, so the clamp cannot go stale.
-  useEffect(() => {
-    setStep((current) => clampStep(current, draft));
-  }, [title, description, items.length]);
-
-  function resetDraft() {
-    releasePendingMedia(items);
-    setItems([]);
-    setAnnotations([]);
-    setSelectedMediaId(null);
-    setPendingRemoval(null);
-    setTitle("");
-    setDescription("");
-    setError("");
-    setStep(1);
-    idempotencyKeyRef.current = crypto.randomUUID();
-  }
+  const selectedMediaIndex = Math.max(0, items.findIndex(item => item.id === selectedMediaId));
 
   function removePendingItem(item: PendingMedia) {
-    URL.revokeObjectURL(item.previewUrl);
-    setItems((current) => current.filter((candidate) => candidate.id !== item.id));
-    setAnnotations((current) => withoutPendingAnnotationsForMedia(current, item.id));
-    setSelectedMediaId((current) => (current === item.id ? null : current));
+    owner.remove(item);
+    setSelectedMediaId(current => current === item.id ? null : current);
     setPendingRemoval(null);
   }
-
   function requestPendingItemRemoval(item: PendingMedia) {
-    if ((annotationCounts[item.id] ?? 0) === 0) {
-      removePendingItem(item);
-      return;
-    }
-    setPendingRemoval(item);
+    if ((annotationCounts[item.id] ?? 0) === 0) removePendingItem(item);
+    else setPendingRemoval(item);
   }
-
-  async function createPendingAnnotation(input: AnnotationDraftInput) {
-    const mediaItem = items[input.mediaIndex];
-    if (!mediaItem) throw new Error("MEDIA_UNAVAILABLE");
-    setAnnotations((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        mediaId: mediaItem.id,
-        kind: input.kind,
-        x: input.x,
-        y: input.y,
-        time: input.time,
-        text: input.text.trim(),
-        createdAt: Date.now(),
-      },
-    ]);
-    toast.success(t("pinAdded"));
-  }
-
-  async function updatePendingAnnotation(input: AnnotationUpdateInput) {
-    setAnnotations((current) =>
-      current.map((annotation) => {
-        if (annotation.id !== input.annotationId) return annotation;
-        return {
-          ...annotation,
-          ...(input.text === undefined ? {} : { text: input.text.trim() }),
-          ...(input.x === undefined ? {} : { x: input.x }),
-          ...(input.y === undefined ? {} : { y: input.y }),
-          ...(input.time === undefined ? {} : { time: input.time }),
-        };
-      }),
-    );
-  }
-
-  async function deletePendingAnnotation(annotationId: string) {
-    setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
-  }
-
   async function submit() {
-    setError("");
-    const blocking = [1, 2].flatMap((candidate) => stepIssues(candidate as CustomerStep, draft));
-    if (blocking.length > 0) {
-      setError(localizeError(new Error(blocking[0]), t));
-      return;
-    }
-
-    setProgress(0);
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    try {
-      await submitTicketDraft(
-        {
-          token,
-          createUploadIntent,
-          createTicket: (args) => createTicket({ ...args, projectId }),
-          onProgress: setProgress,
-          signal: abortController.signal,
-          onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),
-          onRequestConflict: () => { idempotencyKeyRef.current = crypto.randomUUID(); },
-        },
-        { title, description, items, annotations, idempotencyKey: idempotencyKeyRef.current },
-      );
-      resetDraft();
+    const blocking = [1, 2].flatMap(candidate => stepIssues(candidate as CustomerStep, draft));
+    if (blocking.length) { setError(new Error(blocking[0])); return; }
+    if (await submitDraft()) {
+      setSelectedMediaId(null);
+      setPendingRemoval(null);
+      setStep(1);
       toast.success(t("ticketSubmitted"));
       onSubmitted();
-    } catch (err) {
-      setError(localizeError(err, t));
-    } finally {
-      abortControllerRef.current = null;
-      setProgress(null);
     }
   }
 
@@ -286,7 +153,7 @@ export function CustomerTicketWizard({
                 <span className="text-xs tabular-nums text-muted-foreground">{title.length}/{TITLE_MAX_LENGTH}</span>
               </div>
               <Input
-                ref={titleInputRef}
+                disabled={isUploading}
                 id="customer-ticket-title"
                 value={title}
                 maxLength={TITLE_MAX_LENGTH}
@@ -301,6 +168,7 @@ export function CustomerTicketWizard({
                 <span className="text-xs tabular-nums text-muted-foreground">{description.length}/{DESCRIPTION_MAX_LENGTH}</span>
               </div>
               <Textarea
+                disabled={isUploading}
                 id="customer-ticket-description"
                 rows={5}
                 maxLength={DESCRIPTION_MAX_LENGTH}
@@ -318,6 +186,7 @@ export function CustomerTicketWizard({
             <MediaUploadField
               items={items}
               onItemsChange={setItems}
+              onFilesAdded={owner.addFiles}
               onPreviewItem={(item) => setSelectedMediaId(item.id)}
               onRequestRemove={requestPendingItemRemoval}
               annotationCounts={annotationCounts}
@@ -360,6 +229,7 @@ export function CustomerTicketWizard({
                   <button
                     key={item.id}
                     type="button"
+                    disabled={isUploading}
                     onClick={() => setSelectedMediaId(item.id)}
                     aria-label={t("openMedia", { name: item.file.name })}
                     className="relative aspect-square overflow-hidden rounded-xl border bg-black transition-transform hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -394,14 +264,14 @@ export function CustomerTicketWizard({
             variant="outline"
             className="shrink-0"
             disabled={step === 1 || isUploading}
-            onClick={() => setStep((current) => clampStep(current - 1, draft))}
+            onClick={() => setStep(clampStep(step - 1, draft))}
           >
             {t("back")}
           </Button>
           {step === 3 ? (
             <div className="ml-auto flex min-w-0 gap-2">
               {isUploading ? (
-                <Button type="button" variant="outline" onClick={() => abortControllerRef.current?.abort()}>
+                <Button type="button" variant="outline" onClick={() => owner.cancel()}>
                   {t("cancelUpload")}
                 </Button>
               ) : null}
@@ -415,7 +285,7 @@ export function CustomerTicketWizard({
               type="button"
               className="min-w-28"
               disabled={!isStepComplete(step, draft) || isUploading}
-              onClick={() => setStep((current) => clampStep(current + 1, draft))}
+              onClick={() => setStep(clampStep(step + 1, draft))}
             >
               {step === 2 && items.length === 0 ? t("skipForNow") : t("next")}
             </Button>
@@ -435,6 +305,7 @@ export function CustomerTicketWizard({
           media={viewerMedia}
           annotations={viewerAnnotations}
           initialIndex={selectedMediaIndex}
+          disabled={isUploading}
           onCreateAnnotation={createPendingAnnotation}
           onUpdateAnnotation={updatePendingAnnotation}
           onDeleteAnnotation={deletePendingAnnotation}

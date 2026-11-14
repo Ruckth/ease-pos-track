@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { pickProject, readProjectParam, withProjectParam } from "@/lib/projects";
 
-export type ProjectSummary = { _id: Id<"projects">; name: string; key: string };
+import type { ProjectSummary } from "@/lib/types";
 
 /**
  * The Projects this account can use and the one currently open. The open

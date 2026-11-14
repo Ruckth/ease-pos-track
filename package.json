@@ -21,7 +21,8 @@
     "typecheck": "tsgo -b",
     "typecheck:tsc": "tsc -b",
     "check": "concurrently --group --names typecheck,unit,convex,build \"pnpm:typecheck\" \"pnpm:test:unit\" \"pnpm:test:convex\" \"vite build --logLevel warn\"",
-    "agent:setup": "node scripts/agent-setup.mjs"
+    "agent:setup": "node scripts/agent-setup.mjs",
+    "test:browser": "node scripts/test-browser.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

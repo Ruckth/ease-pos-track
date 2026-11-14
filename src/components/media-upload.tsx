@@ -1,33 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, FileImage, GripVertical, ImagePlus, Info, MapPin, PlayCircle, Upload, X } from "lucide-react";
-import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
+import type { PendingMedia } from "@/lib/types";
 import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
+import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
 import { Button } from "@/components/ui/button";
 import { supportsCamera } from "@/lib/camera";
-import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
-
-export type PendingMedia = {
-  id: string;
-  file: File;
-  previewUrl: string;
-  isVideo: boolean;
-};
+import { cn } from "@/lib/utils";
+import { Camera, FileImage, GripVertical, ImagePlus, Info, MapPin, PlayCircle, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
 const VIDEO_LIMIT = 3;
 const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 64 * 1024 * 1024;
 
-export function releasePendingMedia(items: PendingMedia[]) {
-  for (const item of items) {
-    URL.revokeObjectURL(item.previewUrl);
-  }
-}
-
 export function MediaUploadField({
   items,
   onItemsChange,
+  onFilesAdded,
   onPreviewItem,
   onRequestRemove,
   annotationCounts = {},
@@ -35,8 +24,9 @@ export function MediaUploadField({
 }: {
   items: PendingMedia[];
   onItemsChange: (items: PendingMedia[]) => void;
+  onFilesAdded: (files: File[]) => void;
   onPreviewItem?: (item: PendingMedia) => void;
-  onRequestRemove?: (item: PendingMedia) => void;
+  onRequestRemove: (item: PendingMedia) => void;
   annotationCounts?: Record<string, number>;
   disabled?: boolean;
 }) {
@@ -44,18 +34,13 @@ export function MediaUploadField({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  if (disabled && cameraOpen) setCameraOpen(false);
   const [isDragging, setDragging] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
-
-  useEffect(() => {
-    return () => releasePendingMedia(itemsRef.current);
-  }, []);
-
   const addFiles = useCallback(
     (list: FileList | File[]) => {
-      const accepted: PendingMedia[] = [];
+      if (disabled) return;
+      const accepted: File[] = [];
       const problems: string[] = [];
       let imageCount = items.filter((item) => !item.isVideo).length;
       let videoCount = items.filter((item) => item.isVideo).length;
@@ -85,20 +70,15 @@ export function MediaUploadField({
         }
         if (isImage) imageCount += 1;
         else videoCount += 1;
-        accepted.push({
-          id: crypto.randomUUID(),
-          file,
-          previewUrl: URL.createObjectURL(file),
-          isVideo,
-        });
+        accepted.push(file);
       }
 
       setErrors(problems);
       if (accepted.length > 0) {
-        onItemsChange([...items, ...accepted]);
+        onFilesAdded(accepted);
       }
     },
-    [items, onItemsChange, t],
+    [items, onFilesAdded, t, disabled],
   );
 
   useEffect(() => {
@@ -117,12 +97,7 @@ export function MediaUploadField({
 
   function removeItem(id: string) {
     const target = items.find((item) => item.id === id);
-    if (target && onRequestRemove) {
-      onRequestRemove(target);
-      return;
-    }
-    if (target) URL.revokeObjectURL(target.previewUrl);
-    onItemsChange(items.filter((item) => item.id !== id));
+    if (target) onRequestRemove(target);
   }
 
   function onDrop(event: React.DragEvent) {
@@ -167,6 +142,7 @@ export function MediaUploadField({
       <input
         ref={cameraInputRef}
         className="hidden"
+        disabled={disabled}
         type="file"
         accept="image/*"
         capture="environment"
@@ -184,6 +160,7 @@ export function MediaUploadField({
       <input
         ref={uploadInputRef}
         className="hidden"
+        disabled={disabled}
         type="file"
         accept="image/*,video/*"
         multiple

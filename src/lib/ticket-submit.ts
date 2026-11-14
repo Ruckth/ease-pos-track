@@ -8,14 +8,13 @@
  */
 
 import type { Id } from "@convex/_generated/dataModel";
-import type { PendingMedia } from "@/components/media-upload";
+import type { PendingMedia } from "@/lib/types";
 import { pendingAnnotationsForCreate, type CreateAnnotationInput, type PendingAnnotation } from "@/lib/pending-annotations";
 import type { MediaItem } from "@/lib/types";
 import { readUploadCancelResponse } from "@/lib/upload-cancel";
 import { uploadFiles } from "@/uploadthing";
 import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 import { fileSignature } from "../../shared/media-policy";
-import { errorCode } from "../../shared/errors";
 
 export type UploadIntentHandle = {
   intentId: Id<"uploadIntents">;
@@ -75,6 +74,7 @@ export async function requestUploadIntentCancel(
 
 export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDraft) {
   let activeIntent: { intentId: Id<"uploadIntents">; secret: string } | null = null;
+  let creating = false;
   try {
     const intent = await reconcileUploadWrite(() => deps.createUploadIntent({
       token: deps.token,
@@ -118,6 +118,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     const resolved = media.filter((item): item is MediaItem => item !== undefined);
     if (resolved.length !== draft.items.length) throw new Error("UPLOAD_INCOMPLETE");
     deps.signal?.throwIfAborted();
+    creating = true;
     await reconcileUploadWrite(() => deps.createTicket({
       token: deps.token,
       requestId: draft.idempotencyKey,
@@ -130,10 +131,13 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     }));
     activeIntent = null;
   } catch (error) {
-    if (deps.signal?.aborted || errorCode(error) === "REQUEST_ID_CONFLICT" || errorCode(error) === "UPLOAD_REQUEST_CONFLICT") deps.onRequestConflict?.();
-    if (activeIntent && (deps.signal?.aborted || definitiveUploadRejection(error))) {
+    const abortedBeforeCreate = deps.signal?.aborted && !creating;
+    const rejected = definitiveUploadRejection(error);
+    if (rejected) deps.onRequestConflict?.();
+    if (activeIntent && (abortedBeforeCreate || rejected)) {
       try {
         await requestUploadIntentCancel(deps.token, activeIntent.intentId, activeIntent.secret);
+        if (abortedBeforeCreate && !rejected) deps.onRequestConflict?.();
       } catch (cleanupError) {
         deps.onCleanupError?.(cleanupError);
       }

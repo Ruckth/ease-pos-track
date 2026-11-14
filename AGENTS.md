@@ -92,3 +92,15 @@ copies `.env.local` from the main checkout, claims a free port block in
 `.env.worktree`, installs dependencies and pushes the schema to that worktree's
 own local Convex backend. `pnpm dev` then serves on the printed ports, so several
 worktrees can run side by side. Do not edit `.env.worktree` by hand.
+
+## Browser workflow checks
+
+`pnpm test:browser` pushes through `pnpm convex:local`, configures local-only
+fixture credentials with media cleanup disabled, seeds the disposable backend,
+and starts Vite plus the upload server on this checkout's ports. It runs headless
+Chromium with fake camera devices using the installed Playwright package. Browser
+tests block provider upload traffic and use fake files/recorded metadata for draft
+lifecycle checks; they never upload or delete provider files. Install Chromium
+with `pnpm exec playwright install chromium` if it is not already available.
+`pnpm test` remains browser-independent. Do not run another local Convex wrapper
+while the browser check owns its local backend.

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { GripVertical } from "lucide-react";
-import { useQuery } from "convex/react";
 import { toast } from "sonner";
-import { api } from "@convex/_generated/api";
+import { useSelectedTicket } from "@/features/tickets/adapter";
 import type { TicketSummary } from "../../shared/ticket-contracts";
 import type { Id } from "@convex/_generated/dataModel";
 import {
@@ -319,7 +318,7 @@ function MoveObservation({ token, entry, onObserve }: {
   token: string; entry: PendingMoves<TicketSummary>[string];
   onObserve: (operationId: string, row: TicketSummary | null) => void;
 }) {
-  const row = useQuery(api.tickets.getTicket, { token, id: entry.ticket._id });
+  const row = useSelectedTicket(token, entry.ticket._id);
   useEffect(() => {
     if (row === undefined) return;
     if (!row) { onObserve(entry.operationId, null); return; }

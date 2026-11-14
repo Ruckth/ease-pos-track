@@ -1,0 +1,61 @@
+import { convexTest } from "convex-test";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { api, internal } from "../../convex/_generated/api";
+import schema from "../../convex/schema";
+import { ticketOperations, type TicketAdapter } from "../../src/features/tickets/operations";
+import { modules } from "./modules";
+
+beforeEach(() => { vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true"); vi.stubEnv("CONVEX_CLOUD_URL", "http://127.0.0.1:3212"); });
+afterEach(() => vi.unstubAllEnvs());
+
+test("both browser roles share edit, annotation and undo intent through registered handlers; conflicts never retry", async () => {
+  const t = convexTest(schema, modules);
+  const seed = await t.mutation(internal.seed.install, { passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1 });
+  const adapter: TicketAdapter = {
+    edit: args => t.mutation(api.tickets.editTicket, args), undoEdit: args => t.mutation(api.tickets.undoTicketEdit, args),
+    status: args => t.mutation(api.tickets.updateTicketStatus, args), undoStatus: args => t.mutation(api.tickets.undoTicketStatus, args),
+    urgency: args => t.mutation(api.tickets.updateUrgencyScore, args), undoUrgency: args => t.mutation(api.tickets.undoUrgencyScore, args),
+    archive: args => t.mutation(api.tickets.archiveTicket, args), restore: args => t.mutation(api.tickets.restoreTicket, args),
+    addAnnotation: args => t.mutation(api.annotations.addAnnotation, args), updateAnnotation: args => t.mutation(api.annotations.updateAnnotation, args),
+    undoAnnotation: args => t.mutation(api.annotations.undoAnnotationUpdate, args), removeAnnotation: args => t.mutation(api.annotations.removeAnnotation, args),
+    restoreAnnotation: args => t.mutation(api.annotations.restoreAnnotation, args),
+  };
+  const id = seed.tickets[1];
+  await t.run(ctx => ctx.db.patch(id, { media: [{ key: "fake", url: "https://fixture.invalid/image", name: "fixture.png", size: 1, type: "image/png" }] }));
+  for (const token of [seed.sessions[0], seed.sessions[1]]) {
+    let undo: (() => Promise<unknown>) | undefined;
+    const operations = ticketOperations(adapter, token, { success: (_message, callback) => { undo = callback; } });
+    const read = async () => (await t.query(api.tickets.getTicket, { token, id }))!;
+    const item = await read();
+    await operations.edit(item, "Edited", "New description");
+    expect((await read()).title).toBe("Edited");
+    await undo!();
+    expect((await read()).title).toBe(item.title);
+    await expect(operations.edit(item, "Stale", "")).rejects.toMatchObject({ data: { code: "VERSION_CONFLICT" }, disposition: "conflict" });
+    expect((await read()).title).toBe(item.title);
+    const annotation = await operations.addAnnotation(await read(), { mediaIndex: 0, kind: "point", x: 0.2, y: 0.4, text: "Pin" });
+    await operations.updateAnnotation(await read(), { annotationId: annotation.annotationId, text: "Changed pin" });
+    await undo!();
+    expect((await read()).annotations[0].text).toBe("Pin");
+    await operations.removeAnnotation(await read(), annotation.annotationId);
+    await undo!();
+    expect((await read()).annotations.find(pin => pin.id === annotation.annotationId)?.deletedAt).toBeUndefined();
+  }
+  const staff = ticketOperations(adapter, seed.sessions[0], { success: () => {} });
+  const readStaff = async () => (await t.query(api.tickets.getTicket, { token: seed.sessions[0], id }))!;
+  await staff.status(await readStaff(), "acknowledged");
+  await staff.urgency(await readStaff(), 75);
+  let staleUndo: (() => Promise<unknown>) | undefined;
+  const editing = ticketOperations(adapter, seed.sessions[0], { success: (_message, callback) => { staleUndo = callback; } });
+  await editing.edit(await readStaff(), "Edit before intervening write", "");
+  await staff.edit(await readStaff(), "Intervening write", "");
+  await expect(staleUndo!()).rejects.toMatchObject({ data: { code: "VERSION_CONFLICT" }, disposition: "conflict" });
+  expect((await readStaff()).title).toBe("Intervening write");
+  const customer = ticketOperations(adapter, seed.sessions[1], { success: () => {} });
+  await expect(customer.status(await readStaff(), "done")).rejects.toMatchObject({ data: { code: "STAFF_ONLY" }, disposition: "rejected" });
+  await customer.archive(await readStaff(), true);
+  await staff.restore(await readStaff());
+  expect(await readStaff()).toMatchObject({ status: "acknowledged", urgencyScore: 75, lifecycle: "active" });
+  const foreign = ticketOperations(adapter, seed.sessions[2], { success: () => {} });
+  await expect(foreign.edit(await readStaff(), "Foreign", "")).rejects.toMatchObject({ data: { code: "TICKET_UNAVAILABLE" }, disposition: "rejected" });
+});
