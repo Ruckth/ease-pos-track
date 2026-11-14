@@ -22,19 +22,19 @@ export function ticketSummary(ticket: TicketDocument) {
   return {
     id: ticket._id,
     ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey),
-    ticketNumber: ticket.ticketNumber ?? null,
-    project: ticket.projectKey ?? null,
+    ticketNumber: ticket.ticketNumber,
+    project: ticket.projectKey,
     title: ticket.title,
     description: ticket.description,
     status: toPublicTicketStatus(ticket.status),
-    version: ticket.version ?? 0,
-    archived: ticket.deletedAt !== undefined,
+    version: ticket.version,
+    archived: ticket.archivedAt !== undefined,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
-    origin: ticket.origin ?? null,
+    origin: ticket.origin,
     createdVia: ticket.createdVia ?? null,
     mediaCount: ticket.media.length,
-    annotationCount: ticket.annotations?.length ?? 0,
+    annotationCount: ticket.annotations.length,
   };
 }
 
@@ -42,7 +42,7 @@ export function ticketDetail(ticket: TicketDocument) {
   return {
     ...ticketSummary(ticket),
     media: ticket.media,
-    annotations: ticket.annotations ?? [],
+    annotations: ticket.annotations,
   };
 }
 
@@ -68,9 +68,9 @@ export function createOutput(
     id: result.ticket._id,
     ticket: formatTicketNumber(result.ticket.ticketNumber, result.ticket.projectKey),
     ticketNumber: result.ticket.ticketNumber,
-    project: result.ticket.projectKey ?? null,
+    project: result.ticket.projectKey,
     status: toPublicTicketStatus(result.ticket.status),
-    version: result.ticket.version ?? 0,
+    version: result.ticket.version,
     created: result.created,
     deployment,
     requestId: result.requestId,

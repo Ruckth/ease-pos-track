@@ -12,11 +12,11 @@ import {
   statusChangeFromDrag,
   withoutPendingMove,
 } from "../src/lib/kanban-board";
-import type { FeedbackStatus } from "../src/lib/types";
+import type { TicketStatus } from "../src/lib/types";
 
-type Card = { _id: string; status: FeedbackStatus };
+type Card = { _id: string; status: TicketStatus };
 
-const card = (id: string, status: FeedbackStatus): Card => ({ _id: id, status });
+const card = (id: string, status: TicketStatus): Card => ({ _id: id, status });
 
 test("the board has exactly the five workflow columns", () => {
   assert.deepEqual(BOARD_COLUMNS, ["new", "acknowledged", "in_progress", "waiting", "done"]);
@@ -88,7 +88,7 @@ test("a ticket moved by someone else follows the server", () => {
 
 test("tickets with an unknown status are left off the board", () => {
   const columns = reconcileColumns(
-    [{ _id: "weird", status: "archived" as unknown as FeedbackStatus }],
+    [{ _id: "weird", status: "archived" as unknown as TicketStatus }],
     emptyColumns<Card>(),
   );
   assert.equal(countCards(columns), 0);

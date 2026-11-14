@@ -1,5 +1,5 @@
+import { internalJobMutation, publicAuthMutation, publicAuthQuery } from "./functions";
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
 import { actorFromSession } from "./authz";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
@@ -21,7 +21,7 @@ function makeToken() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export const login = mutation({
+export const login = publicAuthMutation("staff-login")({
   args: {
     password: v.string(),
     clientId: v.string(),
@@ -98,7 +98,7 @@ export const login = mutation({
   },
 });
 
-export const logout = mutation({
+export const logout = publicAuthMutation("logout")({
   args: {
     token: v.string(),
   },
@@ -111,32 +111,7 @@ export const logout = mutation({
   },
 });
 
-/**
- * Backward-compatible staff session check. Existing callers keep working, but a
- * customer token can never be mistaken for authorization to enter the staff UI.
- * New role-aware callers should use currentSession instead.
- */
-export const validateSession = query({
-  args: {
-    token: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const token = args.token;
-    if (!token) return false;
-    const session = await ctx.db
-      .query("sessions")
-      .withIndex("by_token", (q) => q.eq("token", token))
-      .unique();
-    if (!session || session.expiresAt <= Date.now()) return false;
-    return actorFromSession(session).role === "staff";
-  },
-});
-
-/**
- * Single source of truth for "who is signed in" on the client. Legacy sessions
- * created before the customer portal have no role and resolve to staff.
- */
-export const currentSession = query({
+export const currentSession = publicAuthQuery("current-session")({
   args: {
     token: v.optional(v.string()),
   },
@@ -166,7 +141,7 @@ export const currentSession = query({
   },
 });
 
-export const cleanupExpiredSessions = internalMutation({
+export const cleanupExpiredSessions = internalJobMutation({
   args: {},
   handler: async (ctx) => {
     const expiredSessions = await ctx.db

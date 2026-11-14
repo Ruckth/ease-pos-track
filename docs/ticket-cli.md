@@ -77,10 +77,8 @@ All live Ticket operations require a valid staff session. Development is the
 default; append `--prod` only when production was explicitly requested.
 
 Every Ticket belongs to a Project, and its reference starts with the Project key:
-`POS-0012` is Ticket 12 in Project `POS`. Numbers count up per Project. Tickets
-created before Projects existed live in Project `TKT`, so their references did
-not change. Keys are case-insensitive on input. Projects are created in the staff
-app; the CLI does not create them.
+`POS-0012` is Ticket 12 in Project `POS`. Numbers count up per Project. Keys
+are case-insensitive on input. Projects are created in the staff app; the CLI does not create them.
 
 ```bash
 pnpm ticket list
@@ -184,6 +182,9 @@ the silent reporter so pnpm does not add lifecycle lines around those streams.
 | `5` | Request-id or optimistic-version conflict. |
 | `6` | Convex deployment/network call failure. |
 
+Unmapped safe server codes appear in the `REMOTE_CALL_FAILED` message, with exit 6
+and the same JSON fields.
+
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
 `SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`, and
@@ -221,14 +222,58 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
-| `convex/feedback.ts` | Existing Ticket domain functions plus authenticated create, image attachment, and Ticket-number lookup. |
-| `convex/feedback_state.ts` | Ticket text limits and the optimistic-version check. |
-| `convex/tickets.ts` | Shared Ticket allocation and audit-record helpers. |
+| `convex/tickets.ts` | Canonical policy-declared Ticket handlers for the browser and CLI. |
+| `convex/ticket_state.ts` | Ticket text limits and the optimistic-version check. |
+| `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 
 Verify changes with:
 
 ```bash
 pnpm test
-pnpm typecheck
+pnpm run typecheck
+pnpm run build
 ```
+
+## Disposable local implementation target
+
+P1 uses `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
+The wrapper preserves `.env.local`, which still selects shared development for
+ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
+by these fixtures. Do not run bare Convex commands or edit either environment
+file manually.
+
+```bash
+pnpm convex:local
+pnpm convex:local env set LOCAL_FIXTURES_ENABLED true
+pnpm convex:local env set APP_PASSWORD 'LocalStaff123!'
+pnpm convex:local env set CUSTOMER_PASSWORD_PEPPER local-only-fixture-pepper
+pnpm convex:local run seed:run '{}'
+pnpm convex:local run local_smoke:run '{}'
+pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
+```
+
+The internal seed requires explicit fixture opt-in and a loopback deployment URL, and is repeatable. It creates Projects `POS` and `APP`,
+customers `alice@local.test` and `bob@local.test` (password `LocalCustomer123!`),
+POS memberships, explicit-role sessions and three text-only Tickets through the
+Ticket domain. Each seed run returns fresh random tokens in `sessions` (staff, Alice, Bob order)
+for tests and smoke clients; Ticket rows are reused. The staff
+password remains the configured global staff sign-in mechanism.
+
+The backend smoke exercises real sign-in, both roles, creation, detail, edit,
+workflow, urgency, archive/restore and annotations. Annotations require media;
+the smoke uses fake metadata with no provider upload. The CLI smoke uses the
+real orchestration and Convex adapter with in-memory credentials and a fixed
+loopback URL, checking JSON, retries, conflict exit 5 and text-only commands.
+`--start` keeps the local backend alive for the CLI process; standalone `run`
+commands stop their local backend when they exit.
+
+Public handlers now return structured error codes. CLI flags, JSON fields and
+exit codes retain their documented meanings. Upload recording requires either
+the originating staff session or the server-only `UPLOAD_CALLBACK_SECRET`
+configured in both the HTTP process and Convex. Existing plaintext Keychain
+credentials are rejected; sign in again to write the current encoded format.
+Automatic media retention scheduling is paused until the durable P3–P4 media
+ownership/job implementation replaces the removed unsafe cleanup path.
+Immutable request-receipt replay after edits is the P2 gate; P1 preserves the
+existing create/retry behavior before edits.

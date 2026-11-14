@@ -14,11 +14,9 @@ export async function requireSession(ctx: QueryCtx | MutationCtx, token: string)
   return session;
 }
 
-/**
- * Resolves the session and the actor behind it. Sessions without a role predate
- * the customer portal and resolve to staff.
- */
 export async function requireActor(ctx: QueryCtx | MutationCtx, token: string) {
   const session = await requireSession(ctx, token);
-  return { session, actor: actorFromSession(session) };
+  const actor = actorFromSession(session);
+  if (actor.role === "customer" && !(await ctx.db.get(actor.customerId))) throw new Error("SESSION_EXPIRED");
+  return { session, actor };
 }

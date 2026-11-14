@@ -1,3 +1,4 @@
+import { errorCode } from "../../shared/errors";
 /**
  * Command orchestration: turn one parsed command into one JSON line and one exit
  * code, and turn any failure into the single-object stderr contract.
@@ -81,9 +82,9 @@ async function attachTicketImages(
     requestId: uploadRequestId(input.requestId),
     files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
   });
-  if (intent.feedbackId) {
+  if (intent.ticketId) {
     const existing = await deps.remote.get(access.url, access.token, input.ref, false);
-    if (!existing || existing._id !== intent.feedbackId) throw inputError("UPLOAD_INTENT_MISMATCH", "The image retry belongs to a different Ticket.");
+    if (!existing || existing._id !== intent.ticketId) throw inputError("UPLOAD_INTENT_MISMATCH", "The image retry belongs to a different Ticket.");
     return existing;
   }
   const reusable = [...intent.uploadedFiles];
@@ -98,7 +99,7 @@ async function attachTicketImages(
     resolved[missing[offset].index] = media;
   });
   for (const file of uploaded) {
-    await deps.remote.recordUploadedFile(access.url, { intentId: intent.intentId, secret: intent.secret, file });
+    await deps.remote.recordUploadedFile(access.url, { token: access.token, intentId: intent.intentId, secret: intent.secret, file });
   }
   const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
   if (media.length !== files.length) throw internalError("The image upload result did not match the requested files.");
@@ -151,24 +152,20 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
     toError: (target) => authError("NOT_AUTHORIZED", "This command requires a staff session.", authHint(target)),
   },
   {
-    codes: ["FEEDBACK_NOT_FOUND", "ARCHIVED_FEEDBACK_NOT_FOUND"],
+    codes: ["TICKET_UNAVAILABLE"],
     toError: () => inputError("TICKET_NOT_FOUND", "The Ticket does not exist or is not available for this operation."),
   },
 ];
 
-const REMOTE_DETAIL_LIMIT = 300;
-
 export function classifyRemoteError(error: unknown, target: Deployment) {
   if (error instanceof TicketCliError) return error;
-  const text = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+  const code = errorCode(error);
   for (const rule of REMOTE_ERROR_RULES) {
-    if (rule.codes.some((code) => text.includes(code))) return rule.toError(target);
+    if (code && rule.codes.includes(code)) return rule.toError(target);
   }
-  for (const code of SERVER_INPUT_ERROR_CODES) {
-    if (text.includes(code)) return mapInputError(new Error(code));
-  }
-  const detail = text.trim().split("\n")[0].slice(0, REMOTE_DETAIL_LIMIT);
-  return remoteError(`The Convex deployment call failed${detail ? `: ${detail}` : "."}`);
+  if (code && SERVER_INPUT_ERROR_CODES.includes(code)) return mapInputError(new Error(code));
+  return remoteError(code && /^[A-Z][A-Z0-9_]*$/.test(code)
+    ? `The Convex deployment call failed (${code}).` : "The Convex deployment call failed.");
 }
 
 async function runSessionCommand(command: SessionCommand, sessions: TicketSessions, deps: TicketCliDeps) {
@@ -246,7 +243,7 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       if (command.images.length > 0) {
         created.ticket = await attachTicketImages({
           ref: { projectKey: created.ticket.projectKey!, ticketNumber: created.ticket.ticketNumber! },
-          expectedVersion: created.ticket.version ?? 0,
+          expectedVersion: created.ticket.version,
           images: command.images,
           requestId: idempotencyKey,
         }, access, deps);

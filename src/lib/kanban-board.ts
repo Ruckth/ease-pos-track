@@ -7,22 +7,22 @@
  * are merged, so the rules can be unit tested without a browser.
  */
 
-import type { FeedbackStatus } from "@/lib/types";
+import type { TicketStatus } from "@/lib/types";
 
 /** Fixed board columns. Columns are never added, removed, or reordered. */
-export const BOARD_COLUMNS: FeedbackStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
+export const BOARD_COLUMNS: TicketStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
 
-export type BoardColumns<T> = Record<FeedbackStatus, T[]>;
+export type BoardColumns<T> = Record<TicketStatus, T[]>;
 
 /** Tickets whose status change is in flight, keyed by ticket id. */
-export type PendingMoves = Record<string, FeedbackStatus>;
+export type PendingMoves = Record<string, TicketStatus>;
 
 export type BoardCard = {
   _id: string;
-  status: FeedbackStatus;
+  status: TicketStatus;
 };
 
-export function isBoardStatus(value: string): value is FeedbackStatus {
+export function isBoardStatus(value: string): value is TicketStatus {
   return (BOARD_COLUMNS as string[]).includes(value);
 }
 
@@ -61,7 +61,7 @@ export function reconcileColumns<T extends BoardCard>(
   previous: BoardColumns<T>,
   pending: PendingMoves = {},
 ): BoardColumns<T> {
-  const previousPositions = new Map<string, { status: FeedbackStatus; index: number }>();
+  const previousPositions = new Map<string, { status: TicketStatus; index: number }>();
   for (const status of BOARD_COLUMNS) {
     previous[status].forEach((item, index) => {
       previousPositions.set(item._id, { status, index });
@@ -128,7 +128,7 @@ export function findCardStatus<T extends BoardCard>(columns: BoardColumns<T>, id
 export function statusChangeFromDrag(input: {
   activeContainer: string;
   overContainer: string;
-}): FeedbackStatus | null {
+}): TicketStatus | null {
   if (input.activeContainer === input.overContainer) return null;
   if (!isBoardStatus(input.overContainer)) return null;
   return input.overContainer;

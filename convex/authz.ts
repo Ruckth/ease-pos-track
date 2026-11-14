@@ -1,13 +1,4 @@
-/**
- * Ownership and role rules for feedback tickets.
- *
- * Pure module: no Convex imports, so the rules can be unit tested directly and
- * reused by every query and mutation without drifting.
- *
- * Two invariants the whole app leans on:
- * - A session without a role is a staff session (sessions predate the portal).
- * - A ticket without an owner is staff-only (tickets predate the portal).
- */
+/** Role and resource rules shared by domain operations. */
 
 export type ActorRole = "staff" | "customer";
 
@@ -24,7 +15,7 @@ export type OwnedDocument<CustomerId extends string = string> = {
   ownerCustomerId?: CustomerId;
 };
 
-/** Resolves the actor for a session. A missing role means staff. */
+/** Invalid sessions never gain staff privileges. */
 export function actorFromSession<CustomerId extends string>(
   session: SessionLike<CustomerId>,
 ): Actor<CustomerId> {
@@ -33,6 +24,7 @@ export function actorFromSession<CustomerId extends string>(
     if (!session.customerId) throw new Error("SESSION_EXPIRED");
     return { role: "customer", customerId: session.customerId };
   }
+  if (session.role !== "staff") throw new Error("SESSION_EXPIRED");
   return { role: "staff" };
 }
 
@@ -40,7 +32,7 @@ export function isStaffActor(actor: Actor<string>) {
   return actor.role === "staff";
 }
 
-export function ownsFeedback<CustomerId extends string>(
+export function ownsTicket<CustomerId extends string>(
   actor: Actor<CustomerId>,
   doc: OwnedDocument<CustomerId>,
 ) {
@@ -50,22 +42,22 @@ export function ownsFeedback<CustomerId extends string>(
 }
 
 /** Staff read everything; customers read only tickets they own. */
-export function canReadFeedback<CustomerId extends string>(
+export function canReadTicket<CustomerId extends string>(
   actor: Actor<CustomerId>,
   doc: OwnedDocument<CustomerId>,
 ) {
-  return isStaffActor(actor) || ownsFeedback(actor, doc);
+  return isStaffActor(actor) || ownsTicket(actor, doc);
 }
 
 /** Content mutations (edit, annotate, soft delete) follow read access. */
-export function canWriteFeedback<CustomerId extends string>(
+export function canWriteTicket<CustomerId extends string>(
   actor: Actor<CustomerId>,
   doc: OwnedDocument<CustomerId>,
 ) {
-  return canReadFeedback(actor, doc);
+  return canReadTicket(actor, doc);
 }
 
-/** Workflow controls (status, restore, backfill, cross-ticket listing). */
+/** Workflow controls (status, restore, cross-ticket listing). */
 export function canUseStaffControls(actor: Actor<string>) {
   return isStaffActor(actor);
 }
@@ -74,11 +66,11 @@ export function canUseStaffControls(actor: Actor<string>) {
  * A ticket a customer may not change is reported as missing, so mutations cannot
  * be used to probe which ticket ids exist.
  */
-export function assertCanWriteFeedback<CustomerId extends string>(
+export function assertCanWriteTicket<CustomerId extends string>(
   actor: Actor<CustomerId>,
   doc: OwnedDocument<CustomerId>,
 ) {
-  if (!canWriteFeedback(actor, doc)) throw new Error("FEEDBACK_NOT_FOUND");
+  if (!canWriteTicket(actor, doc)) throw new Error("TICKET_UNAVAILABLE");
 }
 
 export function assertStaffActor(actor: Actor<string>) {
@@ -96,7 +88,7 @@ export function assertCustomerActor<CustomerId extends string>(
  * Ownership stamped on a new ticket. Derived from the session only — the client
  * never supplies ownerCustomerId.
  */
-export function newFeedbackOwnership<CustomerId extends string>(actor: Actor<CustomerId>) {
+export function newTicketOwnership<CustomerId extends string>(actor: Actor<CustomerId>) {
   return actor.role === "customer"
     ? { ownerCustomerId: actor.customerId, origin: "customer" as const }
     : { origin: "staff" as const };

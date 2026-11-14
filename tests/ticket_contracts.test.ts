@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Id } from "../convex/_generated/dataModel";
-import { validateFiles } from "../convex/uploads";
+import { validateFiles } from "../shared/media-policy";
 import { createAnnotationRecord, updateAnnotationRecord } from "../convex/annotation_state";
 import {
   MEDIA_POLICY, normalizeTicketRequest, ticketRequestFingerprintInput, transitionTicketJob,

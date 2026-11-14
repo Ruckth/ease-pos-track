@@ -7,7 +7,7 @@
  * exactly once.
  */
 
-import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../convex/feedback_state";
+import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../convex/ticket_state";
 import { MAX_REQUEST_ID_LENGTH } from "../../convex/ticket_requests";
 
 export const EXIT = {
@@ -67,7 +67,7 @@ export function internalError(message: string) {
  * differently there.
  */
 const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
-  REQUIRED_FEEDBACK: { code: "TITLE_REQUIRED", message: "--title is required and cannot be blank." },
+  REQUIRED_TICKET: { code: "TITLE_REQUIRED", message: "--title is required and cannot be blank." },
   TITLE_TOO_LONG: { code: "TITLE_TOO_LONG", message: `--title must be ${MAX_TITLE_LENGTH} characters or fewer.` },
   DESCRIPTION_TOO_LONG: { code: "DESCRIPTION_TOO_LONG", message: `--description must be ${MAX_DESCRIPTION_LENGTH} characters or fewer.` },
   REQUIRED_REQUEST_ID: { code: "REQUEST_ID_REQUIRED", message: "--request-id cannot be blank." },

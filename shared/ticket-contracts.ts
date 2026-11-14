@@ -1,14 +1,15 @@
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { ConvexError } from "convex/values";
-import type { api } from "../convex/_generated/api";
-import type { Id } from "../convex/_generated/dataModel";
+import type { api } from "../convex/_generated/api.js";
+import type { Id } from "../convex/_generated/dataModel.js";
 
 /** Safe public codes only. Unavailable includes missing and unauthorized Tickets. */
 export type TicketErrorCode =
   | "SESSION_EXPIRED" | "STAFF_ONLY" | "PROJECT_NOT_FOUND" | "PROJECT_REQUIRED"
   | "TICKET_UNAVAILABLE" | "VERSION_CONFLICT" | "REQUEST_ID_CONFLICT"
   | "INVALID_INPUT" | "MEDIA_LIMIT_EXCEEDED" | "UPLOAD_INTENT_INVALID"
-  | "MEDIA_OWNERSHIP_CONFLICT" | "TICKET_PURGING" | "STORAGE_NOT_CONFIGURED";
+  | "MEDIA_OWNERSHIP_CONFLICT" | "TICKET_PURGING" | "STORAGE_NOT_CONFIGURED"
+  | "UPLOAD_CALLBACK_NOT_CONFIGURED";
 
 /** ConvexError.data: no raw messages, provider responses, credentials or content. */
 export type TicketErrorData = { code: TicketErrorCode };
@@ -16,7 +17,7 @@ export type TicketDomainError = ConvexError<TicketErrorData>;
 
 // Project existing generated results explicitly; never expose owner/session fields.
 // These are contract projections for future handlers, not replacements for generated callers.
-type TicketRead = NonNullable<FunctionReturnType<typeof api.feedback.getFeedback>>;
+type TicketRead = NonNullable<FunctionReturnType<typeof api.tickets.getTicket>>;
 export type TicketSummary = Pick<TicketRead,
   "_id" | "title" | "status" | "urgencyScore" | "createdAt" | "updatedAt"
 > & Required<Pick<TicketRead, "projectId" | "projectKey" | "ticketNumber" | "version">> & {
@@ -47,7 +48,7 @@ export type StorageDeletionOutcome =
   | { outcome: "failed_permanent" }
   | { outcome: "unknown" };
 
-// Existing limits: convex/uploads.ts, convex/annotation_state.ts. No runtime imports.
+// Shared metadata limits: shared/media-policy.ts and convex/annotation_state.ts.
 // Positive file sizes, nonblank names and image/ or video/ MIME prefixes remain
 // validator rules outside this upper-bound policy. Node tests detect limit drift.
 // There is no existing total annotation count/text budget; P2 must set that policy.
@@ -59,7 +60,7 @@ export const MEDIA_POLICY = {
   maxAnnotationTextLength: 2_000,
 } as const;
 
-type CreateArgs = FunctionArgs<typeof api.feedback.createFeedback>;
+type CreateArgs = FunctionArgs<typeof api.tickets.createTicket>;
 export type TicketRequestInput = Pick<CreateArgs, "title" | "description" | "annotations" | "projectId"> & {
   actor: { role: "staff" } | { role: "customer"; customerId: Id<"customers"> };
   // Trusted immutable key references, in display order (annotations use indexes).

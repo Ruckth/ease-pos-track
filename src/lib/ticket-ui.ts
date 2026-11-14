@@ -1,12 +1,12 @@
-import type { FeedbackStatus } from "@/lib/types";
+import type { TicketStatus } from "@/lib/types";
 
 // Formatting lives with the ticket-number rules on the server so both sides agree.
 export { formatTicketNumber } from "@convex/ticket_numbers";
 
 /** The workflow, in order. A ticket only ever moves forward through it. */
-export const STATUS_ORDER: FeedbackStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
+export const STATUS_ORDER: TicketStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
 
-export function nextFeedbackStatus(status: FeedbackStatus): FeedbackStatus | null {
+export function nextTicketStatus(status: TicketStatus): TicketStatus | null {
   const index = STATUS_ORDER.indexOf(status);
   if (index < 0 || index === STATUS_ORDER.length - 1) return null;
   return STATUS_ORDER[index + 1];
@@ -20,7 +20,7 @@ export function nextFeedbackStatus(status: FeedbackStatus): FeedbackStatus | nul
  * a brand new ticket reads 0% and only `done` reads 100%. An unrecognised status
  * is treated as the first step, matching `statusMeta`.
  */
-export function feedbackProgress(status: FeedbackStatus) {
+export function ticketProgress(status: TicketStatus) {
   const total = STATUS_ORDER.length;
   const index = Math.max(STATUS_ORDER.indexOf(status), 0);
   return { step: index + 1, total, percent: Math.round((index / (total - 1)) * 100) };

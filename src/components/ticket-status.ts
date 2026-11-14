@@ -1,12 +1,12 @@
 import { CheckCircle2, ClipboardCheck, Clock3, ImagePlus, RefreshCw } from "lucide-react";
-import type { FeedbackStatus } from "@/lib/types";
+import type { TicketStatus } from "@/lib/types";
 
 /**
  * Presentation for the five fixed workflow states, shared by the staff board,
  * the ticket dialog, and the customer portal.
  */
 export const statuses: Array<{
-  value: FeedbackStatus;
+  value: TicketStatus;
   labelKey: "new" | "acknowledged" | "inProgress" | "waiting" | "done";
   tone: string;
   icon: typeof Clock3;
@@ -18,6 +18,6 @@ export const statuses: Array<{
   { value: "done", labelKey: "done", tone: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: CheckCircle2 },
 ];
 
-export function statusMeta(status: FeedbackStatus) {
+export function statusMeta(status: TicketStatus) {
   return statuses.find((item) => item.value === status) ?? statuses[0];
 }

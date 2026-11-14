@@ -1,25 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requireCurrentVersion, validateFeedbackText } from "../convex/feedback_state";
-import { sameFiles, validateFiles, validateMediaItems } from "../convex/uploads";
+import { requireCurrentVersion, validateTicketText } from "../convex/ticket_state";
+import { sameFiles, validateFiles, validateMediaItems } from "../shared/media-policy";
 
-test("feedback text is trimmed and bounded on the server", () => {
-  assert.deepEqual(validateFeedbackText("  Printer issue  ", "  Receipt is blank  "), {
+test("ticket text is trimmed and bounded on the server", () => {
+  assert.deepEqual(validateTicketText("  Printer issue  ", "  Receipt is blank  "), {
     title: "Printer issue",
     description: "Receipt is blank",
   });
-  assert.deepEqual(validateFeedbackText("  Printer issue  ", "   "), {
+  assert.deepEqual(validateTicketText("  Printer issue  ", "   "), {
     title: "Printer issue",
     description: "",
   });
-  assert.throws(() => validateFeedbackText("   ", "optional description"), /REQUIRED_FEEDBACK/);
-  assert.throws(() => validateFeedbackText("x".repeat(101), "description"), /TITLE_TOO_LONG/);
-  assert.throws(() => validateFeedbackText("title", "x".repeat(10_001)), /DESCRIPTION_TOO_LONG/);
+  assert.throws(() => validateTicketText("   ", "optional description"), /REQUIRED_TICKET/);
+  assert.throws(() => validateTicketText("x".repeat(101), "description"), /TITLE_TOO_LONG/);
+  assert.throws(() => validateTicketText("title", "x".repeat(10_001)), /DESCRIPTION_TOO_LONG/);
 });
 
 test("optimistic versions reject stale mutations", () => {
   assert.equal(requireCurrentVersion({ version: 3 }, 3), 3);
-  assert.equal(requireCurrentVersion({}, 0), 0);
+  assert.equal(requireCurrentVersion({ version: 0 }, 0), 0);
   assert.throws(() => requireCurrentVersion({ version: 4 }, 3), /VERSION_CONFLICT/);
 });
 

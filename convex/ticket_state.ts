@@ -4,10 +4,10 @@ export const MAX_DESCRIPTION_LENGTH = 10_000;
 export const MIN_URGENCY_SCORE = 1;
 export const MAX_URGENCY_SCORE = 100;
 
-export function validateFeedbackText(titleInput: string, descriptionInput: string) {
+export function validateTicketText(titleInput: string, descriptionInput: string) {
   const title = titleInput.trim();
   const description = descriptionInput.trim();
-  if (!title) throw new Error("REQUIRED_FEEDBACK");
+  if (!title) throw new Error("REQUIRED_TICKET");
   if (title.length > MAX_TITLE_LENGTH) throw new Error("TITLE_TOO_LONG");
   if (description.length > MAX_DESCRIPTION_LENGTH) throw new Error("DESCRIPTION_TOO_LONG");
   return { title, description };
@@ -25,8 +25,8 @@ export function validateUrgencyScore(score: number | undefined) {
   return score;
 }
 
-export function requireCurrentVersion(doc: { version?: number }, expectedVersion: number) {
-  const currentVersion = doc.version ?? 0;
+export function requireCurrentVersion(doc: { version: number }, expectedVersion: number) {
+  const currentVersion = doc.version;
   if (currentVersion !== expectedVersion) {
     throw new Error("VERSION_CONFLICT");
   }

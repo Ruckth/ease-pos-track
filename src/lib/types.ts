@@ -1,11 +1,11 @@
 import type { Doc } from "@convex/_generated/dataModel";
 
-export type Feedback = Doc<"feedback">;
-export type FeedbackStatus = Feedback["status"];
-export type MediaItem = Feedback["media"][number];
-export type Annotation = NonNullable<Feedback["annotations"]>[number];
+export type Ticket = Doc<"tickets">;
+export type TicketStatus = Ticket["status"];
+export type MediaItem = Ticket["media"][number];
+export type Annotation = NonNullable<Ticket["annotations"]>[number];
 export type AnnotationEvent = Omit<Doc<"annotationEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
-export type FeedbackEvent = Omit<Doc<"feedbackEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
+export type TicketEvent = Omit<Doc<"ticketEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
 
 export function isActiveAnnotation(annotation: Annotation) {
   return annotation.deletedAt === undefined;

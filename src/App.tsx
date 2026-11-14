@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { MAX_URGENCY_SCORE, MIN_URGENCY_SCORE } from "../convex/feedback_state";
+import { MAX_URGENCY_SCORE, MIN_URGENCY_SCORE } from "../convex/ticket_state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,8 @@ import { AnnotationActivityList } from "@/components/annotation-activity";
 import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
 import { AuthPage, LanguageSelector } from "@/components/auth-screens";
 import { CustomerPortal } from "@/components/customer-portal";
-import { FeedbackActivityList } from "@/components/feedback-activity";
-import { statuses, statusMeta } from "@/components/feedback-status";
+import { TicketActivityList } from "@/components/ticket-activity";
+import { statuses, statusMeta } from "@/components/ticket-status";
 import { MediaUploadField, releasePendingMedia, type PendingMedia } from "@/components/media-upload";
 import {
   MediaViewer,
@@ -37,8 +37,8 @@ import { StaffBoard } from "@/components/staff-board";
 import { NewProjectDialog, NoProjects, StaffProjectControls, useCurrentProject } from "@/components/project-controls";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { cn } from "@/lib/utils";
-import { formatTicketNumber } from "@/lib/feedback-ui";
-import { submitFeedbackDraft } from "@/lib/feedback-submit";
+import { formatTicketNumber } from "@/lib/ticket-ui";
+import { submitTicketDraft } from "@/lib/ticket-submit";
 import {
   pendingAnnotationsForViewer,
   pendingMediaForViewer,
@@ -46,7 +46,7 @@ import {
   withoutPendingAnnotationsForMedia,
 } from "@/lib/pending-annotations";
 import { clearToken, getStoredToken, storeToken } from "@/lib/session";
-import { isActiveAnnotation, type Feedback, type FeedbackStatus } from "@/lib/types";
+import { isActiveAnnotation, type Ticket, type TicketStatus } from "@/lib/types";
 import { localizeError, useI18n } from "@/lib/i18n";
 
 function useAppPathname() {
@@ -150,36 +150,36 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   const [composerBusy, setComposerBusy] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const { projects, current: project, select: selectProject } = useCurrentProject(token);
-  const feedback = useQuery(
-    api.feedback.listFeedback,
+  const tickets = useQuery(
+    api.tickets.listTickets,
     project ? { token, projectKey: project.key, includeDeleted: showArchived } : "skip",
   );
-  const updateStatus = useMutation(api.feedback.updateFeedbackStatus);
-  const undoStatus = useMutation(api.feedback.undoFeedbackStatus);
-  const archiveFeedback = useMutation(api.feedback.archiveFeedback);
-  const restoreFeedback = useMutation(api.feedback.restoreFeedback);
-  const [selectedId, setSelectedId] = useState<Id<"feedback"> | null>(null);
+  const updateStatus = useMutation(api.tickets.updateTicketStatus);
+  const undoStatus = useMutation(api.tickets.undoTicketStatus);
+  const archiveTicket = useMutation(api.tickets.archiveTicket);
+  const restoreTicket = useMutation(api.tickets.restoreTicket);
+  const [selectedId, setSelectedId] = useState<Id<"tickets"> | null>(null);
   const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
-    const rows = feedback ?? [];
+    const rows = tickets ?? [];
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((item) =>
       `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description}`.toLowerCase().includes(q)
     );
-  }, [feedback, search]);
+  }, [tickets, search]);
 
-  const selected = feedback?.find((item) => item._id === selectedId) ?? null;
-  const activeItems = useMemo(() => filtered.filter((item) => item.deletedAt === undefined), [filtered]);
-  const archivedItems = useMemo(() => filtered.filter((item) => item.deletedAt !== undefined), [filtered]);
+  const selected = tickets?.find((item) => item._id === selectedId) ?? null;
+  const activeItems = useMemo(() => filtered.filter((item) => item.archivedAt === undefined), [filtered]);
+  const archivedItems = useMemo(() => filtered.filter((item) => item.archivedAt !== undefined), [filtered]);
 
   /** Persists a status change and offers an undo. False means it was rejected. */
-  async function moveItem(id: Id<"feedback">, status: FeedbackStatus) {
-    const current = feedback?.find((item) => item._id === id);
+  async function moveItem(id: Id<"tickets">, status: TicketStatus) {
+    const current = tickets?.find((item) => item._id === id);
     if (!current) return false;
     try {
-      const result = await updateStatus({ token, id, status, expectedVersion: current.version ?? 0 });
+      const result = await updateStatus({ token, id, status, expectedVersion: current.version });
       if (!result.eventId) return true;
       toast.success(t("statusUpdated"), {
         action: {
@@ -197,23 +197,23 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
     }
   }
 
-  async function restoreItem(id: Id<"feedback">, announce = true) {
-    const current = feedback?.find((item) => item._id === id);
+  async function restoreItem(id: Id<"tickets">, announce = true) {
+    const current = tickets?.find((item) => item._id === id);
     if (!current) return;
-    await restoreFeedback({ token, id, expectedVersion: current.version ?? 0 });
-    if (announce) toast.success(t("feedbackRestored"));
+    await restoreTicket({ token, id, expectedVersion: current.version });
+    if (announce) toast.success(t("ticketRestored"));
   }
 
-  async function archiveItem(id: Id<"feedback">) {
-    const current = feedback?.find((item) => item._id === id);
+  async function archiveItem(id: Id<"tickets">) {
+    const current = tickets?.find((item) => item._id === id);
     if (!current) return;
-    const result = await archiveFeedback({ token, id, expectedVersion: current.version ?? 0 });
+    const result = await archiveTicket({ token, id, expectedVersion: current.version });
     setSelectedId(null);
-    toast.success(t("feedbackArchived"), {
+    toast.success(t("ticketArchived"), {
       action: {
           label: t("undo"),
         onClick: () => {
-          void restoreFeedback({ token, id, expectedVersion: result.version })
+          void restoreTicket({ token, id, expectedVersion: result.version })
             .catch((error) => toast.error(localizeError(error, t)));
         },
       },
@@ -227,7 +227,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal">{t("appName")}</h1>
-            <p className="text-sm text-muted-foreground">{feedback ? t("feedbackItems", { count: feedback.length }) : project === null ? t("noProjectsTitle") : t("syncing")}</p>
+            <p className="text-sm text-muted-foreground">{tickets ? t("ticketItems", { count: tickets.length }) : project === null ? t("noProjectsTitle") : t("syncing")}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap">
             {projects ? (
@@ -251,7 +251,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
               onClick={() => setComposerOpen(true)}
             >
               <ImagePlus />
-              {composerHasDraft ? t("resumeFeedback") : t("newFeedback")}
+              {composerHasDraft ? t("resumeTicket") : t("newTicket")}
             </Button>
             <Button variant={showArchived ? "default" : "outline"} onClick={() => setShowArchived((value) => !value)}>
               <Archive />
@@ -269,7 +269,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         <section className="min-w-0">
           {project === null ? (
             <NoProjects action={<Button type="button" onClick={() => setNewProjectOpen(true)}>{t("newProject")}</Button>} />
-          ) : feedback === undefined ? (
+          ) : tickets === undefined ? (
             <div className="grid min-h-72 place-items-center rounded-lg border bg-card">
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
@@ -278,7 +278,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           )}
           {showArchived && archivedItems.length > 0 ? (
             <section className="mt-5 rounded-lg border bg-card p-4">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedFeedback")}</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedTicket")}</h2>
               <div className="space-y-2">
                 {archivedItems.map((item) => (
                   <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
@@ -286,7 +286,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
                       <span className="block truncate text-sm font-medium">{item.title}</span>
                       <span className="text-sm leading-5 text-muted-foreground">
                         <span className="font-mono">{formatTicketNumber(item.ticketNumber, item.projectKey)}</span>
-                        {" · "}{t("archivedOn", { date: formatDate(item.deletedAt ?? item.updatedAt) })}
+                        {" · "}{t("archivedOn", { date: formatDate(item.archivedAt ?? item.updatedAt) })}
                       </span>
                     </div>
                     <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(localizeError(error, t)))}>
@@ -305,11 +305,11 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         onOpenChange={(open) => {
           if (open || !composerBusy) setComposerOpen(open);
         }}
-        title={t("newFeedback")}
+        title={t("newTicket")}
         description={project ? `${project.name} (${project.key})` : t("internalBoard")}
         keepMounted
       >
-        <SubmitFeedback
+        <SubmitTicket
           token={token}
           projectId={project?._id ?? null}
           active={composerOpen}
@@ -324,8 +324,8 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
 
       <NewProjectDialog token={token} open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={selectProject} />
 
-      <FeedbackDialog
-        feedback={selected}
+      <TicketDialog
+        ticket={selected}
         token={token}
         onClose={() => setSelectedId(null)}
         onMove={(id, status) => void moveItem(id, status)}
@@ -335,7 +335,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   );
 }
 
-function SubmitFeedback({
+function SubmitTicket({
   token,
   projectId,
   active,
@@ -351,7 +351,7 @@ function SubmitFeedback({
   onUploadBusyChange: (isBusy: boolean) => void;
 }) {
   const { t } = useI18n();
-  const createFeedback = useMutation(api.feedback.createFeedback);
+  const createTicket = useMutation(api.tickets.createTicket);
   const createUploadIntent = useMutation(api.uploads.createUploadIntent);
   const abortControllerRef = useRef<AbortController | null>(null);
   const idempotencyKeyRef = useRef(crypto.randomUUID());
@@ -405,7 +405,7 @@ function SubmitFeedback({
     setDescription("");
     setError("");
     idempotencyKeyRef.current = crypto.randomUUID();
-    toast.success(t("feedbackSubmitted"));
+    toast.success(t("ticketSubmitted"));
     onSubmissionComplete();
   }
 
@@ -463,7 +463,7 @@ function SubmitFeedback({
     setError("");
 
     if (!title.trim()) {
-      setError(t("requiredFeedback"));
+      setError(t("requiredTicket"));
       return;
     }
 
@@ -476,11 +476,11 @@ function SubmitFeedback({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     try {
-      await submitFeedbackDraft(
+      await submitTicketDraft(
         {
           token,
           createUploadIntent,
-          createFeedback: (args) => createFeedback({ ...args, projectId }),
+          createTicket: (args) => createTicket({ ...args, projectId }),
           onProgress: setProgress,
           signal: abortController.signal,
           onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),
@@ -581,41 +581,41 @@ function SubmitFeedback({
   );
 }
 
-function FeedbackDialog({
-  feedback,
+function TicketDialog({
+  ticket,
   token,
   onClose,
   onMove,
   onArchive,
 }: {
-  feedback: Feedback | null;
+  ticket: Ticket | null;
   token: string;
   onClose: () => void;
-  onMove: (id: Id<"feedback">, status: FeedbackStatus) => void;
-  onArchive: (id: Id<"feedback">) => Promise<void>;
+  onMove: (id: Id<"tickets">, status: TicketStatus) => void;
+  onArchive: (id: Id<"tickets">) => Promise<void>;
 }) {
   const { t, formatDate } = useI18n();
-  const detail = useQuery(api.feedback.getFeedback, feedback ? { token, id: feedback._id } : "skip");
-  const activity = useQuery(api.feedback.listAnnotationActivity, feedback ? { token, id: feedback._id } : "skip");
-  const feedbackActivity = useQuery(api.feedback.listFeedbackActivity, feedback ? { token, id: feedback._id } : "skip");
-  const editFeedback = useMutation(api.feedback.editFeedback);
-  const undoFeedbackEdit = useMutation(api.feedback.undoFeedbackEdit);
-  const updateUrgencyScore = useMutation(api.feedback.updateUrgencyScore);
-  const undoUrgencyScore = useMutation(api.feedback.undoUrgencyScore);
-  const addAnnotation = useMutation(api.feedback.addAnnotation);
-  const updateAnnotation = useMutation(api.feedback.updateAnnotation);
-  const undoAnnotationUpdate = useMutation(api.feedback.undoAnnotationUpdate);
-  const removeAnnotation = useMutation(api.feedback.removeAnnotation);
-  const restoreAnnotation = useMutation(api.feedback.restoreAnnotation);
+  const detail = useQuery(api.tickets.getTicket, ticket ? { token, id: ticket._id } : "skip");
+  const activity = useQuery(api.annotations.listAnnotationActivity, ticket ? { token, id: ticket._id } : "skip");
+  const ticketActivity = useQuery(api.tickets.listTicketActivity, ticket ? { token, id: ticket._id } : "skip");
+  const editTicket = useMutation(api.tickets.editTicket);
+  const undoTicketEdit = useMutation(api.tickets.undoTicketEdit);
+  const updateUrgencyScore = useMutation(api.tickets.updateUrgencyScore);
+  const undoUrgencyScore = useMutation(api.tickets.undoUrgencyScore);
+  const addAnnotation = useMutation(api.annotations.addAnnotation);
+  const updateAnnotation = useMutation(api.annotations.updateAnnotation);
+  const undoAnnotationUpdate = useMutation(api.annotations.undoAnnotationUpdate);
+  const removeAnnotation = useMutation(api.annotations.removeAnnotation);
+  const restoreAnnotation = useMutation(api.annotations.restoreAnnotation);
   const viewerRef = useRef<MediaViewerHandle>(null);
-  const item = detail ?? feedback;
+  const item = detail ?? ticket;
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [savingFeedback, setSavingFeedback] = useState(false);
+  const [savingTicket, setSavingTicket] = useState(false);
   const [urgencyDraft, setUrgencyDraft] = useState("");
   const [savingUrgency, setSavingUrgency] = useState(false);
-  const [feedbackError, setFeedbackError] = useState("");
+  const [ticketError, setTicketError] = useState("");
   const allAnnotations = item?.annotations ?? [];
   const annotations = allAnnotations.filter(isActiveAnnotation);
   const deletedAnnotations = allAnnotations.filter((annotation) => !isActiveAnnotation(annotation));
@@ -624,7 +624,7 @@ function FeedbackDialog({
     setEditing(false);
     setEditTitle(item?.title ?? "");
     setEditDescription(item?.description ?? "");
-    setFeedbackError("");
+    setTicketError("");
   }, [item?._id]);
 
   useEffect(() => {
@@ -639,18 +639,18 @@ function FeedbackDialog({
       urgencyScore !== undefined
       && (!Number.isInteger(urgencyScore) || urgencyScore < MIN_URGENCY_SCORE || urgencyScore > MAX_URGENCY_SCORE)
     ) {
-      setFeedbackError(t("invalidUrgencyScore"));
+      setTicketError(t("invalidUrgencyScore"));
       return;
     }
 
     setSavingUrgency(true);
-    setFeedbackError("");
+    setTicketError("");
     try {
       const result = await updateUrgencyScore({
         token,
         id: item._id,
         urgencyScore,
-        expectedVersion: item.version ?? 0,
+        expectedVersion: item.version,
       });
       setUrgencyDraft(urgencyScore?.toString() ?? "");
       if (result.eventId) {
@@ -665,40 +665,40 @@ function FeedbackDialog({
         });
       }
     } catch (error) {
-      setFeedbackError(localizeError(error, t));
+      setTicketError(localizeError(error, t));
     } finally {
       setSavingUrgency(false);
     }
   }
 
-  async function saveFeedbackEdits() {
+  async function saveTicketEdits() {
     if (!item) return;
-    setSavingFeedback(true);
-    setFeedbackError("");
+    setSavingTicket(true);
+    setTicketError("");
     try {
-      const result = await editFeedback({
+      const result = await editTicket({
         token,
         id: item._id,
         title: editTitle,
         description: editDescription,
-        expectedVersion: item.version ?? 0,
+        expectedVersion: item.version,
       });
       setEditing(false);
       if ("eventId" in result && result.eventId) {
-        toast.success(t("feedbackUpdated"), {
+        toast.success(t("ticketUpdated"), {
           action: {
             label: t("undo"),
             onClick: () => {
-              void undoFeedbackEdit({ token, eventId: result.eventId, expectedVersion: result.version })
+              void undoTicketEdit({ token, eventId: result.eventId, expectedVersion: result.version })
                 .catch((error) => toast.error(localizeError(error, t)));
             },
           },
         });
       }
     } catch (error) {
-      setFeedbackError(localizeError(error, t));
+      setTicketError(localizeError(error, t));
     } finally {
-      setSavingFeedback(false);
+      setSavingTicket(false);
     }
   }
 
@@ -747,9 +747,9 @@ function FeedbackDialog({
 
   return (
     <Dialog
-      open={Boolean(feedback)}
+      open={Boolean(ticket)}
       onOpenChange={(open) => !open && onClose()}
-      title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("feedback")}
+      title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("ticket")}
     >
       {item ? (
         <div className="space-y-4">
@@ -821,7 +821,7 @@ function FeedbackDialog({
               className="text-destructive hover:text-destructive"
               onClick={() => {
                 if (!window.confirm(t("archiveConfirm"))) return;
-                void onArchive(item._id).catch((error) => setFeedbackError(localizeError(error, t)));
+                void onArchive(item._id).catch((error) => setTicketError(localizeError(error, t)));
               }}
             >
               <Archive /> {t("archive")}
@@ -834,18 +834,18 @@ function FeedbackDialog({
             {editing ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                 <div className="space-y-1.5">
-                  <label htmlFor="edit-feedback-title" className="text-sm font-medium">{t("topic")}</label>
-                  <Input id="edit-feedback-title" value={editTitle} maxLength={100} onChange={(event) => setEditTitle(event.target.value)} />
+                  <label htmlFor="edit-ticket-title" className="text-sm font-medium">{t("topic")}</label>
+                  <Input id="edit-ticket-title" value={editTitle} maxLength={100} onChange={(event) => setEditTitle(event.target.value)} />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="edit-feedback-description" className="text-sm font-medium">{t("description")}</label>
-                  <Textarea id="edit-feedback-description" rows={5} maxLength={10_000} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} />
+                  <label htmlFor="edit-ticket-description" className="text-sm font-medium">{t("description")}</label>
+                  <Textarea id="edit-ticket-description" rows={5} maxLength={10_000} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} />
                   <p className="text-sm leading-5 text-muted-foreground">{t("mediaLinkHint")}</p>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="ghost" onClick={() => setEditing(false)}>{t("cancel")}</Button>
-                  <Button type="button" disabled={savingFeedback || !editTitle.trim()} onClick={() => void saveFeedbackEdits()}>
-                    {savingFeedback ? <Loader2 className="animate-spin" /> : null} {t("save")}
+                  <Button type="button" disabled={savingTicket || !editTitle.trim()} onClick={() => void saveTicketEdits()}>
+                    {savingTicket ? <Loader2 className="animate-spin" /> : null} {t("save")}
                   </Button>
                 </div>
               </div>
@@ -860,7 +860,7 @@ function FeedbackDialog({
                 <p className="text-sm leading-6 text-muted-foreground">{t("noDescription")}</p>
               )
             )}
-            {feedbackError ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{feedbackError}</p> : null}
+            {ticketError ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{ticketError}</p> : null}
             <AnnotationList
               annotations={annotations}
               deletedAnnotations={deletedAnnotations}
@@ -870,7 +870,7 @@ function FeedbackDialog({
               onRestore={handleRestoreAnnotation}
             />
             <AnnotationActivityList events={activity ?? []} />
-            <FeedbackActivityList events={feedbackActivity ?? []} />
+            <TicketActivityList events={ticketActivity ?? []} />
             <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
           </div>
         </div>

@@ -1,19 +1,10 @@
-import { config } from "dotenv";
 import { ConvexHttpClient } from "convex/browser";
-import { createUploadthing, UploadThingError, UTApi } from "uploadthing/server";
+import { createUploadthing, UploadThingError } from "uploadthing/server";
 import type { FileRoute } from "uploadthing/types";
 import { z } from "zod";
 import type { Json } from "@uploadthing/shared";
 import { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel.js";
-
-config({ path: ".env.local", quiet: true });
-
-const f = createUploadthing();
-const convexUrl = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
-if (!convexUrl) throw new Error("CONVEX_URL or VITE_CONVEX_URL is required by the upload server.");
-const convex = new ConvexHttpClient(convexUrl);
-const utapi = new UTApi();
 
 type UploadIntentInput = {
   intentId: string;
@@ -51,15 +42,17 @@ function bearerToken(request: Request) {
 }
 
 export type OurFileRouter = {
-  feedbackMedia: FileRoute<{
+  ticketMedia: FileRoute<{
     input: UploadIntentInput;
     output: null;
     errorShape: Json;
   }>;
 };
 
-export const uploadRouter: OurFileRouter = {
-  feedbackMedia: f({
+export function createUploadRouter(convex: ConvexHttpClient, callbackToken: string | undefined): OurFileRouter {
+  const f = createUploadthing();
+  return {
+  ticketMedia: f({
     image: {
       maxFileSize: "8MB",
       maxFileCount: 10,
@@ -88,6 +81,7 @@ export const uploadRouter: OurFileRouter = {
       const uploaded = file as unknown as CompletedUpload;
       try {
         await convex.mutation(api.uploads.recordUploadedFile, {
+          callbackToken,
           intentId: metadata.intentId as Id<"uploadIntents">,
           secret: metadata.secret,
           file: {
@@ -98,10 +92,11 @@ export const uploadRouter: OurFileRouter = {
             url: uploaded.ufsUrl,
           },
         });
-        console.log("UploadThing completed", uploaded.name, uploaded.key);
+
       } catch (error) {
-        await utapi.deleteFiles(uploaded.key).catch(() => undefined);
+        // A lost response may follow a committed write; reconciliation belongs to P3.
         throw error;
       }
     }),
 };
+}

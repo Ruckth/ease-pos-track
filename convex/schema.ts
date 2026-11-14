@@ -1,7 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-export const feedbackStatus = v.union(
+export const ticketStatus = v.union(
   v.literal("new"),
   v.literal("acknowledged"),
   v.literal("in_progress"),
@@ -9,8 +9,8 @@ export const feedbackStatus = v.union(
   v.literal("done"),
 );
 
-// Sessions created before the customer portal have no role; readers treat a
-// missing role as staff so legacy sessions keep full workspace access.
+export const ticketLifecycle = v.union(v.literal("active"), v.literal("archived"), v.literal("purging"));
+
 export const actorRole = v.union(v.literal("staff"), v.literal("customer"));
 
 export const mediaItemValidator = v.object({
@@ -31,8 +31,7 @@ export const annotationValidator = v.object({
   id: v.string(),
   label: v.number(),
   mediaIndex: v.number(),
-  // "pin" is retained for records created by the earlier annotation model.
-  kind: v.union(v.literal("pin"), v.literal("point"), v.literal("time")),
+  kind: v.union(v.literal("point"), v.literal("time")),
   x: v.optional(v.number()),
   y: v.optional(v.number()),
   time: v.optional(v.number()),
@@ -59,7 +58,7 @@ export const annotationEventAction = v.union(
   v.literal("update_undone"),
 );
 
-export const feedbackEventAction = v.union(
+export const ticketEventAction = v.union(
   v.literal("created"),
   v.literal("media_attached"),
   v.literal("edited"),
@@ -72,21 +71,17 @@ export const feedbackEventAction = v.union(
   v.literal("restored"),
 );
 
-export const feedbackStateValidator = v.object({
+export const ticketStateValidator = v.object({
   title: v.string(),
   description: v.string(),
-  status: feedbackStatus,
+  status: ticketStatus,
   urgencyScore: v.optional(v.number()),
   version: v.number(),
-  mediaCount: v.optional(v.number()),
-  deletedAt: v.optional(v.number()),
+  mediaCount: v.number(),
+  lifecycle: ticketLifecycle,
+  archivedAt: v.optional(v.number()),
 });
 
-/**
- * How a ticket entered the system when it did not come from the browser UI.
- * Absent means the browser UI, so every ticket created before agent creation
- * existed keeps its meaning without a migration.
- */
 export const ticketCreatedVia = v.literal("codex");
 
 export const uploadIntentStatus = v.union(
@@ -113,25 +108,22 @@ export default defineSchema({
   })
     .index("by_project", ["projectId", "customerId"])
     .index("by_customer", ["customerId"]),
-  feedback: defineTable({
-    // Optional only until `projects:migrateLegacyTickets` has run on every
-    // deployment; every Ticket created since Projects exist has both.
-    projectId: v.optional(v.id("projects")),
-    // Copy of the Project's immutable key, so a Ticket formats and resolves its
-    // own reference without a join.
-    projectKey: v.optional(v.string()),
+  tickets: defineTable({
+    projectId: v.id("projects"),
+    projectKey: v.string(),
     title: v.string(),
     description: v.string(),
-    status: feedbackStatus,
+    searchText: v.string(),
+    status: ticketStatus,
     urgencyScore: v.optional(v.number()),
-    ticketNumber: v.optional(v.number()),
+    ticketNumber: v.number(),
     media: v.array(mediaItemValidator),
-    annotations: v.optional(v.array(annotationValidator)),
-    version: v.optional(v.number()),
-    deletedAt: v.optional(v.number()),
-    // Tickets created before the customer portal have no owner and stay staff-only.
+    annotations: v.array(annotationValidator),
+    version: v.number(),
+    lifecycle: ticketLifecycle,
+    archivedAt: v.optional(v.number()),
     ownerCustomerId: v.optional(v.id("customers")),
-    origin: v.optional(actorRole),
+    origin: actorRole,
     createdVia: v.optional(ticketCreatedVia),
     // Idempotency key supplied by a non-browser caller (the ticket CLI). Unset
     // for UI tickets, so at most one ticket exists per external request id.
@@ -139,11 +131,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_status", ["status"])
-    .index("by_deleted_at", ["deletedAt"])
+    .index("by_lifecycle_archive", ["lifecycle", "archivedAt"])
+    .index("by_project_lane", ["projectId", "lifecycle", "status", "ticketNumber"])
+    .index("by_owner_project", ["ownerCustomerId", "projectId", "lifecycle", "ticketNumber"])
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
     .index("by_external_request", ["externalRequestId"])
-    .index("by_owner", ["ownerCustomerId", "createdAt"]),
+    .index("by_owner", ["ownerCustomerId", "createdAt"])
+    .searchIndex("search_text", { searchField: "searchText", filterFields: ["projectId", "ownerCustomerId", "lifecycle"] }),
   customers: defineTable({
     email: v.string(),
     passwordAlgorithm: v.string(),
@@ -153,45 +147,46 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_email", ["email"]),
+  ticketTotals: defineTable({
+    projectId: v.id("projects"),
+    status: ticketStatus,
+    count: v.number(),
+  }).index("by_project_status", ["projectId", "status"]),
   ticketCounters: defineTable({
     name: v.string(),
     nextNumber: v.number(),
     updatedAt: v.number(),
   }).index("by_name", ["name"]),
-  feedbackEvents: defineTable({
-    feedbackId: v.id("feedback"),
-    action: feedbackEventAction,
-    before: v.optional(feedbackStateValidator),
-    after: v.optional(feedbackStateValidator),
+  ticketEvents: defineTable({
+    ticketId: v.id("tickets"),
+    action: ticketEventAction,
+    before: v.optional(ticketStateValidator),
+    after: v.optional(ticketStateValidator),
     sessionId: v.id("sessions"),
     createdVia: v.optional(ticketCreatedVia),
-    actorRole: v.optional(actorRole),
+    actorRole: actorRole,
     actorCustomerId: v.optional(v.id("customers")),
-    sourceEventId: v.optional(v.id("feedbackEvents")),
+    sourceEventId: v.optional(v.id("ticketEvents")),
     createdAt: v.number(),
   })
-    .index("by_feedback", ["feedbackId", "createdAt"]),
+    .index("by_ticket", ["ticketId", "createdAt"]),
   annotationEvents: defineTable({
-    feedbackId: v.id("feedback"),
+    ticketId: v.id("tickets"),
     annotationId: v.string(),
     action: annotationEventAction,
     before: v.optional(annotationValidator),
     after: v.optional(annotationValidator),
     sessionId: v.id("sessions"),
-    actorRole: v.optional(actorRole),
+    actorRole: actorRole,
     actorCustomerId: v.optional(v.id("customers")),
     createdAt: v.number(),
   })
-    .index("by_feedback", ["feedbackId", "createdAt"])
-    .index("by_annotation", ["feedbackId", "annotationId", "createdAt"]),
-  sessions: defineTable({
-    token: v.string(),
-    clientId: v.optional(v.string()),
-    role: v.optional(actorRole),
-    customerId: v.optional(v.id("customers")),
-    createdAt: v.number(),
-    expiresAt: v.number(),
-  })
+    .index("by_ticket", ["ticketId", "createdAt"])
+    .index("by_annotation", ["ticketId", "annotationId", "createdAt"]),
+  sessions: defineTable(v.union(
+    v.object({ token: v.string(), clientId: v.optional(v.string()), role: v.literal("staff"), createdAt: v.number(), expiresAt: v.number() }),
+    v.object({ token: v.string(), clientId: v.optional(v.string()), role: v.literal("customer"), customerId: v.id("customers"), createdAt: v.number(), expiresAt: v.number() }),
+  ))
     .index("by_token", ["token"])
     .index("by_expires_at", ["expiresAt"]),
   loginAttempts: defineTable({
@@ -201,6 +196,53 @@ export default defineSchema({
     lockedUntil: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_client_id", ["clientId"]),
+  ticketRequests: defineTable({
+    operation: v.string(),
+    requestId: v.string(),
+    actorRole,
+    actorCustomerId: v.optional(v.id("customers")),
+    projectId: v.id("projects"),
+    digestVersion: v.number(),
+    inputDigest: v.string(),
+    outcome: v.union(v.literal("committed"), v.literal("unavailable")),
+    ticketId: v.optional(v.id("tickets")),
+    jobId: v.optional(v.id("mediaJobs")),
+    createdAt: v.number(),
+  }).index("by_operation_request", ["operation", "requestId"])
+    .index("by_ticket", ["ticketId"]),
+  mediaAssets: defineTable({
+    key: v.string(),
+    intentId: v.id("uploadIntents"),
+    ticketId: v.optional(v.id("tickets")),
+    metadata: mediaItemValidator,
+    lifecycle: v.union(v.literal("pending"), v.literal("attached"), v.literal("deleting"), v.literal("deleted")),
+    jobId: v.optional(v.id("mediaJobs")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"])
+    .index("by_intent", ["intentId", "lifecycle"])
+    .index("by_ticket", ["ticketId", "lifecycle"]),
+  mediaJobs: defineTable({
+    kind: v.union(v.literal("cancellation"), v.literal("intent_expiry"), v.literal("rejected_upload"), v.literal("ticket_purge")),
+    resourceScope: v.string(),
+    intentId: v.optional(v.id("uploadIntents")),
+    ticketId: v.optional(v.id("tickets")),
+    keys: v.array(v.string()),
+    completedKeys: v.array(v.string()),
+    phase: v.union(v.literal("delete_media"), v.literal("delete_ticket"), v.literal("delete_events"), v.literal("complete")),
+    state: v.union(v.literal("pending"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    attempt: v.number(),
+    maxAttempts: v.number(),
+    leaseId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    availableAt: v.number(),
+    lastOutcome: v.optional(v.union(v.literal("deleted"), v.literal("absent_verified"), v.literal("failed_retryable"), v.literal("failed_permanent"), v.literal("unknown"), v.literal("not_configured"))),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_scope", ["resourceScope", "state"])
+    .index("by_available", ["state", "availableAt"])
+    .index("by_lease", ["state", "leaseExpiresAt"])
+    .index("by_kind_state", ["kind", "state", "createdAt"]),
   uploadIntents: defineTable({
     sessionId: v.id("sessions"),
     secret: v.string(),
@@ -208,8 +250,8 @@ export default defineSchema({
     expectedFiles: v.array(pendingFileValidator),
     uploadedFiles: v.array(mediaItemValidator),
     status: uploadIntentStatus,
-    feedbackId: v.optional(v.id("feedback")),
-    actorRole: v.optional(actorRole),
+    ticketId: v.optional(v.id("tickets")),
+    actorRole: actorRole,
     actorCustomerId: v.optional(v.id("customers")),
     createdAt: v.number(),
     expiresAt: v.number(),

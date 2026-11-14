@@ -50,21 +50,11 @@ function isStoredCredential(value: unknown): value is StoredCredential {
   );
 }
 
-/**
- * Accepts the base64 form written today and the plaintext JSON written by
- * earlier versions, so an existing session survives an upgrade.
- */
 function decodeCredential(stored: string): StoredCredential | null {
-  const candidates = [stored, Buffer.from(stored, "base64").toString("utf8")];
-  for (const candidate of candidates) {
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (isStoredCredential(parsed)) return parsed;
-    } catch {
-      // Not this encoding; try the next candidate.
-    }
-  }
-  return null;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(stored, "base64").toString("utf8"));
+    return isStoredCredential(parsed) ? parsed : null;
+  } catch { return null; }
 }
 
 /** macOS Keychain adapter. Secret values are passed on stdin, never as arguments. */

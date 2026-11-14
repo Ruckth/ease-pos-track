@@ -7,9 +7,6 @@
  * so a reference stays valid for the life of its Ticket.
  */
 
-/** Key of the Project that Tickets created before Projects existed move into. */
-export const LEGACY_PROJECT_KEY = "TKT";
-
 export const MAX_PROJECT_NAME_LENGTH = 80;
 
 /** 2-10 characters: an uppercase letter, then uppercase letters or digits. */
@@ -19,12 +16,8 @@ export function isValidTicketNumber(value: number | undefined): value is number 
   return value !== undefined && Number.isInteger(value) && value > 0;
 }
 
-/**
- * The customer-facing Ticket reference. A Ticket without a Project key predates
- * Projects and keeps its original `TKT-` reference.
- */
-export function formatTicketNumber(ticketNumber: number | undefined, projectKey = LEGACY_PROJECT_KEY) {
-  if (!isValidTicketNumber(ticketNumber)) return `${projectKey}—`;
+/** The immutable Project key and number form the public Ticket reference. */
+export function formatTicketNumber(ticketNumber: number, projectKey: string) {
   return `${projectKey}-${String(ticketNumber).padStart(4, "0")}`;
 }
 

@@ -14,7 +14,7 @@ import type { TicketRef } from "./cli";
 import type { TicketMediaItem } from "./images";
 import { toStoredTicketStatus, type TicketStatus } from "./status";
 
-export type TicketDocument = Doc<"feedback">;
+export type TicketDocument = Doc<"tickets">;
 
 export type CurrentSession = {
   role: "staff" | "customer";
@@ -30,7 +30,7 @@ export type TicketStatusInput = { ref: TicketRef; status: TicketStatus; expected
 export type TicketUploadIntent = {
   intentId: Id<"uploadIntents">;
   secret: string;
-  feedbackId?: Id<"feedback">;
+  ticketId?: Id<"tickets">;
   uploadedFiles: TicketMediaItem[];
 };
 export type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
@@ -48,7 +48,7 @@ export interface TicketRemote {
   get(url: string, token: string, ref: TicketRef, includeArchived: boolean): Promise<TicketDocument | null>;
   create(url: string, token: string, input: TicketCreateInput): Promise<TicketCreateResult>;
   createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): Promise<TicketUploadIntent>;
-  recordUploadedFile(url: string, input: TicketUploadCredentials & { file: TicketMediaItem }): Promise<void>;
+  recordUploadedFile(url: string, input: TicketUploadCredentials & { token: string; file: TicketMediaItem }): Promise<void>;
   attachImages(url: string, token: string, input: TicketAttachInput): Promise<TicketDocument>;
   update(url: string, token: string, input: TicketUpdateInput): Promise<TicketDocument>;
   changeStatus(url: string, token: string, input: TicketStatusInput): Promise<TicketDocument>;
@@ -92,7 +92,7 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean) {
-    return await this.client(url).query(api.feedback.listFeedback, {
+    return await this.client(url).query(api.tickets.listTickets, {
       token,
       ...(projectKey === undefined ? {} : { projectKey }),
       includeDeleted: includeArchived,
@@ -100,7 +100,7 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
-    return await this.client(url).query(api.feedback.getFeedbackByTicketNumber, {
+    return await this.client(url).query(api.tickets.getTicketByTicketNumber, {
       token,
       projectKey: ref.projectKey,
       ticketNumber: ref.ticketNumber,
@@ -109,7 +109,7 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async create(url: string, token: string, input: TicketCreateInput) {
-    return await this.client(url).mutation(api.feedback.createTextFeedback, { token, ...input });
+    return await this.client(url).mutation(api.tickets.createTextTicket, { token, ...input });
   }
 
   async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
@@ -120,13 +120,13 @@ export class ConvexTicketRemote implements TicketRemote {
     });
   }
 
-  async recordUploadedFile(url: string, input: TicketUploadCredentials & { file: TicketMediaItem }) {
+  async recordUploadedFile(url: string, input: TicketUploadCredentials & { token: string; file: TicketMediaItem }) {
     await this.client(url).mutation(api.uploads.recordUploadedFile, input);
   }
 
   async attachImages(url: string, token: string, input: TicketAttachInput) {
     return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.feedback.attachFeedbackMedia, {
+      await this.client(url).mutation(api.tickets.attachTicketMedia, {
         token,
         id: current._id,
         media: input.media,
@@ -140,7 +140,7 @@ export class ConvexTicketRemote implements TicketRemote {
   async update(url: string, token: string, input: TicketUpdateInput) {
     // Omitted fields keep their stored value; the mutation replaces both.
     return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.feedback.editFeedback, {
+      await this.client(url).mutation(api.tickets.editTicket, {
         token,
         id: current._id,
         title: input.title ?? current.title,
@@ -152,7 +152,7 @@ export class ConvexTicketRemote implements TicketRemote {
 
   async changeStatus(url: string, token: string, input: TicketStatusInput) {
     return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.feedback.updateFeedbackStatus, {
+      await this.client(url).mutation(api.tickets.updateTicketStatus, {
         token,
         id: current._id,
         status: toStoredTicketStatus(input.status),
@@ -163,13 +163,13 @@ export class ConvexTicketRemote implements TicketRemote {
 
   async archive(url: string, token: string, ref: TicketRef, expectedVersion: number) {
     return await this.write(url, token, ref, ARCHIVING, async (current) => {
-      await this.client(url).mutation(api.feedback.archiveFeedback, { token, id: current._id, expectedVersion });
+      await this.client(url).mutation(api.tickets.archiveTicket, { token, id: current._id, expectedVersion });
     });
   }
 
   async restore(url: string, token: string, ref: TicketRef, expectedVersion: number) {
     return await this.write(url, token, ref, RESTORING, async (current) => {
-      await this.client(url).mutation(api.feedback.restoreFeedback, { token, id: current._id, expectedVersion });
+      await this.client(url).mutation(api.tickets.restoreTicket, { token, id: current._id, expectedVersion });
     });
   }
 
@@ -193,7 +193,7 @@ export class ConvexTicketRemote implements TicketRemote {
   /** Reports the domain's own not-found code so the CLI classifies it once. */
   private async requireTicket(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
     const ticket = await this.get(url, token, ref, includeArchived);
-    if (!ticket) throw new Error("FEEDBACK_NOT_FOUND");
+    if (!ticket) throw new Error("TICKET_UNAVAILABLE");
     return ticket;
   }
 }

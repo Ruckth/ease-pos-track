@@ -4,7 +4,7 @@ import {
   MAX_URGENCY_SCORE,
   MIN_URGENCY_SCORE,
   validateUrgencyScore,
-} from "../convex/feedback_state";
+} from "../convex/ticket_state";
 import { urgencyBand } from "../src/lib/urgency-score";
 
 test("urgency scores are optional whole numbers from 1 to 100", () => {

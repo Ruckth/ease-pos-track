@@ -1,8 +1,19 @@
 # Agent instructions
 
 Project vocabulary: the unit of work is a **Ticket**. Do not introduce "feedback",
-"report" or "card" in anything a user reads; `feedback*` names inside `convex/` and
-`src/` are existing internals.
+"report" or "card" in anything a user reads. Tables, handlers and source modules
+use canonical Ticket names.
+
+## Local architecture implementation
+
+Use only `pnpm convex:local <args>` for Convex CLI work. Its default pushes and
+regenerates bindings against the disposable local backend, preserving shared
+deployment settings. Do not edit `.env.local` or `.env.convex-local` manually.
+Do not deploy or run fixtures against shared development or production.
+
+Local seed and smoke instructions are in [docs/ticket-cli.md](docs/ticket-cli.md).
+Every Convex registration uses a policy constructor from `convex/functions.ts`;
+resource ownership and Project access belong in domain operations.
 
 ## Creating a Ticket
 
@@ -22,6 +33,7 @@ pnpm ticket create --title "<title>" --description "<description>" --project <KE
 - The command prints one JSON object on stdout. Report the `ticket` value (for
   example `POS-0007`) back to the user; `created: false` means an existing Ticket
   was returned for that `--request-id`, not a new one.
+- Unmapped safe server codes appear in the `REMOTE_CALL_FAILED` message (exit 6).
 - Errors print one JSON object on stderr with a `code`. Exit codes: `2` usage,
   `3` invalid input, `4` Convex setup or auth, `5` `--request-id` reuse with
   different content, `6` the deployment call failed.
@@ -36,4 +48,5 @@ This repository is pnpm-only. Use `pnpm` for every command; `npm`, `npx`, yarn a
 bun are not supported, and `preinstall` refuses an install driven by any of them.
 `npx <tool>` becomes `pnpm exec <tool>`.
 
-Run `pnpm test` and `pnpm run typecheck` before reporting work as done.
+Run `pnpm test`, `pnpm run typecheck` and `pnpm run build` before reporting work
+as done. Schema changes must also push cleanly with `pnpm convex:local`.

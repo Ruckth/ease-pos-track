@@ -13,10 +13,10 @@ import {
 } from "@/components/reui/kanban";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FeedbackCard } from "@/components/feedback-card";
-import { statusMeta } from "@/components/feedback-status";
+import { TicketCard } from "@/components/ticket-card";
+import { statusMeta } from "@/components/ticket-status";
 import { cn } from "@/lib/utils";
-import { formatTicketNumber } from "@/lib/feedback-ui";
+import { formatTicketNumber } from "@/lib/ticket-ui";
 import {
   BOARD_COLUMNS,
   emptyColumns,
@@ -28,7 +28,7 @@ import {
   type BoardColumns,
   type PendingMoves,
 } from "@/lib/kanban-board";
-import type { Feedback, FeedbackStatus } from "@/lib/types";
+import type { Ticket, TicketStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
 /**
@@ -70,21 +70,21 @@ export function StaffBoard({
   onMoveCard,
 }: {
   /** Active tickets, newest first, already filtered by the workspace search. */
-  items: Feedback[];
-  onSelect: (id: Id<"feedback">) => void;
+  items: Ticket[];
+  onSelect: (id: Id<"tickets">) => void;
   /** Persists a status change. Resolves false when the move was rejected. */
-  onMoveCard: (id: Id<"feedback">, status: FeedbackStatus) => Promise<boolean>;
+  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => Promise<boolean>;
 }) {
   const pendingRef = useRef<PendingMoves>({});
   const itemsRef = useRef(items);
-  const [columns, setColumns] = useState<BoardColumns<Feedback>>(() =>
-    reconcileColumns(items, emptyColumns<Feedback>(), {})
+  const [columns, setColumns] = useState<BoardColumns<Ticket>>(() =>
+    reconcileColumns(items, emptyColumns<Ticket>(), {})
   );
   const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
-  const [visibleStatus, setVisibleStatus] = useState<FeedbackStatus>(BOARD_COLUMNS[0]);
+  const [visibleStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
   const tabsId = useId();
   const panelId = `${tabsId}-panel`;
-  const tabId = (status: FeedbackStatus) => `${tabsId}-${status}`;
+  const tabId = (status: TicketStatus) => `${tabsId}-${status}`;
 
   // Convex pushes the authoritative list on every change. Fold it into what is
   // on screen instead of replacing it, so in-flight drags survive the update.
@@ -100,12 +100,12 @@ export function StaffBoard({
   }, []);
 
   const commitMove = useCallback(
-    async (meta: KanbanCommitMeta<Feedback>) => {
+    async (meta: KanbanCommitMeta<Ticket>) => {
       if (meta.kind !== "item") return;
       const status = statusChangeFromDrag(meta);
       // Reordering inside a column changes nothing that is stored.
       if (!status) return;
-      const id = String(meta.event.active.id) as Id<"feedback">;
+      const id = String(meta.event.active.id) as Id<"tickets">;
       pendingRef.current = { ...pendingRef.current, [id]: status };
       const persisted = await onMoveCard(id, status);
       if (!persisted) rollback(id);
@@ -152,7 +152,7 @@ export function StaffBoard({
           if (!dragged) return null;
           return (
             <div className="w-72 max-w-[90vw] rotate-1 opacity-95">
-              <FeedbackCard item={dragged} onSelect={() => undefined} />
+              <TicketCard item={dragged} onSelect={() => undefined} />
             </div>
           );
         }}
@@ -172,14 +172,14 @@ function StatusTabs({
   panelId,
   tabId,
 }: {
-  columns: BoardColumns<Feedback>;
-  value: FeedbackStatus;
-  onValueChange: (status: FeedbackStatus) => void;
+  columns: BoardColumns<Ticket>;
+  value: TicketStatus;
+  onValueChange: (status: TicketStatus) => void;
   panelId: string;
-  tabId: (status: FeedbackStatus) => string;
+  tabId: (status: TicketStatus) => string;
 }) {
   const { t } = useI18n();
-  const tabRefs = useRef<Partial<Record<FeedbackStatus, HTMLButtonElement | null>>>({});
+  const tabRefs = useRef<Partial<Record<TicketStatus, HTMLButtonElement | null>>>({});
 
   return (
     <div role="tablist" aria-label={t("boardStatusTabs")} className="mb-4 grid grid-cols-2 gap-1 rounded-lg border bg-card p-1 sm:grid-cols-3">
@@ -232,10 +232,10 @@ function BoardColumn({
   onMoveCard,
   draggable,
 }: {
-  status: FeedbackStatus;
-  items: Feedback[];
-  onSelect: (id: Id<"feedback">) => void;
-  onMoveCard: (id: Id<"feedback">, status: FeedbackStatus) => Promise<boolean>;
+  status: TicketStatus;
+  items: Ticket[];
+  onSelect: (id: Id<"tickets">) => void;
+  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => Promise<boolean>;
   /** False below `lg`, where one column is shown at a time and no card can be dragged. */
   draggable: boolean;
 }) {
@@ -266,7 +266,7 @@ function BoardColumn({
         ) : (
           items.map((item) => (
             <KanbanItem key={item._id} value={item._id}>
-              <FeedbackCard
+              <TicketCard
                 item={item}
                 onSelect={onSelect}
                 onMove={(id, next) => void onMoveCard(id, next)}

@@ -6,15 +6,13 @@ import {
   suggestProjectKey,
   validateProjectName,
 } from "../convex/ticket_numbers";
-import { formatTicketNumber, nextFeedbackStatus } from "../src/lib/feedback-ui";
+import { formatTicketNumber, nextTicketStatus } from "../src/lib/ticket-ui";
 import { pickProject, readProjectParam, withProjectParam } from "../src/lib/projects";
 
-test("formats Ticket references with their Project key, legacy Tickets as TKT", () => {
-  assert.equal(formatTicketNumber(1), "TKT-0001");
-  assert.equal(formatTicketNumber(10_001), "TKT-10001");
-  assert.equal(formatTicketNumber(undefined), "TKT—");
+test("formats Ticket references with the required Project key", () => {
+  assert.equal(formatTicketNumber(1, "POS"), "POS-0001");
+  assert.equal(formatTicketNumber(10_001, "APP"), "APP-10001");
   assert.equal(formatTicketNumber(12, "POS"), "POS-0012");
-  assert.equal(formatTicketNumber(12, undefined), "TKT-0012");
 });
 
 test("parses Ticket references in any case and rejects malformed ones", () => {
@@ -56,8 +54,8 @@ test("the URL's Project wins, otherwise the first available Project", () => {
 });
 
 test("advances status without wrapping Done", () => {
-  assert.equal(nextFeedbackStatus("new"), "acknowledged");
-  assert.equal(nextFeedbackStatus("acknowledged"), "in_progress");
-  assert.equal(nextFeedbackStatus("waiting"), "done");
-  assert.equal(nextFeedbackStatus("done"), null);
+  assert.equal(nextTicketStatus("new"), "acknowledged");
+  assert.equal(nextTicketStatus("acknowledged"), "in_progress");
+  assert.equal(nextTicketStatus("waiting"), "done");
+  assert.equal(nextTicketStatus("done"), null);
 });

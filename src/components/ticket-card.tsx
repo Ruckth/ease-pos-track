@@ -5,23 +5,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { statusMeta } from "@/components/feedback-status";
+import { statusMeta } from "@/components/ticket-status";
 import { cn } from "@/lib/utils";
-import { feedbackProgress, formatTicketNumber, nextFeedbackStatus } from "@/lib/feedback-ui";
+import { ticketProgress, formatTicketNumber, nextTicketStatus } from "@/lib/ticket-ui";
 import { urgencyBand, urgencyTone } from "@/lib/urgency-score";
-import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus } from "@/lib/types";
+import { isActiveAnnotation, isVideoMedia, type Ticket, type TicketStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
 /** Compact Ticket summary with an independent attachment popup and status action. */
-export function FeedbackCard({
+export function TicketCard({
   item,
   onSelect,
   onMove,
   handle,
 }: {
-  item: Feedback;
-  onSelect: (id: Id<"feedback">) => void;
-  onMove?: (id: Id<"feedback">, status: FeedbackStatus) => void;
+  item: Ticket;
+  onSelect: (id: Id<"tickets">) => void;
+  onMove?: (id: Id<"tickets">, status: TicketStatus) => void;
   handle?: ReactNode;
 }) {
   const { t, formatDate } = useI18n();
@@ -31,10 +31,10 @@ export function FeedbackCard({
   const mediaCount = item.media.length;
   const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
   const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
-  const nextStatus = nextFeedbackStatus(item.status);
+  const nextStatus = nextTicketStatus(item.status);
   const currentStatus = statusMeta(item.status);
   const nextStatusLabel = nextStatus ? t(statusMeta(nextStatus).labelKey) : null;
-  const progress = feedbackProgress(item.status);
+  const progress = ticketProgress(item.status);
   const urgency = urgencyBand(item.urgencyScore);
 
   return (

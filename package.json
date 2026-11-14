@@ -6,10 +6,10 @@
   "packageManager": "pnpm@11.5.2",
   "scripts": {
     "preinstall": "node scripts/ensure-pnpm.mjs",
-    "dev": "concurrently -k -n vite,api,convex \"vite\" \"tsx server/index.ts\" \"convex dev\"",
+    "dev": "concurrently -k -n vite,api,convex \"VITE_CONVEX_URL=http://127.0.0.1:3212 VITE_CONVEX_SITE_URL=http://127.0.0.1:3213 vite\" \"CONVEX_URL=http://127.0.0.1:3212 tsx server/index.ts\" \"pnpm run dev:convex\"",
     "dev:web": "vite",
     "dev:api": "tsx server/index.ts",
-    "dev:convex": "convex dev",
+    "dev:convex": "node scripts/convex-local.mjs dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "ticket": "tsx scripts/ticket.ts",

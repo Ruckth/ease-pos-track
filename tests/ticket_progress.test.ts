@@ -1,25 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { STATUS_ORDER, feedbackProgress } from "../src/lib/feedback-ui";
+import { STATUS_ORDER, ticketProgress } from "../src/lib/ticket-ui";
 import { translate } from "../src/lib/i18n";
 
 test("progress maps each workflow status to a step and a percentage", () => {
-  assert.deepEqual(feedbackProgress("new"), { step: 1, total: 5, percent: 0 });
-  assert.deepEqual(feedbackProgress("acknowledged"), { step: 2, total: 5, percent: 25 });
-  assert.deepEqual(feedbackProgress("in_progress"), { step: 3, total: 5, percent: 50 });
-  assert.deepEqual(feedbackProgress("waiting"), { step: 4, total: 5, percent: 75 });
-  assert.deepEqual(feedbackProgress("done"), { step: 5, total: 5, percent: 100 });
+  assert.deepEqual(ticketProgress("new"), { step: 1, total: 5, percent: 0 });
+  assert.deepEqual(ticketProgress("acknowledged"), { step: 2, total: 5, percent: 25 });
+  assert.deepEqual(ticketProgress("in_progress"), { step: 3, total: 5, percent: 50 });
+  assert.deepEqual(ticketProgress("waiting"), { step: 4, total: 5, percent: 75 });
+  assert.deepEqual(ticketProgress("done"), { step: 5, total: 5, percent: 100 });
 });
 
 test("progress rises with the workflow and only Done reaches full", () => {
-  const percents = STATUS_ORDER.map((status) => feedbackProgress(status).percent);
+  const percents = STATUS_ORDER.map((status) => ticketProgress(status).percent);
   assert.deepEqual([...percents].sort((left, right) => left - right), percents);
   assert.equal(percents.filter((percent) => percent === 100).length, 1);
-  assert.equal(feedbackProgress(STATUS_ORDER[0]).percent, 0);
+  assert.equal(ticketProgress(STATUS_ORDER[0]).percent, 0);
 });
 
 test("an unrecognised status falls back to the first step, like statusMeta", () => {
-  assert.deepEqual(feedbackProgress("archived" as never), { step: 1, total: 5, percent: 0 });
+  assert.deepEqual(ticketProgress("archived" as never), { step: 1, total: 5, percent: 0 });
 });
 
 test("the progress bar labels interpolate every value in both languages", () => {

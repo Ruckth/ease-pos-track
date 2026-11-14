@@ -1,3 +1,4 @@
+import { ConvexError } from "convex/values";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatLocalizedDate, localizeError, resolveLanguage, translate, translations } from "../src/lib/i18n";
@@ -57,14 +58,14 @@ test("Thai is the default persisted language and English is retained", () => {
 });
 
 test("translations interpolate in Thai and English", () => {
-  assert.equal(translate("th", "feedbackItems", { count: 3 }), "รายการแจ้งปัญหา 3 รายการ");
-  assert.equal(translate("en", "feedbackItems", { count: 3 }), "3 Tickets");
+  assert.equal(translate("th", "ticketItems", { count: 3 }), "รายการแจ้งปัญหา 3 รายการ");
+  assert.equal(translate("en", "ticketItems", { count: 3 }), "3 Tickets");
   assert.equal(translate("th", "description"), "รายละเอียด (ไม่บังคับ)");
   assert.equal(translate("en", "description"), "Description (optional)");
   assert.equal(translate("th", "noDescription"), "ไม่มีรายละเอียด");
   assert.equal(translate("en", "noDescription"), "No description provided.");
-  assert.equal(translate("th", "requiredFeedback"), "ต้องกรอกหัวข้อ");
-  assert.equal(translate("en", "requiredFeedback"), "A topic is required.");
+  assert.equal(translate("th", "requiredTicket"), "ต้องกรอกหัวข้อ");
+  assert.equal(translate("en", "requiredTicket"), "A topic is required.");
 });
 
 test("stable error codes are localized", () => {
@@ -79,11 +80,11 @@ test("stable error codes are localized", () => {
   assert.equal(localizeError(new Error("UNKNOWN_CODE"), thai), "เกิดข้อผิดพลาด โปรดลองอีกครั้ง");
 });
 
-test("authorization and account error codes are localized, including wrapped ones", () => {
+test("authorization and account error codes are localized, including structured Convex errors", () => {
   const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
   assert.equal(localizeError(new Error("STAFF_ONLY"), english), translate("en", "staffOnlyAction"));
   assert.equal(localizeError(new Error("CUSTOMER_ONLY"), english), translate("en", "customerOnlyAction"));
-  assert.equal(localizeError(new Error("FEEDBACK_NOT_FOUND"), english), translate("en", "ticketMissing"));
+  assert.equal(localizeError(new Error("TICKET_UNAVAILABLE"), english), translate("en", "ticketMissing"));
   assert.equal(localizeError(new Error("INVALID_EMAIL"), english), translate("en", "invalidEmail"));
   assert.equal(localizeError(new Error("WEAK_PASSWORD"), english), translate("en", "weakPassword"));
   assert.equal(localizeError(new Error("EMAIL_ALREADY_REGISTERED"), english), translate("en", "emailTaken"));
@@ -94,15 +95,30 @@ test("authorization and account error codes are localized, including wrapped one
   );
   assert.equal(localizeError(new Error("VERSION_CONFLICT"), english), translate("en", "moveConflict"));
   assert.equal(localizeError(new Error("REQUIRED_MEDIA"), english), translate("en", "requiredMedia"));
-  // Convex wraps thrown errors, so the code arrives inside a longer message.
+  // Public handlers return structured data; text mentioning a code is not authoritative.
   assert.equal(
-    localizeError(new Error("[Request ID: 1] Server Error\nUncaught Error: STAFF_ONLY at handler"), english),
+    localizeError(new ConvexError({ code: "STAFF_ONLY" }), english),
     translate("en", "staffOnlyAction"),
   );
+});
+
+test("error messages cannot impersonate a structured domain rejection", () => {
+  const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
+  assert.equal(localizeError(new Error("Server Error STAFF_ONLY"), english), translate("en", "genericError"));
 });
 
 test("Thai dates use Buddhist Era years", () => {
   const timestamp = Date.UTC(2026, 0, 2, 3, 4);
   assert.match(formatLocalizedDate("th", timestamp), /2569/);
   assert.match(formatLocalizedDate("en", timestamp), /2026/);
+});
+
+
+test("cleanup uncertainty, mismatched intent and invalid media index have localized errors", () => {
+  for (const language of ["en", "th"] as const) {
+    const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+    for (const code of ["UPLOAD_CLEANUP_UNKNOWN", "UPLOAD_INTENT_MISMATCH", "INVALID_MEDIA_INDEX", "UPLOAD_CALLBACK_NOT_CONFIGURED"]) {
+      assert.notEqual(localizeError(new ConvexError({ code }), t), t("genericError"));
+    }
+  }
 });

@@ -1,6 +1,6 @@
 import type { Doc } from "./_generated/dataModel";
 
-export type AnnotationRecord = NonNullable<Doc<"feedback">["annotations"]>[number];
+export type AnnotationRecord = NonNullable<Doc<"tickets">["annotations"]>[number];
 
 export type AnnotationUpdate = {
   text?: string;
@@ -102,7 +102,7 @@ export function updateAnnotationRecord(
     throw new Error("INVALID_ANNOTATION_POSITION");
   }
 
-  if ((annotation.kind === "pin" || annotation.kind === "point") && update.time !== undefined) {
+  if ((annotation.kind === "point") && update.time !== undefined) {
     throw new Error("INVALID_ANNOTATION_TIME");
   }
 

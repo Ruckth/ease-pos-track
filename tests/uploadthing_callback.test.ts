@@ -18,7 +18,7 @@ test("public deployments keep UploadThing automatic callback URL detection", () 
 
 test("an explicit callback URL remains available for non-Vercel hosts", () => {
   assert.equal(
-    resolveUploadThingCallbackUrl({ UPLOADTHING_CALLBACK_URL: "https://feedback.example.com/api/uploadthing" }),
-    "https://feedback.example.com/api/uploadthing",
+    resolveUploadThingCallbackUrl({ UPLOADTHING_CALLBACK_URL: "https://ticket.example.com/api/uploadthing" }),
+    "https://ticket.example.com/api/uploadthing",
   );
 });

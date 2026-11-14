@@ -18,10 +18,10 @@ import { uploadFiles } from "@/uploadthing";
 export type UploadIntentHandle = {
   intentId: Id<"uploadIntents">;
   secret: string;
-  feedbackId?: Id<"feedback"> | undefined;
+  ticketId?: Id<"tickets"> | undefined;
 };
 
-export type FeedbackDraft = {
+export type TicketDraft = {
   title: string;
   description: string;
   items: PendingMedia[];
@@ -30,14 +30,14 @@ export type FeedbackDraft = {
   idempotencyKey: string;
 };
 
-export type SubmitFeedbackDeps = {
+export type SubmitTicketDeps = {
   token: string;
   createUploadIntent: (args: {
     token: string;
     idempotencyKey: string;
     files: Array<{ name: string; size: number; type: string }>;
   }) => Promise<UploadIntentHandle>;
-  createFeedback: (args: {
+  createTicket: (args: {
     token: string;
     title: string;
     description: string;
@@ -68,7 +68,7 @@ export async function requestUploadIntentCancel(
   return await readUploadCancelResponse(response);
 }
 
-export async function submitFeedbackDraft(deps: SubmitFeedbackDeps, draft: FeedbackDraft) {
+export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDraft) {
   let activeIntent: { intentId: Id<"uploadIntents">; secret: string } | null = null;
   try {
     const intent = await deps.createUploadIntent({
@@ -81,12 +81,12 @@ export async function submitFeedbackDraft(deps: SubmitFeedbackDeps, draft: Feedb
       })),
     });
     // The intent was already turned into a ticket by an earlier attempt.
-    if (intent.feedbackId) return;
+    if (intent.ticketId) return;
 
     activeIntent = { intentId: intent.intentId, secret: intent.secret };
     const uploads = draft.items.length === 0
       ? []
-      : await (deps.uploadMedia ?? uploadFiles)("feedbackMedia", {
+      : await (deps.uploadMedia ?? uploadFiles)("ticketMedia", {
           files: draft.items.map((item) => item.file),
           input: { intentId: intent.intentId, secret: intent.secret },
           headers: { authorization: `Bearer ${deps.token}` },
@@ -105,7 +105,7 @@ export async function submitFeedbackDraft(deps: SubmitFeedbackDeps, draft: Feedb
       };
     });
 
-    await deps.createFeedback({
+    await deps.createTicket({
       token: deps.token,
       title: draft.title,
       description: draft.description,

@@ -36,7 +36,7 @@ import {
   type CustomerStep,
   type CustomerTicketDraft,
 } from "@/lib/customer-ticket-steps";
-import { submitFeedbackDraft } from "@/lib/feedback-submit";
+import { submitTicketDraft } from "@/lib/ticket-submit";
 import {
   pendingAnnotationsForViewer,
   pendingMediaForViewer,
@@ -65,7 +65,7 @@ export function CustomerTicketWizard({
   onUploadBusyChange: (isBusy: boolean) => void;
 }) {
   const { t } = useI18n();
-  const createFeedback = useMutation(api.feedback.createFeedback);
+  const createTicket = useMutation(api.tickets.createTicket);
   const createUploadIntent = useMutation(api.uploads.createUploadIntent);
   const abortControllerRef = useRef<AbortController | null>(null);
   const idempotencyKeyRef = useRef(crypto.randomUUID());
@@ -199,11 +199,11 @@ export function CustomerTicketWizard({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     try {
-      await submitFeedbackDraft(
+      await submitTicketDraft(
         {
           token,
           createUploadIntent,
-          createFeedback: (args) => createFeedback({ ...args, projectId }),
+          createTicket: (args) => createTicket({ ...args, projectId }),
           onProgress: setProgress,
           signal: abortController.signal,
           onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),
@@ -211,7 +211,7 @@ export function CustomerTicketWizard({
         { title, description, items, annotations, idempotencyKey: idempotencyKeyRef.current },
       );
       resetDraft();
-      toast.success(t("feedbackSubmitted"));
+      toast.success(t("ticketSubmitted"));
       onSubmitted();
     } catch (err) {
       setError(localizeError(err, t));

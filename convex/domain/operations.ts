@@ -1,49 +1,45 @@
+import { queryOperation, mutationOperation } from "./operation";
 import { v } from "convex/values";
-import { annotationCreateInputValidator, feedbackStatus, mediaItemValidator } from "./schema";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import { annotationCreateInputValidator, ticketStatus, mediaItemValidator } from "../schema";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
 import {
   actorFields,
-  assertCanWriteFeedback,
+  assertCanWriteTicket,
   assertCustomerActor,
-  assertStaffActor,
-  canReadFeedback,
-  newFeedbackOwnership,
+  canReadTicket,
+  newTicketOwnership,
   type Actor,
-} from "./authz";
+} from "../authz";
 import {
   createAnnotationRecord,
   restoreAnnotationRecord,
   softDeleteAnnotationRecord,
   updateAnnotationRecord,
-  type AnnotationRecord,
-} from "./annotation_state";
-import { requireCurrentVersion, validateFeedbackText, validateUrgencyScore } from "./feedback_state";
-import { assertSameTicketRequest, normalizeRequestId } from "./ticket_requests";
-import { normalizeProjectKey } from "./ticket_numbers";
-import { projectByKey, requireUsableProject, resolveStaffProject } from "./projects";
-import { requireActor } from "./session_auth";
-import { validateMediaItems } from "./uploads";
+} from "../annotation_state";
+import { requireCurrentVersion, validateTicketText, validateUrgencyScore } from "../ticket_state";
+import { assertSameTicketRequest, normalizeRequestId } from "../ticket_requests";
+import { normalizeProjectKey } from "../ticket_numbers";
+import { isMember, projectByKey, requireUsableProject, resolveStaffProject } from "./projects";
+import { validateMediaItems } from "../../shared/media-policy";
 import {
   applyTicketChange,
   createTicketRecord,
-  feedbackState,
   recordAnnotationEvent,
-  recordFeedbackEvent,
 } from "./tickets";
 
 /**
  * Loads a ticket the actor may read, or null. Denied and non-existent tickets are
  * indistinguishable, so the portal cannot be used to probe for ticket ids.
  */
-async function readableFeedback(
+async function readableTicket(
   ctx: QueryCtx | MutationCtx,
   actor: Actor<Id<"customers">>,
-  id: Id<"feedback">,
+  id: Id<"tickets">,
 ) {
   const doc = await ctx.db.get(id);
-  if (!doc || !canReadFeedback(actor, doc)) return null;
+  if (!doc || doc.lifecycle === "purging" || !canReadTicket(actor, doc)) return null;
+  if (actor.role === "customer" && !await isMember(ctx, doc.projectId, actor)) return null;
   return doc;
 }
 
@@ -51,7 +47,7 @@ function publicAnnotationEvent(event: Doc<"annotationEvents">) {
   return {
     _id: event._id,
     _creationTime: event._creationTime,
-    feedbackId: event.feedbackId,
+    ticketId: event.ticketId,
     annotationId: event.annotationId,
     action: event.action,
     before: event.before,
@@ -60,11 +56,11 @@ function publicAnnotationEvent(event: Doc<"annotationEvents">) {
   };
 }
 
-function publicFeedbackEvent(event: Doc<"feedbackEvents">) {
+function publicTicketEvent(event: Doc<"ticketEvents">) {
   return {
     _id: event._id,
     _creationTime: event._creationTime,
-    feedbackId: event.feedbackId,
+    ticketId: event.ticketId,
     action: event.action,
     before: event.before,
     after: event.after,
@@ -74,14 +70,14 @@ function publicFeedbackEvent(event: Doc<"feedbackEvents">) {
 }
 
 /** Loads an active ticket the actor is allowed to change. */
-async function requireWritableFeedback(
+async function requireWritableTicket(
   ctx: MutationCtx,
   actor: Actor<Id<"customers">>,
-  id: Id<"feedback">,
+  id: Id<"tickets">,
 ) {
-  const doc = await ctx.db.get(id);
-  if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
-  assertCanWriteFeedback(actor, doc);
+  const doc = await readableTicket(ctx, actor, id);
+  if (!doc || doc.lifecycle !== "active") throw new Error("TICKET_UNAVAILABLE");
+  assertCanWriteTicket(actor, doc);
   return doc;
 }
 
@@ -95,8 +91,8 @@ function requireOwnedUploadIntent(
     !intent
     || intent.sessionId !== session._id
     || intent.secret !== secret
-    || (intent.actorRole !== undefined && intent.actorRole !== actor.role)
-    || (intent.actorCustomerId !== undefined && intent.actorCustomerId !== actor.customerId)
+    || intent.actorRole !== actor.role
+    || intent.actorCustomerId !== actor.customerId
   ) {
     throw new Error("UPLOAD_INTENT_NOT_FOUND");
   }
@@ -105,7 +101,7 @@ function requireOwnedUploadIntent(
 
 function verifyPendingUploadIntent(
   intent: Doc<"uploadIntents">,
-  media: Doc<"feedback">["media"],
+  media: Doc<"tickets">["media"],
 ) {
   if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
     throw new Error("UPLOAD_INTENT_INVALID");
@@ -130,69 +126,71 @@ function verifyPendingUploadIntent(
  * Staff board and CLI listing, newest first. With `projectKey` it lists one
  * Project; without it, every Ticket.
  */
-export const listFeedback = query({
+export const listTickets = queryOperation({
   args: {
     token: v.string(),
     projectKey: v.optional(v.string()),
     includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
-    // Customers never see the whole board; they use listMyFeedback instead.
-    assertStaffActor(actor);
+    // Customers never see the whole board; they use listMyTickets instead.
 
-    let rows: Doc<"feedback">[];
+    let rows: Doc<"tickets">[];
     if (args.projectKey === undefined) {
-      rows = await ctx.db.query("feedback").order("desc").collect();
+      rows = await ctx.db.query("tickets").order("desc").collect();
     } else {
       const project = await projectByKey(ctx, normalizeProjectKey(args.projectKey));
       if (!project) throw new Error("PROJECT_NOT_FOUND");
       rows = await ctx.db
-        .query("feedback")
+        .query("tickets")
         .withIndex("by_project_ticket", (q) => q.eq("projectKey", project.key))
         .order("desc")
         .collect();
     }
-    return args.includeDeleted ? rows : rows.filter((item) => item.deletedAt === undefined);
+    return rows.filter((item) => item.lifecycle !== "purging" && (args.includeDeleted || item.lifecycle === "active"));
   },
 });
 
 /** Tickets owned by the signed-in customer, newest first, optionally in one Project. */
-export const listMyFeedback = query({
+export const listMyTickets = queryOperation({
   args: {
     token: v.string(),
     projectKey: v.optional(v.string()),
     includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
+    const { actor } = ctx;
     const customerId = assertCustomerActor(actor);
 
     const rows = await ctx.db
-      .query("feedback")
+      .query("tickets")
       .withIndex("by_owner", (q) => q.eq("ownerCustomerId", customerId))
       .order("desc")
       .collect();
+    const projectKey = args.projectKey === undefined ? undefined : normalizeProjectKey(args.projectKey);
+    const memberships = await ctx.db.query("projectMembers")
+      .withIndex("by_customer", q => q.eq("customerId", customerId)).collect();
+    const projectIds = new Set(memberships.map(row => row.projectId));
     return rows.filter((item) =>
-      (args.includeDeleted || item.deletedAt === undefined)
-      && (args.projectKey === undefined || item.projectKey === args.projectKey)
+      projectIds.has(item.projectId) && item.lifecycle !== "purging" && (args.includeDeleted || item.lifecycle === "active")
+      && (projectKey === undefined || item.projectKey === projectKey)
     );
   },
 });
 
-export const getFeedback = query({
+export const getTicket = queryOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
   },
   handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
-    return await readableFeedback(ctx, actor, args.id);
+    const { actor } = ctx;
+    return await readableTicket(ctx, actor, args.id);
   },
 });
 
 /** Ticket-reference lookup (`POS-0012`) for authenticated staff tools such as the Ticket CLI. */
-export const getFeedbackByTicketNumber = query({
+export const getTicketByTicketNumber = queryOperation({
   args: {
     token: v.string(),
     projectKey: v.string(),
@@ -200,50 +198,48 @@ export const getFeedbackByTicketNumber = query({
     includeDeleted: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
     const projectKey = normalizeProjectKey(args.projectKey);
     const doc = await ctx.db
-      .query("feedback")
+      .query("tickets")
       .withIndex("by_project_ticket", (q) => q.eq("projectKey", projectKey).eq("ticketNumber", args.ticketNumber))
       .unique();
-    if (!doc || (!args.includeDeleted && doc.deletedAt !== undefined)) return null;
+    if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")) return null;
     return doc;
   },
 });
 
-export const listAnnotationActivity = query({
+export const listAnnotationActivity = queryOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
   },
   handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
-    if (!(await readableFeedback(ctx, actor, args.id))) return [];
+    const { actor } = ctx;
+    if (!(await readableTicket(ctx, actor, args.id))) return [];
     const events = await ctx.db
       .query("annotationEvents")
-      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
+      .withIndex("by_ticket", (q) => q.eq("ticketId", args.id))
       .order("desc")
       .take(30);
     return events.map(publicAnnotationEvent);
   },
 });
 
-export const listFeedbackActivity = query({
-  args: { token: v.string(), id: v.id("feedback") },
+export const listTicketActivity = queryOperation({
+  args: { token: v.string(), id: v.id("tickets") },
   handler: async (ctx, args) => {
-    const { actor } = await requireActor(ctx, args.token);
-    if (!(await readableFeedback(ctx, actor, args.id))) return [];
+    const { actor } = ctx;
+    if (!(await readableTicket(ctx, actor, args.id))) return [];
     const events = await ctx.db
-      .query("feedbackEvents")
-      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
+      .query("ticketEvents")
+      .withIndex("by_ticket", (q) => q.eq("ticketId", args.id))
       .order("desc")
       .take(30);
-    return events.map(publicFeedbackEvent);
+    return events.map(publicTicketEvent);
   },
 });
 
-export const createFeedback = mutation({
+export const createTicket = mutationOperation({
   args: {
     token: v.string(),
     projectId: v.id("projects"),
@@ -255,9 +251,9 @@ export const createFeedback = mutation({
     uploadIntentSecret: v.string(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
+    const { session, actor } = ctx;
 
-    const { title, description } = validateFeedbackText(args.title, args.description);
+    const { title, description } = validateTicketText(args.title, args.description);
     const intent = requireOwnedUploadIntent(
       await ctx.db.get(args.uploadIntentId),
       session,
@@ -266,7 +262,7 @@ export const createFeedback = mutation({
     );
     // The intent stays bound to the session that created it, and therefore to
     // the same actor; the actor columns are re-checked as defence in depth.
-    if (intent.status === "attached" && intent.feedbackId) return intent.feedbackId;
+    if (intent.status === "attached" && intent.ticketId) return intent.ticketId;
     verifyPendingUploadIntent(intent, args.media);
     const project = await requireUsableProject(ctx, actor, args.projectId);
 
@@ -281,11 +277,11 @@ export const createFeedback = mutation({
       media: args.media,
       annotations,
       // Ownership is derived from the session; clients cannot pass it in.
-      ownership: newFeedbackOwnership(actor),
+      ownership: newTicketOwnership(actor),
       author: { sessionId: session._id, ...actorFields(actor) },
       now,
     });
-    await ctx.db.patch(intent._id, { status: "attached", feedbackId: created._id, updatedAt: now });
+    await ctx.db.patch(intent._id, { status: "attached", ticketId: created._id, updatedAt: now });
     return created._id;
   },
 });
@@ -296,7 +292,7 @@ export const createFeedback = mutation({
  * with the rest of the Ticket domain. `projectKey` may be omitted only while a
  * single Project exists.
  */
-export const createTextFeedback = mutation({
+export const createTextTicket = mutationOperation({
   args: {
     token: v.string(),
     projectKey: v.optional(v.string()),
@@ -305,16 +301,17 @@ export const createTextFeedback = mutation({
     requestId: v.string(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
+    const { session, actor } = ctx;
     const requestId = normalizeRequestId(args.requestId);
-    const { title, description } = validateFeedbackText(args.title, args.description);
-    const project = await resolveStaffProject(ctx, args.projectKey);
+    const { title, description } = validateTicketText(args.title, args.description);
+    const selected = await resolveStaffProject(ctx, args.projectKey);
+    const project = await requireUsableProject(ctx, actor, selected._id);
     const existing = await ctx.db
-      .query("feedback")
+      .query("tickets")
       .withIndex("by_external_request", (q) => q.eq("externalRequestId", requestId))
       .unique();
     if (existing) {
+      if (!canReadTicket(actor, existing) || existing.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
       assertSameTicketRequest(existing, { title, description });
       if (existing.projectKey !== project.key) throw new Error("REQUEST_ID_CONFLICT");
       return { ticket: existing, created: false, requestId };
@@ -325,8 +322,8 @@ export const createTextFeedback = mutation({
       title,
       description,
       media: [],
-      ownership: newFeedbackOwnership(actor),
-      author: { sessionId: session._id, ...actorFields(actor), createdVia: "codex" },
+      ownership: newTicketOwnership(actor),
+      author: { sessionId: session._id, ...actorFields(actor), ...(actor.role === "staff" ? { createdVia: "codex" as const } : {}) },
       externalRequestId: requestId,
       now: Date.now(),
     });
@@ -334,19 +331,18 @@ export const createTextFeedback = mutation({
   },
 });
 
-export const attachFeedbackMedia = mutation({
+export const attachTicketMedia = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     media: v.array(mediaItemValidator),
     uploadIntentId: v.id("uploadIntents"),
     uploadIntentSecret: v.string(),
     expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
     const intent = requireOwnedUploadIntent(
       await ctx.db.get(args.uploadIntentId),
       session,
@@ -354,8 +350,8 @@ export const attachFeedbackMedia = mutation({
       args.uploadIntentSecret,
     );
     if (intent.status === "attached") {
-      if (intent.feedbackId !== doc._id) throw new Error("UPLOAD_INTENT_MISMATCH");
-      return { eventId: null, version: doc.version ?? 0 };
+      if (intent.ticketId !== doc._id) throw new Error("UPLOAD_INTENT_MISMATCH");
+      return { eventId: null, version: doc.version };
     }
     if (args.media.length === 0) throw new Error("UPLOAD_INCOMPLETE");
     validateMediaItems([...doc.media, ...args.media]);
@@ -370,23 +366,22 @@ export const attachFeedbackMedia = mutation({
       author: { sessionId: session._id, ...actorFields(actor), createdVia: "codex" },
       now,
     });
-    await ctx.db.patch(intent._id, { status: "attached", feedbackId: doc._id, updatedAt: now });
+    await ctx.db.patch(intent._id, { status: "attached", ticketId: doc._id, updatedAt: now });
     return changed;
   },
 });
 
-export const updateFeedbackStatus = mutation({
+export const updateTicketStatus = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
-    status: feedbackStatus,
+    id: v.id("tickets"),
+    status: ticketStatus,
     expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
+    const { session, actor } = ctx;
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
+    if (!doc || doc.lifecycle !== "active") throw new Error("TICKET_UNAVAILABLE");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status === args.status) return { eventId: null, version: currentVersion };
 
@@ -403,17 +398,16 @@ export const updateFeedbackStatus = mutation({
 });
 
 /** Staff triage control for the optional 1-100 urgency score. */
-export const updateUrgencyScore = mutation({
+export const updateUrgencyScore = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     urgencyScore: v.optional(v.number()),
     expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     const urgencyScore = validateUrgencyScore(args.urgencyScore);
     if (doc.urgencyScore === urgencyScore) return { eventId: null, version: currentVersion };
@@ -429,20 +423,19 @@ export const updateUrgencyScore = mutation({
   },
 });
 
-export const undoUrgencyScore = mutation({
+export const undoUrgencyScore = mutationOperation({
   args: {
     token: v.string(),
-    eventId: v.id("feedbackEvents"),
+    eventId: v.id("ticketEvents"),
     expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
+    const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
     if (!event || event.action !== "urgency_changed" || !event.before || !event.after) {
       throw new Error("URGENCY_UNDO_UNAVAILABLE");
     }
-    const doc = await requireWritableFeedback(ctx, actor, event.feedbackId);
+    const doc = await requireWritableTicket(ctx, actor, event.ticketId);
     requireCurrentVersion(doc, args.expectedVersion);
     if (doc.urgencyScore !== event.after.urgencyScore) throw new Error("URGENCY_UNDO_UNAVAILABLE");
 
@@ -459,21 +452,20 @@ export const undoUrgencyScore = mutation({
   },
 });
 
-export const undoFeedbackStatus = mutation({
+export const undoTicketStatus = mutationOperation({
   args: {
     token: v.string(),
-    eventId: v.id("feedbackEvents"),
+    eventId: v.id("ticketEvents"),
     expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    assertStaffActor(actor);
+    const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
     if (!event || event.action !== "status_changed" || !event.before || !event.after) {
       throw new Error("STATUS_UNDO_UNAVAILABLE");
     }
-    const doc = await ctx.db.get(event.feedbackId);
-    if (!doc || doc.deletedAt !== undefined) throw new Error("FEEDBACK_NOT_FOUND");
+    const doc = await ctx.db.get(event.ticketId);
+    if (!doc || doc.lifecycle !== "active") throw new Error("TICKET_UNAVAILABLE");
     requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status !== event.after.status) throw new Error("STATUS_UNDO_UNAVAILABLE");
 
@@ -490,15 +482,15 @@ export const undoFeedbackStatus = mutation({
   },
 });
 
-export const undoFeedbackEdit = mutation({
-  args: { token: v.string(), eventId: v.id("feedbackEvents"), expectedVersion: v.number() },
+export const undoTicketEdit = mutationOperation({
+  args: { token: v.string(), eventId: v.id("ticketEvents"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
+    const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
-    if (!event) throw new Error("FEEDBACK_NOT_FOUND");
+    if (!event) throw new Error("TICKET_UNAVAILABLE");
     // Ownership is settled before the event itself is inspected, so undo cannot be
     // used to learn anything about another customer's audit trail.
-    const doc = await requireWritableFeedback(ctx, actor, event.feedbackId);
+    const doc = await requireWritableTicket(ctx, actor, event.ticketId);
     if (event.action !== "edited" || !event.before || !event.after) {
       throw new Error("EDIT_UNDO_UNAVAILABLE");
     }
@@ -519,19 +511,19 @@ export const undoFeedbackEdit = mutation({
   },
 });
 
-export const editFeedback = mutation({
+export const editTicket = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     title: v.string(),
     description: v.string(),
     expectedVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
-    const { title, description } = validateFeedbackText(args.title, args.description);
+    const { title, description } = validateTicketText(args.title, args.description);
     if (title === doc.title && description === doc.description) return { version: currentVersion };
 
     const { eventId, version } = await applyTicketChange(ctx, {
@@ -546,16 +538,16 @@ export const editFeedback = mutation({
   },
 });
 
-export const archiveFeedback = mutation({
-  args: { token: v.string(), id: v.id("feedback"), expectedVersion: v.number() },
+export const archiveTicket = mutationOperation({
+  args: { token: v.string(), id: v.id("tickets"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
     const now = Date.now();
     const { version } = await applyTicketChange(ctx, {
       doc,
       expectedVersion: args.expectedVersion,
-      changes: { deletedAt: now },
+      changes: { archivedAt: now, lifecycle: "archived" },
       action: "archived",
       author: { sessionId: session._id, ...actorFields(actor) },
       now,
@@ -564,36 +556,28 @@ export const archiveFeedback = mutation({
   },
 });
 
-export const restoreFeedback = mutation({
-  args: { token: v.string(), id: v.id("feedback"), expectedVersion: v.number() },
+export const restoreTicket = mutationOperation({
+  args: { token: v.string(), id: v.id("tickets"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
+    const { session, actor } = ctx;
     // Restoring an archived ticket is a staff control.
-    assertStaffActor(actor);
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.deletedAt === undefined) throw new Error("ARCHIVED_FEEDBACK_NOT_FOUND");
-    const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
-    const now = Date.now();
-    const { deletedAt: _deletedAt, ...restored } = doc;
-    const after = { ...restored, version: currentVersion + 1, updatedAt: now };
-    await ctx.db.replace(doc._id, after);
-    await recordFeedbackEvent(ctx, {
-      feedbackId: doc._id,
+    if (!doc || doc.lifecycle !== "archived") throw new Error("TICKET_UNAVAILABLE");
+    return await applyTicketChange(ctx, {
+      doc,
+      expectedVersion: args.expectedVersion,
+      changes: { lifecycle: "active", archivedAt: undefined },
       action: "restored",
-      before: feedbackState(doc),
-      after: feedbackState(after),
-      sessionId: session._id,
-      ...actorFields(actor),
-      createdAt: now,
+      author: { sessionId: session._id, ...actorFields(actor) },
+      now: Date.now(),
     });
-    return { version: currentVersion + 1 };
   },
 });
 
-export const addAnnotation = mutation({
+export const addAnnotation = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     mediaIndex: v.number(),
     kind: v.union(v.literal("point"), v.literal("time")),
     x: v.optional(v.number()),
@@ -602,10 +586,10 @@ export const addAnnotation = mutation({
     text: v.string(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
 
-    const annotations = doc.annotations ?? [];
+    const annotations = doc.annotations;
     const label = annotations.reduce((max, item) => Math.max(max, item.label), 0) + 1;
     const now = Date.now();
     const annotation = createAnnotationRecord(doc.media, args, label, crypto.randomUUID(), now);
@@ -616,7 +600,7 @@ export const addAnnotation = mutation({
     });
 
     await recordAnnotationEvent(ctx, {
-      feedbackId: args.id,
+      ticketId: args.id,
       annotationId: annotation.id,
       action: "created",
       after: annotation,
@@ -629,10 +613,10 @@ export const addAnnotation = mutation({
   },
 });
 
-export const updateAnnotation = mutation({
+export const updateAnnotation = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     annotationId: v.string(),
     text: v.optional(v.string()),
     x: v.optional(v.number()),
@@ -640,13 +624,13 @@ export const updateAnnotation = mutation({
     time: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
 
-    const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
+    const index = (doc.annotations).findIndex((item) => item.id === args.annotationId);
     if (index < 0) throw new Error("COMMENT_NOT_FOUND");
 
-    const annotations = [...(doc.annotations ?? [])];
+    const annotations = [...doc.annotations];
     const before = annotations[index];
     const now = Date.now();
     const after = updateAnnotationRecord(before, args, now);
@@ -654,7 +638,7 @@ export const updateAnnotation = mutation({
 
     await ctx.db.patch(args.id, { annotations, updatedAt: now });
     const eventId = await recordAnnotationEvent(ctx, {
-      feedbackId: args.id,
+      ticketId: args.id,
       annotationId: args.annotationId,
       action: "updated",
       before,
@@ -667,18 +651,18 @@ export const updateAnnotation = mutation({
   },
 });
 
-export const undoAnnotationUpdate = mutation({
+export const undoAnnotationUpdate = mutationOperation({
   args: { token: v.string(), eventId: v.id("annotationEvents") },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
+    const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
-    if (!event) throw new Error("FEEDBACK_NOT_FOUND");
-    // Ownership first, for the same reason as undoFeedbackEdit.
-    const doc = await requireWritableFeedback(ctx, actor, event.feedbackId);
+    if (!event) throw new Error("TICKET_UNAVAILABLE");
+    // Ownership first, for the same reason as undoTicketEdit.
+    const doc = await requireWritableTicket(ctx, actor, event.ticketId);
     if (event.action !== "updated" || !event.before || !event.after) {
       throw new Error("COMMENT_UNDO_UNAVAILABLE");
     }
-    const annotations = [...(doc.annotations ?? [])];
+    const annotations = [...doc.annotations];
     const index = annotations.findIndex((annotation) => annotation.id === event.annotationId);
     if (index < 0 || annotations[index].deletedAt !== undefined) throw new Error("COMMENT_NOT_FOUND");
     if (annotations[index].updatedAt !== event.after.updatedAt) {
@@ -690,7 +674,7 @@ export const undoAnnotationUpdate = mutation({
     annotations[index] = after;
     await ctx.db.patch(doc._id, { annotations, updatedAt: now });
     await recordAnnotationEvent(ctx, {
-      feedbackId: doc._id,
+      ticketId: doc._id,
       annotationId: event.annotationId,
       action: "update_undone",
       before,
@@ -702,20 +686,20 @@ export const undoAnnotationUpdate = mutation({
   },
 });
 
-export const removeAnnotation = mutation({
+export const removeAnnotation = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
 
-    const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
+    const index = (doc.annotations).findIndex((item) => item.id === args.annotationId);
     if (index < 0) throw new Error("COMMENT_NOT_FOUND");
 
-    const annotations = [...(doc.annotations ?? [])];
+    const annotations = [...doc.annotations];
     const before = annotations[index];
     const now = Date.now();
     const after = softDeleteAnnotationRecord(before, now);
@@ -725,7 +709,7 @@ export const removeAnnotation = mutation({
       updatedAt: now,
     });
     await recordAnnotationEvent(ctx, {
-      feedbackId: args.id,
+      ticketId: args.id,
       annotationId: args.annotationId,
       action: "deleted",
       before,
@@ -737,20 +721,20 @@ export const removeAnnotation = mutation({
   },
 });
 
-export const restoreAnnotation = mutation({
+export const restoreAnnotation = mutationOperation({
   args: {
     token: v.string(),
-    id: v.id("feedback"),
+    id: v.id("tickets"),
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
-    const { session, actor } = await requireActor(ctx, args.token);
-    const doc = await requireWritableFeedback(ctx, actor, args.id);
+    const { session, actor } = ctx;
+    const doc = await requireWritableTicket(ctx, actor, args.id);
 
-    const index = (doc.annotations ?? []).findIndex((item) => item.id === args.annotationId);
+    const index = (doc.annotations).findIndex((item) => item.id === args.annotationId);
     if (index < 0) throw new Error("COMMENT_NOT_FOUND");
 
-    const annotations = [...(doc.annotations ?? [])];
+    const annotations = [...doc.annotations];
     const before = annotations[index];
     const now = Date.now();
     const after = restoreAnnotationRecord(before, now);
@@ -758,7 +742,7 @@ export const restoreAnnotation = mutation({
 
     await ctx.db.patch(args.id, { annotations, updatedAt: now });
     await recordAnnotationEvent(ctx, {
-      feedbackId: args.id,
+      ticketId: args.id,
       annotationId: args.annotationId,
       action: "restored",
       before,
@@ -770,31 +754,3 @@ export const restoreAnnotation = mutation({
   },
 });
 
-export const listFeedbackForPurge = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    return await ctx.db
-      .query("feedback")
-      .withIndex("by_deleted_at", (q) => q.gte("deletedAt", 0).lt("deletedAt", cutoff))
-      .take(25);
-  },
-});
-
-export const purgeFeedback = internalMutation({
-  args: { id: v.id("feedback") },
-  handler: async (ctx, args) => {
-    const doc = await ctx.db.get(args.id);
-    if (!doc?.deletedAt || doc.deletedAt > Date.now() - 30 * 24 * 60 * 60 * 1000) return;
-    const feedbackEvents = await ctx.db
-      .query("feedbackEvents")
-      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
-      .collect();
-    const annotationEvents = await ctx.db
-      .query("annotationEvents")
-      .withIndex("by_feedback", (q) => q.eq("feedbackId", args.id))
-      .collect();
-    for (const event of [...feedbackEvents, ...annotationEvents]) await ctx.db.delete(event._id);
-    await ctx.db.delete(args.id);
-  },
-});

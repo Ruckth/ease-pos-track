@@ -8,7 +8,7 @@
  * CLI cannot drift from either.
  */
 
-import { validateFeedbackText } from "../../convex/feedback_state";
+import { validateTicketText } from "../../convex/ticket_state";
 import { normalizeRequestId, type TicketContent } from "../../convex/ticket_requests";
 import { normalizeProjectKey, parseTicketReference } from "../../convex/ticket_numbers";
 import type { Deployment } from "./deployment";
@@ -208,7 +208,7 @@ function createRequest(input: CommandInput): TicketRequest {
   const requestId = input.text("--request-id") ?? json.requestId;
   const projectKey = input.projectKey(json.project);
   return validated(() => ({
-    ...validateFeedbackText(title, description),
+    ...validateTicketText(title, description),
     ...(requestId === undefined ? {} : { requestId: normalizeRequestId(requestId) }),
     ...(projectKey === undefined ? {} : { projectKey }),
   }));
@@ -218,8 +218,8 @@ function updateCommand(input: CommandInput): TicketCommand {
   const title = input.text("--title");
   const description = input.text("--description");
   const replacement = validated(() => ({
-    ...(title === undefined ? {} : { title: validateFeedbackText(title, "").title }),
-    ...(description === undefined ? {} : { description: validateFeedbackText(TITLE_PLACEHOLDER, description).description }),
+    ...(title === undefined ? {} : { title: validateTicketText(title, "").title }),
+    ...(description === undefined ? {} : { description: validateTicketText(TITLE_PLACEHOLDER, description).description }),
   }));
   if (title === undefined && description === undefined) {
     throw usageError("UPDATE_REQUIRED", "update requires --title and/or --description.");

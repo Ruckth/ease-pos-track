@@ -31,17 +31,17 @@ import { AnnotationList, DescriptionWithTags } from "@/components/annotation-not
 import { LanguageSelector } from "@/components/auth-screens";
 import { CustomerTicketWizard } from "@/components/customer-ticket-wizard";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
-import { FeedbackActivityList } from "@/components/feedback-activity";
-import { statusMeta } from "@/components/feedback-status";
+import { TicketActivityList } from "@/components/ticket-activity";
+import { statusMeta } from "@/components/ticket-status";
 import { MediaViewer, type AnnotationUpdateInput, type MediaViewerHandle } from "@/components/media-viewer";
 import { cn } from "@/lib/utils";
-import { feedbackProgress, formatTicketNumber } from "@/lib/feedback-ui";
-import { isActiveAnnotation, isVideoMedia, type Feedback, type FeedbackStatus } from "@/lib/types";
+import { ticketProgress, formatTicketNumber } from "@/lib/ticket-ui";
+import { isActiveAnnotation, isVideoMedia, type Ticket, type TicketStatus } from "@/lib/types";
 import { localizeError, useI18n } from "@/lib/i18n";
 
 type CustomerTicketFilter = "all" | "active" | "waiting" | "done";
 
-function ticketMatchesFilter(status: FeedbackStatus, filter: CustomerTicketFilter) {
+function ticketMatchesFilter(status: TicketStatus, filter: CustomerTicketFilter) {
   if (filter === "all") return true;
   if (filter === "active") return status !== "waiting" && status !== "done";
   return status === filter;
@@ -64,10 +64,10 @@ export function CustomerPortal({
 }) {
   const { language, setLanguage, t } = useI18n();
   const { projects, current: project, select: selectProject } = useCurrentProject(token);
-  const tickets = useQuery(api.feedback.listMyFeedback, project ? { token, projectKey: project.key } : "skip");
+  const tickets = useQuery(api.tickets.listMyTickets, project ? { token, projectKey: project.key } : "skip");
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerBusy, setComposerBusy] = useState(false);
-  const [selectedId, setSelectedId] = useState<Id<"feedback"> | null>(null);
+  const [selectedId, setSelectedId] = useState<Id<"tickets"> | null>(null);
   const [filter, setFilter] = useState<CustomerTicketFilter>("all");
   const selected = tickets?.find((ticket) => ticket._id === selectedId) ?? null;
   const ticketCounts = useMemo(() => {
@@ -283,7 +283,7 @@ function TicketSummary({
   );
 }
 
-const statusHintKeys: Record<FeedbackStatus, "statusNextNew" | "statusNextAcknowledged" | "statusNextInProgress" | "statusNextWaiting" | "statusNextDone"> = {
+const statusHintKeys: Record<TicketStatus, "statusNextNew" | "statusNextAcknowledged" | "statusNextInProgress" | "statusNextWaiting" | "statusNextDone"> = {
   new: "statusNextNew",
   acknowledged: "statusNextAcknowledged",
   in_progress: "statusNextInProgress",
@@ -291,11 +291,11 @@ const statusHintKeys: Record<FeedbackStatus, "statusNextNew" | "statusNextAcknow
   done: "statusNextDone",
 };
 
-function CustomerTicketCard({ item, onSelect }: { item: Feedback; onSelect: (id: Id<"feedback">) => void }) {
+function CustomerTicketCard({ item, onSelect }: { item: Ticket; onSelect: (id: Id<"tickets">) => void }) {
   const { t, formatDate } = useI18n();
   const meta = statusMeta(item.status);
   const StatusIcon = meta.icon;
-  const progress = feedbackProgress(item.status);
+  const progress = ticketProgress(item.status);
   const cover = item.media[0];
   const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
   const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
@@ -355,21 +355,21 @@ function CustomerTicketDialog({
   onClose,
 }: {
   token: string;
-  ticket: Feedback | null;
+  ticket: Ticket | null;
   onClose: () => void;
 }) {
   const { t, formatDate } = useI18n();
-  const detail = useQuery(api.feedback.getFeedback, ticket ? { token, id: ticket._id } : "skip");
-  const activity = useQuery(api.feedback.listAnnotationActivity, ticket ? { token, id: ticket._id } : "skip");
-  const feedbackActivity = useQuery(api.feedback.listFeedbackActivity, ticket ? { token, id: ticket._id } : "skip");
-  const editFeedback = useMutation(api.feedback.editFeedback);
-  const undoFeedbackEdit = useMutation(api.feedback.undoFeedbackEdit);
-  const archiveFeedback = useMutation(api.feedback.archiveFeedback);
-  const addAnnotation = useMutation(api.feedback.addAnnotation);
-  const updateAnnotation = useMutation(api.feedback.updateAnnotation);
-  const undoAnnotationUpdate = useMutation(api.feedback.undoAnnotationUpdate);
-  const removeAnnotation = useMutation(api.feedback.removeAnnotation);
-  const restoreAnnotation = useMutation(api.feedback.restoreAnnotation);
+  const detail = useQuery(api.tickets.getTicket, ticket ? { token, id: ticket._id } : "skip");
+  const activity = useQuery(api.annotations.listAnnotationActivity, ticket ? { token, id: ticket._id } : "skip");
+  const ticketActivity = useQuery(api.tickets.listTicketActivity, ticket ? { token, id: ticket._id } : "skip");
+  const editTicket = useMutation(api.tickets.editTicket);
+  const undoTicketEdit = useMutation(api.tickets.undoTicketEdit);
+  const archiveTicket = useMutation(api.tickets.archiveTicket);
+  const addAnnotation = useMutation(api.annotations.addAnnotation);
+  const updateAnnotation = useMutation(api.annotations.updateAnnotation);
+  const undoAnnotationUpdate = useMutation(api.annotations.undoAnnotationUpdate);
+  const removeAnnotation = useMutation(api.annotations.removeAnnotation);
+  const restoreAnnotation = useMutation(api.annotations.restoreAnnotation);
   const viewerRef = useRef<MediaViewerHandle>(null);
   const item = detail ?? ticket;
   const [editing, setEditing] = useState(false);
@@ -395,20 +395,20 @@ function CustomerTicketDialog({
     setSaving(true);
     setError("");
     try {
-      const result = await editFeedback({
+      const result = await editTicket({
         token,
         id: item._id,
         title: editTitle,
         description: editDescription,
-        expectedVersion: item.version ?? 0,
+        expectedVersion: item.version,
       });
       setEditing(false);
       if ("eventId" in result && result.eventId) {
-        toast.success(t("feedbackUpdated"), {
+        toast.success(t("ticketUpdated"), {
           action: {
             label: t("undo"),
             onClick: () => {
-              void undoFeedbackEdit({ token, eventId: result.eventId, expectedVersion: result.version })
+              void undoTicketEdit({ token, eventId: result.eventId, expectedVersion: result.version })
                 .catch((undoError) => toast.error(localizeError(undoError, t)));
             },
           },
@@ -424,7 +424,7 @@ function CustomerTicketDialog({
   async function deleteTicket() {
     if (!item) return;
     try {
-      await archiveFeedback({ token, id: item._id, expectedVersion: item.version ?? 0 });
+      await archiveTicket({ token, id: item._id, expectedVersion: item.version });
       toast.success(t("ticketDeleted"));
       onClose();
     } catch (deleteError) {
@@ -472,7 +472,7 @@ function CustomerTicketDialog({
     <Dialog
       open={Boolean(ticket)}
       onOpenChange={(open) => !open && onClose()}
-      title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("feedback")}
+      title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("ticket")}
     >
       {item ? (
         <div className="space-y-4">
@@ -559,7 +559,7 @@ function CustomerTicketDialog({
             onRestore={handleRestoreAnnotation}
           />
           <AnnotationActivityList events={activity ?? []} />
-          <FeedbackActivityList events={feedbackActivity ?? []} />
+          <TicketActivityList events={ticketActivity ?? []} />
           <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
           <p className="text-sm leading-5 text-muted-foreground">{t("updatedOn", { date: formatDate(item.updatedAt) })}</p>
 

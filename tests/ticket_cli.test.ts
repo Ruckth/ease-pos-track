@@ -20,7 +20,11 @@ function ticket(overrides: Partial<TicketDocument> = {}) {
     title: "Printer jams",
     description: "On long receipts",
     status: "new",
+    projectId: "project-id",
     projectKey: "TKT",
+    lifecycle: "active",
+    searchText: "Printer jams On long receipts",
+    annotations: [],
     ticketNumber: 7,
     media: [],
     version: 0,
@@ -68,7 +72,7 @@ class FakeRemote implements TicketRemote {
   async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
     this.record("get", url, token, ref, includeArchived);
     return this.rows.find((row) =>
-      row.projectKey === ref.projectKey && row.ticketNumber === ref.ticketNumber && (includeArchived || row.deletedAt === undefined)
+      row.projectKey === ref.projectKey && row.ticketNumber === ref.ticketNumber && (includeArchived || row.archivedAt === undefined)
     ) ?? null;
   }
   async create(url: string, token: string, input: { title: string; description: string; requestId: string; projectKey?: string }) {
@@ -100,12 +104,12 @@ class FakeRemote implements TicketRemote {
   }
   async archive(url: string, token: string, ref: TicketRef, expectedVersion: number) {
     this.record("archive", url, token, ref, expectedVersion);
-    this.rows[0] = ticket({ ...this.rows[0], deletedAt: 5_000, version: expectedVersion + 1 });
+    this.rows[0] = ticket({ ...this.rows[0], archivedAt: 5_000, version: expectedVersion + 1 });
     return this.rows[0];
   }
   async restore(url: string, token: string, ref: TicketRef, expectedVersion: number) {
     this.record("restore", url, token, ref, expectedVersion);
-    const { deletedAt: _deletedAt, ...active } = this.rows[0];
+    const { archivedAt: _archivedAt, ...active } = this.rows[0];
     this.rows[0] = ticket({ ...active, version: expectedVersion + 1 });
     return this.rows[0];
   }
@@ -517,7 +521,7 @@ test("version and authorization failures retain stable JSON and exit codes", asy
   assert.equal(JSON.parse(conflict.stderr).code, "VERSION_CONFLICT");
   assert.match(JSON.parse(conflict.stderr).hint, /pnpm ticket get/);
   assert.equal(classifyRemoteError(new Error("STAFF_ONLY"), "dev").code, "NOT_AUTHORIZED");
-  assert.equal(classifyRemoteError(new Error("FEEDBACK_NOT_FOUND"), "dev").code, "TICKET_NOT_FOUND");
+  assert.equal(classifyRemoteError(new Error("TICKET_UNAVAILABLE"), "dev").code, "TICKET_NOT_FOUND");
   assert.equal(classifyRemoteError(new Error("UPLOAD_REQUEST_CONFLICT"), "dev").code, "UPLOAD_REQUEST_CONFLICT");
   assert.equal(classifyRemoteError(new Error("UPLOAD_REQUEST_CONFLICT"), "dev").exitCode, EXIT.conflict);
 });
@@ -532,4 +536,25 @@ test("an attachment failure reports its generated retry id", async () => {
 
   assert.equal(result.exitCode, EXIT.remote);
   assert.equal(JSON.parse(result.stderr).requestId, "generated-request-id");
+});
+
+
+test("unmapped safe server codes remain visible with remote exit 6 and no raw error details", () => {
+  const error = classifyRemoteError({ data: { code: "UPLOAD_CALLBACK_NOT_CONFIGURED", secret: "private" } }, "dev");
+  assert.equal(error.exitCode, 6);
+  assert.equal(error.code, "REMOTE_CALL_FAILED");
+  assert.equal(error.message, "The Convex deployment call failed (UPLOAD_CALLBACK_NOT_CONFIGURED).");
+  assert.equal(classifyRemoteError({ data: { code: "secret token and Ticket content" } }, "dev").message, "The Convex deployment call failed.");
+});
+
+test("unmapped server failures preserve the CLI JSON error shape and exit 6", async () => {
+  const { deps, remote } = fixture();
+  remote.list = async () => { throw { data: { code: "STORAGE_NOT_CONFIGURED", details: "private" } }; };
+  const result = await runTicketCli(["list"], deps);
+  assert.equal(result.exitCode, 6);
+  assert.equal(result.stdout, "");
+  assert.deepEqual(JSON.parse(result.stderr), {
+    ok: false, code: "REMOTE_CALL_FAILED", message: "The Convex deployment call failed (STORAGE_NOT_CONFIGURED).", deployment: "dev",
+  });
+  assert.equal(result.stderr.trim().split("\n").length, 1);
 });
