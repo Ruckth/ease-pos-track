@@ -16,7 +16,7 @@ import { uploadFiles } from "@/uploadthing";
 import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 import { fileSignature } from "../../shared/media-policy";
 
-export type UploadIntentHandle = {
+type UploadIntentHandle = {
   intentId: Id<"uploadIntents">;
   secret: string;
   ticketId?: Id<"tickets"> | undefined;
@@ -59,7 +59,7 @@ export type SubmitTicketDeps = {
 };
 
 /** Queues guarded cleanup; this acknowledgement does not claim provider deletion. */
-export async function requestUploadIntentCancel(
+async function requestUploadIntentCancel(
   token: string,
   intentId: Id<"uploadIntents">,
   secret: string,

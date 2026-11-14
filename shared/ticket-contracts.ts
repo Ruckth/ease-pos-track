@@ -1,21 +1,6 @@
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
-import type { ConvexError } from "convex/values";
 import type { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel.js";
-
-/** Safe public codes only. Unavailable includes missing and unauthorized Tickets. */
-export type TicketErrorCode =
-  | "SESSION_EXPIRED" | "STAFF_ONLY" | "PROJECT_NOT_FOUND" | "PROJECT_REQUIRED"
-  | "TICKET_UNAVAILABLE" | "VERSION_CONFLICT" | "REQUEST_ID_CONFLICT"
-  | "INVALID_INPUT" | "MEDIA_LIMIT_EXCEEDED" | "ANNOTATION_LIMIT_EXCEEDED" | "UPLOAD_INTENT_INVALID"
-  | "MEDIA_OWNERSHIP_CONFLICT" | "TICKET_PURGING" | "STORAGE_NOT_CONFIGURED"
-  | "UPLOAD_CALLBACK_NOT_CONFIGURED" | "TRUSTED_CALLBACK_REQUIRED" | "MEDIA_NOT_ATTACHABLE"
-  | "UPLOAD_VERIFICATION_FAILED" | "UPLOAD_INTENT_NOT_FOUND" | "UPLOAD_INCOMPLETE" | "UPLOAD_REQUEST_CONFLICT"
-  | "UPLOAD_CLEANUP_FAILED";
-
-/** ConvexError.data: no raw messages, provider responses, credentials or content. */
-export type TicketErrorData = { code: TicketErrorCode };
-export type TicketDomainError = ConvexError<TicketErrorData>;
 
 // Generated handler results are the transport contract.
 export type TicketSummary = FunctionReturnType<typeof api.tickets.pageTickets>["page"][number];
@@ -25,17 +10,6 @@ export type TicketDetail = NonNullable<FunctionReturnType<typeof api.tickets.get
 export function isTicketSearchWithinLimits(search: string) {
   return search.length <= 200 && (search.match(new RegExp("[\\p{L}\\p{M}\\p{N}]+", "gu"))?.length ?? 0) <= 16;
 }
-
-export type TicketCommandResult<Result, Progress = string> =
-  | { state: "committed"; result: Result }
-  | { state: "queued"; progress: Progress }
-  | { state: "completed"; result: Result };
-
-/** Only the client can classify response loss; unknown never permits cleanup. */
-export type TicketCommandOutcome<Result, Progress = string> =
-  | { outcome: "acknowledged"; acknowledgement: TicketCommandResult<Result, Progress> }
-  | { outcome: "rejected"; error: TicketErrorData }
-  | { outcome: "unknown"; requestId: string };
 
 /** Per reserved provider key; absent is success only after provider verification. */
 export type StorageDeletionOutcome =
@@ -113,61 +87,3 @@ export function ticketMediaRequestFingerprintInput(input: {
 }
 
 export type JobFence = { attempt: number; leaseId: string };
-// Set maxAttempts to a positive integer at creation; transitions preserve it.
-export type TicketJob = { maxAttempts: number } & (
-  | { state: "pending"; attempt: number; availableAt: number }
-  | ({ state: "leased"; leaseExpiresAt: number } & JobFence)
-  | { state: "succeeded" | "failed" | "exhausted" | "cancelled"; attempt: number });
-export type JobTransition =
-  | { kind: "claim"; now: number; leaseId: string; leaseExpiresAt: number }
-  | { kind: "settle"; now: number; fence: JobFence; outcome: "succeeded" | "failed" }
-  | { kind: "retry"; now: number; fence: JobFence; availableAt: number }
-  | { kind: "cancel"; now: number };
-export type JobTransitionResult =
-  | { accepted: true; job: TicketJob }
-  | { accepted: false; reason: "terminal" | "not_ready" | "invalid_event" | "invalid_job" | "stale_lease" | "leased" };
-
-/** Database rules only: callers persist/schedule atomically. Fences cannot stop
- * old provider I/O; reservations must survive retry, unknown and terminal failure.
- * An accepted claim may produce exhausted; callers must check the resulting state.
- */
-export function transitionTicketJob(job: TicketJob, event: JobTransition): JobTransitionResult {
-  if (!Number.isInteger(job.maxAttempts) || job.maxAttempts < 1) {
-    return { accepted: false, reason: "invalid_job" };
-  }
-  if (job.state !== "pending" && job.state !== "leased") {
-    return { accepted: false, reason: "terminal" };
-  }
-  if (event.kind === "cancel") {
-    if (!Number.isFinite(event.now)) return { accepted: false, reason: "invalid_event" };
-    return job.state === "pending" || job.leaseExpiresAt <= event.now
-      ? { accepted: true, job: { state: "cancelled", attempt: job.attempt, maxAttempts: job.maxAttempts } }
-      : { accepted: false, reason: "leased" };
-  }
-  if (event.kind === "claim") {
-    if (!event.leaseId || !Number.isFinite(event.now) || !Number.isFinite(event.leaseExpiresAt)
-      || event.leaseExpiresAt <= event.now) {
-      return { accepted: false, reason: "invalid_event" };
-    }
-    if ((job.state === "pending" && job.availableAt > event.now)
-      || (job.state === "leased" && job.leaseExpiresAt > event.now)) {
-      return { accepted: false, reason: "not_ready" };
-    }
-    return { accepted: true, job: job.attempt >= job.maxAttempts
-      ? { state: "exhausted", attempt: job.attempt, maxAttempts: job.maxAttempts }
-      : { state: "leased", attempt: job.attempt + 1, leaseId: event.leaseId, leaseExpiresAt: event.leaseExpiresAt, maxAttempts: job.maxAttempts } };
-  }
-  if (job.state !== "leased" || job.attempt !== event.fence.attempt
-    || job.leaseId !== event.fence.leaseId || !Number.isFinite(event.now) || job.leaseExpiresAt <= event.now) {
-    return { accepted: false, reason: "stale_lease" };
-  }
-  if (event.kind === "settle") {
-    return { accepted: true, job: { state: event.outcome, attempt: job.attempt, maxAttempts: job.maxAttempts } };
-  }
-  if (!Number.isFinite(event.availableAt) || event.availableAt < event.now) {
-    return { accepted: false, reason: "invalid_event" };
-  }
-  return { accepted: true, job: job.attempt >= job.maxAttempts
-    ? { state: "exhausted", attempt: job.attempt, maxAttempts: job.maxAttempts }
-    : { state: "pending", attempt: job.attempt, availableAt: event.availableAt, maxAttempts: job.maxAttempts } };
-}

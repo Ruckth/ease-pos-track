@@ -1,17 +1,17 @@
 /** Role and resource rules shared by domain operations. */
 
-export type ActorRole = "staff" | "customer";
+type ActorRole = "staff" | "customer";
 
 export type Actor<CustomerId extends string = string> =
   | { role: "staff"; customerId?: undefined }
   | { role: "customer"; customerId: CustomerId };
 
-export type SessionLike<CustomerId extends string = string> = {
+type SessionLike<CustomerId extends string = string> = {
   role?: ActorRole;
   customerId?: CustomerId;
 };
 
-export type OwnedDocument<CustomerId extends string = string> = {
+type OwnedDocument<CustomerId extends string = string> = {
   ownerCustomerId?: CustomerId;
 };
 
@@ -28,7 +28,7 @@ export function actorFromSession<CustomerId extends string>(
   return { role: "staff" };
 }
 
-export function isStaffActor(actor: Actor<string>) {
+function isStaffActor(actor: Actor<string>) {
   return actor.role === "staff";
 }
 

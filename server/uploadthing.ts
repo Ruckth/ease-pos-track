@@ -1,17 +1,12 @@
+import type { OurFileRouter, UploadIntentInput } from "../shared/upload-router.js";
 import { ConvexHttpClient } from "convex/browser";
 import { createUploadthing, UploadThingError } from "uploadthing/server";
-import type { FileRoute } from "uploadthing/types";
 import { z } from "zod";
-import type { Json } from "@uploadthing/shared";
 import { errorCode } from "../shared/errors.js";
 import { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel.js";
 import { recordUploadHandler } from "./handlers/record-upload.js";
 
-type UploadIntentInput = {
-  intentId: string;
-  secret: string;
-};
 
 const uploadIntentSchema = z.object({
   intentId: z.string().min(1),
@@ -43,13 +38,6 @@ function bearerToken(request: Request) {
   return authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
 }
 
-export type OurFileRouter = {
-  ticketMedia: FileRoute<{
-    input: UploadIntentInput;
-    output: null;
-    errorShape: Json;
-  }>;
-};
 
 export function createUploadRouter(convex: ConvexHttpClient, callbackToken: string | undefined): OurFileRouter {
   const f = createUploadthing();

@@ -3,7 +3,7 @@ import test from "node:test";
 import { ConvexError } from "convex/values";
 import { createUploadApp } from "../server/app";
 import { cancelUploadHandler } from "../server/handlers/cancel-upload";
-import { createStorage } from "../server/storage";
+import { createStorage } from "../convex/adapters/storage";
 import { StorageConfigurationError } from "../shared/storage";
 
 function request(body: string, authorized = true) {
@@ -36,7 +36,7 @@ test("both HTTP adapters return queued reservations without calling storage or c
 });
 
 test("typed storage normalizes provider acknowledgements and sanitizes configuration and provider errors", async () => {
-  assert.throws(() => createStorage(undefined), error => error instanceof StorageConfigurationError && error.code === "STORAGE_NOT_CONFIGURED");
+  assert.throws(() => createStorage(""), error => error instanceof StorageConfigurationError && error.code === "STORAGE_NOT_CONFIGURED");
   assert.throws(() => createStorage("fake-token", () => { throw new Error("secret provider config"); }), /STORAGE_NOT_CONFIGURED/);
   for (const result of [{ success: true, deletedCount: 2 }, { success: false, deletedCount: 2 }, { success: true, deletedCount: 1 }, { success: true, deletedCount: 0 }]) {
     const storage = createStorage("fake-token", token => {

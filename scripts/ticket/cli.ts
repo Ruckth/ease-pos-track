@@ -8,15 +8,15 @@
  * CLI cannot drift from either.
  */
 
-import { validateTicketText } from "../../convex/ticket_state";
+import { validateTicketText } from "../../shared/ticket-state";
 import { normalizeRequestId, type TicketContent } from "../../convex/ticket_requests";
-import { normalizeProjectKey, parseTicketReference } from "../../convex/ticket_numbers";
+import { normalizeProjectKey, parseTicketReference } from "../../shared/ticket-numbers";
 import type { Deployment } from "./deployment";
 import { inputError, usageError, validated } from "./errors";
 import { commandDefinition, type CommandOption, type TicketCommandDefinition } from "./registry";
 import { isTicketStatus, type TicketStatus } from "./status";
 
-export type TicketRequest = TicketContent & { requestId?: string; projectKey?: string };
+type TicketRequest = TicketContent & { requestId?: string; projectKey?: string };
 
 /** A parsed `POS-0012` reference. */
 export type TicketRef = { projectKey: string; ticketNumber: number };

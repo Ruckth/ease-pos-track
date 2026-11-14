@@ -21,9 +21,9 @@ export interface CredentialStore {
 }
 
 export type ProcessResult = { exitCode: number; stdout: string; stderr: string };
-export type ProcessRunner = (command: string, args: string[], stdin?: string) => Promise<ProcessResult>;
+type ProcessRunner = (command: string, args: string[], stdin?: string) => Promise<ProcessResult>;
 
-export const spawnProcess: ProcessRunner = (command, args, stdin) => new Promise((resolve) => {
+const spawnProcess: ProcessRunner = (command, args, stdin) => new Promise((resolve) => {
   const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], shell: false });
   let stdout = "";
   let stderr = "";

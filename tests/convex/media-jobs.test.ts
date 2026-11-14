@@ -4,7 +4,7 @@ import { api, internal } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import schema from "../../convex/schema";
 import { modules } from "./modules";
-import { ARCHIVE_RETENTION_MS, AUDIT_BATCH, JOB_POLICY, SWEEP_LIMIT } from "../../convex/domain/media_jobs";
+import { ARCHIVE_RETENTION_MS, AUDIT_BATCH, JOB_POLICY, SWEEP_LIMIT, createMediaJob } from "../../convex/domain/media_jobs";
 import type { Storage } from "../../shared/storage";
 import { StorageConfigurationError } from "../../shared/storage";
 import type { StorageDeletionOutcome } from "../../shared/ticket-contracts";
@@ -256,11 +256,11 @@ test("disabled cancellation queues reservations and defers execution without con
   expect(provider.factory).not.toHaveBeenCalled();
   expect(f.storage.verifyAppKey).not.toHaveBeenCalled();
   expect(f.storage.deleteFiles).not.toHaveBeenCalled();
-  expect(vi.mocked(console.info).mock.calls).toEqual([[{ jobId: id, kind: "cancellation", attempt: 0, outcome: "cleanup_disabled" }]]);
+  expect(console.info).not.toHaveBeenCalled();
   // Duplicate wakeups before availableAt neither log nor change the job.
   await f.t.action(internal.media_job_actions.run, { jobId: id });
   expect(await f.job(id)).toEqual(deferredJob);
-  expect(vi.mocked(console.info).mock.calls).toHaveLength(1);
+  expect(console.info).not.toHaveBeenCalled();
   vi.setSystemTime(deferredJob.availableAt);
   expect(await f.t.mutation(internal.retention.recover, {})).toBe(0);
   expect(await f.t.mutation(internal.retention.requeue, { jobId: id })).toBe(false);
@@ -303,7 +303,7 @@ test("disabling cleanup fences expired leases and pauses already scheduled provi
   expect(provider.factory).not.toHaveBeenCalled();
   expect(await f.t.mutation(internal.retention.checkpoint, { ...f.fence(claimed), key: claimed.keys[0], outcome: "deleted" })).toBe(false);
   expect((await f.assets()).every(asset => asset.lifecycle === "deleting")).toBe(true);
-  expect(vi.mocked(console.info).mock.calls).toHaveLength(2);
+  expect(vi.mocked(console.info).mock.calls).toMatchObject([[{ jobId: runningId, outcome: "cleanup_disabled", durationMs: expect.any(Number), keyCount: 1 }]]);
   const availableAt = Math.max((await f.job(runningId))!.availableAt, (await f.job(pendingId))!.availableAt);
   vi.setSystemTime(availableAt);
   vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true");
@@ -661,10 +661,12 @@ test("bounded expiry and recovery scans recover lost pending wakeups", async () 
   await f.drain();
   expect(await f.job(id)).toMatchObject({ state: "completed", attempt: 1 });
   await f.t.run(async ctx => {
-    for (let index = 0; index < SWEEP_LIMIT + 3; index++) await ctx.db.insert("mediaJobs", {
-      kind: "cancellation", resourceScope: `asset:lost-empty-${index}`, keys: [], completedKeys: [], phase: "delete_media",
-      state: "pending", attempt: 0, maxAttempts: 5, availableAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now(),
+    for (let index = 0; index < SWEEP_LIMIT + 3; index++) await createMediaJob(ctx, {
+      kind: "cancellation", resourceScope: `asset:lost-empty-${index}`, keys: [],
     });
+    for (const wakeup of await ctx.db.system.query("_scheduled_functions").collect()) {
+      if (wakeup.state.kind === "pending") await ctx.scheduler.cancel(wakeup._id);
+    }
   });
   expect(await f.t.mutation(internal.retention.recover, {})).toBe(SWEEP_LIMIT);
   await f.drain();
@@ -746,4 +748,206 @@ test("bounded cancellation reads do not let historical deleted assets hide pendi
   expect((await f.assets()).find(asset => asset.key === handle.files[0].key)).toMatchObject({ lifecycle: "deleting", jobId: expect.any(String) });
   await f.drain();
   expect((await f.assets()).every(asset => asset.lifecycle === "deleted")).toBe(true);
+});
+
+test("staff health exposes configuration failure, retry and terminal failure with bounded redacted data and logs", async () => {
+  const f = await fixture();
+  vi.stubEnv("UPLOADTHING_TOKEN", "private-token-marker");
+  const handle = await f.upload();
+  const [jobId] = (await f.cancel(handle)).jobIds;
+  provider.factory.mockImplementation(() => { throw new StorageConfigurationError(); });
+  await f.t.action(internal.media_job_actions.run, { jobId });
+  const health = () => f.t.query(api.retention.health, { token: f.staff });
+  const details = (view: "pending" | "failed" | "expired") => f.t.query(api.retention.diagnostics, { token: f.staff, view, paginationOpts: { numItems: 25, cursor: null } });
+  const configuration = await health();
+  expect(configuration.configuration).toEqual({ uploadThingToken: true, callbackSecret: true, mediaCleanupEnabled: true });
+  expect(configuration.oldestPendingAt).toBe((await f.job(jobId))!.createdAt);
+  expect(configuration.counts["cancellation:pending"]).toBe(1);
+  const missing = await details("pending");
+  expect(missing.page).toMatchObject([{ jobId, lastOutcome: "not_configured", attempt: 0 }]);
+  provider.factory.mockReturnValue(f.storage);
+  f.storage.deleteFiles = vi.fn(async () => ({ outcome: "failed_retryable" as const }));
+  vi.setSystemTime((await f.job(jobId))!.availableAt);
+  await f.t.action(internal.media_job_actions.run, { jobId });
+  const retry = await details("pending");
+  expect(retry.page).toMatchObject([{ lastOutcome: "failed_retryable", attempt: 1 }]);
+  f.storage.deleteFiles = vi.fn(async () => ({ outcome: "failed_permanent" as const }));
+  vi.setSystemTime((await f.job(jobId))!.availableAt);
+  await f.t.action(internal.media_job_actions.run, { jobId });
+  const failed = await details("failed");
+  expect(failed.page).toMatchObject([{ jobId, lastOutcome: "failed_permanent", exhausted: false }]);
+  expect((await health()).counts).toMatchObject({ "cancellation:pending": 0, "cancellation:running": 0, "cancellation:failed": 1 });
+  expect((await health()).oldestPendingAt).toBeNull();
+  expect(await f.assets()).toMatchObject([{ lifecycle: "deleting" }]);
+  const logs = vi.mocked(console.info).mock.calls.map(call => call[0]);
+  expect(logs.map(log => log.outcome)).toEqual(["not_configured", "failed_retryable", "failed_permanent"]);
+  for (const log of logs) {
+    expect(Object.keys(log).sort()).toEqual(["jobId", "kind", "attempt", "outcome", "durationMs", "keyCount"].sort());
+    expect(log.durationMs).toBeGreaterThanOrEqual(0);
+    expect(log.keyCount).toBe(1);
+  }
+  const publicFixtures = JSON.stringify([configuration, missing, retry, failed, logs]);
+  for (const secret of ["private-token-marker", "fake-callback", handle.secret, f.staff, f.alice, handle.files[0].key, handle.files[0].url]) expect(publicFixtures).not.toContain(secret);
+  expect(publicFixtures).not.toMatch(/https?:|resourceScope|completedKeys|leaseId|description|title/);
+  for (const token of [f.alice, f.bob, "invalid-token"]) {
+    await expect(f.t.query(api.retention.health, { token })).rejects.toThrow();
+    await expect(f.t.query(api.retention.diagnostics, { token, view: "failed", paginationOpts: { numItems: 25, cursor: null } })).rejects.toThrow();
+    await expect(f.t.mutation(api.retention.requeueFailed, { token, jobId })).rejects.toThrow();
+  }
+  vi.mocked(console.info).mockClear();
+  await f.t.mutation(internal.retention.recover, {});
+  await f.t.mutation(internal.retention.expireIntents, {});
+  await f.t.mutation(internal.retention.claimPurges, {});
+  expect(console.info).not.toHaveBeenCalled();
+  vi.stubEnv("UPLOADTHING_TOKEN", ""); vi.stubEnv("UPLOAD_CALLBACK_SECRET", ""); vi.stubEnv("MEDIA_CLEANUP_ENABLED", "");
+  expect((await health()).configuration).toEqual({ uploadThingToken: false, callbackSecret: false, mediaCleanupEnabled: false });
+});
+
+test("health counters remain exact across all kinds, lease recovery, completion and staff requeue; diagnostic pages are bounded", async () => {
+  const f = await fixture();
+  const assertCounters = async () => {
+    const jobs = await f.t.run(ctx => ctx.db.query("mediaJobs").collect());
+    const health = await f.t.query(api.retention.health, { token: f.staff });
+    for (const [key, value] of Object.entries(health.counts)) expect(value).toBe(jobs.filter(job => `${job.kind}:${job.state}` === key).length);
+    expect(health.oldestPendingAt).toBe(jobs.filter(job => job.state === "pending").sort((a, b) => a.createdAt - b.createdAt)[0]?.createdAt ?? null);
+  };
+  for (const kind of ["cancellation", "intent_expiry", "rejected_upload", "ticket_purge"] as const) {
+    await f.t.run(ctx => createMediaJob(ctx, { kind, resourceScope: `counter:${kind}`, keys: [] }));
+  }
+  await assertCounters();
+  await f.drain();
+  // The empty purge has no Ticket, so its finalization safely fails.
+  await assertCounters();
+  const handles = await Promise.all([f.upload(), f.upload()]);
+  const [id] = (await f.cancel(handles[0])).jobIds;
+  await f.cancel(handles[1]);
+  const old = (await f.t.mutation(internal.retention.claim, { jobId: id }))!;
+  await assertCounters();
+  vi.setSystemTime(Date.now() + JOB_POLICY.leaseMs + 1);
+  const expired = await f.t.query(api.retention.diagnostics, { token: f.staff, view: "expired", paginationOpts: { numItems: 25, cursor: null } });
+  expect(expired.page).toMatchObject([{ jobId: id, leaseExpiresAt: old.leaseExpiresAt }]);
+  f.storage.deleteFiles = vi.fn(async () => ({ outcome: "unknown" as const }));
+  await f.t.action(internal.media_job_actions.run, { jobId: id });
+  expect(await f.t.mutation(internal.retention.checkpoint, { ...f.fence(old), key: handles[0].files[0].key, outcome: "deleted" })).toBe(false);
+  await assertCounters();
+  await f.drain();
+  const exhausted = await f.t.query(api.retention.diagnostics, { token: f.staff, view: "failed", paginationOpts: { numItems: 25, cursor: null } });
+  expect(exhausted.page.find(job => job.jobId === id)).toMatchObject({ exhausted: true });
+  await assertCounters();
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: id })).toBe(true);
+  await assertCounters();
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: id })).toBe(false);
+  f.storage.deleteFiles = vi.fn(async () => ({ outcome: "deleted" as const }));
+  await f.drain();
+  await assertCounters();
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "");
+  for (let i = 0; i < 28; i++) await f.t.run(ctx => createMediaJob(ctx, { kind: "cancellation", resourceScope: `page:${i}`, keys: [] }));
+  const first = await f.t.query(api.retention.diagnostics, { token: f.staff, view: "pending", paginationOpts: { numItems: 1000, cursor: null } });
+  expect(first.page).toHaveLength(25); expect(first.isDone).toBe(false);
+  const second = await f.t.query(api.retention.diagnostics, { token: f.staff, view: "pending", paginationOpts: { numItems: 25, cursor: first.continueCursor } });
+  expect(second.page).toHaveLength(3); expect(second.isDone).toBe(true);
+  expect(new Set([...first.page, ...second.page].map(job => job.jobId)).size).toBe(28);
+  await assertCounters();
+});
+
+test("staff diagnostics show ownership_unverified and purgeBlocked while requeue preserves ownership checks", async () => {
+  const f = await fixture();
+  const unverified = await f.upload(1, "staff");
+  f.storage.verifyAppKey = vi.fn(async () => false);
+  const [jobId] = (await f.cancel(unverified)).jobIds;
+  await f.drain();
+  const blocked = await f.archived(1);
+  await f.t.run(async ctx => {
+    const asset = (await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", blocked.files[0].key)).unique())!;
+    await ctx.db.patch(asset._id, { ticketId: undefined });
+  });
+  await f.t.mutation(internal.retention.claimPurges, {});
+  const details = await f.t.query(api.retention.diagnostics, { token: f.staff, view: "failed", paginationOpts: { numItems: 25, cursor: null } });
+  expect(details.page.find(job => job.jobId === jobId)).toMatchObject({ lastOutcome: "ownership_unverified" });
+  const purge = details.page.find(job => job.kind === "ticket_purge")!;
+  expect(purge).toMatchObject({ lastOutcome: "ownership_conflict", purgeBlocked: true });
+  expect(JSON.stringify(details)).not.toMatch(/Purge fixture|Fixture|https?:|fake-\d-\d/);
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: purge.jobId })).toBe(false);
+  expect(await f.t.run(ctx => ctx.db.get(blocked.ticketId))).toMatchObject({ lifecycle: "archived", purgeBlocked: true });
+});
+
+
+test("restore supersedes a failed purge, clears its block, and re-archive starts a new retention window", async () => {
+  const f = await fixture();
+  const handle = await f.archived(1);
+  const asset = (await f.assets())[0];
+  await f.t.run(ctx => ctx.db.patch(asset._id, { lifecycle: "pending" }));
+  await f.t.mutation(internal.retention.claimPurges, {});
+  const [oldJob] = await f.t.run(ctx => ctx.db.query("mediaJobs").collect());
+  expect(oldJob.state).toBe("failed");
+  const restored = await f.t.mutation(api.tickets.restoreTicket, { token: f.staff, id: handle.ticketId, expectedVersion: 1 });
+  expect((await f.t.run(ctx => ctx.db.get(handle.ticketId)))!.lifecycle).toBe("active");
+  expect((await f.t.run(ctx => ctx.db.get(handle.ticketId)))!.purgeBlocked).toBeUndefined();
+  expect(await f.job(oldJob._id)).toMatchObject({ state: "superseded" });
+  expect((await f.t.query(api.retention.health, { token: f.staff })).counts).toMatchObject({
+    "ticket_purge:failed": 0, "ticket_purge:superseded": 1, "ticket_purge:completed": 0,
+  });
+  await f.t.mutation(api.tickets.archiveTicket, { token: f.staff, id: handle.ticketId, expectedVersion: restored.version });
+  await f.t.run(ctx => ctx.db.patch(asset._id, { lifecycle: "attached" }));
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: oldJob._id })).toBe(false);
+  expect(await f.t.mutation(internal.retention.claimPurges, {})).toBe(0);
+  const archivedAt = (await f.t.run(ctx => ctx.db.get(handle.ticketId)))!.archivedAt!;
+  vi.setSystemTime(archivedAt + ARCHIVE_RETENTION_MS - 1);
+  expect(await f.t.mutation(internal.retention.claimPurges, {})).toBe(0);
+  vi.setSystemTime(archivedAt + ARCHIVE_RETENTION_MS);
+  expect(await f.t.mutation(internal.retention.claimPurges, {})).toBe(1);
+  const jobs = await f.t.run(ctx => ctx.db.query("mediaJobs").collect());
+  expect(jobs).toHaveLength(2);
+  expect(jobs.find(job => job._id !== oldJob._id)).toMatchObject({ state: "pending", resourceScope: `ticket:${handle.ticketId}` });
+  await f.drain();
+  expect(await f.t.run(ctx => ctx.db.get(handle.ticketId))).toBeNull();
+});
+
+test("archived purge requeue independently enforces the full 30-day window", async () => {
+  const f = await fixture();
+  const handle = await f.archived(1);
+  const asset = (await f.assets())[0];
+  await f.t.run(ctx => ctx.db.patch(asset._id, { lifecycle: "pending" }));
+  await f.t.mutation(internal.retention.claimPurges, {});
+  const [job] = await f.t.run(ctx => ctx.db.query("mediaJobs").collect());
+  await f.t.run(async ctx => {
+    await ctx.db.patch(asset._id, { lifecycle: "attached" });
+    await ctx.db.patch(handle.ticketId, { archivedAt: Date.now() });
+  });
+  expect(await f.t.mutation(internal.retention.requeue, { jobId: job._id })).toBe(false);
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: job._id })).toBe(false);
+  expect((await f.assets())[0].lifecycle).toBe("attached");
+  expect((await f.assets())[0].jobId).toBeUndefined();
+  expect((await f.job(job._id))!.state).toBe("failed");
+  const archivedAt = (await f.t.run(ctx => ctx.db.get(handle.ticketId)))!.archivedAt!;
+  vi.setSystemTime(archivedAt + ARCHIVE_RETENTION_MS);
+  await f.t.run(async ctx => {
+    const session = (await ctx.db.query("sessions").withIndex("by_token", q => q.eq("token", f.staff)).unique())!;
+    await ctx.db.patch(session._id, { expiresAt: Date.now() + 86_400_000 });
+  });
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: job._id })).toBe(true);
+  await f.drain();
+});
+
+test("job counters use independent kind/state rows and pending age follows the indexed queue", async () => {
+  const f = await fixture();
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "false");
+  const [cancelId] = (await f.cancel(await f.upload())).jobIds;
+  vi.setSystemTime(Date.now() + 1000);
+  const purgeId = await f.t.run(ctx => createMediaJob(ctx, { kind: "ticket_purge", resourceScope: "counter-purge", keys: [] }));
+  const counters = () => f.t.run(ctx => ctx.db.query("mediaJobCounters").collect());
+  const initial = await counters();
+  expect(initial.map(row => ({ key: row.key, count: row.count }))).toEqual([
+    { key: "cancellation:pending", count: 1 }, { key: "ticket_purge:pending", count: 1 },
+  ]);
+  expect(new Set(initial.map(row => row._id)).size).toBe(2);
+  expect((await f.t.query(api.retention.health, { token: f.staff })).oldestPendingAt).toBe((await f.job(cancelId))!.createdAt);
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true");
+  await f.t.mutation(internal.retention.claim, { jobId: cancelId });
+  expect((await counters()).find(row => row.key === "ticket_purge:pending")).toEqual(initial[1]);
+  expect((await f.t.query(api.retention.health, { token: f.staff })).oldestPendingAt).toBe((await f.job(purgeId))!.createdAt);
+  await f.t.mutation(internal.retention.claim, { jobId: purgeId });
+  expect((await f.t.query(api.retention.health, { token: f.staff })).oldestPendingAt).toBeNull();
+  expect((await counters()).every(row => Number.isFinite(row.count))).toBe(true);
+  await f.drain();
 });

@@ -8,7 +8,7 @@ import { actorQuery, staffMutation, staffQuery } from "./functions";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { validateCustomerEmail } from "./customer_validation";
-import { normalizeProjectKey, validateProjectName } from "./ticket_numbers";
+import { normalizeProjectKey, validateProjectName } from "../shared/ticket-numbers";
 
 /** Projects the signed-in actor can use, by name. */
 export const listProjects = actorQuery({

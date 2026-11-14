@@ -1,16 +1,16 @@
 import type { TicketStatus } from "@/lib/types";
 
 export const BOARD_COLUMNS: TicketStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
-export type BoardColumns<T> = Record<TicketStatus, T[]>;
+type BoardColumns<T> = Record<TicketStatus, T[]>;
 export type BoardTicket = { _id: string; projectId: string; status: TicketStatus; version: number; ticketNumber: number; lifecycle: string };
-export type PendingMove<T extends BoardTicket> = {
+type PendingMove<T extends BoardTicket> = {
   operationId: string; ticket: T; target: TicketStatus; resultVersion?: number;
   observed?: T;
   retained?: T;
 };
 export type PendingMoves<T extends BoardTicket> = Record<string, PendingMove<T>>;
 
-export function isBoardStatus(value: string): value is TicketStatus {
+function isBoardStatus(value: string): value is TicketStatus {
   return (BOARD_COLUMNS as string[]).includes(value);
 }
 export function emptyColumns<T>(): BoardColumns<T> {

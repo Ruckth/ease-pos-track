@@ -7,14 +7,10 @@
  * so a reference stays valid for the life of its Ticket.
  */
 
-export const MAX_PROJECT_NAME_LENGTH = 80;
+const MAX_PROJECT_NAME_LENGTH = 80;
 
 /** 2-10 characters: an uppercase letter, then uppercase letters or digits. */
 const PROJECT_KEY = /^[A-Z][A-Z0-9]{1,9}$/;
-
-export function isValidTicketNumber(value: number | undefined): value is number {
-  return value !== undefined && Number.isInteger(value) && value > 0;
-}
 
 /** The immutable Project key and number form the public Ticket reference. */
 export function formatTicketNumber(ticketNumber: number, projectKey: string) {

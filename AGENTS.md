@@ -26,7 +26,14 @@ storage configuration retries without spending provider attempts. Failed jobs
 retain reservations; ops can repair the cause then invoke the internal
 `retention:requeue` mutation with `{ "jobId": "..." }`. Ownership-conflicted
 archived Tickets remain visible/restorable and are excluded from later claims
-until repaired and requeued. Local smoke flag setup is in docs/ticket-cli.md.
+until repaired and requeued. Staff can inspect counts, configuration booleans and
+paginated job diagnostics in Operations health, and requeue failed jobs there
+after repair. The staff action shares the internal requeue ownership and
+archive-age checks.
+Restoring a blocked archived Ticket supersedes its failed purge job and clears
+the block; re-archiving starts a fresh 30-day window. Purge requeue requires
+confirmation in Operations health.
+Local smoke flag setup is in docs/ticket-cli.md.
 
 ## Creating a Ticket
 
@@ -80,8 +87,9 @@ While iterating, run only what you touched:
 - `pnpm test:convex tests/convex/<name>.test.ts` runs one Convex test file.
 - `pnpm typecheck` uses the native TypeScript checker and is incremental.
 
-Run `pnpm check` before reporting work as done. It runs the type check, both test
-suites and the production build in parallel and fails if any of them fails.
+Run `pnpm check` before reporting work as done. It runs the type check, both test suites and the production build in parallel
+and fails if any of them fails. The unit suite includes dependency boundaries
+and every Convex registration policy; `pnpm check:arch` runs just those tests.
 Schema changes must also push cleanly with `pnpm convex:local`. CI runs the same
 checks on every pull request.
 

@@ -25,17 +25,17 @@ export type CurrentSession = {
   email: string | null;
 };
 
-export type TicketCreateInput = { title: string; description: string; requestId: string; projectKey?: string };
-export type TicketCreateResult = { ticket: TicketDocument; created: boolean; requestId: string };
-export type TicketUpdateInput = { ref: TicketRef; title?: string; description?: string; expectedVersion: number };
-export type TicketStatusInput = { ref: TicketRef; status: TicketStatus; expectedVersion: number };
-export type TicketUploadIntent = {
+type TicketCreateInput = { title: string; description: string; requestId: string; projectKey?: string };
+type TicketCreateResult = { ticket: TicketDocument; created: boolean; requestId: string };
+type TicketUpdateInput = { ref: TicketRef; title?: string; description?: string; expectedVersion: number };
+type TicketStatusInput = { ref: TicketRef; status: TicketStatus; expectedVersion: number };
+type TicketUploadIntent = {
   intentId: Id<"uploadIntents">;
   secret: string;
   ticketId?: Id<"tickets">;
   uploadedFiles: TicketMediaItem[];
 };
-export type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
+type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
 export type TicketAttachInput = TicketUploadCredentials & {
   requestId: string;
   id: Id<"tickets">;

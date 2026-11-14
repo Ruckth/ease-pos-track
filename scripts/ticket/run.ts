@@ -9,7 +9,7 @@ import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/up
  * decides the order those are used in.
  */
 
-import { formatTicketNumber } from "../../convex/ticket_numbers";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import { createHash } from "node:crypto";
 import { parseTicketArgs, type TicketCommand, type TicketRef } from "./cli";
 import type { ConfigStore } from "./config";
@@ -54,7 +54,7 @@ export type TicketCliDeps = {
   images: TicketImages;
 };
 
-export type TicketCliOutcome = { exitCode: number; stdout: string; stderr: string };
+type TicketCliOutcome = { exitCode: number; stdout: string; stderr: string };
 
 /** Commands that need a deployment but not a staff session. */
 type SessionCommand = Extract<TicketCommand, { kind: "login" | "logout" }>;

@@ -1,7 +1,7 @@
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { actorFromSession } from "./authz";
 
-export async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
+async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
   const session = await ctx.db
     .query("sessions")
     .withIndex("by_token", (q) => q.eq("token", token))

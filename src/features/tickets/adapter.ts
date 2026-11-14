@@ -1,4 +1,4 @@
-import { useStaffLanes } from "@/lib/ticket-pages";
+import { useStaffLanes } from "./lane-adapter";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";

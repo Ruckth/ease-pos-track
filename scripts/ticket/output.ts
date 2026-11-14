@@ -6,7 +6,7 @@
  * public status value is decided.
  */
 
-import { formatTicketNumber } from "../../convex/ticket_numbers";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import type { TicketContent } from "../../convex/ticket_requests";
 import type { Deployment } from "./deployment";
 import type { TicketCliError } from "./errors";

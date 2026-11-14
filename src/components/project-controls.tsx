@@ -1,10 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useProjects, useCreateProject, useProjectMembers } from "@/app/adapter";
 import { toast } from "sonner";
 import { FolderKanban, Loader2, Plus, Trash2, Users } from "lucide-react";
-import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { suggestProjectKey } from "../../convex/ticket_numbers";
+import { suggestProjectKey } from "../../shared/ticket-numbers";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -18,7 +17,7 @@ import type { ProjectSummary } from "@/lib/types";
  * Project lives in the URL, so a refresh or a shared link keeps it.
  */
 export function useCurrentProject(token: string) {
-  const projects = useQuery(api.projects.listProjects, { token });
+  const projects = useProjects(token);
   const [requestedKey, setRequestedKey] = useState(() => readProjectParam(window.location.search));
   const current = projects ? pickProject(projects, requestedKey) : undefined;
 
@@ -104,7 +103,7 @@ export function NewProjectDialog({
   onCreated: (key: string) => void;
 }) {
   const { t } = useI18n();
-  const createProject = useMutation(api.projects.createProject);
+  const createProject = useCreateProject();
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
@@ -172,7 +171,7 @@ export function NewProjectDialog({
   );
 }
 
-export function ProjectMembersDialog({
+function ProjectMembersDialog({
   token,
   project,
   open,
@@ -184,9 +183,7 @@ export function ProjectMembersDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const members = useQuery(api.projects.listProjectMembers, open ? { token, projectId: project._id } : "skip");
-  const addMember = useMutation(api.projects.addProjectMember);
-  const removeMember = useMutation(api.projects.removeProjectMember);
+  const { members, addMember, removeMember } = useProjectMembers(token, project._id, open);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
 

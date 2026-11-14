@@ -15,8 +15,8 @@ type Functions = {
   restoreAnnotation: typeof api.annotations.restoreAnnotation;
 };
 export type TicketAdapter = { [K in keyof Functions]: (args: FunctionArgs<Functions[K]>) => Promise<FunctionReturnType<Functions[K]>> };
-export type TicketTarget = { _id: Id<"tickets">; version: number };
-export type OperationMessage = "ticketUpdated" | "statusUpdated" | "urgencySaved" | "ticketArchived" | "ticketDeleted" | "ticketRestored" | "commentUpdated" | "commentDeleted" | "commentRestored";
+type TicketTarget = { _id: Id<"tickets">; version: number };
+type OperationMessage = "ticketUpdated" | "statusUpdated" | "urgencySaved" | "ticketArchived" | "ticketDeleted" | "ticketRestored" | "commentUpdated" | "commentDeleted" | "commentRestored";
 export class TicketOperationFailure extends Error {
   readonly data: { code: string };
   readonly disposition: "conflict" | "rejected" | "unknown";

@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { TicketCard } from "@/components/ticket-card";
 import { statusMeta } from "@/components/ticket-status";
 import { cn } from "@/lib/utils";
-import { formatTicketNumber } from "@/lib/ticket-ui";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import {
   BOARD_COLUMNS,
   reconcileColumns,

@@ -3,14 +3,14 @@ import { MEDIA_POLICY } from "../shared/ticket-contracts";
 
 export type AnnotationRecord = NonNullable<Doc<"tickets">["annotations"]>[number];
 
-export type AnnotationUpdate = {
+type AnnotationUpdate = {
   text?: string;
   x?: number;
   y?: number;
   time?: number;
 };
 
-export type AnnotationCreateInput = {
+type AnnotationCreateInput = {
   mediaIndex: number;
   kind: "point" | "time";
   x?: number;

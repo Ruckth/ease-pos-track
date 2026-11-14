@@ -4,12 +4,12 @@ import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { newTicketOwnership } from "../authz";
 import { validateAnnotationBudget, type AnnotationRecord } from "../annotation_state";
-import { requireCurrentVersion } from "../ticket_state";
+import { requireCurrentVersion } from "../../shared/ticket-state";
 
 export type MediaItem = Doc<"tickets">["media"][number];
 
 /** Each Project numbers its Tickets independently, from 1. */
-export function projectCounterName(projectId: Id<"projects">) {
+function projectCounterName(projectId: Id<"projects">) {
   return `project:${projectId}`;
 }
 
@@ -47,7 +47,7 @@ export function ticketState(doc: Doc<"tickets">) {
  * uses a real app session; `createdVia` records the integration boundary without
  * weakening attribution.
  */
-export type TicketAuthor = {
+type TicketAuthor = {
   sessionId: Id<"sessions">;
   actorRole: "staff" | "customer";
   actorCustomerId?: Id<"customers">;
@@ -67,7 +67,7 @@ function requireSessionAuthor(author: TicketAuthor) {
   };
 }
 
-export async function recordTicketEvent(
+async function recordTicketEvent(
   ctx: MutationCtx,
   input: {
     ticketId: Id<"tickets">;
@@ -82,10 +82,10 @@ export async function recordTicketEvent(
 }
 
 /** The audit-trail snapshot of a Ticket. */
-export type TicketState = ReturnType<typeof ticketState>;
+type TicketState = ReturnType<typeof ticketState>;
 
 /** Ticket fields that versioned state mutations may change. */
-export type TicketChanges = Partial<
+type TicketChanges = Partial<
   Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "media" | "annotations" | "archivedAt" | "lifecycle">
 >;
 
@@ -102,7 +102,7 @@ type TicketChangeAction =
   | "annotation_changed"
   | "purge_claimed";
 
-export type TicketChangePlan<Changes extends TicketChanges> = {
+type TicketChangePlan<Changes extends TicketChanges> = {
   version: number;
   updatedAt: number;
   patch: Changes & { version: number; updatedAt: number };
@@ -189,7 +189,7 @@ export async function recordAnnotationEvent(
   return await ctx.db.insert("annotationEvents", input);
 }
 
-export type NewTicket = {
+type NewTicket = {
   /** Checked by the caller with `canUseProject`. */
   project: Pick<Doc<"projects">, "_id" | "key">;
   title: string;

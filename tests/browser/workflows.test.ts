@@ -112,7 +112,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await page.waitForFunction(() => window.draftStats.revoked.length === 1);
       assert.equal(await page.getByText(copy(language, "pinSummary", { count: 1 }), { exact: true }).count(), 0);
       await page.getByRole("button", { name: copy(language, "takePhoto"), exact: true }).click();
-      const camera = page.getByRole("dialog").last();
+      const camera = page.getByRole("dialog", { name: copy(language, "camera"), exact: true });
       await camera.getByRole("button", { name: copy(language, "takePhoto"), exact: true }).waitFor({ state: "visible" });
       await page.waitForFunction(() => window.draftStats.streams.length > 0);
       if (language === "en") {
@@ -121,6 +121,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
         await camera.getByRole("button", { name: copy(language, "cancel"), exact: true }).click();
         await files(page);
       }
+      await camera.waitFor({ state: "hidden" });
       await page.waitForFunction(() => window.draftStats.stops.length === window.draftStats.streams.length);
       await page.getByRole("button", { name: copy(language, "takePhoto"), exact: true }).click();
       await page.waitForFunction(() => window.draftStats.streams.length === 2);
@@ -328,3 +329,69 @@ test("losing captured Project access leaves the customer draft discardable", asy
   }
 });
 
+
+for (const language of ["en", "th"] as const) {
+  test(`staff ${language}: operations health shows safe configuration, counts and diagnostic views`, async () => {
+    const f = await open("staff", language);
+    try {
+      await f.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      await f.page.getByRole("button", { name: copy(language, "healthTitle"), exact: true }).click();
+      const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
+      await dialog.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
+      assert.equal(await dialog.getByRole("table", { name: copy(language, "healthCounts") }).count(), 1);
+      for (const key of ["healthFailed", "healthPending", "healthExpired"] as const) {
+        await dialog.getByRole("button", { name: copy(language, key), exact: true }).click();
+        await dialog.getByText(copy(language, "healthPageHint"), { exact: true }).waitFor();
+        assert.equal(await dialog.getByRole("button", { name: copy(language, key), exact: true }).getAttribute("aria-pressed"), "true");
+      }
+      assert.doesNotMatch(await dialog.innerText(), /local-only-callback-fixture|https?:|UPLOADTHING_TOKEN|UPLOAD_CALLBACK_SECRET/);
+      assert.deepEqual(f.errors, []);
+      assert.equal(f.uploads(), 0);
+    } finally { await f.context.close(); }
+  });
+}
+
+test("customer navigation does not expose staff health", async () => {
+  const f = await open("customer");
+  try {
+    await f.page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    assert.equal(await f.page.getByRole("button", { name: copy("en", "healthTitle"), exact: true }).count(), 0);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); }
+});
+
+for (const language of ["en", "th"] as const) {
+  test(`staff ${language}: purge requeue requires confirmation and cancellation sends no mutation`, async () => {
+    // Exercise the real health UI with a failed-job transport fixture; never schedule deletion.
+    const f = await open("staff", language, async context => {
+      await context.route("**/src/features/operations/adapters/health.ts", route => route.fulfill({
+        contentType: "application/javascript",
+        body: `window.healthRequeues = [];
+          export const useHealth = () => ({ counts: {}, oldestPendingAt: null,
+            configuration: { uploadThingToken: false, callbackSecret: true, mediaCleanupEnabled: false } });
+          export const useJobDiagnostics = () => ({ status: "Exhausted", loadMore() {},
+            results: [{ jobId: "fake-purge", kind: "ticket_purge", state: "failed", attempt: 0, maxAttempts: 8,
+              availableAt: 1794614400000, lastOutcome: "ownership_conflict", purgeBlocked: true }],
+            requeue: async args => { window.healthRequeues.push(args); return true; } });`,
+      }));
+    });
+    try {
+      await f.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      await f.page.getByRole("button", { name: copy(language, "healthTitle"), exact: true }).click();
+      const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
+      const requeue = dialog.getByRole("button", { name: copy(language, "healthRequeue"), exact: true });
+      const prompts: string[] = [];
+      f.page.once("dialog", async prompt => { prompts.push(prompt.message()); await prompt.dismiss(); });
+      await requeue.click();
+      const calls = () => f.page.evaluate(() => (window as unknown as { healthRequeues: unknown[] }).healthRequeues);
+      assert.deepEqual(await calls(), []);
+      f.page.once("dialog", async prompt => { prompts.push(prompt.message()); await prompt.accept(); });
+      await requeue.click();
+      await f.page.getByText(copy(language, "healthRequeued"), { exact: true }).waitFor();
+      assert.deepEqual(await calls(), [{ token: f.token, jobId: "fake-purge" }]);
+      assert.deepEqual(prompts, [copy(language, "healthPurgeConfirm"), copy(language, "healthPurgeConfirm")]);
+      assert.deepEqual(f.errors, []);
+      assert.equal(f.uploads(), 0);
+    } finally { await f.context.close(); }
+  });
+}

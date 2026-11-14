@@ -84,7 +84,7 @@ const dropAnimationConfig: DropAnimation = {
 }
 
 // Multipurpose Sortable Component
-export interface SortableRootProps<T> extends Omit<
+interface SortableRootProps<T> extends Omit<
   useRender.ComponentProps<"div">,
   "onDragStart" | "onDragEnd" | "children"
 > {
@@ -259,7 +259,7 @@ function Sortable<T>({
   )
 }
 
-export interface SortableItemProps extends useRender.ComponentProps<"div"> {
+interface SortableItemProps extends useRender.ComponentProps<"div"> {
   value: string
   disabled?: boolean
 }
@@ -332,7 +332,7 @@ function SortableItem({
   )
 }
 
-export interface SortableItemHandleProps extends useRender.ComponentProps<"div"> {
+interface SortableItemHandleProps extends useRender.ComponentProps<"div"> {
   cursor?: boolean
 }
 
@@ -363,7 +363,7 @@ function SortableItemHandle({
   })
 }
 
-export interface SortableOverlayProps extends Omit<
+interface SortableOverlayProps extends Omit<
   React.ComponentProps<typeof DragOverlay>,
   "children"
 > {

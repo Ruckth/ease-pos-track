@@ -3,8 +3,8 @@ import { basename, extname } from "node:path";
 import { UTApi } from "uploadthing/server";
 import { authError, inputError, remoteError } from "./errors";
 
-export const MAX_TICKET_IMAGES = 10;
-export const MAX_TICKET_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TICKET_IMAGES = 10;
+const MAX_TICKET_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export type TicketMediaItem = {
   key: string;

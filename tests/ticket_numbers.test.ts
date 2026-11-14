@@ -5,8 +5,9 @@ import {
   parseTicketReference,
   suggestProjectKey,
   validateProjectName,
-} from "../convex/ticket_numbers";
-import { formatTicketNumber, nextTicketStatus } from "../src/lib/ticket-ui";
+} from "../shared/ticket-numbers";
+import { formatTicketNumber } from "../shared/ticket-numbers";
+import { nextTicketStatus } from "../src/lib/ticket-ui";
 import { pickProject, readProjectParam, withProjectParam } from "../src/lib/projects";
 
 test("formats Ticket references with the required Project key", () => {

@@ -9,7 +9,10 @@ export const ticketStatus = v.union(
   v.literal("done"),
 );
 
-export const ticketLifecycle = v.union(v.literal("active"), v.literal("archived"), v.literal("purging"));
+export const mediaJobKind = v.union(v.literal("cancellation"), v.literal("intent_expiry"), v.literal("rejected_upload"), v.literal("ticket_purge"));
+export const mediaJobState = v.union(v.literal("pending"), v.literal("running"), v.literal("completed"), v.literal("failed"), v.literal("superseded"));
+
+const ticketLifecycle = v.union(v.literal("active"), v.literal("archived"), v.literal("purging"));
 
 export const actorRole = v.union(v.literal("staff"), v.literal("customer"));
 
@@ -27,7 +30,7 @@ export const pendingFileValidator = v.object({
   type: v.string(),
 });
 
-export const annotationValidator = v.object({
+const annotationValidator = v.object({
   id: v.string(),
   label: v.number(),
   mediaIndex: v.number(),
@@ -50,7 +53,7 @@ export const annotationCreateInputValidator = v.object({
   text: v.string(),
 });
 
-export const annotationEventAction = v.union(
+const annotationEventAction = v.union(
   v.literal("created"),
   v.literal("updated"),
   v.literal("deleted"),
@@ -58,7 +61,7 @@ export const annotationEventAction = v.union(
   v.literal("update_undone"),
 );
 
-export const ticketEventAction = v.union(
+const ticketEventAction = v.union(
   v.literal("created"),
   v.literal("media_attached"),
   v.literal("edited"),
@@ -73,7 +76,7 @@ export const ticketEventAction = v.union(
   v.literal("purge_claimed"),
 );
 
-export const ticketStateValidator = v.object({
+const ticketStateValidator = v.object({
   title: v.string(),
   description: v.string(),
   status: ticketStatus,
@@ -85,9 +88,9 @@ export const ticketStateValidator = v.object({
   archivedAt: v.optional(v.number()),
 });
 
-export const ticketCreatedVia = v.literal("codex");
+const ticketCreatedVia = v.literal("codex");
 
-export const uploadIntentStatus = v.union(
+const uploadIntentStatus = v.union(
   v.literal("pending"),
   v.literal("expiring"),
   v.literal("attached"),
@@ -227,17 +230,18 @@ export default defineSchema({
     .index("by_intent", ["intentId", "lifecycle"])
     .index("by_ticket", ["ticketId", "lifecycle"]),
   mediaJobs: defineTable({
-    kind: v.union(v.literal("cancellation"), v.literal("intent_expiry"), v.literal("rejected_upload"), v.literal("ticket_purge")),
+    kind: mediaJobKind,
     resourceScope: v.string(),
     intentId: v.optional(v.id("uploadIntents")),
     ticketId: v.optional(v.id("tickets")),
     keys: v.array(v.string()),
     completedKeys: v.array(v.string()),
     phase: v.union(v.literal("delete_media"), v.literal("delete_ticket"), v.literal("delete_events"), v.literal("complete")),
-    state: v.union(v.literal("pending"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    state: mediaJobState,
     attempt: v.number(),
     maxAttempts: v.number(),
     leaseId: v.optional(v.string()),
+    leaseStartedAt: v.optional(v.number()),
     leaseExpiresAt: v.optional(v.number()),
     availableAt: v.number(),
     lastOutcome: v.optional(v.union(v.literal("deleted"), v.literal("absent_verified"), v.literal("failed_retryable"), v.literal("failed_permanent"), v.literal("unknown"), v.literal("not_configured"), v.literal("ownership_unverified"), v.literal("ownership_conflict"))),
@@ -246,7 +250,12 @@ export default defineSchema({
   }).index("by_scope", ["resourceScope", "state"])
     .index("by_available", ["state", "availableAt"])
     .index("by_lease", ["state", "leaseExpiresAt"])
-    .index("by_kind_state", ["kind", "state", "createdAt"]),
+    .index("by_kind_state", ["kind", "state", "createdAt"])
+    .index("by_state_created", ["state", "createdAt"]),
+  mediaJobCounters: defineTable({
+    key: v.string(),
+    count: v.number(),
+  }).index("by_key", ["key"]),
   uploadIntents: defineTable({
     sessionId: v.id("sessions"),
     secret: v.string(),

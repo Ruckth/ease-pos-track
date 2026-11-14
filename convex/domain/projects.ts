@@ -1,7 +1,7 @@
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { canUseProject, type Actor } from "../authz";
-import { normalizeProjectKey } from "../ticket_numbers";
+import { normalizeProjectKey } from "../../shared/ticket-numbers";
 
 type Ctx = QueryCtx | MutationCtx;
 

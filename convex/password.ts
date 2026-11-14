@@ -10,7 +10,7 @@
  */
 
 export const PASSWORD_ALGORITHM = "pbkdf2-sha256";
-export const PASSWORD_ITERATIONS = 310_000;
+const PASSWORD_ITERATIONS = 310_000;
 const SALT_BYTES = 16;
 const DERIVED_BITS = 256;
 
@@ -60,7 +60,7 @@ function fromHex(hex: string) {
   return bytes;
 }
 
-export function makePasswordSalt() {
+function makePasswordSalt() {
   const bytes = new Uint8Array(SALT_BYTES);
   crypto.getRandomValues(bytes);
   return toHex(bytes);

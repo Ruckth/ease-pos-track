@@ -11,7 +11,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { formatTicketNumber } from "@/lib/ticket-ui";
+import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { isActiveAnnotation, type Ticket } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";

@@ -11,7 +11,7 @@ export type PendingAnnotation = {
   createdAt: number;
 };
 
-export type PendingMediaRef = {
+type PendingMediaRef = {
   id: string;
 };
 

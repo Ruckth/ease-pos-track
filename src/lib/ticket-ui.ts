@@ -1,8 +1,5 @@
 import type { TicketStatus } from "@/lib/types";
 
-// Formatting lives with the ticket-number rules on the server so both sides agree.
-export { formatTicketNumber } from "@convex/ticket_numbers";
-
 /** The workflow, in order. A ticket only ever moves forward through it. */
 export const STATUS_ORDER: TicketStatus[] = ["new", "acknowledged", "in_progress", "waiting", "done"];
 

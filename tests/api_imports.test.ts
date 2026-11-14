@@ -15,7 +15,7 @@ function importGraphErrors(entries: string[], read = (file: string) => readFileS
     function edge(specifier: ts.Expression, follow = true) {
       if (!ts.isStringLiteral(specifier) || !specifier.text.startsWith(".")) return;
       const spec = specifier.text;
-      if (!extname(spec)) errors.push(`${relative(root, file)}: ${spec}`);
+      if (extname(spec) !== ".js") errors.push(`${relative(root, file)}: ${spec}`);
       if (!follow) return;
       const path = resolve(dirname(file), spec);
       const source = path.replace(/\.js$/, ".ts");
@@ -25,7 +25,7 @@ function importGraphErrors(entries: string[], read = (file: string) => readFileS
     function scan(node: ts.Node) {
       if (ts.isImportDeclaration(node)) {
         const bindings = node.importClause?.namedBindings;
-        const typeOnly = node.importClause?.isTypeOnly || bindings && ts.isNamedImports(bindings) && bindings.elements.every(item => item.isTypeOnly);
+        const typeOnly = node.importClause?.isTypeOnly || !node.importClause?.name && bindings && ts.isNamedImports(bindings) && bindings.elements.length > 0 && bindings.elements.every(item => item.isTypeOnly);
         edge(node.moduleSpecifier, !typeOnly);
       }
       if (ts.isExportDeclaration(node) && node.moduleSpecifier) edge(node.moduleSpecifier, !node.isTypeOnly);
@@ -55,4 +55,14 @@ test("API import graph follows re-exports and dynamic imports to extensionless e
     [resolve(root, "fake-handler")]: '',
   };
   assert.deepEqual(importGraphErrors([entry], file => sources[file]), ["fake-runtime.js: ./fake-handler"]);
+});
+
+test("API graph rejects TypeScript relative specifiers and follows default value imports beside named types", () => {
+  const entry = resolve(root, "fake-api.ts");
+  const sources: Record<string, string> = {
+    [entry]: 'import D, { type T } from "./fake-mixed.js";',
+    [resolve(root, "fake-mixed.js")]: 'export * from "./fake-leaf.ts";',
+    [resolve(root, "fake-leaf.ts")]: '',
+  };
+  assert.deepEqual(importGraphErrors([entry], file => sources[file]), ["fake-mixed.js: ./fake-leaf.ts"]);
 });

@@ -2,7 +2,7 @@
  * User-facing workflow language and its one translation to stored Convex values.
  * Internal literals never cross this module into CLI parsing or JSON output.
  */
-export const TICKET_STATUSES = [
+const TICKET_STATUSES = [
   "new",
   "acknowledged",
   "in_progress",
@@ -11,7 +11,7 @@ export const TICKET_STATUSES = [
 ] as const;
 
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
-export type StoredTicketStatus = "new" | "acknowledged" | "in_progress" | "waiting" | "done";
+type StoredTicketStatus = "new" | "acknowledged" | "in_progress" | "waiting" | "done";
 
 const STORED_BY_PUBLIC: Record<TicketStatus, StoredTicketStatus> = {
   new: "new",

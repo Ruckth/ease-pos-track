@@ -21,7 +21,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Types, unit and Convex tests, and the production bundle, in parallel.
+      # pnpm check runs architecture and registration tests once, plus types, tests and build.
       - run: pnpm check
       # tsgo is a TypeScript 7 preview; keep the stable checker as a guard.
       - run: pnpm run typecheck:tsc

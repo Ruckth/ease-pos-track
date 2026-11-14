@@ -13,11 +13,11 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { formatTicketNumber } from "@/lib/ticket-ui";
+import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { isActiveAnnotation, type Ticket, type TicketStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { MAX_URGENCY_SCORE, MIN_URGENCY_SCORE } from "@convex/ticket_state";
+import { MAX_URGENCY_SCORE, MIN_URGENCY_SCORE } from "../../../shared/ticket-state";
 import {
   Archive,
   Copy,

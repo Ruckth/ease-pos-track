@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requireCurrentVersion, validateTicketText } from "../convex/ticket_state";
+import { requireCurrentVersion, validateTicketText } from "../shared/ticket-state";
 import { sameFiles, validateFiles, validateMediaItems } from "../shared/media-policy";
 
 test("ticket text is trimmed and bounded on the server", () => {

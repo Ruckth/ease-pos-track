@@ -1,6 +1,6 @@
 import { errorCode } from "../../shared/errors.js";
 
-export type CancelUploadDependencies = {
+type CancelUploadDependencies = {
   cancel(input: { token: string; intentId: string; secret: string }): Promise<{ state: "queued" | "completed" | "failed"; jobIds: string[] }>;
 };
 

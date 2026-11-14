@@ -3,7 +3,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { ticketStatus } from "../schema";
-import { parseTicketReference } from "../ticket_numbers";
+import { parseTicketReference } from "../../shared/ticket-numbers";
 import { queryOperation } from "./operation";
 import { requireUsableProject } from "./projects";
 

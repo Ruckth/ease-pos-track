@@ -7,7 +7,7 @@
  * exactly once.
  */
 
-import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../convex/ticket_state";
+import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../shared/ticket-state";
 import { MAX_REQUEST_ID_LENGTH } from "../../convex/ticket_requests";
 
 export const EXIT = {
@@ -20,7 +20,7 @@ export const EXIT = {
   remote: 6,
 } as const;
 
-export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
+type ExitCode = (typeof EXIT)[keyof typeof EXIT];
 
 export class TicketCliError extends Error {
   constructor(readonly code: string, message: string, readonly exitCode: number, readonly hint?: string) {

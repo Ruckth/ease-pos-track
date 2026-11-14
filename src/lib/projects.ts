@@ -1,5 +1,5 @@
 /** The query parameter that keeps the open Project in the URL: `/staff?project=POS`. */
-export const PROJECT_PARAM = "project";
+const PROJECT_PARAM = "project";
 
 /**
  * The Project to show: the one the URL names, or the first available one when

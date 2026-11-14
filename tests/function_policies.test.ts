@@ -1,49 +1,15 @@
+import { checkPolicies, violations, routeViolations } from "../scripts/check-arch";
+import { httpRouter } from "convex/server";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
-import { resolve, relative } from "node:path";
-import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import test from "node:test";
-import { registrationPolicy, publicAuthMutation, publicAuthQuery, trustedCallbackMutation } from "../convex/functions";
+import { publicAuthMutation, publicAuthQuery, trustedCallbackMutation } from "../convex/functions";
 import { v } from "convex/values";
 import { mutationGeneric, queryGeneric, actionGeneric, internalMutationGeneric, internalQueryGeneric, internalActionGeneric, httpActionGeneric } from "./fixtures/raw-registration";
 
 const root = resolve(import.meta.dirname, "../convex");
-const exceptions: Record<string, string> = {
-  "auth.ts:login": "publicAuthMutation:staff-login",
-  "auth.ts:logout": "publicAuthMutation:logout",
-  "auth.ts:currentSession": "publicAuthQuery:current-session",
-  "customers.ts:login": "publicAuthAction:customer-login",
-  "customers.ts:register": "publicAuthAction:customer-register",
-  "uploads.ts:recordUploadedFile": "trustedCallbackMutation",
-};
-
-function violations(module: string, exports: Record<string, unknown>) {
-  return Object.entries(exports).flatMap(([name, value]) => {
-    if (!value || (typeof value !== "function" && typeof value !== "object")
-      || !["isQuery", "isMutation", "isAction", "isHttp"].some(key => key in value && value[key as keyof typeof value])) return [];
-    const policy = registrationPolicy(value);
-    const pair = `${module}:${name}`;
-    if (!policy) return [`${pair}: untagged registration`];
-    if ((policy.startsWith("publicAuth") || policy === "trustedCallbackMutation" || pair in exceptions)
-      && exceptions[pair] !== policy) return [`${pair}: unexpected policy ${policy}`];
-    return [];
-  });
-}
-
-function files(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap(item => item.name === "_generated" ? [] : item.isDirectory()
-    ? files(resolve(dir, item.name)) : item.name.endsWith(".ts") && !item.name.endsWith(".d.ts") ? [resolve(dir, item.name)] : []);
-}
-
-test("every Convex function export is tagged and exceptional policies match the manifest", async () => {
-  const seen = new Set<string>();
-  for (const file of files(root)) {
-    const module = relative(root, file);
-    const exports = await import(pathToFileURL(file).href);
-    assert.deepEqual(violations(module, exports), []);
-    for (const name of Object.keys(exports)) seen.add(`${module}:${name}`);
-  }
-  for (const pair of Object.keys(exceptions)) assert.ok(seen.has(pair), `missing manifest export ${pair}`);
+test("every Convex export and HTTP route declares its policy across all source extensions", async () => {
+  assert.deepEqual(await checkPolicies(root, url => import(url)), []);
 });
 
 test("policy check rejects raw registrations through re-exports, including inside functions.ts", () => {
@@ -66,4 +32,10 @@ test("policy manifest rejects new public auth/callback exports and wrong purpose
     ["other.ts", { login }], ["other.ts", { callback }]] as const) {
     assert.equal(violations(module, exports).length, 1);
   }
+});
+
+test("HTTP routes cannot hide an untagged handler inside the router", () => {
+  const router = httpRouter();
+  router.route({ path: "/bypass", method: "GET", handler: httpActionGeneric(async () => new Response()) });
+  assert.deepEqual(routeViolations("http.ts", router), ["http.ts:GET /bypass: untagged HTTP route"]);
 });

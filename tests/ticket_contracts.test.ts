@@ -4,8 +4,8 @@ import type { Id } from "../convex/_generated/dataModel";
 import { validateFiles } from "../shared/media-policy";
 import { createAnnotationRecord, updateAnnotationRecord } from "../convex/annotation_state";
 import {
-  MEDIA_POLICY, isTicketSearchWithinLimits, normalizeTicketRequest, ticketRequestFingerprintInput, transitionTicketJob,
-  type JobTransition, type TicketJob, type TicketRequestInput,
+  MEDIA_POLICY, isTicketSearchWithinLimits, normalizeTicketRequest, ticketRequestFingerprintInput,
+  type TicketRequestInput,
 } from "../shared/ticket-contracts";
 
 const request: TicketRequestInput = {
@@ -114,94 +114,4 @@ test("annotation creation and update text limits match MEDIA_POLICY", () => {
   assert.throws(() => updateAnnotationRecord(annotation, { text: input.text + "a" }, 101), {
     message: "COMMENT_TOO_LONG",
   });
-});
-
-const pending: TicketJob = { state: "pending", attempt: 0, availableAt: 100, maxAttempts: 2 };
-const claim: JobTransition = { kind: "claim", now: 100, leaseId: "lease-1", leaseExpiresAt: 200 };
-const leased: TicketJob = { state: "leased", attempt: 1, leaseId: "lease-1", leaseExpiresAt: 200, maxAttempts: 2 };
-const fence = { attempt: 1, leaseId: "lease-1" };
-
-test("jobs claim only available pending work or expired leases and increment attempts", () => {
-  assert.deepEqual(transitionTicketJob(pending, claim), { accepted: true, job: leased });
-  assert.deepEqual(transitionTicketJob(pending, { ...claim, now: 99 }), { accepted: false, reason: "not_ready" });
-  assert.deepEqual(transitionTicketJob(leased, claim), { accepted: false, reason: "not_ready" });
-  assert.deepEqual(transitionTicketJob(leased, { ...claim, now: 200, leaseId: "lease-2", leaseExpiresAt: 300 }), {
-    accepted: true, job: { state: "leased", attempt: 2, leaseId: "lease-2", leaseExpiresAt: 300, maxAttempts: 2 },
-  });
-  assert.deepEqual(pending, { state: "pending", attempt: 0, availableAt: 100, maxAttempts: 2 });
-});
-
-test("job settlement requires both the current lease and attempt before expiry", () => {
-  const settle: JobTransition = { kind: "settle", now: 199, fence, outcome: "succeeded" };
-  assert.deepEqual(transitionTicketJob(leased, settle), { accepted: true, job: { state: "succeeded", attempt: 1, maxAttempts: 2 } });
-  for (const event of [
-    { ...settle, now: 200 },
-    { ...settle, fence: { ...fence, attempt: 0 } },
-    { ...settle, fence: { ...fence, leaseId: "old-lease" } },
-  ]) assert.deepEqual(transitionTicketJob(leased, event), { accepted: false, reason: "stale_lease" });
-  assert.deepEqual(transitionTicketJob(pending, settle), { accepted: false, reason: "stale_lease" });
-  // Even reusing a lease ID cannot let the old attempt settle a replacement.
-  assert.deepEqual(transitionTicketJob({ ...leased, attempt: 2, leaseExpiresAt: 300 }, {
-    ...settle, now: 201,
-  }), { accepted: false, reason: "stale_lease" });
-});
-
-test("retryable or unknown work returns to pending; stale retries cannot release the lease", () => {
-  const retry: JobTransition = { kind: "retry", now: 150, fence, availableAt: 250 };
-  assert.deepEqual(transitionTicketJob(leased, retry), {
-    accepted: true, job: { state: "pending", attempt: 1, availableAt: 250, maxAttempts: 2 },
-  });
-  assert.deepEqual(transitionTicketJob(leased, { ...retry, fence: { ...fence, attempt: 2 } }), {
-    accepted: false, reason: "stale_lease",
-  });
-  assert.deepEqual(transitionTicketJob(leased, { ...retry, now: 200 }), { accepted: false, reason: "stale_lease" });
-});
-
-test("attempt limits exhaust retry and expired-lease recovery; permanent failure is terminal", () => {
-  assert.deepEqual(transitionTicketJob({ ...leased, maxAttempts: 1 }, { kind: "retry", now: 150, fence, availableAt: 250 }), {
-    accepted: true, job: { state: "exhausted", attempt: 1, maxAttempts: 1 },
-  });
-  assert.deepEqual(transitionTicketJob({ ...leased, attempt: 2 }, {
-    ...claim, now: 200, leaseExpiresAt: 300,
-  }), { accepted: true, job: { state: "exhausted", attempt: 2, maxAttempts: 2 } });
-  assert.deepEqual(transitionTicketJob(leased, { kind: "settle", now: 150, fence, outcome: "failed" }), {
-    accepted: true, job: { state: "failed", attempt: 1, maxAttempts: 2 },
-  });
-});
-
-test("cancellation is allowed before a claim or after lease expiry; terminal states never restart", () => {
-  assert.deepEqual(transitionTicketJob(pending, { kind: "cancel", now: 99 }), {
-    accepted: true, job: { state: "cancelled", attempt: 0, maxAttempts: 2 },
-  });
-  assert.deepEqual(transitionTicketJob(leased, { kind: "cancel", now: 199 }), { accepted: false, reason: "leased" });
-  for (const now of [200, 201]) {
-    assert.deepEqual(transitionTicketJob(leased, { kind: "cancel", now }), {
-      accepted: true, job: { state: "cancelled", attempt: 1, maxAttempts: 2 },
-    });
-  }
-  for (const state of ["succeeded", "failed", "exhausted", "cancelled"] as const) {
-    for (const event of [claim, { kind: "cancel", now: 200 } as const]) {
-      assert.deepEqual(transitionTicketJob({ state, attempt: 1, maxAttempts: 2 }, event), { accepted: false, reason: "terminal" });
-    }
-  }
-});
-
-test("claims, retries and cancellations reject invalid event input", () => {
-  for (const change of [
-    { leaseId: "" }, { leaseExpiresAt: 100 }, { leaseExpiresAt: Infinity }, { now: NaN },
-  ]) assert.deepEqual(transitionTicketJob(pending, { ...claim, ...change }), { accepted: false, reason: "invalid_event" });
-  for (const availableAt of [149, NaN, Infinity]) {
-    assert.deepEqual(transitionTicketJob(leased, {
-      kind: "retry", now: 150, fence, availableAt,
-    }), { accepted: false, reason: "invalid_event" });
-  }
-  for (const job of [pending, leased]) {
-    assert.deepEqual(transitionTicketJob(job, { kind: "cancel", now: NaN }), { accepted: false, reason: "invalid_event" });
-  }
-});
-
-test("job transitions reject a job without a positive integer maxAttempts", () => {
-  for (const maxAttempts of [Number.NaN, 0, -1, 1.5, undefined as unknown as number]) {
-    assert.deepEqual(transitionTicketJob({ ...pending, maxAttempts }, claim), { accepted: false, reason: "invalid_job" });
-  }
 });

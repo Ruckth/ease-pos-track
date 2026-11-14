@@ -7,7 +7,7 @@ export type CommandOption = {
   requiredUnless?: string;
 };
 
-export type CommandArgument = {
+type CommandArgument = {
   name: string;
   description: string;
   required: boolean;
@@ -183,7 +183,7 @@ export const COMMAND_REGISTRY = [
   },
 ] as const satisfies readonly TicketCommandDefinition[];
 
-export type RegisteredCommandName = (typeof COMMAND_REGISTRY)[number]["name"];
+type RegisteredCommandName = (typeof COMMAND_REGISTRY)[number]["name"];
 
 export function commandDefinition(name: string): TicketCommandDefinition | undefined {
   return COMMAND_REGISTRY.find((command) => command.name === name);

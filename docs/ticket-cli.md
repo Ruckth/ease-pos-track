@@ -392,3 +392,9 @@ Ticket annotations share the Ticket version and audit path. The embedded budget
 is 100 entries and 50,000 text characters per Ticket, with 2,000 characters per
 entry; soft-deleted entries still count. Initial creation, additions, edits and
 undo all enforce the budget. Restore removes the archive timestamp explicitly.
+
+Restoring a blocked archived Ticket supersedes the failed purge job and clears
+its block. Re-archiving starts a fresh 30-day retention window. Both internal
+and staff requeue enforce that window; Operations health asks for confirmation
+before requeuing permanent Ticket deletion. Superseded jobs are counted
+separately from completed deletions.

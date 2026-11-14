@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { BackendProvider } from "./app/convex-provider";
 import { AppShell } from "./app/app-shell";
 import { ErrorBoundary } from "./components/error-boundary";
 import { LanguageProvider } from "./lib/i18n";
@@ -11,9 +11,9 @@ const convexUrl = import.meta.env.VITE_CONVEX_URL;
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <LanguageProvider>{convexUrl ? (
-      <ConvexProvider client={new ConvexReactClient(convexUrl)}>
+      <BackendProvider>
         <ErrorBoundary><AppShell /></ErrorBoundary>
-      </ConvexProvider>
+      </BackendProvider>
     ) : (
       <main className="flex min-h-screen items-center justify-center p-6">
         <div className="max-w-md rounded-lg border bg-card p-6 shadow-sm">

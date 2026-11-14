@@ -1,3 +1,4 @@
+import { StaffHealth } from "@/features/operations/staff-health";
 import { LanguageSelector } from "@/components/auth-screens";
 import { NewProjectDialog, NoProjects, StaffProjectControls, useCurrentProject } from "@/components/project-controls";
 import { StaffBoard } from "@/components/staff-board";
@@ -6,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { formatTicketNumber } from "@/lib/ticket-ui";
+import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { type Ticket, type TicketStatus } from "@/lib/types";
 import type { Id } from "@convex/_generated/dataModel";
 import {
@@ -29,6 +30,7 @@ import { StaffTicketDialog } from "./staff-ticket-dialog";
 
 export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: () => Promise<void> }) {
   const { language, setLanguage, t, formatDate } = useI18n();
+  const [healthOpen, setHealthOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -101,6 +103,7 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
               <Archive />
               {showArchived ? t("hideArchive") : t("archive")}
             </Button>
+            <Button variant="outline" onClick={() => setHealthOpen(true)}>{t("healthTitle")}</Button>
             <LanguageSelector language={language} onChange={setLanguage} />
             <Button variant="outline" size="icon" onClick={() => void onLogout()} aria-label={t("signOut")}>
               <LogOut />
@@ -166,6 +169,10 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
           active={composer.open}
           onSubmissionComplete={composer.complete}
         /> : null}
+      </Dialog>
+
+      <Dialog open={healthOpen} onOpenChange={setHealthOpen} title={t("healthTitle")} description={t("healthDescription")}>
+        {healthOpen ? <StaffHealth token={token} /> : null}
       </Dialog>
 
       <NewProjectDialog token={token} open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={selectProject} />

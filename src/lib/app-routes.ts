@@ -9,9 +9,9 @@ export const APP_PATHS = {
   customerRegister: "/customer/register",
 } as const;
 
-export type RouteSession = "loading" | "signed-out" | SessionRole;
+type RouteSession = "loading" | "signed-out" | SessionRole;
 
-export type AppRoute =
+type AppRoute =
   | { page: "loading" }
   | { page: "redirect"; to: string }
   | { page: "staff-login" }

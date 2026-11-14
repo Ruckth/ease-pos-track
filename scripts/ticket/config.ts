@@ -22,7 +22,7 @@ export interface ConfigStore {
   save(config: TicketConfig): Promise<void>;
 }
 
-export function defaultConfigPath() {
+function defaultConfigPath() {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   return join(base, "track-ease-pos", "ticket.json");
 }

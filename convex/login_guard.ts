@@ -5,13 +5,13 @@
  * its own inline copy of this logic untouched.
  */
 
-export type AttemptRecord = {
+type AttemptRecord = {
   attempts: number;
   firstAttemptAt: number;
   lockedUntil?: number;
 };
 
-export type GuardConfig = {
+type GuardConfig = {
   windowMs: number;
   maxAttempts: number;
   lockoutMs: number;

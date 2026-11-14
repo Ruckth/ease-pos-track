@@ -1,7 +1,7 @@
 import { usePaginatedQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { BOARD_COLUMNS } from "./kanban-board";
+import { BOARD_COLUMNS } from "@/lib/kanban-board";
 
 export function useStaffLanes(token: string, projectId: Id<"projects"> | undefined, enabled: boolean) {
   const args = projectId && enabled ? { token, projectId, lifecycle: "active" as const } : null;

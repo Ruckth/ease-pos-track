@@ -4,8 +4,7 @@ import { CustomerPortal } from "@/features/tickets/customer-portal";
 import { StaffWorkspace } from "@/features/tickets/staff-workspace";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { clearToken, getStoredToken, storeToken } from "@/lib/session";
-import { api } from "@convex/_generated/api";
-import { useMutation, useQuery } from "convex/react";
+import { useSession } from "./adapter";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -31,8 +30,7 @@ function useAppPathname() {
 export function AppShell() {
   const [token, setToken] = useState(getStoredToken);
   const { pathname, navigate } = useAppPathname();
-  const logout = useMutation(api.auth.logout);
-  const session = useQuery(api.auth.currentSession, { token: token || undefined });
+  const { logout, session } = useSession(token);
   const route = resolveAppRoute(
     pathname,
     token && session === undefined

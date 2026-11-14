@@ -1,4 +1,4 @@
-export type UrgencyBand = "unscored" | "low" | "medium" | "high" | "critical";
+type UrgencyBand = "unscored" | "low" | "medium" | "high" | "critical";
 
 /** Stable visual bands for the staff board's 1-100 urgency scale. */
 export function urgencyBand(score: number | undefined): UrgencyBand {

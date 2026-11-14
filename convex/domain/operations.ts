@@ -1,3 +1,4 @@
+import { patchMediaJob } from "./media_jobs";
 import { queryOperation, mutationOperation } from "./operation";
 import { ticketDetail } from "./reads";
 import { v } from "convex/values";
@@ -17,11 +18,11 @@ import {
   softDeleteAnnotationRecord,
   updateAnnotationRecord,
 } from "../annotation_state";
-import { requireCurrentVersion, validateTicketText, validateUrgencyScore } from "../ticket_state";
+import { requireCurrentVersion, validateTicketText, validateUrgencyScore } from "../../shared/ticket-state";
 import { hashTicketRequest, normalizeRequestId } from "../ticket_requests";
 import { ticketRequestFingerprintInput, ticketMediaRequestFingerprintInput } from "../../shared/ticket-contracts";
 import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./requests";
-import { normalizeProjectKey } from "../ticket_numbers";
+import { normalizeProjectKey } from "../../shared/ticket-numbers";
 import { isMember, requireUsableProject, resolveStaffProject } from "./projects";
 import { validateMediaItems } from "../../shared/media-policy";
 import { requireOwnedUploadIntent, verifyPendingUploadIntent, verifyAssetReceipts, attachIntentAssets } from "./media";
@@ -483,7 +484,7 @@ export const restoreTicket = mutationOperation({
     const doc = await ctx.db.get(args.id);
     if (doc?.lifecycle === "purging") throw new Error("TICKET_PURGING");
     if (!doc || doc.lifecycle !== "archived") throw new Error("TICKET_UNAVAILABLE");
-    return await applyTicketChange(ctx, {
+    const result = await applyTicketChange(ctx, {
       doc,
       expectedVersion: args.expectedVersion,
       changes: { lifecycle: "active", archivedAt: undefined },
@@ -491,6 +492,14 @@ export const restoreTicket = mutationOperation({
       author: { sessionId: session._id, ...actorFields(actor) },
       now: Date.now(),
     });
+    await ctx.db.patch(doc._id, { purgeBlocked: undefined });
+    const failed = await ctx.db.query("mediaJobs").withIndex("by_scope", q => q.eq("resourceScope", `ticket:${doc._id}`).eq("state", "failed")).unique();
+    if (failed) {
+      // Restore ends this archive cycle. Retire its job and release the scope for a future cycle.
+      await patchMediaJob(ctx, failed, { state: "superseded", resourceScope: `superseded:${failed._id}`,
+        lastOutcome: undefined, updatedAt: Date.now() });
+    }
+    return result;
   },
 });
 
