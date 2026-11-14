@@ -35,6 +35,7 @@ export type TicketUploadIntent = {
 };
 export type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
 export type TicketAttachInput = TicketUploadCredentials & {
+  requestId: string;
   ref: TicketRef;
   expectedVersion: number;
   media: TicketMediaItem[];
@@ -133,6 +134,7 @@ export class ConvexTicketRemote implements TicketRemote {
         uploadIntentId: input.intentId,
         uploadIntentSecret: input.secret,
         expectedVersion: input.expectedVersion,
+        requestId: input.requestId,
       });
     });
   }

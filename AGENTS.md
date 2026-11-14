@@ -39,6 +39,9 @@ pnpm ticket create --title "<title>" --description "<description>" --project <KE
   different content, `6` the deployment call failed.
 - If a run fails and you want to retry it, reuse the `requestId` from the output.
   Never retry with a different request id: that can create a duplicate Ticket.
+- Create retries compare immutable normalized input, so later Ticket edits do
+  not invalidate the retry. Replay requires the same durable actor and current
+  access to an active Project; a purged Ticket returns `TICKET_UNAVAILABLE`.
 
 `pnpm ticket --help` documents every flag. Details and setup: [docs/ticket-cli.md](docs/ticket-cli.md).
 

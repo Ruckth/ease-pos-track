@@ -49,6 +49,29 @@ export const run = internalJobAction({
     const bob = (await ctx.runAction(api.customers.login, { email: "bob@local.test", password: "LocalCustomer123!", clientId: "local-smoke-bob-client" })).token;
     check((await ctx.runQuery(api.auth.currentSession, { token: staff }))?.role === "staff", "staff credential and explicit role");
     check((await ctx.runQuery(api.auth.currentSession, { token: alice }))?.role === "customer", "customer credential and explicit role");
+    // Real OCC contention: the action starts separate concurrent mutation
+    // transactions, rather than simulating duplicates in a single mutation.
+    const before = await ctx.runQuery(api.tickets.listTickets, { token: staff, includeDeleted: true });
+    const duplicateInput = { token: staff, projectKey: "POS", requestId: crypto.randomUUID(), title: "Concurrent local create", description: "Immutable original" };
+    const duplicates = await Promise.all(Array.from({ length: 8 }, () => ctx.runMutation(api.tickets.createTextTicket, duplicateInput)));
+    const duplicateId = duplicates[0].ticket._id;
+    check(duplicates.filter(result => result.created).length === 1 && duplicates.every(result => result.ticket._id === duplicateId), "eight concurrent duplicates commit exactly once");
+    const after = await ctx.runQuery(api.tickets.listTickets, { token: staff, includeDeleted: true });
+    const oldIds = new Set(before.map(ticket => ticket._id));
+    check(after.filter(ticket => !oldIds.has(ticket._id)).length === 1, "concurrent duplicates insert exactly one Ticket row");
+    check((await ctx.runQuery(api.tickets.listTicketActivity, { token: staff, id: duplicateId })).length === 1, "concurrent duplicates insert exactly one audit event");
+    await ctx.runMutation(api.tickets.editTicket, { token: staff, id: duplicateId, expectedVersion: 0, title: "Edited after create", description: "" });
+    const replay = await ctx.runMutation(api.tickets.createTextTicket, duplicateInput);
+    check(!replay.created && replay.ticket._id === duplicateId && replay.ticket.version === 1, "original retry after edit returns same Ticket");
+    await denied(() => ctx.runMutation(api.tickets.createTextTicket, { ...duplicateInput, title: "Different" }), "REQUEST_ID_CONFLICT", "different content conflicts");
+    await denied(() => ctx.runMutation(api.tickets.createTextTicket, { ...duplicateInput, projectKey: "APP" }), "REQUEST_ID_CONFLICT", "different Project conflicts");
+    const crossProjectRequestId = crypto.randomUUID();
+    const competing = await Promise.allSettled(["POS", "APP"].map(projectKey => ctx.runMutation(api.tickets.createTextTicket, {
+      ...duplicateInput, requestId: crossProjectRequestId, projectKey,
+    })));
+    check(competing.filter(result => result.status === "fulfilled").length === 1
+      && competing.some(result => result.status === "rejected" && errorCode(result.reason) === "REQUEST_ID_CONFLICT"),
+    "concurrent different-Project requests commit once and conflict");
     await denied(() => ctx.runMutation(api.tickets.createTextTicket, { token: alice, projectKey: "APP", requestId: crypto.randomUUID(), title: "Denied", description: "" }), "PROJECT_NOT_FOUND", "customer foreign Project denied");
     for (const token of [staff, alice]) {
       const created = await ctx.runMutation(api.tickets.createTextTicket, { token, projectKey: "POS", requestId: crypto.randomUUID(), title: "Local text-only smoke", description: "" });
@@ -71,11 +94,13 @@ export const run = internalJobAction({
       check(detail?.version === 5 && detail.lifecycle === "active" && detail.archivedAt === undefined && detail.status === "acknowledged" && detail.urgencyScore === 42, "edit/status/urgency/archive/restore");
     }
     const id = await ctx.runMutation(internal.local_smoke.annotationFixture, { token: alice });
-    await denied(() => ctx.runMutation(api.annotations.addAnnotation, { token: bob, id, kind: "point", mediaIndex: 0, x: 0.5, y: 0.5, text: "Denied" }), "TICKET_UNAVAILABLE", "foreign customer annotation denied");
-    const annotationId = await ctx.runMutation(api.annotations.addAnnotation, { token: alice, id, kind: "point", mediaIndex: 0, x: 0.5, y: 0.5, text: "Local note" });
-    await ctx.runMutation(api.annotations.updateAnnotation, { token: staff, id, annotationId, text: "Reviewed local note" });
-    await ctx.runMutation(api.annotations.removeAnnotation, { token: alice, id, annotationId });
-    await ctx.runMutation(api.annotations.restoreAnnotation, { token: staff, id, annotationId });
+    await denied(() => ctx.runMutation(api.annotations.addAnnotation, { token: bob, id, expectedVersion: 0, kind: "point", mediaIndex: 0, x: 0.5, y: 0.5, text: "Denied" }), "TICKET_UNAVAILABLE", "foreign customer annotation denied");
+    const added = await ctx.runMutation(api.annotations.addAnnotation, { token: alice, id, expectedVersion: 0, kind: "point", mediaIndex: 0, x: 0.5, y: 0.5, text: "Local note" });
+    const { annotationId } = added;
+    const updated = await ctx.runMutation(api.annotations.updateAnnotation, { token: staff, id, annotationId, expectedVersion: added.version, text: "Reviewed local note" });
+    const removed = await ctx.runMutation(api.annotations.removeAnnotation, { token: alice, id, annotationId, expectedVersion: updated.version });
+    const restored = await ctx.runMutation(api.annotations.restoreAnnotation, { token: staff, id, annotationId, expectedVersion: removed.version });
+    check(restored.version === 4, "annotation delete undo uses returned version");
     check((await ctx.runQuery(api.annotations.listAnnotationActivity, { token: alice, id })).length === 4, "annotation create/edit/remove/restore with fake metadata");
     for (const token of [staff, alice, bob, ...seeded.sessions]) await ctx.runMutation(api.auth.logout, { token });
     return { ok: true, checks };

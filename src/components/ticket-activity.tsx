@@ -3,7 +3,7 @@ import { statusMeta } from "@/components/ticket-status";
 import type { TicketEvent } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-const actionKeys = { created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", urgency_changed: "actionUrgencyChanged", urgency_undone: "actionUrgencyUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored" } as const;
+const actionKeys = { created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", urgency_changed: "actionUrgencyChanged", urgency_undone: "actionUrgencyUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored", annotation_changed: "actionAnnotationChanged", purge_claimed: "actionPurgeClaimed" } as const;
 
 export function TicketActivityList({ events }: { events: TicketEvent[] }) {
   const { t, formatDate } = useI18n();

@@ -72,6 +72,7 @@ test("the patch and the audit after state cannot disagree", () => {
     status: "acknowledged",
     version: 4,
     mediaCount: 0,
+    annotationCount: 0,
     lifecycle: "active",
   });
 });
@@ -121,6 +122,15 @@ test("leaves the ticket and the changes it was given untouched", () => {
   plan.patch.status = "waiting";
   assert.equal(doc.status, "new");
   assert.equal(plan.after.status, "done");
+});
+
+test("restore deliberately removes archivedAt in the patch and its audit snapshot", () => {
+  const plan = planTicketChange({ doc: ticket({ lifecycle: "archived", archivedAt: 100 }), expectedVersion: 3,
+    changes: { lifecycle: "active", archivedAt: undefined }, now: 500 });
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.patch, "archivedAt"), true);
+  assert.equal(plan.patch.archivedAt, undefined);
+  assert.equal(plan.before.archivedAt, 100);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.after, "archivedAt"), false);
 });
 
 test("attaching media updates the row and records only media counts in the audit snapshot", () => {

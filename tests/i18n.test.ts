@@ -41,7 +41,7 @@ test("new customer portal and board screens are translated in both languages", (
     "urgencyScoreShort",
     "urgencyUnscored",
     "saveUrgency",
-    "moveConflict",
+    "versionConflict",
     "invalidCredentials",
   ] as const;
   for (const key of keys) {
@@ -73,6 +73,8 @@ test("stable error codes are localized", () => {
   const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
   assert.equal(localizeError(new Error("SESSION_EXPIRED"), thai), "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
   assert.equal(localizeError(new Error("IMAGE_TOO_LARGE"), english), "Images must be 8MB or smaller.");
+  assert.equal(localizeError(new ConvexError({ code: "ANNOTATION_LIMIT_EXCEEDED" }), english), translate("en", "annotationLimitExceeded"));
+  assert.equal(localizeError(new ConvexError({ code: "REQUEST_ID_CONFLICT" }), thai), translate("th", "requestIdConflict"));
   assert.equal(
     localizeError(new Error("UPLOAD_INCOMPLETE"), thai),
     "อัปโหลดไฟล์ยังไม่เสร็จสมบูรณ์ กรุณาลองอีกครั้ง",
@@ -93,7 +95,7 @@ test("authorization and account error codes are localized, including structured 
     localizeError(new Error("CUSTOMER_ACCOUNTS_UNAVAILABLE"), english),
     translate("en", "accountsUnavailable"),
   );
-  assert.equal(localizeError(new Error("VERSION_CONFLICT"), english), translate("en", "moveConflict"));
+  assert.equal(localizeError(new Error("VERSION_CONFLICT"), english), translate("en", "versionConflict"));
   assert.equal(localizeError(new Error("REQUIRED_MEDIA"), english), translate("en", "requiredMedia"));
   // Public handlers return structured data; text mentioning a code is not authoritative.
   assert.equal(
@@ -105,6 +107,15 @@ test("authorization and account error codes are localized, including structured 
 test("error messages cannot impersonate a structured domain rejection", () => {
   const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
   assert.equal(localizeError(new Error("Server Error STAFF_ONLY"), english), translate("en", "genericError"));
+});
+
+test("annotation and detail version conflicts use accurate copy in both languages", () => {
+  for (const language of ["en", "th"] as const) {
+    const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+    const copy = localizeError(new ConvexError({ code: "VERSION_CONFLICT" }), t);
+    assert.equal(copy, t("versionConflict"));
+    assert.doesNotMatch(copy, /board|กระดาน|รีเฟรช/i);
+  }
 });
 
 test("Thai dates use Buddhist Era years", () => {

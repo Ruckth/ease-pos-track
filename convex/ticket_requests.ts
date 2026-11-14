@@ -1,8 +1,8 @@
 /**
  * Rules for externally keyed ticket creation requests.
  *
- * Pure module: no Convex imports, so the retry semantics can be unit tested and
- * are shared by anything that creates a ticket on behalf of an outside caller.
+ * Request-id validation is shared with the CLI. Runtime hashing consumes the
+ * shared canonical input; receipt persistence/authorization lives in the domain.
  *
  * The contract a caller can rely on: the same request id with the same content
  * yields the same ticket, and the same request id with different content is an
@@ -10,6 +10,7 @@
  */
 
 export const MAX_REQUEST_ID_LENGTH = 200;
+export type TicketContent = { title: string; description: string };
 
 /**
  * Trims and bounds a caller-supplied request id. Control characters are refused
@@ -23,21 +24,8 @@ export function normalizeRequestId(value: string) {
   return requestId;
 }
 
-export type TicketContent = {
-  title: string;
-  description: string;
-};
-
-/** True when a retry carries exactly the content the stored ticket was created with. */
-export function isSameTicketRequest(existing: TicketContent, requested: TicketContent) {
-  return existing.title === requested.title && existing.description === requested.description;
-}
-
-/**
- * Guards a retry. Reusing a request id for different content is a caller bug —
- * failing loudly is safer than creating a duplicate ticket the caller will not
- * expect, or editing a ticket someone may already be working on.
- */
-export function assertSameTicketRequest(existing: TicketContent, requested: TicketContent) {
-  if (!isSameTicketRequest(existing, requested)) throw new Error("REQUEST_ID_CONFLICT");
+/** Runtime boundary: shared canonicalization supplies the input, never a client digest. */
+export async function hashTicketRequest(fingerprint: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fingerprint));
+  return { digestVersion: 1, inputDigest: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("") };
 }

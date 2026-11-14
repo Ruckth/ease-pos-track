@@ -1,4 +1,5 @@
 import type { Doc } from "./_generated/dataModel";
+import { MEDIA_POLICY } from "../shared/ticket-contracts";
 
 export type AnnotationRecord = NonNullable<Doc<"tickets">["annotations"]>[number];
 
@@ -22,7 +23,15 @@ type AnnotationMedia = {
   type: string;
 };
 
-const MAX_ANNOTATION_LENGTH = 2_000;
+const MAX_ANNOTATION_LENGTH = MEDIA_POLICY.maxAnnotationTextLength;
+
+/** Soft-deleted content still consumes the embedded document budget. */
+export function validateAnnotationBudget(annotations: readonly { text: string }[]) {
+  if (annotations.length > MEDIA_POLICY.maxAnnotationCount
+    || annotations.reduce((total, item) => total + item.text.length, 0) > MEDIA_POLICY.maxAnnotationTotalTextLength) {
+    throw new Error("ANNOTATION_LIMIT_EXCEEDED");
+  }
+}
 
 function clamp01(value: number) {
   return Math.min(1, Math.max(0, value));

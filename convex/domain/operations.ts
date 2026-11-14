@@ -18,7 +18,9 @@ import {
   updateAnnotationRecord,
 } from "../annotation_state";
 import { requireCurrentVersion, validateTicketText, validateUrgencyScore } from "../ticket_state";
-import { assertSameTicketRequest, normalizeRequestId } from "../ticket_requests";
+import { hashTicketRequest, normalizeRequestId } from "../ticket_requests";
+import { ticketRequestFingerprintInput, ticketMediaRequestFingerprintInput } from "../../shared/ticket-contracts";
+import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./requests";
 import { normalizeProjectKey } from "../ticket_numbers";
 import { isMember, projectByKey, requireUsableProject, resolveStaffProject } from "./projects";
 import { validateMediaItems } from "../../shared/media-policy";
@@ -247,12 +249,19 @@ export const createTicket = mutationOperation({
     description: v.string(),
     media: v.array(mediaItemValidator),
     annotations: v.optional(v.array(annotationCreateInputValidator)),
+    requestId: v.string(),
     uploadIntentId: v.id("uploadIntents"),
     uploadIntentSecret: v.string(),
   },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
-
+    const project = await requireUsableProject(ctx, actor, args.projectId);
+    const request: RequestScope = {
+      operation: "ticket.create", requestId: normalizeRequestId(args.requestId), actor, projectId: args.projectId,
+      ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, mediaKeys: args.media.map(item => item.key) })),
+    };
+    const replay = await replayTicketRequest(ctx, request);
+    if (replay) return replay.ticket._id;
     const { title, description } = validateTicketText(args.title, args.description);
     const intent = requireOwnedUploadIntent(
       await ctx.db.get(args.uploadIntentId),
@@ -260,11 +269,7 @@ export const createTicket = mutationOperation({
       actor,
       args.uploadIntentSecret,
     );
-    // The intent stays bound to the session that created it, and therefore to
-    // the same actor; the actor columns are re-checked as defence in depth.
-    if (intent.status === "attached" && intent.ticketId) return intent.ticketId;
     verifyPendingUploadIntent(intent, args.media);
-    const project = await requireUsableProject(ctx, actor, args.projectId);
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
@@ -281,7 +286,8 @@ export const createTicket = mutationOperation({
       author: { sessionId: session._id, ...actorFields(actor) },
       now,
     });
-    await ctx.db.patch(intent._id, { status: "attached", ticketId: created._id, updatedAt: now });
+    await ctx.db.patch(intent._id, { status: "attached", ticketId: created._id, uploadedFiles: args.media, updatedAt: now });
+    await commitTicketRequest(ctx, request, { ticketId: created._id, version: created.version });
     return created._id;
   },
 });
@@ -306,16 +312,12 @@ export const createTextTicket = mutationOperation({
     const { title, description } = validateTicketText(args.title, args.description);
     const selected = await resolveStaffProject(ctx, args.projectKey);
     const project = await requireUsableProject(ctx, actor, selected._id);
-    const existing = await ctx.db
-      .query("tickets")
-      .withIndex("by_external_request", (q) => q.eq("externalRequestId", requestId))
-      .unique();
-    if (existing) {
-      if (!canReadTicket(actor, existing) || existing.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
-      assertSameTicketRequest(existing, { title, description });
-      if (existing.projectKey !== project.key) throw new Error("REQUEST_ID_CONFLICT");
-      return { ticket: existing, created: false, requestId };
-    }
+    const request: RequestScope = {
+      operation: "ticket.create", requestId, actor, projectId: selected._id,
+      ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, projectId: selected._id })),
+    };
+    const replay = await replayTicketRequest(ctx, request);
+    if (replay) return { ticket: replay.ticket, created: false, requestId };
 
     const created = await createTicketRecord(ctx, {
       project,
@@ -324,9 +326,9 @@ export const createTextTicket = mutationOperation({
       media: [],
       ownership: newTicketOwnership(actor),
       author: { sessionId: session._id, ...actorFields(actor), ...(actor.role === "staff" ? { createdVia: "codex" as const } : {}) },
-      externalRequestId: requestId,
       now: Date.now(),
     });
+    await commitTicketRequest(ctx, request, { ticketId: created._id, version: created.version });
     return { ticket: created, created: true, requestId };
   },
 });
@@ -339,9 +341,18 @@ export const attachTicketMedia = mutationOperation({
     uploadIntentId: v.id("uploadIntents"),
     uploadIntentSecret: v.string(),
     expectedVersion: v.number(),
+    requestId: v.string(),
   },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
+    const visible = await readableTicket(ctx, actor, args.id);
+    if (!visible) throw new Error("TICKET_UNAVAILABLE");
+    const request: RequestScope = {
+      operation: "ticket.attach_media", requestId: normalizeRequestId(args.requestId), actor, projectId: visible.projectId,
+      ...await hashTicketRequest(ticketMediaRequestFingerprintInput({ actor, projectId: visible.projectId, ticketId: args.id, mediaKeys: args.media.map(item => item.key) })),
+    };
+    const replay = await replayTicketRequest(ctx, request);
+    if (replay) return { eventId: replay.receipt.eventId ?? null, version: replay.receipt.version };
     const doc = await requireWritableTicket(ctx, actor, args.id);
     const intent = requireOwnedUploadIntent(
       await ctx.db.get(args.uploadIntentId),
@@ -349,10 +360,6 @@ export const attachTicketMedia = mutationOperation({
       actor,
       args.uploadIntentSecret,
     );
-    if (intent.status === "attached") {
-      if (intent.ticketId !== doc._id) throw new Error("UPLOAD_INTENT_MISMATCH");
-      return { eventId: null, version: doc.version };
-    }
     if (args.media.length === 0) throw new Error("UPLOAD_INCOMPLETE");
     validateMediaItems([...doc.media, ...args.media]);
     verifyPendingUploadIntent(intent, args.media);
@@ -366,7 +373,8 @@ export const attachTicketMedia = mutationOperation({
       author: { sessionId: session._id, ...actorFields(actor), createdVia: "codex" },
       now,
     });
-    await ctx.db.patch(intent._id, { status: "attached", ticketId: doc._id, updatedAt: now });
+    await ctx.db.patch(intent._id, { status: "attached", ticketId: doc._id, uploadedFiles: args.media, updatedAt: now });
+    await commitTicketRequest(ctx, request, { ticketId: doc._id, ...changed });
     return changed;
   },
 });
@@ -578,6 +586,7 @@ export const addAnnotation = mutationOperation({
   args: {
     token: v.string(),
     id: v.id("tickets"),
+    expectedVersion: v.number(),
     mediaIndex: v.number(),
     kind: v.union(v.literal("point"), v.literal("time")),
     x: v.optional(v.number()),
@@ -594,9 +603,9 @@ export const addAnnotation = mutationOperation({
     const now = Date.now();
     const annotation = createAnnotationRecord(doc.media, args, label, crypto.randomUUID(), now);
 
-    await ctx.db.patch(args.id, {
-      annotations: [...annotations, annotation],
-      updatedAt: now,
+    const { version } = await applyTicketChange(ctx, {
+      doc, expectedVersion: args.expectedVersion, changes: { annotations: [...annotations, annotation] },
+      action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
 
     await recordAnnotationEvent(ctx, {
@@ -609,7 +618,7 @@ export const addAnnotation = mutationOperation({
       createdAt: now,
     });
 
-    return annotation.id;
+    return { annotationId: annotation.id, version };
   },
 });
 
@@ -617,6 +626,7 @@ export const updateAnnotation = mutationOperation({
   args: {
     token: v.string(),
     id: v.id("tickets"),
+    expectedVersion: v.number(),
     annotationId: v.string(),
     text: v.optional(v.string()),
     x: v.optional(v.number()),
@@ -636,7 +646,10 @@ export const updateAnnotation = mutationOperation({
     const after = updateAnnotationRecord(before, args, now);
     annotations[index] = after;
 
-    await ctx.db.patch(args.id, { annotations, updatedAt: now });
+    const { version } = await applyTicketChange(ctx, {
+      doc, expectedVersion: args.expectedVersion, changes: { annotations },
+      action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
+    });
     const eventId = await recordAnnotationEvent(ctx, {
       ticketId: args.id,
       annotationId: args.annotationId,
@@ -647,12 +660,12 @@ export const updateAnnotation = mutationOperation({
       ...actorFields(actor),
       createdAt: now,
     });
-    return { eventId };
+    return { eventId, version };
   },
 });
 
 export const undoAnnotationUpdate = mutationOperation({
-  args: { token: v.string(), eventId: v.id("annotationEvents") },
+  args: { token: v.string(), eventId: v.id("annotationEvents"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
@@ -672,7 +685,10 @@ export const undoAnnotationUpdate = mutationOperation({
     const before = annotations[index];
     const after = { ...event.before, updatedAt: now };
     annotations[index] = after;
-    await ctx.db.patch(doc._id, { annotations, updatedAt: now });
+    await applyTicketChange(ctx, {
+      doc, expectedVersion: args.expectedVersion, changes: { annotations },
+      action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
+    });
     await recordAnnotationEvent(ctx, {
       ticketId: doc._id,
       annotationId: event.annotationId,
@@ -690,6 +706,7 @@ export const removeAnnotation = mutationOperation({
   args: {
     token: v.string(),
     id: v.id("tickets"),
+    expectedVersion: v.number(),
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
@@ -704,9 +721,9 @@ export const removeAnnotation = mutationOperation({
     const now = Date.now();
     const after = softDeleteAnnotationRecord(before, now);
     annotations[index] = after;
-    await ctx.db.patch(args.id, {
-      annotations,
-      updatedAt: now,
+    const { version } = await applyTicketChange(ctx, {
+      doc, expectedVersion: args.expectedVersion, changes: { annotations },
+      action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
     await recordAnnotationEvent(ctx, {
       ticketId: args.id,
@@ -718,6 +735,7 @@ export const removeAnnotation = mutationOperation({
       ...actorFields(actor),
       createdAt: now,
     });
+    return { version };
   },
 });
 
@@ -725,6 +743,7 @@ export const restoreAnnotation = mutationOperation({
   args: {
     token: v.string(),
     id: v.id("tickets"),
+    expectedVersion: v.number(),
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
@@ -740,7 +759,10 @@ export const restoreAnnotation = mutationOperation({
     const after = restoreAnnotationRecord(before, now);
     annotations[index] = after;
 
-    await ctx.db.patch(args.id, { annotations, updatedAt: now });
+    const { version } = await applyTicketChange(ctx, {
+      doc, expectedVersion: args.expectedVersion, changes: { annotations },
+      action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
+    });
     await recordAnnotationEvent(ctx, {
       ticketId: args.id,
       annotationId: args.annotationId,
@@ -751,6 +773,7 @@ export const restoreAnnotation = mutationOperation({
       ...actorFields(actor),
       createdAt: now,
     });
+    return { version };
   },
 });
 

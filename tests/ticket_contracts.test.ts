@@ -14,10 +14,10 @@ const request: TicketRequestInput = {
   title: "  Printer jams  ", description: "  Long receipts\nstop printing  ",
 };
 
-test("request normalization trims text, defaults arrays and is versioned without mutating input", () => {
+test("request normalization trims text and defaults arrays without mutating input", () => {
   const before = structuredClone(request);
   assert.deepEqual(normalizeTicketRequest(request), {
-    version: 1, operation: "ticket.create", actor: request.actor, projectId: request.projectId,
+    operation: "ticket.create", actor: request.actor, projectId: request.projectId,
     title: "Printer jams", description: "Long receipts\nstop printing", mediaKeys: [], annotations: [],
   });
   assert.deepEqual(request, before);
@@ -28,7 +28,7 @@ test("request normalization trims text, defaults arrays and is versioned without
 
 test("fingerprint input has a stable encoding independent of property insertion order", () => {
   assert.equal(ticketRequestFingerprintInput(request),
-    '{"version":1,"operation":"ticket.create","actor":{"role":"customer","customerId":"customer-1"},"projectId":"project-1","title":"Printer jams","description":"Long receipts\\nstop printing","mediaKeys":[],"annotations":[]}');
+    '{"operation":"ticket.create","actor":{"role":"customer","customerId":"customer-1"},"projectId":"project-1","title":"Printer jams","description":"Long receipts\\nstop printing","mediaKeys":[],"annotations":[]}');
   assert.equal(ticketRequestFingerprintInput(request), ticketRequestFingerprintInput({
     description: request.description, title: request.title, projectId: request.projectId,
     actor: { customerId: "customer-1" as Id<"customers">, role: "customer" },

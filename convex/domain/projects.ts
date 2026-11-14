@@ -43,8 +43,8 @@ export async function activeProjects(ctx: Ctx) {
 }
 
 /**
- * The Project a staff tool writes to: the one named, or the only active Project
- * when none is named. With several Projects the caller must choose.
+ * Resolve an active Project identity. Callers must check actor access before
+ * comparing a request receipt.
  */
 export async function resolveStaffProject(ctx: Ctx, key: string | undefined) {
   if (key !== undefined) {

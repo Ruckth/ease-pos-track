@@ -18,6 +18,7 @@ import type * as customers from "../customers.js";
 import type * as domain_operation from "../domain/operation.js";
 import type * as domain_operations from "../domain/operations.js";
 import type * as domain_projects from "../domain/projects.js";
+import type * as domain_requests from "../domain/requests.js";
 import type * as domain_tickets from "../domain/tickets.js";
 import type * as functions from "../functions.js";
 import type * as local_smoke from "../local_smoke.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "domain/operation": typeof domain_operation;
   "domain/operations": typeof domain_operations;
   "domain/projects": typeof domain_projects;
+  "domain/requests": typeof domain_requests;
   "domain/tickets": typeof domain_tickets;
   functions: typeof functions;
   local_smoke: typeof local_smoke;

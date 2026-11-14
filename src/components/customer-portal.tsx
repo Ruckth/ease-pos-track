@@ -434,32 +434,32 @@ function CustomerTicketDialog({
 
   async function handleUpdateAnnotation(input: AnnotationUpdateInput) {
     if (!item) return;
-    const result = await updateAnnotation({ token, id: item._id, ...input });
+    const result = await updateAnnotation({ token, id: item._id, ...input, expectedVersion: item.version });
     toast.success(t("commentUpdated"), {
       action: {
         label: t("undo"),
         onClick: () => {
-          void undoAnnotationUpdate({ token, eventId: result.eventId })
+          void undoAnnotationUpdate({ token, eventId: result.eventId, expectedVersion: result.version })
             .catch((undoError) => toast.error(localizeError(undoError, t)));
         },
       },
     });
   }
 
-  async function handleRestoreAnnotation(annotationId: string, announce = true) {
+  async function handleRestoreAnnotation(annotationId: string) {
     if (!item) return;
-    await restoreAnnotation({ token, id: item._id, annotationId });
-    if (announce) toast.success(t("commentRestored"));
+    await restoreAnnotation({ token, id: item._id, annotationId, expectedVersion: item.version });
+    toast.success(t("commentRestored"));
   }
 
   async function handleDeleteAnnotation(annotationId: string) {
     if (!item) return;
-    await removeAnnotation({ token, id: item._id, annotationId });
+    const result = await removeAnnotation({ token, id: item._id, annotationId, expectedVersion: item.version });
     toast.success(t("commentDeleted"), {
       action: {
         label: t("undo"),
         onClick: () => {
-          void handleRestoreAnnotation(annotationId, false)
+          void restoreAnnotation({ token, id: item._id, annotationId, expectedVersion: result.version })
             .catch((undoError) => toast.error(localizeError(undoError, t)));
         },
       },
@@ -490,7 +490,7 @@ function CustomerTicketDialog({
             media={item.media}
             annotations={annotations}
             onCreateAnnotation={async (input) => {
-              await addAnnotation({ token, id: item._id, ...input });
+              await addAnnotation({ token, id: item._id, ...input, expectedVersion: item.version });
             }}
             onUpdateAnnotation={handleUpdateAnnotation}
             onDeleteAnnotation={handleDeleteAnnotation}

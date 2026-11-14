@@ -91,7 +91,7 @@ test("domain Project membership and Ticket ownership remain independent of entry
     .rejects.toMatchObject({ data: { code: "TICKET_UNAVAILABLE" } });
   await expect(t.mutation(api.tickets.archiveTicket, { token: alice, id, expectedVersion: 0 }))
     .rejects.toMatchObject({ data: { code: "TICKET_UNAVAILABLE" } });
-  await expect(t.mutation(api.annotations.addAnnotation, { token: alice, id, mediaIndex: 0, kind: "point", x: 0, y: 0, text: "Denied" }))
+  await expect(t.mutation(api.annotations.addAnnotation, { token: alice, id, expectedVersion: 0, mediaIndex: 0, kind: "point", x: 0, y: 0, text: "Denied" }))
     .rejects.toMatchObject({ data: { code: "TICKET_UNAVAILABLE" } });
   expect(await t.query(api.tickets.getTicket, { token: staff, id })).not.toBeNull();
   await expect(t.mutation(api.tickets.createTextTicket, {
@@ -104,7 +104,7 @@ test("both roles create and edit text-only Tickets; workflow, urgency and restor
   const intent = await t.mutation(api.uploads.createUploadIntent, { token: alice, idempotencyKey: "customer-text-only", files: [] });
   const id = await t.mutation(api.tickets.createTicket, {
     token: alice, projectId: seed.projects[0].id, title: " Customer Ticket ", description: " Text only ", media: [],
-    uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret,
+    uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret, requestId: "customer-text-only",
   });
   const customer = await t.query(api.tickets.getTicket, { token: alice, id });
   expect(customer).toMatchObject({ title: "Customer Ticket", description: "Text only", lifecycle: "active", version: 0, media: [], annotations: [], origin: "customer" });
@@ -140,15 +140,15 @@ test("both roles create and edit text-only Tickets; workflow, urgency and restor
 test("annotations enforce ownership and media validity; both roles can annotate owned Tickets", async () => {
   const { t, seed, alice, bob, staff } = await fixture();
   const id = seed.tickets[1];
-  const point = { id, mediaIndex: 0, kind: "point" as const, x: 0.2, y: 0.3, text: "Point here" };
+  const point = { id, expectedVersion: 0, mediaIndex: 0, kind: "point" as const, x: 0.2, y: 0.3, text: "Point here" };
   await expect(t.mutation(api.annotations.addAnnotation, { ...point, token: alice })).rejects.toThrow("INVALID_MEDIA_INDEX");
   // Metadata fixture only. No upload or real provider call.
   await t.run(ctx => ctx.db.patch(id, { media: [{ key: "fake-only", name: "fixture.png", type: "image/png", size: 1, url: "https://fixture.invalid/image.png" }] }));
   await expect(t.mutation(api.annotations.addAnnotation, { ...point, token: bob })).rejects.toThrow("TICKET_UNAVAILABLE");
-  const annotationId = await t.mutation(api.annotations.addAnnotation, { ...point, token: alice });
-  await t.mutation(api.annotations.updateAnnotation, { token: staff, id, annotationId, text: "Reviewed note" });
-  await t.mutation(api.annotations.removeAnnotation, { token: alice, id, annotationId });
-  await t.mutation(api.annotations.restoreAnnotation, { token: staff, id, annotationId });
+  const { annotationId } = await t.mutation(api.annotations.addAnnotation, { ...point, token: alice });
+  await t.mutation(api.annotations.updateAnnotation, { token: staff, id, annotationId, expectedVersion: 1, text: "Reviewed note" });
+  await t.mutation(api.annotations.removeAnnotation, { token: alice, id, annotationId, expectedVersion: 2 });
+  await t.mutation(api.annotations.restoreAnnotation, { token: staff, id, annotationId, expectedVersion: 3 });
   const detail = await t.query(api.tickets.getTicket, { token: alice, id });
   expect(detail?.annotations[0]).toMatchObject({ text: "Reviewed note" });
   expect(detail?.annotations[0]).not.toHaveProperty("deletedAt");
@@ -221,7 +221,7 @@ test("customer handlers deny status/urgency undo, media attachment and Ticket-nu
     .rejects.toMatchObject({ data: { code: "STAFF_ONLY" } });
   await expect(t.mutation(api.tickets.undoUrgencyScore, { token: alice, eventId: urgency.eventId!, expectedVersion: 2 }))
     .rejects.toMatchObject({ data: { code: "STAFF_ONLY" } });
-  await expect(t.mutation(api.tickets.attachTicketMedia, { token: alice, id, media: [], uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret, expectedVersion: 2 }))
+  await expect(t.mutation(api.tickets.attachTicketMedia, { token: alice, id, media: [], requestId: "denied-attach", uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret, expectedVersion: 2 }))
     .rejects.toMatchObject({ data: { code: "STAFF_ONLY" } });
   await expect(t.query(api.tickets.getTicketByTicketNumber, { token: alice, projectKey: "POS", ticketNumber: 2 }))
     .rejects.toMatchObject({ data: { code: "STAFF_ONLY" } });

@@ -7,7 +7,7 @@ import { EXIT, TicketCliError } from "../scripts/ticket/errors";
 import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
 import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
 import type { TicketRef } from "../scripts/ticket/cli";
-import type { TicketDocument, TicketRemote } from "../scripts/ticket/remote";
+import type { TicketAttachInput, TicketDocument, TicketRemote } from "../scripts/ticket/remote";
 import { classifyRemoteError, runTicketCli, type TicketCliDeps } from "../scripts/ticket/run";
 import { toStoredTicketStatus, type TicketStatus } from "../scripts/ticket/status";
 
@@ -86,7 +86,7 @@ class FakeRemote implements TicketRemote {
   async recordUploadedFile(url: string, input: { intentId: string; secret: string; file: TicketDocument["media"][number] }) {
     this.record("recordUploadedFile", url, input);
   }
-  async attachImages(url: string, token: string, input: { ref: TicketRef; expectedVersion: number; intentId: string; secret: string; media: TicketDocument["media"] }) {
+  async attachImages(url: string, token: string, input: TicketAttachInput) {
     this.record("attachImages", url, token, input);
     this.rows[0] = ticket({ ...this.rows[0], media: [...this.rows[0].media, ...input.media], version: input.expectedVersion + 1 });
     return this.rows[0];
@@ -498,6 +498,22 @@ test("an idempotent create retry reports the original Ticket without claiming a 
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).created, false);
   assert.equal(JSON.parse(result.stdout).requestId, "same-request");
+});
+
+test("an attached intent still sends the request id for authoritative attachment conflict checks", async () => {
+  const { deps, remote } = fixture();
+  remote.createUploadIntent = async () => ({
+    intentId: "intent-id" as never, secret: "secret", ticketId: remote.rows[0]._id,
+    uploadedFiles: [{ key: "existing-key", name: "first.png", size: 7, type: "image/png", url: "https://fixture.invalid/first.png" }],
+  });
+  deps.images.upload = async () => { throw new Error("Must reuse the uploaded file"); };
+  remote.attachImages = async (_url, _token, input) => {
+    assert.equal(input.requestId, "same-attachment-id");
+    throw new Error("REQUEST_ID_CONFLICT");
+  };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "same-attachment-id"], deps);
+  assert.equal(result.exitCode, 5);
+  assert.equal(JSON.parse(result.stderr).code, "REQUEST_ID_CONFLICT");
 });
 
 test("update, status, archive, and restore pass expectedVersion and return the new version", async () => {

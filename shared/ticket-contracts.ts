@@ -7,7 +7,7 @@ import type { Id } from "../convex/_generated/dataModel.js";
 export type TicketErrorCode =
   | "SESSION_EXPIRED" | "STAFF_ONLY" | "PROJECT_NOT_FOUND" | "PROJECT_REQUIRED"
   | "TICKET_UNAVAILABLE" | "VERSION_CONFLICT" | "REQUEST_ID_CONFLICT"
-  | "INVALID_INPUT" | "MEDIA_LIMIT_EXCEEDED" | "UPLOAD_INTENT_INVALID"
+  | "INVALID_INPUT" | "MEDIA_LIMIT_EXCEEDED" | "ANNOTATION_LIMIT_EXCEEDED" | "UPLOAD_INTENT_INVALID"
   | "MEDIA_OWNERSHIP_CONFLICT" | "TICKET_PURGING" | "STORAGE_NOT_CONFIGURED"
   | "UPLOAD_CALLBACK_NOT_CONFIGURED";
 
@@ -51,13 +51,14 @@ export type StorageDeletionOutcome =
 // Shared metadata limits: shared/media-policy.ts and convex/annotation_state.ts.
 // Positive file sizes, nonblank names and image/ or video/ MIME prefixes remain
 // validator rules outside this upper-bound policy. Node tests detect limit drift.
-// There is no existing total annotation count/text budget; P2 must set that policy.
 export const MEDIA_POLICY = {
   image: { maxCount: 10, maxBytes: 8 * 1024 * 1024 },
   video: { maxCount: 3, maxBytes: 64 * 1024 * 1024 },
   maxFileNameLength: 255,
   maxMimeTypeLength: 100,
   maxAnnotationTextLength: 2_000,
+  maxAnnotationCount: 100,
+  maxAnnotationTotalTextLength: 50_000,
 } as const;
 
 type CreateArgs = FunctionArgs<typeof api.tickets.createTicket>;
@@ -67,17 +68,20 @@ export type TicketRequestInput = Pick<CreateArgs, "title" | "description" | "ann
   mediaKeys?: readonly string[];
 };
 
+function normalizeTicketActor(actor: TicketRequestInput["actor"]) {
+  return actor.role === "staff"
+    ? { role: "staff" as const }
+    : { role: "customer" as const, customerId: actor.customerId };
+}
+
 /** Pure canonicalization of validated create input. Never include a session or secret.
  * Coordinates are preserved, not clamped; callers must supply already-validated input.
- * Change the version when normalization or fields change. Order is significant.
+ * Bump hashTicketRequest's digest version when this encoding changes. Order is significant.
  */
 export function normalizeTicketRequest(input: TicketRequestInput) {
   return {
-    version: 1 as const,
     operation: "ticket.create" as const,
-    actor: input.actor.role === "staff"
-      ? { role: "staff" as const }
-      : { role: "customer" as const, customerId: input.actor.customerId },
+    actor: normalizeTicketActor(input.actor),
     projectId: input.projectId,
     title: input.title.trim(),
     description: input.description.trim(),
@@ -99,6 +103,16 @@ export function normalizeTicketRequest(input: TicketRequestInput) {
  */
 export function ticketRequestFingerprintInput(input: TicketRequestInput): string {
   return JSON.stringify(normalizeTicketRequest(input));
+}
+
+export function ticketMediaRequestFingerprintInput(input: {
+  actor: TicketRequestInput["actor"];
+  projectId: Id<"projects">;
+  ticketId: Id<"tickets">;
+  mediaKeys: readonly string[];
+}) {
+  return JSON.stringify({ operation: "ticket.attach_media", actor: normalizeTicketActor(input.actor),
+    projectId: input.projectId, ticketId: input.ticketId, mediaKeys: [...input.mediaKeys] });
 }
 
 export type JobFence = { attempt: number; leaseId: string };

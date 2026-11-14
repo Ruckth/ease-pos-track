@@ -46,13 +46,17 @@ assert.equal((await command(args)).created, false);
 assert.equal((await command([...args.slice(0, 4), "Conflicting title", ...args.slice(5)], 5)).code, "REQUEST_ID_CONFLICT");
 await command(["get", created.ticket]);
 await command(["update", created.ticket, "--title", "CLI edited", "--expected-version", "0"]);
+const replay = await command(args);
+assert.equal(replay.created, false);
+assert.equal(replay.id, created.id);
+assert.equal((await command(["create", "--project", "APP", ...args.slice(3)], 5)).code, "REQUEST_ID_CONFLICT");
 await command(["status", created.ticket, "--status", "acknowledged", "--expected-version", "1"]);
 await command(["archive", created.ticket, "--expected-version", "2"]);
 const restored = await command(["restore", created.ticket, "--expected-version", "3"]);
 assert.equal(restored.ticket.version, 4);
 assert.equal(restored.ticket.archived, false);
 await command(["logout"]);
-console.log(JSON.stringify({ ok: true, target: url, checks: ["login", "whoami", "create", "retry", "request conflict exit 5", "detail", "edit", "status", "archive", "restore", "logout", "single JSON result"] }));
+console.log(JSON.stringify({ ok: true, target: url, checks: ["login", "whoami", "create", "retry", "retry after edit", "content and Project conflict exit 5", "detail", "edit", "status", "archive", "restore", "logout", "single JSON result"] }));
 
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

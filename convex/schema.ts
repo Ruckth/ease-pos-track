@@ -69,6 +69,8 @@ export const ticketEventAction = v.union(
   v.literal("status_undone"),
   v.literal("archived"),
   v.literal("restored"),
+  v.literal("annotation_changed"),
+  v.literal("purge_claimed"),
 );
 
 export const ticketStateValidator = v.object({
@@ -78,6 +80,7 @@ export const ticketStateValidator = v.object({
   urgencyScore: v.optional(v.number()),
   version: v.number(),
   mediaCount: v.number(),
+  annotationCount: v.number(),
   lifecycle: ticketLifecycle,
   archivedAt: v.optional(v.number()),
 });
@@ -125,9 +128,6 @@ export default defineSchema({
     ownerCustomerId: v.optional(v.id("customers")),
     origin: actorRole,
     createdVia: v.optional(ticketCreatedVia),
-    // Idempotency key supplied by a non-browser caller (the ticket CLI). Unset
-    // for UI tickets, so at most one ticket exists per external request id.
-    externalRequestId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -135,7 +135,6 @@ export default defineSchema({
     .index("by_project_lane", ["projectId", "lifecycle", "status", "ticketNumber"])
     .index("by_owner_project", ["ownerCustomerId", "projectId", "lifecycle", "ticketNumber"])
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
-    .index("by_external_request", ["externalRequestId"])
     .index("by_owner", ["ownerCustomerId", "createdAt"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["projectId", "ownerCustomerId", "lifecycle"] }),
   customers: defineTable({
@@ -207,6 +206,8 @@ export default defineSchema({
     outcome: v.union(v.literal("committed"), v.literal("unavailable")),
     ticketId: v.optional(v.id("tickets")),
     jobId: v.optional(v.id("mediaJobs")),
+    eventId: v.optional(v.id("ticketEvents")),
+    version: v.number(),
     createdAt: v.number(),
   }).index("by_operation_request", ["operation", "requestId"])
     .index("by_ticket", ["ticketId"]),

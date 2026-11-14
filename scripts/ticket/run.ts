@@ -82,11 +82,6 @@ async function attachTicketImages(
     requestId: uploadRequestId(input.requestId),
     files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
   });
-  if (intent.ticketId) {
-    const existing = await deps.remote.get(access.url, access.token, input.ref, false);
-    if (!existing || existing._id !== intent.ticketId) throw inputError("UPLOAD_INTENT_MISMATCH", "The image retry belongs to a different Ticket.");
-    return existing;
-  }
   const reusable = [...intent.uploadedFiles];
   const resolved = files.map((file) => {
     const index = reusable.findIndex((media) => sameFileMetadata(file, media));
@@ -106,6 +101,7 @@ async function attachTicketImages(
   return await deps.remote.attachImages(access.url, access.token, {
     ref: input.ref,
     expectedVersion: input.expectedVersion,
+    requestId: input.requestId,
     intentId: intent.intentId,
     secret: intent.secret,
     media,

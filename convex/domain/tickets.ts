@@ -3,7 +3,7 @@
 import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { newTicketOwnership } from "../authz";
-import type { AnnotationRecord } from "../annotation_state";
+import { validateAnnotationBudget, type AnnotationRecord } from "../annotation_state";
 import { requireCurrentVersion } from "../ticket_state";
 
 export type MediaItem = Doc<"tickets">["media"][number];
@@ -37,6 +37,7 @@ export function ticketState(doc: Doc<"tickets">) {
     version: doc.version,
     lifecycle: doc.lifecycle,
     mediaCount: doc.media.length,
+    annotationCount: doc.annotations.length,
     ...(doc.archivedAt === undefined ? {} : { archivedAt: doc.archivedAt }),
   };
 }
@@ -70,7 +71,7 @@ export async function recordTicketEvent(
   ctx: MutationCtx,
   input: {
     ticketId: Id<"tickets">;
-    action: "created" | "media_attached" | "edited" | "edit_undone" | "urgency_changed" | "urgency_undone" | "status_changed" | "status_undone" | "archived" | "restored";
+    action: "created" | TicketChangeAction;
     before?: ReturnType<typeof ticketState>;
     after?: ReturnType<typeof ticketState>;
     sourceEventId?: Id<"ticketEvents">;
@@ -85,7 +86,7 @@ export type TicketState = ReturnType<typeof ticketState>;
 
 /** Ticket fields that versioned state mutations may change. */
 export type TicketChanges = Partial<
-  Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "media" | "archivedAt" | "lifecycle">
+  Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "media" | "annotations" | "archivedAt" | "lifecycle">
 >;
 
 type TicketChangeAction =
@@ -97,7 +98,9 @@ type TicketChangeAction =
   | "status_changed"
   | "status_undone"
   | "archived"
-  | "restored";
+  | "restored"
+  | "annotation_changed"
+  | "purge_claimed";
 
 export type TicketChangePlan<Changes extends TicketChanges> = {
   version: number;
@@ -147,6 +150,7 @@ export async function applyTicketChange(
     now: number;
   },
 ) {
+  if (input.changes.annotations) validateAnnotationBudget(input.changes.annotations);
   const plan = planTicketChange(input);
   if (input.changes.title !== undefined || input.changes.description !== undefined) {
     Object.assign(plan.patch, { searchText: `${plan.after.title} ${plan.after.description}` });
@@ -195,7 +199,6 @@ export type NewTicket = {
   /** Derived from the actor by `newTicketOwnership`; never taken from a client. */
   ownership: ReturnType<typeof newTicketOwnership<Id<"customers">>>;
   author: TicketAuthor;
-  externalRequestId?: string;
   now: number;
 };
 
@@ -206,6 +209,7 @@ export type NewTicket = {
  */
 export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
   const annotations = input.annotations ?? [];
+  validateAnnotationBudget(annotations);
   const ticketNumber = await allocateTicketNumber(ctx, input.project._id);
   const ticketId = await ctx.db.insert("tickets", {
     projectId: input.project._id,
@@ -221,7 +225,6 @@ export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
     version: 0,
     ...input.ownership,
     ...(input.author.createdVia === undefined ? {} : { createdVia: input.author.createdVia }),
-    ...(input.externalRequestId === undefined ? {} : { externalRequestId: input.externalRequestId }),
     createdAt: input.now,
     updatedAt: input.now,
   });

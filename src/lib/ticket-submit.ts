@@ -19,6 +19,7 @@ export type UploadIntentHandle = {
   intentId: Id<"uploadIntents">;
   secret: string;
   ticketId?: Id<"tickets"> | undefined;
+  uploadedFiles: MediaItem[];
 };
 
 export type TicketDraft = {
@@ -39,6 +40,7 @@ export type SubmitTicketDeps = {
   }) => Promise<UploadIntentHandle>;
   createTicket: (args: {
     token: string;
+    requestId: string;
     title: string;
     description: string;
     media: MediaItem[];
@@ -80,11 +82,10 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
         type: item.file.type,
       })),
     });
-    // The intent was already turned into a ticket by an earlier attempt.
-    if (intent.ticketId) return;
-
-    activeIntent = { intentId: intent.intentId, secret: intent.secret };
-    const uploads = draft.items.length === 0
+    // An attached intent supplies the original media for receipt validation;
+    // it cannot bypass comparison of the original create input.
+    if (!intent.ticketId) activeIntent = { intentId: intent.intentId, secret: intent.secret };
+    const uploads = intent.ticketId ? intent.uploadedFiles : draft.items.length === 0
       ? []
       : await (deps.uploadMedia ?? uploadFiles)("ticketMedia", {
           files: draft.items.map((item) => item.file),
@@ -107,6 +108,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
 
     await deps.createTicket({
       token: deps.token,
+      requestId: draft.idempotencyKey,
       title: draft.title,
       description: draft.description,
       media,

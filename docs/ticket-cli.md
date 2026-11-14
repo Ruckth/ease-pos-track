@@ -111,13 +111,20 @@ key fails with `PROJECT_NOT_FOUND`.
 
 `--request-id` is the idempotency key. If omitted, one is generated and returned:
 
-- same request id, same title and description: the original Ticket is returned
-  with `"created":false`;
+- same request id, same normalized original title and description: the original
+  Ticket is returned with `"created":false`, even after the Ticket is edited;
 - same request id, different content or a different Project: `REQUEST_ID_CONFLICT`,
   exit 5, and no write.
 
 If a caller is uncertain whether a create completed, it must retry with the
 reported request id. A different request id can create a second Ticket.
+Receipts keep a SHA-256 digest of the original normalized input, durable actor
+and Project scope. Staff retries work across staff sessions; they cannot replay
+a customer's request identity. Creation and replay require an active Project;
+customers must still have membership. Missing, archived and inaccessible Projects
+all return `PROJECT_NOT_FOUND` to customers before comparing receipt input.
+After purge, a permanent receipt tombstone returns `TICKET_UNAVAILABLE` instead
+of recreating the Ticket. Rejected attempts reserve no request id.
 
 Images can also be added to an existing Ticket. Read its latest version first,
 then provide a retry key when the operation may need to be repeated:
@@ -135,6 +142,10 @@ intent instead of uploading or attaching them twice. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
 `create --dry-run` reads or downloads each image and reports its original name,
 size, and type, but does not upload it or contact the deployment.
+Attachment receipts use their own operation scope and compare the target Ticket
+and ordered media keys. A replay returns the committed attachment's version and
+audit reference, even if the Ticket has since changed; the CLI reads the current
+Ticket for its JSON result.
 
 Every state-changing command requires the latest `version` returned by create,
 list, or get. This preserves the existing optimistic concurrency check:
@@ -226,6 +237,7 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `convex/ticket_state.ts` | Ticket text limits and the optimistic-version check. |
 | `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
+| `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
 
 Verify changes with:
 
@@ -237,7 +249,7 @@ pnpm run build
 
 ## Disposable local implementation target
 
-P1 uses `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
+The implementation target is `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
 The wrapper preserves `.env.local`, which still selects shared development for
 ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
 by these fixtures. Do not run bare Convex commands or edit either environment
@@ -264,7 +276,10 @@ The backend smoke exercises real sign-in, both roles, creation, detail, edit,
 workflow, urgency, archive/restore and annotations. Annotations require media;
 the smoke uses fake metadata with no provider upload. The CLI smoke uses the
 real orchestration and Convex adapter with in-memory credentials and a fixed
-loopback URL, checking JSON, retries, conflict exit 5 and text-only commands.
+loopback URL, checking JSON, retries after edits, content/Project conflict exit 5
+and text-only commands. The backend smoke starts eight concurrent identical
+creates in separate mutations and asserts one Ticket row and one creation audit
+event, then checks replay after editing and content/Project conflicts.
 `--start` keeps the local backend alive for the CLI process; standalone `run`
 commands stop their local backend when they exit.
 
@@ -275,5 +290,7 @@ configured in both the HTTP process and Convex. Existing plaintext Keychain
 credentials are rejected; sign in again to write the current encoded format.
 Automatic media retention scheduling is paused until the durable P3–P4 media
 ownership/job implementation replaces the removed unsafe cleanup path.
-Immutable request-receipt replay after edits is the P2 gate; P1 preserves the
-existing create/retry behavior before edits.
+Ticket annotations share the Ticket version and audit path. The embedded budget
+is 100 entries and 50,000 text characters per Ticket, with 2,000 characters per
+entry; soft-deleted entries still count. Initial creation, additions, edits and
+undo all enforce the budget. Restore removes the archive timestamp explicitly.

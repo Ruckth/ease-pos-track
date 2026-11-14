@@ -6,6 +6,9 @@ import { createPasswordRecord } from "./password";
 import { createTicketRecord } from "./domain/tickets";
 import { requireUsableProject } from "./domain/projects";
 import { actorFields, newTicketOwnership } from "./authz";
+import { ticketRequestFingerprintInput } from "../shared/ticket-contracts";
+import { hashTicketRequest } from "./ticket_requests";
+import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./domain/requests";
 
 export function requireLocalFixtures() {
   let host: string | undefined;
@@ -62,14 +65,22 @@ export const install = internalJobMutation({
         token, ...actor, createdAt: now, expiresAt: now + 14 * 86_400_000,
       });
       const requestId = `seed-${name}`;
-      let ticket = await ctx.db.query("tickets").withIndex("by_external_request", q => q.eq("externalRequestId", requestId)).unique();
-      if (!ticket) ticket = await createTicketRecord(ctx, {
-        project: await requireUsableProject(ctx, actor, project._id),
-        title: actor.role === "staff" ? "Printer needs review" : `Ticket from ${name}`,
-        description: "Deterministic local text-only example", media: [],
-        ownership: newTicketOwnership(actor), author: { sessionId, ...actorFields(actor) },
-        externalRequestId: requestId, now,
-      });
+      const title = actor.role === "staff" ? "Printer needs review" : `Ticket from ${name}`;
+      const description = "Deterministic local text-only example";
+      const request: RequestScope = {
+        operation: "ticket.create", requestId, actor, projectId: project._id,
+        ...await hashTicketRequest(ticketRequestFingerprintInput({ actor, projectId: project._id, title, description })),
+      };
+      let ticket = (await replayTicketRequest(ctx, request))?.ticket;
+      if (!ticket) {
+        ticket = await createTicketRecord(ctx, {
+          project: await requireUsableProject(ctx, actor, project._id),
+          title, description, media: [],
+          ownership: newTicketOwnership(actor), author: { sessionId, ...actorFields(actor) },
+          now,
+        });
+        await commitTicketRequest(ctx, request, { ticketId: ticket._id, version: ticket.version });
+      }
       tickets.push(ticket._id);
     }
     return { projects: projects.map(p => ({ id: p._id, key: p.key })), tickets, sessions };
