@@ -1,35 +1,32 @@
-import { useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Gauge, Images, MapPin } from "lucide-react";
+import { type ReactNode } from "react";
+import { ChevronRight, Gauge, Images, MapPin } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { statusMeta } from "@/components/ticket-status";
 import { cn } from "@/lib/utils";
 import { ticketProgress, formatTicketNumber, nextTicketStatus } from "@/lib/ticket-ui";
 import { urgencyBand, urgencyTone } from "@/lib/urgency-score";
-import { isActiveAnnotation, isVideoMedia, type Ticket, type TicketStatus } from "@/lib/types";
+import { type TicketStatus } from "@/lib/types";
+import type { TicketSummary } from "../../shared/ticket-contracts";
 import { useI18n } from "@/lib/i18n";
 
-/** Compact Ticket summary with an independent attachment popup and status action. */
+/** Compact Ticket summary with detail selection and a status action. */
 export function TicketCard({
   item,
   onSelect,
   onMove,
   handle,
 }: {
-  item: Ticket;
+  item: TicketSummary;
   onSelect: (id: Id<"tickets">) => void;
   onMove?: (id: Id<"tickets">, status: TicketStatus) => void;
   handle?: ReactNode;
 }) {
   const { t, formatDate } = useI18n();
-  const [mediaOpen, setMediaOpen] = useState(false);
-  const [mediaIndex, setMediaIndex] = useState(0);
-  const selectedMedia = item.media[mediaIndex] ?? item.media[0];
-  const mediaCount = item.media.length;
-  const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
+  const mediaCount = item.mediaCount;
+  const pinCount = item.annotationCount;
   const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
   const nextStatus = nextTicketStatus(item.status);
   const currentStatus = statusMeta(item.status);
@@ -46,7 +43,7 @@ export function TicketCard({
         </div>
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
-          {item.description ? <p className="truncate text-sm leading-5 text-muted-foreground">{item.description}</p> : null}
+          {item.excerpt ? <p className="truncate text-sm leading-5 text-muted-foreground">{item.excerpt}</p> : null}
           {/* The bar is labelled with the whole sentence, so the percent and step
               beside it are decoration a screen reader would only repeat. */}
           <Progress
@@ -68,11 +65,9 @@ export function TicketCard({
               <button
                 type="button"
                 className="relative z-10 ml-auto flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-md px-2 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t("viewTicketMedia", { ticket: ticketLabel, count: mediaCount })}
-                aria-haspopup="dialog"
+                aria-label={t("viewTicket", { ticket: ticketLabel })}
                 onClick={() => {
-                  setMediaIndex(0);
-                  setMediaOpen(true);
+                  onSelect(item._id);
                 }}
               >
                 <Images className="size-3.5" aria-hidden="true" />
@@ -127,36 +122,6 @@ export function TicketCard({
             {nextStatus ? <ChevronRight className="size-3" /> : null}
           </Button> : null}
       </div>
-      <Dialog
-        open={mediaOpen}
-        onOpenChange={setMediaOpen}
-        title={ticketLabel}
-        description={t("reviewMedia", { count: mediaCount })}
-      >
-        {mediaOpen && selectedMedia ? (
-          <div className="space-y-3">
-            <div className="flex h-[55dvh] items-center justify-center overflow-hidden rounded-lg bg-black">
-              {isVideoMedia(selectedMedia) ? (
-                <video key={selectedMedia.key} src={selectedMedia.url} controls playsInline preload="metadata" className="max-h-full max-w-full" />
-              ) : (
-                <img src={selectedMedia.url} alt={selectedMedia.name} className="h-full w-full object-contain" />
-              )}
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <Button type="button" variant="outline" size="icon" aria-label={t("previousSlide")} disabled={mediaIndex === 0} onClick={() => setMediaIndex((index) => index - 1)}>
-                <ChevronLeft className="size-4" />
-              </Button>
-              <span className="min-w-0 text-center text-sm" aria-live="polite">
-                <span className="block truncate">{selectedMedia.name}</span>
-                <span className="text-muted-foreground">{Math.min(mediaIndex + 1, mediaCount)} / {mediaCount}</span>
-              </span>
-              <Button type="button" variant="outline" size="icon" aria-label={t("nextSlide")} disabled={mediaIndex >= mediaCount - 1} onClick={() => setMediaIndex((index) => index + 1)}>
-                <ChevronRight className="size-4" />
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </Dialog>
     </article>
   );
 }

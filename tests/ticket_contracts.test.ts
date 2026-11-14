@@ -4,7 +4,7 @@ import type { Id } from "../convex/_generated/dataModel";
 import { validateFiles } from "../shared/media-policy";
 import { createAnnotationRecord, updateAnnotationRecord } from "../convex/annotation_state";
 import {
-  MEDIA_POLICY, normalizeTicketRequest, ticketRequestFingerprintInput, transitionTicketJob,
+  MEDIA_POLICY, isTicketSearchWithinLimits, normalizeTicketRequest, ticketRequestFingerprintInput, transitionTicketJob,
   type JobTransition, type TicketJob, type TicketRequestInput,
 } from "../shared/ticket-contracts";
 
@@ -13,6 +13,16 @@ const request: TicketRequestInput = {
   projectId: "project-1" as Id<"projects">,
   title: "  Printer jams  ", description: "  Long receipts\nstop printing  ",
 };
+
+test("search limits keep Thai combining marks with their letters", () => {
+  for (const search of ["หน้าจอค้าง เมื่อกดปุ่มชำระเงิน ที่สาขาสีลม", "เครื่องพิมพ์ไม่ออกใบเสร็จ"]) {
+    assert.equal(isTicketSearchWithinLimits(search), true, search);
+  }
+  assert.equal(isTicketSearchWithinLimits("เมื่อกดปุ่ม ".repeat(16).trim()), true);
+  assert.equal(isTicketSearchWithinLimits("เมื่อกดปุ่ม ".repeat(17).trim()), false);
+  assert.equal(isTicketSearchWithinLimits("word ".repeat(17).trim()), false);
+  assert.equal(isTicketSearchWithinLimits("x".repeat(201)), false);
+});
 
 test("request normalization trims text and defaults arrays without mutating input", () => {
   const before = structuredClone(request);

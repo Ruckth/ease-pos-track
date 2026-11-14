@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, usePaginatedQuery } from "convex/react";
 import { Toaster, toast } from "sonner";
 import {
   ArrowRight,
@@ -36,7 +36,8 @@ import { statusMeta } from "@/components/ticket-status";
 import { MediaViewer, type AnnotationUpdateInput, type MediaViewerHandle } from "@/components/media-viewer";
 import { cn } from "@/lib/utils";
 import { ticketProgress, formatTicketNumber } from "@/lib/ticket-ui";
-import { isActiveAnnotation, isVideoMedia, type Ticket, type TicketStatus } from "@/lib/types";
+import { isActiveAnnotation, type TicketStatus } from "@/lib/types";
+import type { TicketSummary as TicketSummaryRow } from "../../shared/ticket-contracts";
 import { localizeError, useI18n } from "@/lib/i18n";
 
 type CustomerTicketFilter = "all" | "active" | "waiting" | "done";
@@ -64,12 +65,14 @@ export function CustomerPortal({
 }) {
   const { language, setLanguage, t } = useI18n();
   const { projects, current: project, select: selectProject } = useCurrentProject(token);
-  const tickets = useQuery(api.tickets.listMyTickets, project ? { token, projectKey: project.key } : "skip");
+  const page = usePaginatedQuery(api.tickets.pageTickets, project ? { token, projectId: project._id, lifecycle: "active" } : "skip", { initialNumItems: 20 });
+  const tickets = page.results;
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerBusy, setComposerBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<Id<"tickets"> | null>(null);
+  useEffect(() => { setSelectedId(null); }, [project?._id]);
   const [filter, setFilter] = useState<CustomerTicketFilter>("all");
-  const selected = tickets?.find((ticket) => ticket._id === selectedId) ?? null;
+
   const ticketCounts = useMemo(() => {
     const rows = tickets ?? [];
     return {
@@ -148,6 +151,7 @@ export function CustomerPortal({
           </div>
         </section>
 
+        <p className="mt-4 text-sm text-muted-foreground">{t("loadedCountsHint")}</p>
         <section aria-label={t("ticketSummary")} className="mt-5 grid grid-cols-3 gap-2 sm:gap-4">
           <TicketSummary icon={CircleDot} label={t("activeTickets")} value={ticketCounts.active} tone="text-sky-700 bg-sky-50" />
           <TicketSummary icon={Clock3} label={t("awaitingReply")} mobileLabel={t("awaitingReplyShort")} value={ticketCounts.waiting} tone="text-violet-700 bg-violet-50" />
@@ -159,7 +163,7 @@ export function CustomerPortal({
             <div>
               <h2 className="text-xl font-semibold tracking-tight">{t("yourTickets")}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {tickets ? t("myTicketCount", { count: tickets.length }) : project === null ? t("noProjectsTitle") : t("syncing")}
+                {project === null ? t("noProjectsTitle") : t("loadedTickets", { count: tickets.length })}
               </p>
             </div>
             <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border bg-card p-1 shadow-sm" aria-label={t("filterTickets")}>
@@ -187,7 +191,7 @@ export function CustomerPortal({
         <div className="mt-4">
         {project === null ? (
           <NoProjects />
-        ) : tickets === undefined ? (
+        ) : page.status === "LoadingFirstPage" ? (
           <div className="grid min-h-72 place-items-center rounded-2xl border bg-card shadow-sm">
             <div className="space-y-3 text-center text-sm text-muted-foreground">
               <Loader2 className="mx-auto size-7 animate-spin" />
@@ -224,6 +228,7 @@ export function CustomerPortal({
           </ul>
         )}
         </div>
+        {page.status !== "Exhausted" && project ? <Button className="mt-4" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
       </div>
 
       <Dialog
@@ -248,7 +253,7 @@ export function CustomerPortal({
 
       <CustomerTicketDialog
         token={token}
-        ticket={selected}
+        ticketId={selectedId}
         onClose={() => setSelectedId(null)}
       />
     </main>
@@ -291,13 +296,12 @@ const statusHintKeys: Record<TicketStatus, "statusNextNew" | "statusNextAcknowle
   done: "statusNextDone",
 };
 
-function CustomerTicketCard({ item, onSelect }: { item: Ticket; onSelect: (id: Id<"tickets">) => void }) {
+function CustomerTicketCard({ item, onSelect }: { item: TicketSummaryRow; onSelect: (id: Id<"tickets">) => void }) {
   const { t, formatDate } = useI18n();
   const meta = statusMeta(item.status);
   const StatusIcon = meta.icon;
   const progress = ticketProgress(item.status);
-  const cover = item.media[0];
-  const pinCount = item.annotations?.filter(isActiveAnnotation).length ?? 0;
+  const pinCount = item.annotationCount;
   const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
 
   return (
@@ -319,7 +323,7 @@ function CustomerTicketCard({ item, onSelect }: { item: Ticket; onSelect: (id: I
             <span className="text-xs text-muted-foreground">· {formatDate(item.createdAt)}</span>
           </div>
           <h3 className="mt-3 line-clamp-2 text-base font-semibold leading-6 group-hover:text-primary">{item.title}</h3>
-          <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">{item.description || t("noDescription")}</p>
+          <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">{item.excerpt || t("noDescription")}</p>
 
           <div className="mt-auto pt-4">
             <div className="mb-2 flex items-center justify-between gap-3 text-xs">
@@ -328,22 +332,12 @@ function CustomerTicketCard({ item, onSelect }: { item: Ticket; onSelect: (id: I
             </div>
             <Progress value={progress.percent} className="h-1.5" aria-label={t("ticketProgress", { ticket: ticketLabel, step: progress.step, total: progress.total, percent: progress.percent })} />
             <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
-              {item.media.length > 0 ? <span className="flex items-center gap-1"><Images className="size-3.5" />{item.media.length}</span> : null}
+              {item.mediaCount > 0 ? <span className="flex items-center gap-1"><Images className="size-3.5" />{item.mediaCount}</span> : null}
               {pinCount > 0 ? <span className="flex items-center gap-1"><MapPin className="size-3.5" />{pinCount}</span> : null}
               <span className="ml-auto inline-flex items-center gap-1 font-medium text-primary">{t("openTicket")}<ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" /></span>
             </div>
           </div>
         </div>
-        {cover ? (
-          <div className="relative h-32 shrink-0 overflow-hidden bg-black sm:h-auto sm:w-36">
-            {isVideoMedia(cover) ? (
-              <video className="h-full w-full object-cover opacity-85" src={cover.url} muted playsInline preload="metadata" />
-            ) : (
-              <img className="h-full w-full object-cover" src={cover.url} alt="" loading="lazy" />
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/25 to-transparent sm:bg-gradient-to-l" />
-          </div>
-        ) : null}
       </div>
     </article>
   );
@@ -351,17 +345,17 @@ function CustomerTicketCard({ item, onSelect }: { item: Ticket; onSelect: (id: I
 
 function CustomerTicketDialog({
   token,
-  ticket,
+  ticketId,
   onClose,
 }: {
   token: string;
-  ticket: Ticket | null;
+  ticketId: Id<"tickets"> | null;
   onClose: () => void;
 }) {
   const { t, formatDate } = useI18n();
-  const detail = useQuery(api.tickets.getTicket, ticket ? { token, id: ticket._id } : "skip");
-  const activity = useQuery(api.annotations.listAnnotationActivity, ticket ? { token, id: ticket._id } : "skip");
-  const ticketActivity = useQuery(api.tickets.listTicketActivity, ticket ? { token, id: ticket._id } : "skip");
+  const detail = useQuery(api.tickets.getTicket, ticketId ? { token, id: ticketId } : "skip");
+  const activity = useQuery(api.annotations.listAnnotationActivity, ticketId ? { token, id: ticketId } : "skip");
+  const ticketActivity = useQuery(api.tickets.listTicketActivity, ticketId ? { token, id: ticketId } : "skip");
   const editTicket = useMutation(api.tickets.editTicket);
   const undoTicketEdit = useMutation(api.tickets.undoTicketEdit);
   const archiveTicket = useMutation(api.tickets.archiveTicket);
@@ -371,7 +365,7 @@ function CustomerTicketDialog({
   const removeAnnotation = useMutation(api.annotations.removeAnnotation);
   const restoreAnnotation = useMutation(api.annotations.restoreAnnotation);
   const viewerRef = useRef<MediaViewerHandle>(null);
-  const item = detail ?? ticket;
+  const item = detail;
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -470,7 +464,7 @@ function CustomerTicketDialog({
 
   return (
     <Dialog
-      open={Boolean(ticket)}
+      open={Boolean(ticketId)}
       onOpenChange={(open) => !open && onClose()}
       title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("ticket")}
     >

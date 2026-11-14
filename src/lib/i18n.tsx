@@ -5,6 +5,13 @@ export type Language = "th" | "en";
 const STORAGE_KEY = "ease-pos-tracking-language";
 
 const en = {
+  liveArrival: "New arrival",
+  loadOlder: "Load older Tickets", loadedTickets: "{{count}} Tickets loaded",
+  pendingMoveLimit: "Wait for a pending Ticket move to finish before moving another Ticket.",
+  loadedCountsHint: "Counts and filters below cover loaded Tickets. Load older Tickets to see more.",
+  searchHint: "Exact Ticket reference, or title/description words. The last token matches prefixes; earlier tokens match whole tokens. Results are ranked by relevance, ignoring case and punctuation. No arbitrary substring or typo matching. Thai token boundaries may differ from words: some words inside longer text may not match. Try a longer phrase or a Ticket reference.",
+  searchLimit: "Search with up to 16 words and 200 characters.",
+  searchMatches: "{{count}} matches", searchLoaded: "Top {{count}} matches shown; refine your search to find more",
   languageThai: "ไทย", languageEnglish: "EN", appName: "Ease POS Tracking", internalBoard: "Internal Ticket board",
   password: "Password", enter: "Enter", signingIn: "Signing in…", search: "Search", newTicket: "New Ticket",
   resumeTicket: "Continue Ticket", archive: "Archive", hideArchive: "Hide archive", signOut: "Sign out",
@@ -65,7 +72,6 @@ const en = {
   statusNextDone: "This ticket has been resolved",
   myTicketsEmpty: "You do not have any Tickets yet.",
   myTicketsEmptyHint: "Create a Ticket to share details, photos, or videos with the team.",
-  myTicketCount: "{{count}} total",
   viewTicket: "Open ticket {{ticket}}",
   editTicket: "Edit ticket",
   deleteTicket: "Delete ticket",
@@ -94,7 +100,6 @@ const en = {
   reviewTopic: "Topic",
   reviewDescription: "Description",
   reviewMedia: "{{count}} files attached",
-  viewTicketMedia: "View {{count}} attachments for {{ticket}}",
   reviewPins: "{{count}} image notes added",
   reviewNoPins: "No image notes added",
   submitTicket: "Submit ticket",
@@ -158,6 +163,13 @@ const en = {
 } as const;
 
 const th: Record<keyof typeof en, string> = {
+  liveArrival: "Ticket เข้ามาใหม่",
+  loadOlder: "โหลด Ticket เก่ากว่า", loadedTickets: "โหลดแล้ว {{count}} Ticket",
+  pendingMoveLimit: "รอให้การย้าย Ticket ที่ค้างอยู่เสร็จก่อนย้าย Ticket อื่น",
+  loadedCountsHint: "จำนวนและตัวกรองด้านล่างนับเฉพาะ Ticket ที่โหลดแล้ว โหลด Ticket เก่าเพื่อดูเพิ่มเติม",
+  searchHint: "ค้นหารหัส Ticket แบบตรงตัว หรือข้อความในหัวข้อ/รายละเอียด ส่วนสุดท้ายค้นหาจากต้นคำ ส่วนก่อนหน้าจับคู่ทั้งส่วนตามที่ระบบแบ่ง ไม่แยกตัวพิมพ์และเครื่องหมาย เรียงตามความเกี่ยวข้อง ไม่รับประกันการค้นหาส่วนกลางคำหรือแก้คำผิด การแบ่งข้อความภาษาไทยอาจไม่ตรงกับคำที่อ่าน บางคำภายในข้อความยาวอาจค้นไม่พบ ลองใช้วลีที่ยาวขึ้นหรือรหัส Ticket",
+  searchLimit: "ค้นหาได้สูงสุด 16 คำและ 200 ตัวอักษร",
+  searchMatches: "พบ {{count}} รายการ", searchLoaded: "แสดง {{count}} อันดับแรก ปรับคำค้นหาเพื่อค้นหารายการอื่น",
   languageThai: "ไทย", languageEnglish: "EN", appName: "ติดตาม Ease POS", internalBoard: "กระดานแจ้งปัญหาภายใน",
   password: "รหัสผ่าน", enter: "เข้าสู่ระบบ", signingIn: "กำลังเข้าสู่ระบบ…", search: "ค้นหา", newTicket: "แจ้งปัญหา",
   resumeTicket: "ทำต่อ", archive: "คลังข้อมูล", hideArchive: "ซ่อนคลัง", signOut: "ออกจากระบบ",
@@ -218,7 +230,6 @@ const th: Record<keyof typeof en, string> = {
   statusNextDone: "เรื่องนี้ได้รับการแก้ไขแล้ว",
   myTicketsEmpty: "คุณยังไม่มีเรื่องที่แจ้งไว้",
   myTicketsEmptyHint: "แจ้งเรื่องเพื่อส่งรายละเอียด รูป หรือวิดีโอให้ทีมงาน",
-  myTicketCount: "ทั้งหมด {{count}} เรื่อง",
   viewTicket: "เปิดเรื่อง {{ticket}}",
   editTicket: "แก้ไขเรื่อง",
   deleteTicket: "ลบเรื่อง",
@@ -247,7 +258,6 @@ const th: Record<keyof typeof en, string> = {
   reviewTopic: "หัวข้อ",
   reviewDescription: "รายละเอียด",
   reviewMedia: "แนบไฟล์ {{count}} ไฟล์",
-  viewTicketMedia: "ดูไฟล์แนบ {{count}} ไฟล์ของ {{ticket}}",
   reviewPins: "เพิ่มหมายเหตุบนรูปแล้ว {{count}} จุด",
   reviewNoPins: "ยังไม่มีหมายเหตุบนรูป",
   submitTicket: "ส่งเรื่อง",

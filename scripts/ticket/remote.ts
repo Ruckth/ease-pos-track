@@ -6,16 +6,17 @@
  * behavior can be tested without a deployment.
  */
 
+import type { FunctionReturnType } from "convex/server";
 import { ConvexHttpClient } from "convex/browser";
 import { ConvexError } from "convex/values";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { TicketDetail } from "../../shared/ticket-contracts";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { TicketRef } from "./cli";
 import type { TicketMediaItem } from "./images";
 import { toStoredTicketStatus, type TicketStatus } from "./status";
 
-export type TicketDocument = Doc<"tickets">;
+export type TicketDocument = TicketDetail;
 
 export type CurrentSession = {
   role: "staff" | "customer";
@@ -95,11 +96,23 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean) {
-    return await this.client(url).query(api.tickets.listTickets, {
-      token,
-      ...(projectKey === undefined ? {} : { projectKey }),
-      includeDeleted: includeArchived,
-    });
+    const client = this.client(url);
+    const projects = await client.query(api.projects.listProjects, { token });
+    const scoped = projectKey === undefined ? projects : projects.filter(project => project.key === projectKey.trim().toUpperCase());
+    if (projectKey !== undefined && scoped.length === 0) throw new ConvexError({ code: "PROJECT_NOT_FOUND" });
+    const tickets: TicketDocument[] = [];
+    for (const project of scoped) {
+      for (const lifecycle of (includeArchived ? ["active", "archived"] : ["active"]) as Array<"active" | "archived">) {
+        let cursor: string | null = null;
+        for (;;) {
+          const result: FunctionReturnType<typeof api.tickets.pageTicketDetails> = await client.query(api.tickets.pageTicketDetails, { token, projectId: project._id, lifecycle, paginationOpts: { numItems: 50, cursor } });
+          tickets.push(...result.page);
+          if (result.isDone) break;
+          cursor = result.continueCursor;
+        }
+      }
+    }
+    return Array.from(new Map(tickets.map(ticket => [ticket._id, ticket])).values()).sort((a, b) => b._creationTime - a._creationTime);
   }
 
   async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {

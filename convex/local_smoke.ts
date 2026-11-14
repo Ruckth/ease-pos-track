@@ -1,7 +1,8 @@
+import type { FunctionReturnType } from "convex/server";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import { internalJobAction, internalJobMutation } from "./functions";
-import { requireLocalFixtures } from "./seed";
+import { requireLocalFixtures } from "./local_fixtures";
 import { requireActor } from "./session_auth";
 import { requireUsableProject } from "./domain/projects";
 import { createTicketRecord } from "./domain/tickets";
@@ -65,14 +66,13 @@ export const run = internalJobAction({
     check((await ctx.runQuery(api.auth.currentSession, { token: alice }))?.role === "customer", "customer credential and explicit role");
     // Real OCC contention: the action starts separate concurrent mutation
     // transactions, rather than simulating duplicates in a single mutation.
-    const before = await ctx.runQuery(api.tickets.listTickets, { token: staff, includeDeleted: true });
+    const before = await ctx.runQuery(api.tickets.laneTotals, { token: staff, projectId: seeded.projects[0].id });
     const duplicateInput = { token: staff, projectKey: "POS", requestId: crypto.randomUUID(), title: "Concurrent local create", description: "Immutable original" };
     const duplicates = await Promise.all(Array.from({ length: 8 }, () => ctx.runMutation(api.tickets.createTextTicket, duplicateInput)));
     const duplicateId = duplicates[0].ticket._id;
     check(duplicates.filter(result => result.created).length === 1 && duplicates.every(result => result.ticket._id === duplicateId), "eight concurrent duplicates commit exactly once");
-    const after = await ctx.runQuery(api.tickets.listTickets, { token: staff, includeDeleted: true });
-    const oldIds = new Set(before.map(ticket => ticket._id));
-    check(after.filter(ticket => !oldIds.has(ticket._id)).length === 1, "concurrent duplicates insert exactly one Ticket row");
+    const after = await ctx.runQuery(api.tickets.laneTotals, { token: staff, projectId: seeded.projects[0].id });
+    check(after.new === (before.new ?? 0) + 1, "concurrent duplicates insert exactly one Ticket row");
     check((await ctx.runQuery(api.tickets.listTicketActivity, { token: staff, id: duplicateId })).length === 1, "concurrent duplicates insert exactly one audit event");
     await ctx.runMutation(api.tickets.editTicket, { token: staff, id: duplicateId, expectedVersion: 0, title: "Edited after create", description: "" });
     const replay = await ctx.runMutation(api.tickets.createTextTicket, duplicateInput);
@@ -86,7 +86,11 @@ export const run = internalJobAction({
     check(competing.filter(result => result.status === "fulfilled").length === 1
       && competing.some(result => result.status === "rejected" && errorCode(result.reason) === "REQUEST_ID_CONFLICT"),
     "concurrent different-Project requests commit once and conflict");
-    await denied(() => ctx.runMutation(api.tickets.createTextTicket, { token: alice, projectKey: "APP", requestId: crypto.randomUUID(), title: "Denied", description: "" }), "PROJECT_NOT_FOUND", "customer foreign Project denied");
+    // Large seeds grant APP membership; use a Project owned by this invocation.
+    const foreignProject = await ctx.runMutation(api.projects.createProject, {
+      token: staff, key: `S${crypto.randomUUID().replace(/-/g, "").slice(0, 9)}`, name: "Local access smoke",
+    });
+    await denied(() => ctx.runMutation(api.tickets.createTextTicket, { token: alice, projectKey: foreignProject.key, requestId: crypto.randomUUID(), title: "Denied", description: "" }), "PROJECT_NOT_FOUND", "customer foreign Project denied");
     for (const token of [staff, alice]) {
       const created = await ctx.runMutation(api.tickets.createTextTicket, { token, projectKey: "POS", requestId: crypto.randomUUID(), title: "Local text-only smoke", description: "" });
       const id = created.ticket._id;
@@ -185,5 +189,69 @@ export const media = internalJobAction({
     });
     if ((await ctx.runQuery(api.tickets.getTicket, { token: customer, id: customerId }))?.media[0].key !== customerFile.key) throw new Error("LOCAL_MEDIA_CUSTOMER_FAILED");
     return { ok: true, checks: ["concurrent exclusive key claims", "eight identical recording replays", "atomic attachment and create replay", "attached key takeover denied", "attached cancellation reserves nothing", "customer callback preflight and media Ticket", "staff late key rejected", "trusted late new upload reserved under pending job", "disabled cleanup exposes pending progress without provider attempts"] };
+  },
+});
+
+/** P5 real search-engine validation; text-only fixtures and no provider I/O. */
+export const reads = internalJobAction({
+  name: "local_smoke:reads",
+  args: {},
+  handler: async (ctx): Promise<{ ok: true; checks: string[]; projects: { key: string; tickets: number }[]; searchOrder: string[]; thaiMatches: { search: string; titles: string[] }[]; firstPageDocuments: number; firstPageJsonBytes: number }> => {
+    requireLocalFixtures();
+    const seeded = await ctx.runAction(internal.seed.run, { largeDataset: true });
+    const token = seeded.sessions[0];
+    // Exact relevance assertions need controlled matches, independent of prior
+    // smoke runs or unrelated Tickets that could fill the bounded search window.
+    const searchProject = await ctx.runMutation(api.projects.createProject, {
+      token, key: `S${crypto.randomUUID().replace(/-/g, "").slice(0, 9)}`, name: "Local search smoke",
+    });
+    await ctx.runMutation(internal.seed.largeBatch, { projectId: searchProject._id, sessions: seeded.sessions, start: 0 });
+    const args = { token, projectId: searchProject._id, lifecycle: "active" as const, paginationOpts: { numItems: 20, cursor: null } };
+    const matches = await ctx.runQuery(api.tickets.searchTickets, { token, projectId: args.projectId, lifecycle: args.lifecycle, search: "quar" });
+    const searchOrder = matches.matches.map(row => row.title);
+    if (JSON.stringify(searchOrder) !== JSON.stringify(["quartz", "quartz calibration", "Printer calibration"])) throw new Error(`LOCAL_SEARCH_ORDER_FAILED:${JSON.stringify(searchOrder)}`);
+    const owned = await ctx.runQuery(api.tickets.searchTickets, { token: seeded.sessions[1], projectId: args.projectId, lifecycle: args.lifecycle, search: "quartz" });
+    if (owned.matches.length !== 1 || owned.matches[0].title !== "Printer calibration") throw new Error("LOCAL_SEARCH_OWNER_FAILED");
+    const foreign = await ctx.runQuery(api.tickets.searchTickets, { token, projectId: args.projectId, lifecycle: args.lifecycle, search: "APP-0001" });
+    if (foreign.matches.length) throw new Error("LOCAL_SEARCH_PROJECT_FAILED");
+    const fragment = await ctx.runQuery(api.tickets.searchTickets, { token, projectId: args.projectId, lifecycle: args.lifecycle, search: "uartz" });
+    if (fragment.matches.length) throw new Error("LOCAL_SEARCH_FRAGMENT_FAILED");
+    const thaiExamples = ["หน้าจอค้าง เมื่อกดปุ่มชำระเงิน ที่สาขาสีลม", "เครื่องพิมพ์ไม่ออกใบเสร็จ"];
+    for (const title of [...thaiExamples, "HP-1020 printer"]) await ctx.runMutation(api.tickets.createTextTicket, {
+      token, projectKey: searchProject.key, requestId: crypto.randomUUID(), title, description: "",
+    });
+    const printer = await ctx.runQuery(api.tickets.searchTickets, { token, projectId: args.projectId, lifecycle: args.lifecycle, search: "HP-1020" });
+    if (printer.matches.length !== 1 || printer.matches[0].title !== "HP-1020 printer") throw new Error("LOCAL_REFERENCE_TEXT_FALLBACK_FAILED");
+    const thaiMatches: { search: string; titles: string[] }[] = [];
+    for (const search of [...thaiExamples, "หน้าจอ", "ค้าง", "หน้าจอค้าง", "เมื่อกดปุ่มชำระเงิน", "ชำระเงิน", "เครื่องพิมพ์", "ใบเสร็จ"]) {
+      const result = await ctx.runQuery(api.tickets.searchTickets, { token, projectId: args.projectId, lifecycle: args.lifecycle, search });
+      const titles = result.matches.map(row => row.title);
+      const expected = search === "ชำระเงิน" ? [] : [thaiExamples[search === thaiExamples[1] || search === "เครื่องพิมพ์" || search === "ใบเสร็จ" ? 1 : 0]];
+      if (JSON.stringify(titles) !== JSON.stringify(expected)) throw new Error(`LOCAL_THAI_SEARCH_FAILED:${search}`);
+      thaiMatches.push({ search, titles });
+    }
+    const projects = [];
+    for (const project of [...seeded.projects, { id: searchProject._id, key: searchProject.key }]) {
+      let count = 0;
+      let cursor: string | null = null;
+      let previous = Infinity;
+      for (;;) {
+        const result: FunctionReturnType<typeof api.tickets.pageTickets> = await ctx.runQuery(api.tickets.pageTickets, { ...args, projectId: project.id, paginationOpts: { numItems: 50, cursor } });
+        if (result.page.length > 50) throw new Error("LOCAL_PAGE_BOUND_FAILED");
+        for (const row of result.page) {
+          // Strictly descending numbers also detect repeated rows across pages.
+          if (row.projectId !== project.id || row.ticketNumber >= previous) throw new Error("LOCAL_PAGE_ORDER_FAILED");
+          previous = row.ticketNumber;
+          count++;
+        }
+        if (result.isDone) break;
+        cursor = result.continueCursor;
+      }
+      const totals = await ctx.runQuery(api.tickets.laneTotals, { token, projectId: project.id });
+      if (Object.values(totals).reduce((a, b) => a + b, 0) !== count) throw new Error("LOCAL_TOTALS_FAILED");
+      projects.push({ key: project.key, tickets: count });
+    }
+    const first = await ctx.runQuery(api.tickets.pageTickets, { ...args, projectId: seeded.projects[0].id, status: "new" });
+    return { ok: true, checks: ["relevance order differs from Ticket-number order", "owner and Project search scope", "prefix matches; middle fragment does not", "reference-shaped text falls back to indexed search", "Thai examples accepted with real token boundary matching", "all pages ordered without duplicates", "workflow totals independent of pages"], projects, searchOrder, thaiMatches, firstPageDocuments: first.page.length, firstPageJsonBytes: new TextEncoder().encode(JSON.stringify(first)).byteLength };
   },
 });

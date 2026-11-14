@@ -319,7 +319,7 @@ function Kanban<T>({
       setActiveId(event.active.id)
       onDragStart?.(event)
 
-      if (onValueCommit || restoreOnCancel) {
+      if (onValueCommit || restoreOnCancel || onMove) {
         const snapshot = valueRef.current
         const id = event.active.id
         const keys = Object.keys(snapshot)
@@ -345,7 +345,7 @@ function Kanban<T>({
         }
       }
     },
-    [onDragStart, onValueCommit, restoreOnCancel]
+    [onDragStart, onValueCommit, restoreOnCancel, onMove]
   )
 
   const handleDragOver = useCallback(
@@ -454,13 +454,16 @@ function Kanban<T>({
 
       // Handle item move callback
       if (onMove && !isColumn(active.id)) {
-        const activeContainer = findContainer(active.id)
+        // Pagination or a live subscription may remove the source row during
+        // a drag. Keep the gesture's original source; consumers fence its version.
+        const origin = dragOriginRef.current
+        const activeContainer = origin?.container ?? findContainer(active.id)
         const overContainer = findContainer(over.id)
 
         if (activeContainer && overContainer) {
-          const activeIndex = columns[activeContainer].findIndex(
+          const activeIndex = origin?.index ?? columns[activeContainer]?.findIndex(
             (item: T) => getItemValue(item) === active.id
-          )
+          ) ?? -1
           const overIndex = isColumn(over.id)
             ? columns[overContainer].length
             : columns[overContainer].findIndex(

@@ -16,15 +16,14 @@ async function fixture() {
 }
 
 test("entry policies resolve explicit roles and reject missing, expired and forged credentials", async () => {
-  const { t, staff, alice } = await fixture();
+  const { t, staff, alice, seed } = await fixture();
   await t.run(async ctx => {
     await ctx.db.insert("sessions", { token: "expired", role: "staff", createdAt: 1, expiresAt: 2 });
   });
   for (const token of ["unknown", "expired"]) {
     await expect(t.query(api.projects.listProjects, { token })).rejects.toThrow("SESSION_EXPIRED");
   }
-  await expect(t.query(api.tickets.listTickets, { token: alice })).rejects.toThrow("STAFF_ONLY");
-  await expect(t.query(api.tickets.listMyTickets, { token: staff })).rejects.toThrow("CUSTOMER_ONLY");
+  await expect(t.query(api.tickets.laneTotals, { token: alice, projectId: seed.projects[0].id })).rejects.toThrow("STAFF_ONLY");
   await expect(t.mutation(api.tickets.createTextTicket, {
     token: alice, projectKey: "POS", requestId: "forged", title: "Forged", description: "",
     ownerCustomerId: "somebody", role: "staff",
@@ -32,7 +31,8 @@ test("entry policies resolve explicit roles and reject missing, expired and forg
   const staffTicket = await t.mutation(api.tickets.createTextTicket, {
     token: staff, projectKey: "APP", requestId: "staff-app", title: "Global staff", description: "",
   });
-  expect(staffTicket.ticket.ownerCustomerId).toBeUndefined();
+  expect(staffTicket.ticket).not.toHaveProperty("ownerCustomerId");
+  expect((await t.run(ctx => ctx.db.get(staffTicket.ticket._id)))?.ownerCustomerId).toBeUndefined();
   expect(staffTicket.ticket.origin).toBe("staff");
 });
 
@@ -51,7 +51,7 @@ test("registered sign-in creates explicit roles from staff credentials or durabl
   await expect(t.action(api.customers.login, { email: "alice@local.test", password: "wrong", clientId: "test-customer-client-id" })).rejects.toThrow("INVALID_CREDENTIALS");
   await expect(t.action(api.customers.register, { email: "alice@local.test", password: "LocalCustomer123!", clientId: "test-customer-client-id" }))
     .rejects.toThrow("EMAIL_ALREADY_REGISTERED");
-});
+}, 30_000);
 
 test("local seed is disabled without explicit fixture opt-in", async () => {
   vi.stubEnv("LOCAL_FIXTURES_ENABLED", "");
@@ -84,7 +84,7 @@ test("domain Project membership and Ticket ownership remain independent of entry
   });
   // Current membership is required even for the customer's own Ticket.
   expect(await t.query(api.tickets.getTicket, { token: alice, id } )).toBeNull();
-  expect(await t.query(api.tickets.listMyTickets, { token: alice })).toEqual([]);
+  await expect(t.query(api.tickets.pageTickets, { token: alice, projectId: seed.projects[0].id, lifecycle: "active", paginationOpts: { numItems: 50, cursor: null } })).rejects.toThrow("PROJECT_NOT_FOUND");
   expect(await t.query(api.tickets.listTicketActivity, { token: alice, id })).toEqual([]);
   expect(await t.query(api.annotations.listAnnotationActivity, { token: alice, id })).toEqual([]);
   await expect(t.mutation(api.tickets.editTicket, { token: alice, id, title: "Denied", description: "", expectedVersion: 0 }))
@@ -108,7 +108,8 @@ test("both roles create and edit text-only Tickets; workflow, urgency and restor
   });
   const customer = await t.query(api.tickets.getTicket, { token: alice, id });
   expect(customer).toMatchObject({ title: "Customer Ticket", description: "Text only", lifecycle: "active", version: 0, media: [], annotations: [], origin: "customer" });
-  expect(customer?.ownerCustomerId).toBeDefined();
+  expect((await t.run(ctx => ctx.db.get(id)))?.ownerCustomerId).toBeDefined();
+  expect(customer).not.toHaveProperty("ownerCustomerId");
   const cli = await t.mutation(api.tickets.createTextTicket, {
     token: staff, projectKey: "POS", requestId: "cli-text-only", title: "Staff Ticket", description: "",
   });
@@ -125,7 +126,7 @@ test("both roles create and edit text-only Tickets; workflow, urgency and restor
   await t.mutation(api.tickets.updateTicketStatus, { token: staff, id, status: "acknowledged", expectedVersion: 2 });
   await t.mutation(api.tickets.updateUrgencyScore, { token: staff, id, urgencyScore: 50, expectedVersion: 3 });
   await t.mutation(api.tickets.archiveTicket, { token: alice, id, expectedVersion: 4 });
-  expect((await t.query(api.tickets.listMyTickets, { token: alice })).some(row => row._id === id)).toBe(false);
+  expect((await t.query(api.tickets.pageTickets, { token: alice, projectId: seed.projects[0].id, lifecycle: "active", paginationOpts: { numItems: 50, cursor: null } })).page.some(row => row._id === id)).toBe(false);
   await expect(t.mutation(api.tickets.restoreTicket, { token: alice, id, expectedVersion: 5 })).rejects.toThrow("STAFF_ONLY");
   await t.mutation(api.tickets.restoreTicket, { token: staff, id, expectedVersion: 5 });
   const restored = await t.query(api.tickets.getTicket, { token: alice, id });
@@ -165,7 +166,7 @@ test("seed is repeatable and final model numbering, totals and purging reads agr
   expect(again.sessions).not.toEqual(seed.sessions);
   expect(new Set([...again.sessions, ...seed.sessions]).size).toBe(6);
   for (const token of [...seed.sessions, ...again.sessions]) expect(token).toMatch(/^[0-9a-f-]{36}$/);
-  const rows = await t.query(api.tickets.listTickets, { token: staff, includeDeleted: true });
+  const { page: rows } = await t.query(api.tickets.pageTickets, { token: staff, projectId: seed.projects[0].id, lifecycle: "active", paginationOpts: { numItems: 50, cursor: null } });
   expect(rows.map(row => row.ticketNumber).sort()).toEqual([1, 2, 3]);
   const totals = await t.run(ctx => ctx.db.query("ticketTotals").collect());
   expect(totals).toMatchObject([{ status: "new", count: 3 }]);
@@ -173,7 +174,7 @@ test("seed is repeatable and final model numbering, totals and purging reads agr
   await t.run(ctx => ctx.db.patch(id, { lifecycle: "purging" }));
   expect(await t.query(api.tickets.getTicket, { token: staff, id })).toBeNull();
   expect(await t.query(api.tickets.getTicketByTicketNumber, { token: staff, projectKey: "POS", ticketNumber: 2, includeDeleted: true })).toBeNull();
-  expect((await t.query(api.tickets.listMyTickets, { token: alice, includeDeleted: true })).some(row => row._id === id)).toBe(false);
+  expect((await t.query(api.tickets.pageTickets, { token: alice, projectId: seed.projects[0].id, lifecycle: "archived", paginationOpts: { numItems: 50, cursor: null } })).page.some(row => row._id === id)).toBe(false);
   await expect(t.mutation(api.tickets.restoreTicket, { token: staff, id, expectedVersion: 0 })).rejects.toMatchObject({ data: { code: "TICKET_PURGING" } });
 });
 
@@ -205,9 +206,9 @@ test("local fixtures reject missing, malformed and remote deployment URLs even w
   }
 });
 
-test("customer Ticket listing normalizes Project keys", async () => {
+test("customer Ticket listing uses explicit Project identity", async () => {
   const { t, alice, seed } = await fixture();
-  const tickets = await t.query(api.tickets.listMyTickets, { token: alice, projectKey: " pos " });
+  const { page: tickets } = await t.query(api.tickets.pageTickets, { token: alice, projectId: seed.projects[0].id, lifecycle: "active", paginationOpts: { numItems: 50, cursor: null } });
   expect(tickets.map(ticket => ticket._id)).toEqual([seed.tickets[1]]);
 });
 

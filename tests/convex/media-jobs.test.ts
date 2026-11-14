@@ -492,8 +492,8 @@ test("restore wins before the 30-day purge claim, is blocked after it, and every
     expect(await f.t.query(api.annotations.listAnnotationActivity, { token, id: row._id })).toEqual([]);
   }
   expect(await f.t.query(api.tickets.getTicketByTicketNumber, { token: f.staff, projectKey: row.projectKey, ticketNumber: row.ticketNumber, includeDeleted: true })).toBeNull();
-  expect((await f.t.query(api.tickets.listTickets, { token: f.staff, includeDeleted: true })).some(ticket => ticket._id === row._id)).toBe(false);
-  expect((await f.t.query(api.tickets.listMyTickets, { token: f.alice, includeDeleted: true })).some(ticket => ticket._id === row._id)).toBe(false);
+  expect((await f.t.query(api.tickets.pageTickets, { token: f.staff, projectId: row.projectId, lifecycle: "archived", paginationOpts: { numItems: 50, cursor: null } })).page.some(ticket => ticket._id === row._id)).toBe(false);
+  expect((await f.t.query(api.tickets.pageTickets, { token: f.alice, projectId: row.projectId, lifecycle: "archived", paginationOpts: { numItems: 50, cursor: null } })).page.some(ticket => ticket._id === row._id)).toBe(false);
   await f.drain();
   expect(await f.t.run(ctx => ctx.db.query("ticketTotals").collect())).toEqual(totals);
   expect(await f.t.run(ctx => ctx.db.get(row._id))).toBeNull();

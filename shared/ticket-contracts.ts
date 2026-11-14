@@ -17,19 +17,14 @@ export type TicketErrorCode =
 export type TicketErrorData = { code: TicketErrorCode };
 export type TicketDomainError = ConvexError<TicketErrorData>;
 
-// Project existing generated results explicitly; never expose owner/session fields.
-// These are contract projections for future handlers, not replacements for generated callers.
-type TicketRead = NonNullable<FunctionReturnType<typeof api.tickets.getTicket>>;
-export type TicketSummary = Pick<TicketRead,
-  "_id" | "title" | "status" | "urgencyScore" | "createdAt" | "updatedAt"
-> & Required<Pick<TicketRead, "projectId" | "projectKey" | "ticketNumber" | "version">> & {
-  lifecycle: "active" | "archived";
-  mediaCount: number;
-};
-export type TicketDetail = TicketSummary & Pick<TicketRead, "description" | "media"> & {
-  annotations: NonNullable<TicketRead["annotations"]>;
-  archivedAt?: number;
-};
+// Generated handler results are the transport contract.
+export type TicketSummary = FunctionReturnType<typeof api.tickets.pageTickets>["page"][number];
+export type TicketDetail = NonNullable<FunctionReturnType<typeof api.tickets.getTicket>>;
+
+/** Convex text search accepts at most sixteen tokens per query. */
+export function isTicketSearchWithinLimits(search: string) {
+  return search.length <= 200 && (search.match(new RegExp("[\\p{L}\\p{M}\\p{N}]+", "gu"))?.length ?? 0) <= 16;
+}
 
 export type TicketCommandResult<Result, Progress = string> =
   | { state: "committed"; result: Result }

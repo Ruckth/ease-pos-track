@@ -1,4 +1,5 @@
 import { queryOperation, mutationOperation } from "./operation";
+import { ticketDetail } from "./reads";
 import { v } from "convex/values";
 import { annotationCreateInputValidator, ticketStatus, mediaItemValidator } from "../schema";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
@@ -6,7 +7,6 @@ import type { Doc, Id } from "../_generated/dataModel";
 import {
   actorFields,
   assertCanWriteTicket,
-  assertCustomerActor,
   canReadTicket,
   newTicketOwnership,
   type Actor,
@@ -22,7 +22,7 @@ import { hashTicketRequest, normalizeRequestId } from "../ticket_requests";
 import { ticketRequestFingerprintInput, ticketMediaRequestFingerprintInput } from "../../shared/ticket-contracts";
 import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./requests";
 import { normalizeProjectKey } from "../ticket_numbers";
-import { isMember, projectByKey, requireUsableProject, resolveStaffProject } from "./projects";
+import { isMember, requireUsableProject, resolveStaffProject } from "./projects";
 import { validateMediaItems } from "../../shared/media-policy";
 import { requireOwnedUploadIntent, verifyPendingUploadIntent, verifyAssetReceipts, attachIntentAssets } from "./media";
 import {
@@ -84,62 +84,6 @@ async function requireWritableTicket(
   return doc;
 }
 
-/**
- * Staff board and CLI listing, newest first. With `projectKey` it lists one
- * Project; without it, every Ticket.
- */
-export const listTickets = queryOperation({
-  args: {
-    token: v.string(),
-    projectKey: v.optional(v.string()),
-    includeDeleted: v.optional(v.boolean()),
-  },
-  handler: async (ctx, args) => {
-    // Customers never see the whole board; they use listMyTickets instead.
-
-    let rows: Doc<"tickets">[];
-    if (args.projectKey === undefined) {
-      rows = await ctx.db.query("tickets").order("desc").collect();
-    } else {
-      const project = await projectByKey(ctx, normalizeProjectKey(args.projectKey));
-      if (!project) throw new Error("PROJECT_NOT_FOUND");
-      rows = await ctx.db
-        .query("tickets")
-        .withIndex("by_project_ticket", (q) => q.eq("projectKey", project.key))
-        .order("desc")
-        .collect();
-    }
-    return rows.filter((item) => item.lifecycle !== "purging" && (args.includeDeleted || item.lifecycle === "active"));
-  },
-});
-
-/** Tickets owned by the signed-in customer, newest first, optionally in one Project. */
-export const listMyTickets = queryOperation({
-  args: {
-    token: v.string(),
-    projectKey: v.optional(v.string()),
-    includeDeleted: v.optional(v.boolean()),
-  },
-  handler: async (ctx, args) => {
-    const { actor } = ctx;
-    const customerId = assertCustomerActor(actor);
-
-    const rows = await ctx.db
-      .query("tickets")
-      .withIndex("by_owner", (q) => q.eq("ownerCustomerId", customerId))
-      .order("desc")
-      .collect();
-    const projectKey = args.projectKey === undefined ? undefined : normalizeProjectKey(args.projectKey);
-    const memberships = await ctx.db.query("projectMembers")
-      .withIndex("by_customer", q => q.eq("customerId", customerId)).collect();
-    const projectIds = new Set(memberships.map(row => row.projectId));
-    return rows.filter((item) =>
-      projectIds.has(item.projectId) && item.lifecycle !== "purging" && (args.includeDeleted || item.lifecycle === "active")
-      && (projectKey === undefined || item.projectKey === projectKey)
-    );
-  },
-});
-
 export const getTicket = queryOperation({
   args: {
     token: v.string(),
@@ -147,7 +91,8 @@ export const getTicket = queryOperation({
   },
   handler: async (ctx, args) => {
     const { actor } = ctx;
-    return await readableTicket(ctx, actor, args.id);
+    const row = await readableTicket(ctx, actor, args.id);
+    return row ? ticketDetail(row) : null;
   },
 });
 
@@ -166,7 +111,7 @@ export const getTicketByTicketNumber = queryOperation({
       .withIndex("by_project_ticket", (q) => q.eq("projectKey", projectKey).eq("ticketNumber", args.ticketNumber))
       .unique();
     if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")) return null;
-    return doc;
+    return ticketDetail(doc);
   },
 });
 
@@ -280,7 +225,7 @@ export const createTextTicket = mutationOperation({
       ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, projectId: selected._id })),
     };
     const replay = await replayTicketRequest(ctx, request);
-    if (replay) return { ticket: replay.ticket, created: false, requestId };
+    if (replay) return { ticket: ticketDetail(replay.ticket), created: false, requestId };
 
     const created = await createTicketRecord(ctx, {
       project,
@@ -292,7 +237,7 @@ export const createTextTicket = mutationOperation({
       now: Date.now(),
     });
     await commitTicketRequest(ctx, request, { ticketId: created._id, version: created.version });
-    return { ticket: created, created: true, requestId };
+    return { ticket: ticketDetail(created), created: true, requestId };
   },
 });
 

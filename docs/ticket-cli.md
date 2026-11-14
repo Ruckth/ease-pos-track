@@ -88,6 +88,12 @@ pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
 ```
 
+`list` reads active Projects and consumes bounded summary pages (up to 50 Tickets
+per server page), then fetches detail by ID to preserve its complete descriptions,
+media counts, annotation counts and existing JSON shape. `--include-archived`
+also consumes archived lifecycle pages. The printed count is the number of Tickets
+returned; concurrent writes between pages do not form a single database snapshot.
+
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
 attach up to 10 original image files. Each source may be a local path or an HTTPS
@@ -285,6 +291,8 @@ pnpm convex:local env set UPLOAD_CALLBACK_SECRET local-only-callback-fixture
 pnpm convex:local env remove MEDIA_CLEANUP_ENABLED
 pnpm convex:local env list
 pnpm convex:local run seed:run '{}'
+pnpm convex:local run seed:run '{"largeDataset":true}'
+pnpm convex:local run local_smoke:reads '{}'
 pnpm convex:local run local_smoke:run '{}'
 pnpm convex:local run local_smoke:media '{}'
 pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
@@ -296,6 +304,42 @@ POS memberships, explicit-role sessions and three text-only Tickets through the
 Ticket domain. Each seed run returns fresh random tokens in `sessions` (staff, Alice, Bob order)
 for tests and smoke clients; Ticket rows are reused. The staff
 password remains the configured global staff sign-in mechanism.
+
+The opt-in `largeDataset` fixture adds 300 text-only Tickets across POS and APP
+in bounded batches through Ticket domain commands. It grants both fixture customers
+APP membership, distributes all five statuses, and uses immutable seed receipts
+so reruns reuse rows and preserve later edits. The three `quartz` examples have
+deliberately different text lengths for real relevance-order validation.
+`local_smoke:reads` creates a fresh, isolated Project with 28 search examples, then
+verifies search scope/order, prefix matching, complete page ordering, deduplication
+and independent workflow totals, and prints actual summary page JSON byte sizes
+from POS. Existing disposable fixtures remain in place; the smoke prints actual
+active counts rather than assuming an empty backend.
+It also checks reference-shaped printer text and two Thai examples against the
+real tokenizer. Thai token boundaries do not always match words: `ชำระเงิน` does
+not match inside the fixture's `เมื่อกดปุ่มชำระเงิน`, while the longer phrase does.
+The CLI consumes staff-only `tickets:pageTicketDetails` pages (at most 50 Tickets
+per page), preserving full descriptions and the existing JSON shape without a
+separate detail query for every Ticket.
+The backend smoke also creates a fresh Project without customer membership for
+its access-denial check; APP membership may already exist after the large seed.
+All three smokes can be repeated in any order on the same local data.
+Unexpected errors include their original message in server logs only when
+`LOCAL_FIXTURES_ENABLED=true` and the deployment URL is loopback. Deployed logs
+and all error responses retain sanitized codes without the original message.
+
+Browser lists use `tickets:pageTickets`; staff lane counts use `tickets:laneTotals`.
+Customer filters/counts explicitly describe loaded summaries. Detail is selected
+by Ticket ID independently of loaded pages. `tickets:searchTickets` returns at most
+50 relevance-ordered matches plus `hasMore`. Exact formatted references use the
+Ticket-number index. Text search ignores case and punctuation; the final token
+matches prefixes and earlier tokens match whole words. It is not arbitrary
+substring or typo matching. When more matches exist, the UI asks users to refine
+the search and does not display an exact match total. Workflow totals stay separate.
+Convex 1.45 ignores row/byte pagination caps for search end-cursor ranges, so search
+uses a bounded `take(51)` rather than reactive search pagination. Ordinary pages
+cap reads at 50 rows and 1 MiB (with Convex page splitting); those budgets exclude
+session/Project/membership reads and may include a boundary document.
 
 The backend smoke exercises real sign-in, both roles, creation, detail, edit,
 workflow, urgency, archive/restore and annotations. Annotations require media;

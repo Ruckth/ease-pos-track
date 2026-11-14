@@ -1,6 +1,7 @@
 import type { Doc } from "@convex/_generated/dataModel";
+import type { TicketDetail } from "../../shared/ticket-contracts";
 
-export type Ticket = Doc<"tickets">;
+export type Ticket = TicketDetail;
 export type TicketStatus = Ticket["status"];
 export type MediaItem = Ticket["media"][number];
 export type Annotation = NonNullable<Ticket["annotations"]>[number];

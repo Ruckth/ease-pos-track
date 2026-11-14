@@ -1,3 +1,4 @@
+import * as projectHandlers from "../convex/projects";
 import { ConvexHttpClient } from "convex/browser";
 import { getFunctionName } from "convex/server";
 import * as ticketHandlers from "../convex/tickets";
@@ -23,15 +24,14 @@ const HELP = humanHelp();
 
 function ticket(overrides: Partial<TicketDocument> = {}) {
   return {
-    _id: "ticket-id",
+    _id: "ticket-id" as TicketDocument["_id"],
     _creationTime: 1_000,
     title: "Printer jams",
     description: "On long receipts",
     status: "new",
-    projectId: "project-id",
+    projectId: "project-id" as TicketDocument["projectId"],
     projectKey: "TKT",
     lifecycle: "active",
-    searchText: "Printer jams On long receipts",
     annotations: [],
     ticketNumber: 7,
     media: [],
@@ -76,6 +76,7 @@ function validateArgs(registration: object, args: unknown) {
       assert.ok(validator.value.some(option => { try { check(option, value); return true; } catch { return false; } }));
     } else if (validator.type === "id" || validator.type === "string") assert.equal(typeof value, "string");
     else if (validator.type === "number" || validator.type === "boolean") assert.equal(typeof value, validator.type);
+    else if (validator.type === "null") assert.equal(value, null);
     else if (validator.type === "literal") assert.equal(value, validator.value);
     else assert.fail(`Unhandled validator ${validator.type}`);
   }
@@ -738,7 +739,7 @@ test("queued CLI recording is a structured definitive rejection", async () => {
 test("every CLI transport call satisfies the real registered argument validators", async () => {
   const originalQuery = ConvexHttpClient.prototype.query;
   const originalMutation = ConvexHttpClient.prototype.mutation;
-  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
+  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
   const called = new Set<string>();
   const invoke = (reference: Parameters<typeof getFunctionName>[0], args: unknown) => {
     const name = getFunctionName(reference);
@@ -748,7 +749,8 @@ test("every CLI transport call satisfies the real registered argument validators
     if (method === "createTextTicket") return { ticket: ticket(), created: true, requestId: "request" };
     if (method === "createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] };
     if (method === "recordUploadedFile") return { state: "recorded" };
-    if (method === "listTickets") return [ticket()];
+    if (method === "listProjects") return [{ _id: ticket().projectId, key: "TKT" }];
+    if (method === "pageTicketDetails") return { page: [ticket()], isDone: true, continueCursor: "" };
     return ticket();
   };
   ConvexHttpClient.prototype.query = async (reference, ...args) => invoke(reference, args[0]) as never;
@@ -773,9 +775,39 @@ test("every CLI transport call satisfies the real registered argument validators
     await remote.changeStatus(url, token, { ref, status: "acknowledged", expectedVersion: 0 });
     await remote.archive(url, token, ref, 0);
     await remote.restore(url, token, ref, 0);
-    assert.equal(called.size, 14);
+    assert.equal(called.size, 15);
   } finally {
     ConvexHttpClient.prototype.query = originalQuery;
     ConvexHttpClient.prototype.mutation = originalMutation;
   }
+});
+
+
+test("CLI read adapter consumes every Project/lifecycle page and preserves full documented output", async () => {
+  const original = ConvexHttpClient.prototype.query;
+  const calls: Array<{ projectId: string; lifecycle: string; cursor: string | null }> = [];
+  const first = ticket();
+  const second = ticket({ _id: "older-id" as never, ticketNumber: 6, _creationTime: 900, description: "Full description outside the summary excerpt" });
+  const archived = ticket({ _id: "archived-id" as never, ticketNumber: 5, _creationTime: 800, lifecycle: "archived", archivedAt: 1200 });
+  ConvexHttpClient.prototype.query = async (reference, ...inputs) => {
+    const name = getFunctionName(reference);
+    const args = inputs[0] as Record<string, unknown>;
+    if (name === "projects:listProjects") return [{ _id: first.projectId, key: "TKT" }, { _id: "empty-project", key: "APP" }] as never;
+    if (name === "tickets:pageTicketDetails") {
+      const opts = args.paginationOpts as { cursor: string | null; numItems: number };
+      assert.equal(opts.numItems, 50);
+      calls.push({ projectId: String(args.projectId), lifecycle: String(args.lifecycle), cursor: opts.cursor });
+      const rows = args.projectId === "empty-project" ? [] : args.lifecycle === "archived" ? [archived] : opts.cursor === null ? [first] : [second];
+      return { page: rows, isDone: args.projectId === "empty-project" || args.lifecycle === "archived" || opts.cursor !== null, continueCursor: "next" } as never;
+    }
+    throw new Error(`Unexpected query ${name}`);
+  };
+  try {
+    const result = await new ConvexTicketRemote().list("https://fixture.convex.cloud", "staff", undefined, true);
+    assert.deepEqual(result, [first, second, archived]);
+    assert.deepEqual(calls.map(call => [call.projectId, call.lifecycle, call.cursor]), [
+      [first.projectId, "active", null], [first.projectId, "active", "next"], [first.projectId, "archived", null],
+      ["empty-project", "active", null], ["empty-project", "archived", null],
+    ]);
+  } finally { ConvexHttpClient.prototype.query = original; }
 });

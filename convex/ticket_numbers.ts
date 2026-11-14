@@ -21,7 +21,9 @@ export function formatTicketNumber(ticketNumber: number, projectKey: string) {
   return `${projectKey}-${String(ticketNumber).padStart(4, "0")}`;
 }
 
-/** Parses `POS-0012` (any case) into its Project key and number, or null. */
+/** Parses formatted references in any case. Padding requires at least four
+ * digits; numbers above 9999 keep their full width.
+ */
 export function parseTicketReference(value: string) {
   const match = /^([A-Za-z][A-Za-z0-9]{1,9})-(\d{4,})$/.exec(value.trim());
   if (!match) return null;

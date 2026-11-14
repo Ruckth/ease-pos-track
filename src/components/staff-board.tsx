@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { GripVertical } from "lucide-react";
+import { useQuery } from "convex/react";
+import { toast } from "sonner";
+import { api } from "@convex/_generated/api";
+import type { TicketSummary } from "../../shared/ticket-contracts";
 import type { Id } from "@convex/_generated/dataModel";
 import {
   Kanban,
@@ -9,7 +13,6 @@ import {
   KanbanItem,
   KanbanItemHandle,
   KanbanOverlay,
-  type KanbanCommitMeta,
 } from "@/components/reui/kanban";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,22 +22,23 @@ import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "@/lib/ticket-ui";
 import {
   BOARD_COLUMNS,
-  emptyColumns,
-  normalizeColumns,
   reconcileColumns,
   settlePendingMoves,
+  finishMove,
+  observeMove,
+  pendingMoveCount,
+  highestTicketNumber,
+  isNewArrival,
   statusChangeFromDrag,
-  withoutPendingMove,
-  type BoardColumns,
   type PendingMoves,
 } from "@/lib/kanban-board";
-import type { Ticket, TicketStatus } from "@/lib/types";
+import type { TicketStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
 /**
  * Tailwind's `lg` breakpoint, the width at which the board becomes multi-column.
  *
- * Below it the four columns cannot sit side by side, so dragging between them is
+ * Below it the five columns cannot sit side by side, so dragging between them is
  * impossible; the board switches to status tabs showing one column at a time and
  * cards are advanced with their status button instead. The breakpoint is read in
  * JS rather than with `lg:hidden` because both layouts must never be mounted at
@@ -61,69 +65,69 @@ const isMultiColumnOnServer = () => true;
  * only and no sensor can pick it up, and no column drag handle is rendered. Cards
  * are dragged from their grip, which is the only drag activator; the drop is
  * applied locally first, then persisted with the ticket's expected version. A
- * rejected move (someone else got there first) is rolled back to whatever the
- * server says.
+ * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({
-  items,
-  onSelect,
-  onMoveCard,
-}: {
-  /** Active tickets, newest first, already filtered by the workspace search. */
-  items: Ticket[];
+export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard }: {
+  items: TicketSummary[];
+  projectId: Id<"projects">;
+  token: string;
+  totals: Partial<Record<TicketStatus, number>>;
+  pages: Record<TicketStatus, { status: string; loadMore: (count: number) => void }>;
   onSelect: (id: Id<"tickets">) => void;
-  /** Persists a status change. Resolves false when the move was rejected. */
-  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => Promise<boolean>;
+  onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
 }) {
-  const pendingRef = useRef<PendingMoves>({});
-  const itemsRef = useRef(items);
-  const [columns, setColumns] = useState<BoardColumns<Ticket>>(() =>
-    reconcileColumns(items, emptyColumns<Ticket>(), {})
-  );
+  const { t } = useI18n();
+  const [initialHighest] = useState(() => highestTicketNumber(items));
+  const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
+  const columns = reconcileColumns(projectId, items, pending);
   const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
   const [visibleStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
   const tabsId = useId();
   const panelId = `${tabsId}-panel`;
   const tabId = (status: TicketStatus) => `${tabsId}-${status}`;
-
-  // Convex pushes the authoritative list on every change. Fold it into what is
-  // on screen instead of replacing it, so in-flight drags survive the update.
+  const draggedRef = useRef<TicketSummary | null>(null);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
   useEffect(() => {
-    itemsRef.current = items;
-    pendingRef.current = settlePendingMoves(items, pendingRef.current);
-    setColumns((current) => reconcileColumns(items, current, pendingRef.current));
-  }, [items]);
+    setPending(current => settlePendingMoves(projectId, items, current));
+  }, [items, projectId, pending]);
 
-  const rollback = useCallback((id: string) => {
-    pendingRef.current = withoutPendingMove(pendingRef.current, id);
-    setColumns((current) => reconcileColumns(itemsRef.current, current, pendingRef.current));
+  const observe = useCallback((operationId: string, row: TicketSummary | null) => {
+    setPending(current => observeMove(current, operationId, row));
   }, []);
 
-  const commitMove = useCallback(
-    async (meta: KanbanCommitMeta<Ticket>) => {
-      if (meta.kind !== "item") return;
-      const status = statusChangeFromDrag(meta);
-      // Reordering inside a column changes nothing that is stored.
-      if (!status) return;
-      const id = String(meta.event.active.id) as Id<"tickets">;
-      pendingRef.current = { ...pendingRef.current, [id]: status };
-      const persisted = await onMoveCard(id, status);
-      if (!persisted) rollback(id);
-    },
-    [onMoveCard, rollback],
-  );
+  async function move(item: TicketSummary, status: TicketStatus) {
+    if (pendingRef.current[item._id] && !pendingRef.current[item._id].observed) return;
+    if (pendingMoveCount(pendingRef.current) >= 10) {
+      toast.info(t("pendingMoveLimit"));
+      return;
+    }
+    const operationId = crypto.randomUUID();
+    const entry = { operationId, ticket: item, target: status, retained: pendingRef.current[item._id]?.observed };
+    pendingRef.current = { ...pendingRef.current, [item._id]: entry };
+    setPending(pendingRef.current);
+    const version = await onMoveCard(item, status);
+    setPending(current => finishMove(current, item._id, operationId, version));
+  }
 
   return (
     <Kanban
       value={columns}
-      onValueChange={(next) => setColumns(normalizeColumns(next))}
+      onValueChange={() => undefined}
       getItemValue={(item) => item._id}
-      onValueCommit={(_value, meta) => void commitMove(meta)}
-      restoreOnCancel
+      onDragStart={(event) => { draggedRef.current = Object.values(columns).flat().find(row => row._id === event.active.id) ?? null; }}
+      onDragCancel={() => { draggedRef.current = null; }}
+      onMove={(meta) => {
+        const status = statusChangeFromDrag(meta);
+        const item = draggedRef.current;
+        draggedRef.current = null;
+        if (item && status) void move(item, status);
+      }}
     >
+      {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} token={token} entry={entry} onObserve={observe} />)}
       {multiColumn ? null : (
         <StatusTabs
-          columns={columns}
+          totals={totals}
           value={visibleStatus}
           onValueChange={setVisibleStatus}
           panelId={panelId}
@@ -139,8 +143,14 @@ export function StaffBoard({
             key={status}
             status={status}
             items={columns[status]}
+            initialHighest={initialHighest}
             onSelect={onSelect}
-            onMoveCard={onMoveCard}
+            onMoveCard={(id, status) => {
+              const item = columns[status].find(row => row._id === id) ?? Object.values(columns).flat().find(row => row._id === id);
+              if (item) void move(item, status);
+            }}
+            total={totals[status] ?? 0}
+            page={pages[status]}
             draggable={multiColumn}
           />
         ))}
@@ -166,13 +176,13 @@ export function StaffBoard({
  * column rendered. Roving tabindex plus arrow keys, per the ARIA tabs pattern.
  */
 function StatusTabs({
-  columns,
+  totals,
   value,
   onValueChange,
   panelId,
   tabId,
 }: {
-  columns: BoardColumns<Ticket>;
+  totals: Partial<Record<TicketStatus, number>>;
   value: TicketStatus;
   onValueChange: (status: TicketStatus) => void;
   panelId: string;
@@ -200,7 +210,7 @@ function StatusTabs({
             aria-controls={panelId}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
-            aria-label={t("boardColumnCards", { count: columns[status].length, status: label })}
+            aria-label={t("boardColumnCards", { count: totals[status] ?? 0, status: label })}
             onClick={() => onValueChange(status)}
             onKeyDown={(event) => {
               const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
@@ -217,7 +227,7 @@ function StatusTabs({
           >
             <Icon className="size-4 shrink-0" aria-hidden="true" />
             <span className="truncate">{label}</span>
-            <span className="tabular-nums">{columns[status].length}</span>
+            <span className="tabular-nums">{totals[status] ?? 0}</span>
           </button>
         );
       })}
@@ -231,13 +241,19 @@ function BoardColumn({
   onSelect,
   onMoveCard,
   draggable,
+  total,
+  page,
+  initialHighest,
 }: {
   status: TicketStatus;
-  items: Ticket[];
+  items: TicketSummary[];
   onSelect: (id: Id<"tickets">) => void;
-  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => Promise<boolean>;
+  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => void;
   /** False below `lg`, where one column is shown at a time and no card can be dragged. */
   draggable: boolean;
+  total: number;
+  page: { status: string; loadMore: (count: number) => void };
+  initialHighest: number;
 }) {
   const { t } = useI18n();
   const meta = statusMeta(status);
@@ -253,8 +269,8 @@ function BoardColumn({
             <Icon className="size-4 shrink-0" aria-hidden="true" />
             <h2 className="truncate text-sm font-semibold">{label}</h2>
           </div>
-          <Badge variant="outline" className="bg-white/70" aria-label={t("boardColumnCards", { count: items.length, status: label })}>
-            {items.length}
+          <Badge variant="outline" className="bg-white/70" aria-label={t("boardColumnCards", { count: total, status: label })}>
+            {total}
           </Badge>
         </div>
       ) : null}
@@ -266,6 +282,7 @@ function BoardColumn({
         ) : (
           items.map((item) => (
             <KanbanItem key={item._id} value={item._id}>
+              {isNewArrival(item, initialHighest) ? <p className="mb-1 text-xs text-muted-foreground">{t("liveArrival")}</p> : null}
               <TicketCard
                 item={item}
                 onSelect={onSelect}
@@ -292,7 +309,24 @@ function BoardColumn({
             </KanbanItem>
           ))
         )}
+        {page.status === "CanLoadMore" || page.status === "LoadingMore" ? <Button type="button" variant="outline" className="w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
       </KanbanColumnContent>
     </KanbanColumn>
   );
+}
+
+function MoveObservation({ token, entry, onObserve }: {
+  token: string; entry: PendingMoves<TicketSummary>[string];
+  onObserve: (operationId: string, row: TicketSummary | null) => void;
+}) {
+  const row = useQuery(api.tickets.getTicket, { token, id: entry.ticket._id });
+  useEffect(() => {
+    if (row === undefined) return;
+    if (!row) { onObserve(entry.operationId, null); return; }
+    const { description, media, annotations, _creationTime: _time, origin: _origin, createdVia: _via, ...summary } = row;
+    onObserve(entry.operationId, { ...summary, urgencyScore: row.urgencyScore, archivedAt: row.archivedAt,
+      excerpt: Array.from(description).slice(0, 200).join(""),
+      mediaCount: media.length, annotationCount: annotations.filter(annotation => annotation.deletedAt === undefined).length });
+  }, [row, entry.operationId, entry.resultVersion, onObserve]);
+  return null;
 }

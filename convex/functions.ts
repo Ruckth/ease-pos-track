@@ -5,6 +5,7 @@ import type { QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
 import { requireActor } from "./session_auth";
 import { constantTimeEquals } from "./password";
 import { assertStaffActor, assertCustomerActor } from "./authz";
+import { localFixturesEnabled } from "./local_fixtures";
 
 const tokenValidator = v.string();
 const policies = new WeakMap<object, string>();
@@ -32,7 +33,10 @@ async function guarded<R>(functionName: string, run: () => R): Promise<Awaited<R
     // Domain validators throw stable codes; never forward arbitrary messages.
     const code = error instanceof Error && /^[A-Z][A-Z_]+$/.test(error.message)
       ? error.message : "INTERNAL_ERROR";
-    if (code === "INTERNAL_ERROR") console.error({ code: "INTERNAL_ERROR", functionName, errorClass: error instanceof Error ? error.constructor.name : typeof error });
+    if (code === "INTERNAL_ERROR") console.error({
+      code, functionName, errorClass: error instanceof Error ? error.constructor.name : typeof error,
+      ...(localFixturesEnabled() && error instanceof Error ? { message: error.message } : {}),
+    });
     throw new ConvexError({ code });
   }
 }

@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, usePaginatedQuery } from "convex/react";
 import { Toaster, toast } from "sonner";
 import {
   Archive,
@@ -33,6 +33,9 @@ import {
   type AnnotationUpdateInput,
   type MediaViewerHandle,
 } from "@/components/media-viewer";
+import { isTicketSearchWithinLimits, type TicketSummary } from "../shared/ticket-contracts";
+import { TicketCard } from "@/components/ticket-card";
+import { useStaffLanes } from "@/lib/ticket-pages";
 import { StaffBoard } from "@/components/staff-board";
 import { NewProjectDialog, NoProjects, StaffProjectControls, useCurrentProject } from "@/components/project-controls";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
@@ -150,37 +153,35 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
   const [composerBusy, setComposerBusy] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const { projects, current: project, select: selectProject } = useCurrentProject(token);
-  const tickets = useQuery(
-    api.tickets.listTickets,
-    project ? { token, projectKey: project.key, includeDeleted: showArchived } : "skip",
-  );
+  const [search, setSearch] = useState("");
+  const query = search.trim();
+  const invalidSearch = !isTicketSearchWithinLimits(query);
+  const { lanes, items: activeItems, loading } = useStaffLanes(token, project?._id, !query);
+  const totals = useQuery(api.tickets.laneTotals, project ? { token, projectId: project._id } : "skip");
+  const matches = useQuery(api.tickets.searchTickets, project && query && !invalidSearch ? {
+    token, projectId: project._id, lifecycle: "active", search: query,
+  } : "skip");
+  const archive = usePaginatedQuery(api.tickets.pageTickets, project && showArchived && !query ? {
+    token, projectId: project._id, lifecycle: "archived",
+  } : "skip", { initialNumItems: 20 });
+  const archiveMatches = useQuery(api.tickets.searchTickets, project && showArchived && query && !invalidSearch ? {
+    token, projectId: project._id, lifecycle: "archived", search: query,
+  } : "skip");
+  const archivedItems = query ? archiveMatches?.matches ?? [] : archive.results;
   const updateStatus = useMutation(api.tickets.updateTicketStatus);
   const undoStatus = useMutation(api.tickets.undoTicketStatus);
   const archiveTicket = useMutation(api.tickets.archiveTicket);
   const restoreTicket = useMutation(api.tickets.restoreTicket);
   const [selectedId, setSelectedId] = useState<Id<"tickets"> | null>(null);
-  const [search, setSearch] = useState("");
+  const selected = useQuery(api.tickets.getTicket, selectedId ? { token, id: selectedId } : "skip") ?? null;
+  useEffect(() => { setSelectedId(null); }, [project?._id]);
 
-  const filtered = useMemo(() => {
-    const rows = tickets ?? [];
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((item) =>
-      `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description}`.toLowerCase().includes(q)
-    );
-  }, [tickets, search]);
-
-  const selected = tickets?.find((item) => item._id === selectedId) ?? null;
-  const activeItems = useMemo(() => filtered.filter((item) => item.archivedAt === undefined), [filtered]);
-  const archivedItems = useMemo(() => filtered.filter((item) => item.archivedAt !== undefined), [filtered]);
-
-  /** Persists a status change and offers an undo. False means it was rejected. */
-  async function moveItem(id: Id<"tickets">, status: TicketStatus) {
-    const current = tickets?.find((item) => item._id === id);
-    if (!current) return false;
+  /** Return the committed version; null removes a rejected operation overlay. */
+  async function moveItem(current: TicketSummary | Ticket, status: TicketStatus) {
+    const id = current._id;
     try {
       const result = await updateStatus({ token, id, status, expectedVersion: current.version });
-      if (!result.eventId) return true;
+      if (!result.eventId) return result.version;
       toast.success(t("statusUpdated"), {
         action: {
           label: t("undo"),
@@ -190,22 +191,22 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
           },
         },
       });
-      return true;
+      return result.version;
     } catch (error) {
       toast.error(localizeError(error, t));
-      return false;
+      return null;
     }
   }
 
   async function restoreItem(id: Id<"tickets">, announce = true) {
-    const current = tickets?.find((item) => item._id === id);
+    const current = archivedItems.find((item) => item._id === id) ?? selected;
     if (!current) return;
     await restoreTicket({ token, id, expectedVersion: current.version });
     if (announce) toast.success(t("ticketRestored"));
   }
 
   async function archiveItem(id: Id<"tickets">) {
-    const current = tickets?.find((item) => item._id === id);
+    const current = selected;
     if (!current) return;
     const result = await archiveTicket({ token, id, expectedVersion: current.version });
     setSelectedId(null);
@@ -227,7 +228,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal">{t("appName")}</h1>
-            <p className="text-sm text-muted-foreground">{tickets ? t("ticketItems", { count: tickets.length }) : project === null ? t("noProjectsTitle") : t("syncing")}</p>
+            <p className="text-sm text-muted-foreground">{totals ? t("ticketItems", { count: Object.values(totals).reduce((sum, count) => sum + count, 0) }) : project === null ? t("noProjectsTitle") : t("syncing")}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap">
             {projects ? (
@@ -241,7 +242,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
             ) : null}
             <div className="relative min-w-48 flex-1 basis-full sm:basis-auto lg:w-72 lg:flex-none">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" placeholder={t("search")} value={search} onChange={(event) => setSearch(event.target.value)} />
+              <Input className="pl-9" placeholder={t("search")} maxLength={200} value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
             <Button
               type="button"
@@ -269,12 +270,18 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         <section className="min-w-0">
           {project === null ? (
             <NoProjects action={<Button type="button" onClick={() => setNewProjectOpen(true)}>{t("newProject")}</Button>} />
-          ) : tickets === undefined ? (
+          ) : invalidSearch ? (
+            <p role="alert" className="text-sm text-destructive">{t("searchLimit")}</p>
+          ) : (query ? matches === undefined : loading) ? (
             <div className="grid min-h-72 place-items-center rounded-lg border bg-card">
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <StaffBoard items={activeItems} onSelect={setSelectedId} onMoveCard={moveItem} />
+            query ? <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">{t("searchHint")}</p>
+              <p className="text-sm">{t(matches?.hasMore ? "searchLoaded" : "searchMatches", { count: matches?.matches.length ?? 0 })}</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{matches?.matches.map(item => <TicketCard key={item._id} item={item} onSelect={setSelectedId} />)}</div>
+            </div> : <StaffBoard key={project?._id} projectId={project!._id} token={token} items={activeItems} totals={totals ?? {}} pages={lanes} onSelect={setSelectedId} onMoveCard={moveItem} />
           )}
           {showArchived && archivedItems.length > 0 ? (
             <section className="mt-5 rounded-lg border bg-card p-4">
@@ -295,6 +302,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
                   </div>
                 ))}
               </div>
+              {query ? archiveMatches?.hasMore ? <p className="text-sm text-muted-foreground">{t("searchLoaded", { count: archivedItems.length })}</p> : null : archive.status !== "Exhausted" ? <Button disabled={archive.status !== "CanLoadMore"} onClick={() => archive.loadMore(20)}>{t("loadOlder")}</Button> : null}
             </section>
           ) : null}
         </section>
@@ -328,7 +336,7 @@ function TrackingWorkspace({ token, onLogout }: { token: string; onLogout: () =>
         ticket={selected}
         token={token}
         onClose={() => setSelectedId(null)}
-        onMove={(id, status) => void moveItem(id, status)}
+        onMove={(_id, status) => { if (selected) void moveItem(selected, status); }}
         onArchive={archiveItem}
       />
     </main>

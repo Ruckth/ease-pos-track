@@ -3,20 +3,14 @@ import { v } from "convex/values";
 import { internalJobAction, internalJobMutation } from "./functions";
 import { internal } from "./_generated/api";
 import { createPasswordRecord } from "./password";
-import { createTicketRecord } from "./domain/tickets";
+import { applyTicketChange, createTicketRecord } from "./domain/tickets";
 import { requireUsableProject } from "./domain/projects";
+import { requireActor } from "./session_auth";
 import { actorFields, newTicketOwnership } from "./authz";
 import { ticketRequestFingerprintInput } from "../shared/ticket-contracts";
 import { hashTicketRequest } from "./ticket_requests";
 import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./domain/requests";
-
-export function requireLocalFixtures() {
-  let host: string | undefined;
-  try { host = new URL(process.env.CONVEX_CLOUD_URL ?? "").hostname; } catch { /* Fail closed. */ }
-  if (process.env.LOCAL_FIXTURES_ENABLED !== "true" || !["127.0.0.1", "localhost", "[::1]"].includes(host ?? "")) {
-    throw new Error("LOCAL_FIXTURES_DISABLED");
-  }
-}
+import { requireLocalFixtures } from "./local_fixtures";
 
 /** Opt-in internal fixture only. No reset and no provider I/O. Repeated runs reuse Projects, customers and Tickets; each run issues fresh random sessions. */
 export const install = internalJobMutation({
@@ -90,12 +84,50 @@ export const install = internalJobMutation({
 
 export const run = internalJobAction({
   name: "seed:run",
-  args: {},
-  handler: async (ctx): Promise<{ projects: { id: Id<"projects">; key: string }[]; tickets: Id<"tickets">[]; sessions: string[] }> => {
+  args: { largeDataset: v.optional(v.boolean()) },
+  handler: async (ctx, args): Promise<{ projects: { id: Id<"projects">; key: string }[]; tickets: Id<"tickets">[]; sessions: string[] }> => {
     requireLocalFixtures();
     const pepper = process.env.CUSTOMER_PASSWORD_PEPPER;
     if (!pepper) throw new Error("CUSTOMER_AUTH_NOT_CONFIGURED");
     const record = await createPasswordRecord("LocalCustomer123!", pepper);
-    return await ctx.runMutation(internal.seed.install, record);
+    const seed = await ctx.runMutation(internal.seed.install, record);
+    if (args.largeDataset) {
+      for (const project of seed.projects) {
+        for (let start = 0; start < 150; start += 25) await ctx.runMutation(internal.seed.largeBatch, { projectId: project.id, sessions: seed.sessions, start });
+      }
+    }
+    return seed;
+  },
+});
+
+/** 300 additional text-only Tickets across two Projects, through domain writes.
+ * Batches keep the fixture's own reads/writes bounded. Replays do not reset edits.
+ */
+export const largeBatch = internalJobMutation({
+  name: "seed:largeBatch",
+  args: { projectId: v.id("projects"), sessions: v.array(v.string()), start: v.number() },
+  handler: async (ctx, args) => {
+    requireLocalFixtures();
+    if (![0, 25, 50, 75, 100, 125].includes(args.start) || args.sessions.length !== 3) throw new Error("INVALID_INPUT");
+    const accesses = await Promise.all(args.sessions.map(token => requireActor(ctx, token)));
+    for (const { actor } of accesses) if (actor.role === "customer") {
+      const membership = await ctx.db.query("projectMembers").withIndex("by_project", q => q.eq("projectId", args.projectId).eq("customerId", actor.customerId)).unique();
+      if (!membership) await ctx.db.insert("projectMembers", { projectId: args.projectId, customerId: actor.customerId, createdAt: Date.now() });
+    }
+    const statuses = ["new", "acknowledged", "in_progress", "waiting", "done"] as const;
+    for (let index = args.start; index < args.start + 25; index++) {
+      const { actor, session } = accesses[index % 3];
+      const project = await requireUsableProject(ctx, actor, args.projectId);
+      const title = index === 0 ? "quartz" : index === 1 ? "Printer calibration" : index === 2 ? "quartz calibration" : `Printer queue fixture ${index}`;
+      const description = index === 1 ? `quartz ${"receipt context ".repeat(150)}` : index < 3 ? "" : `Receipt printing ${"local context ".repeat(index % 20)}`;
+      const request: RequestScope = { operation: "ticket.create", requestId: `seed-large-${project.key}-${index}`, actor, projectId: project._id,
+        ...await hashTicketRequest(ticketRequestFingerprintInput({ actor, projectId: project._id, title, description })) };
+      if (await replayTicketRequest(ctx, request)) continue;
+      const author = { sessionId: session._id, ...actorFields(actor) };
+      const ticket = await createTicketRecord(ctx, { project, title, description, media: [], ownership: newTicketOwnership(actor), author, now: Date.now() });
+      await commitTicketRequest(ctx, request, { ticketId: ticket._id, version: ticket.version });
+      const status = statuses[index % 5];
+      if (status !== "new") await applyTicketChange(ctx, { doc: ticket, expectedVersion: ticket.version, changes: { status }, action: "status_changed", author, now: Date.now() });
+    }
   },
 });

@@ -1,8 +1,12 @@
-import { actorMutation, actorQuery, customerQuery, staffMutation, staffQuery } from "./functions";
+import { actorMutation, actorQuery, staffMutation, staffQuery } from "./functions";
 import * as operations from "./domain/operations";
 
-export const listTickets = staffQuery({ name: "tickets:listTickets", ...operations.listTickets });
-export const listMyTickets = customerQuery({ name: "tickets:listMyTickets", ...operations.listMyTickets });
+import * as reads from "./domain/reads";
+
+export const pageTickets = actorQuery({ name: "tickets:pageTickets", ...reads.pageTickets });
+export const pageTicketDetails = staffQuery({ name: "tickets:pageTicketDetails", ...reads.pageTicketDetails });
+export const searchTickets = actorQuery({ name: "tickets:searchTickets", ...reads.searchTickets });
+export const laneTotals = staffQuery({ name: "tickets:laneTotals", ...reads.laneTotals });
 export const getTicket = actorQuery({ name: "tickets:getTicket", ...operations.getTicket });
 export const getTicketByTicketNumber = staffQuery({ name: "tickets:getTicketByTicketNumber", ...operations.getTicketByTicketNumber });
 export const listTicketActivity = actorQuery({ name: "tickets:listTicketActivity", ...operations.listTicketActivity });

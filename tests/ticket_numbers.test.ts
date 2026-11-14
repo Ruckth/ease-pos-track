@@ -13,6 +13,9 @@ test("formats Ticket references with the required Project key", () => {
   assert.equal(formatTicketNumber(1, "POS"), "POS-0001");
   assert.equal(formatTicketNumber(10_001, "APP"), "APP-10001");
   assert.equal(formatTicketNumber(12, "POS"), "POS-0012");
+  for (const ticketNumber of [1, 12, 999, 1000, 10_001, Number.MAX_SAFE_INTEGER]) {
+    assert.deepEqual(parseTicketReference(formatTicketNumber(ticketNumber, "POS")), { projectKey: "POS", ticketNumber });
+  }
 });
 
 test("parses Ticket references in any case and rejects malformed ones", () => {

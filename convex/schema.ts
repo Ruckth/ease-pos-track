@@ -137,8 +137,8 @@ export default defineSchema({
     .index("by_project_lane", ["projectId", "lifecycle", "status", "ticketNumber"])
     .index("by_owner_project", ["ownerCustomerId", "projectId", "lifecycle", "ticketNumber"])
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
-    .index("by_owner", ["ownerCustomerId", "createdAt"])
-    .searchIndex("search_text", { searchField: "searchText", filterFields: ["projectId", "ownerCustomerId", "lifecycle"] }),
+    .index("by_project_lifecycle", ["projectId", "lifecycle", "ticketNumber"])
+    .searchIndex("search_text", { searchField: "searchText", filterFields: ["projectId", "ownerCustomerId", "lifecycle", "status"] }),
   customers: defineTable({
     email: v.string(),
     passwordAlgorithm: v.string(),
