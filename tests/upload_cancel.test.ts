@@ -5,10 +5,11 @@ import { readUploadCancelResponse } from "../src/lib/upload-cancel";
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-test("a JSON acknowledgement is accepted and reports how many files were deleted", async () => {
-  assert.deepEqual(await readUploadCancelResponse(json({ ok: true, deleted: 2 })), { deleted: 2 });
-  // A missing count is not an error; nothing had been uploaded yet.
-  assert.deepEqual(await readUploadCancelResponse(json({ ok: true })), { deleted: 0 });
+test("queued and completed cancellation acknowledgements carry progress without claiming deletion", async () => {
+  for (const state of ["queued", "completed"]) {
+    assert.deepEqual(await readUploadCancelResponse(json({ ok: true, state, jobIds: ["job"] })), { state, jobIds: ["job"] });
+  }
+  await assert.rejects(() => readUploadCancelResponse(json({ ok: true, deleted: 2 })), /UPLOAD_CLEANUP_FAILED/);
 });
 
 test("a 200 that is not JSON is a failure, not a silent success", async () => {
@@ -46,9 +47,9 @@ test("an error response surfaces the server's stable code for localization", asy
 });
 
 test("a JSON content type with parameters is still treated as JSON", async () => {
-  const withCharset = new Response(JSON.stringify({ ok: true, deleted: 1 }), {
+  const withCharset = new Response(JSON.stringify({ ok: true, state: "queued", jobIds: ["job"] }), {
     status: 200,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
-  assert.deepEqual(await readUploadCancelResponse(withCharset), { deleted: 1 });
+  assert.deepEqual(await readUploadCancelResponse(withCharset), { state: "queued", jobIds: ["job"] });
 });

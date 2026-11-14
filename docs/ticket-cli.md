@@ -136,9 +136,11 @@ pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/det
 
 Local files and downloaded HTTPS images are uploaded without resizing or
 re-encoding. Images must be non-empty, no larger than 8 MB each, and the Ticket
-may contain at most 10 images in total. The upload intent is bound to the staff
-session and retry key; an interrupted retry reuses files already recorded by the
-intent instead of uploading or attaching them twice. Image upload requires
+may contain at most 10 images in total. The upload intent is bound to the durable
+actor and retry key; an interrupted retry, including after sign-in, reuses files
+already recorded by the intent instead of uploading or attaching them twice.
+Recording requires the validated staff session that acquired the intent; this
+direct provider adapter is a deliberate staff capability. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
 `create --dry-run` reads or downloads each image and reports its original name,
 size, and type, but does not upload it or contact the deployment.
@@ -146,6 +148,15 @@ Attachment receipts use their own operation scope and compare the target Ticket
 and ordered media keys. A replay returns the committed attachment's version and
 audit reference, even if the Ticket has since changed; the CLI reads the current
 Ticket for its JSON result.
+If that read fails after attachment commits, it does not replay the mutation or
+queue cancellation; retry with the same request id.
+
+Recording and attachment reconcile a lost response by replaying the identical
+write once. If its outcome is still unknown, keep the same request id on retry;
+no deletion is authorized. A definitive rejection queues cleanup through an
+atomic ownership reservation. Cancellation and late rejected callbacks retain
+pending media jobs; P4 will execute them. A queued acknowledgement does not mean
+the files have been deleted. Callback and provider credentials stay server-side.
 
 Every state-changing command requires the latest `version` returned by create,
 list, or get. This preserves the existing optimistic concurrency check:
@@ -194,7 +205,9 @@ the silent reporter so pnpm does not add lifecycle lines around those streams.
 | `6` | Convex deployment/network call failure. |
 
 Unmapped safe server codes appear in the `REMOTE_CALL_FAILED` message, with exit 6
-and the same JSON fields.
+and the same JSON fields. If guarded upload cancellation cannot be confirmed,
+the original error and exit status are retained with
+`details: { "cleanup": { "outcome": "unknown" } }`; reuse the same request ID.
 
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
@@ -260,8 +273,10 @@ pnpm convex:local
 pnpm convex:local env set LOCAL_FIXTURES_ENABLED true
 pnpm convex:local env set APP_PASSWORD 'LocalStaff123!'
 pnpm convex:local env set CUSTOMER_PASSWORD_PEPPER local-only-fixture-pepper
+pnpm convex:local env set UPLOAD_CALLBACK_SECRET local-only-callback-fixture
 pnpm convex:local run seed:run '{}'
 pnpm convex:local run local_smoke:run '{}'
+pnpm convex:local run local_smoke:media '{}'
 pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
 ```
 
@@ -280,13 +295,20 @@ loopback URL, checking JSON, retries after edits, content/Project conflict exit 
 and text-only commands. The backend smoke starts eight concurrent identical
 creates in separate mutations and asserts one Ticket row and one creation audit
 event, then checks replay after editing and content/Project conflicts.
+The media smoke uses fake receipts to exercise competing exclusive key claims,
+duplicate recording, attachment, takeover denial and late-upload reservations
+on the local backend, including customer callback preflight and media creation.
+It does not call UploadThing.
 `--start` keeps the local backend alive for the CLI process; standalone `run`
 commands stop their local backend when they exit.
 
 Public handlers now return structured error codes. CLI flags, JSON fields and
 exit codes retain their documented meanings. Upload recording requires either
 the originating staff session or the server-only `UPLOAD_CALLBACK_SECRET`
-configured in both the HTTP process and Convex. Existing plaintext Keychain
+configured in both the HTTP process and Convex. Browser upload preflight verifies
+that credential before accepting files and counts files already recorded for
+the intent. Staff recording cannot reserve new keys against rejected intents;
+only trusted provider callbacks can reserve rejected new uploads. Existing plaintext Keychain
 credentials are rejected; sign in again to write the current encoded format.
 Automatic media retention scheduling is paused until the durable P3–P4 media
 ownership/job implementation replaces the removed unsafe cleanup path.

@@ -128,7 +128,7 @@ export function logoutOutput(deployment: Deployment, loggedOut: boolean) {
   return { ok: true as const, loggedOut, deployment };
 }
 
-export function errorOutput(error: TicketCliError, deployment?: Deployment, requestId?: string) {
+export function errorOutput(error: TicketCliError, deployment?: Deployment, requestId?: string, details?: { cleanup: { outcome: "unknown" } }) {
   return {
     ok: false as const,
     code: error.code,
@@ -136,5 +136,6 @@ export function errorOutput(error: TicketCliError, deployment?: Deployment, requ
     ...(deployment ? { deployment } : {}),
     ...(requestId ? { requestId } : {}),
     ...(error.hint ? { hint: error.hint } : {}),
+    ...(details ? { details } : {}),
   };
 }

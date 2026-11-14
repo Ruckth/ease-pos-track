@@ -22,6 +22,7 @@ function makeToken() {
 }
 
 export const login = publicAuthMutation("staff-login")({
+  name: "auth:login",
   args: {
     password: v.string(),
     clientId: v.string(),
@@ -99,6 +100,7 @@ export const login = publicAuthMutation("staff-login")({
 });
 
 export const logout = publicAuthMutation("logout")({
+  name: "auth:logout",
   args: {
     token: v.string(),
   },
@@ -112,6 +114,7 @@ export const logout = publicAuthMutation("logout")({
 });
 
 export const currentSession = publicAuthQuery("current-session")({
+  name: "auth:currentSession",
   args: {
     token: v.optional(v.string()),
   },
@@ -142,6 +145,7 @@ export const currentSession = publicAuthQuery("current-session")({
 });
 
 export const cleanupExpiredSessions = internalJobMutation({
+  name: "auth:cleanupExpiredSessions",
   args: {},
   handler: async (ctx) => {
     const expiredSessions = await ctx.db

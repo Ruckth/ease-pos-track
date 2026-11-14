@@ -20,6 +20,7 @@ export function requireLocalFixtures() {
 
 /** Opt-in internal fixture only. No reset and no provider I/O. Repeated runs reuse Projects, customers and Tickets; each run issues fresh random sessions. */
 export const install = internalJobMutation({
+  name: "seed:install",
   args: {
     passwordAlgorithm: v.string(), passwordSalt: v.string(),
     passwordHash: v.string(), passwordIterations: v.number(),
@@ -88,6 +89,7 @@ export const install = internalJobMutation({
 });
 
 export const run = internalJobAction({
+  name: "seed:run",
   args: {},
   handler: async (ctx): Promise<{ projects: { id: Id<"projects">; key: string }[]; tickets: Id<"tickets">[]; sessions: string[] }> => {
     requireLocalFixtures();

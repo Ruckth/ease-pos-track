@@ -7,25 +7,39 @@ import { requireUsableProject } from "./domain/projects";
 import { createTicketRecord } from "./domain/tickets";
 import { actorFields, newTicketOwnership } from "./authz";
 import { errorCode } from "../shared/errors";
+import { attachIntentAssets, recordUpload } from "./domain/media";
 
 /** Fake metadata is confined to the opt-in local fixture. No provider I/O. */
 export const annotationFixture = internalJobMutation({
+  name: "local_smoke:annotationFixture",
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requireLocalFixtures();
     const { actor, session } = await requireActor(ctx, token);
     const project = await ctx.db.query("projects").withIndex("by_key", q => q.eq("key", "POS")).unique();
     if (!project) throw new Error("PROJECT_NOT_FOUND");
-    return (await createTicketRecord(ctx, {
+    const now = Date.now();
+    const file = { key: `local-fake-${crypto.randomUUID()}`, name: "fixture.png", size: 1, type: "image/png", url: "https://fixture.invalid/image.png" };
+    const intentId = await ctx.db.insert("uploadIntents", {
+      sessionId: session._id, ...actorFields(actor), secret: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+      expectedFiles: [{ name: file.name, size: file.size, type: file.type }], uploadedFiles: [], status: "pending",
+      createdAt: now, updatedAt: now, expiresAt: now + 60_000,
+    });
+    const intent = (await ctx.db.get(intentId))!;
+    await recordUpload(ctx, intent, file);
+    const created = await createTicketRecord(ctx, {
       project: await requireUsableProject(ctx, actor, project._id),
       title: "Local annotation fixture", description: "Fake metadata only",
-      media: [{ key: `local-fake-${crypto.randomUUID()}`, name: "fixture.png", size: 1, type: "image/png", url: "https://fixture.invalid/image.png" }],
+      media: [file],
       ownership: newTicketOwnership(actor), author: { sessionId: session._id, ...actorFields(actor) }, now: Date.now(),
-    }))._id;
+    });
+    await attachIntentAssets(ctx, intent, created._id, [file]);
+    return created._id;
   },
 });
 
 export const run = internalJobAction({
+  name: "local_smoke:run",
   args: {},
   handler: async (ctx): Promise<{ ok: true; checks: string[] }> => {
     requireLocalFixtures();
@@ -104,5 +118,66 @@ export const run = internalJobAction({
     check((await ctx.runQuery(api.annotations.listAnnotationActivity, { token: alice, id })).length === 4, "annotation create/edit/remove/restore with fake metadata");
     for (const token of [staff, alice, bob, ...seeded.sessions]) await ctx.runMutation(api.auth.logout, { token });
     return { ok: true, checks };
+  },
+});
+
+/** P3 contention proof on the disposable backend. Fake receipts, no provider I/O. */
+export const media = internalJobAction({
+  name: "local_smoke:media",
+  args: {},
+  handler: async (ctx): Promise<{ ok: true; checks: string[] }> => {
+    requireLocalFixtures();
+    const seeded = await ctx.runAction(internal.seed.run, {});
+    const token = seeded.sessions[0];
+    const requestId = crypto.randomUUID();
+    const file = { key: `local-fake-${requestId}`, name: "fixture.png", size: 1, type: "image/png", url: "https://fixture.invalid/image.png" };
+    const files = [{ name: file.name, size: file.size, type: file.type }];
+    const handles = await Promise.all(["first", "second"].map(suffix => ctx.runMutation(api.uploads.createUploadIntent, {
+      token, idempotencyKey: `${requestId}-${suffix}`, files,
+    })));
+    const record = (handle: typeof handles[number], uploaded = file) => ctx.runMutation(api.uploads.recordUploadedFile, {
+      token, intentId: handle.intentId, secret: handle.secret, file: uploaded,
+    });
+    const claims = await Promise.allSettled(handles.map(handle => record(handle)));
+    if (claims.filter(result => result.status === "fulfilled").length !== 1
+      || !claims.some(result => result.status === "rejected" && errorCode(result.reason) === "MEDIA_OWNERSHIP_CONFLICT")) {
+      throw new Error("LOCAL_MEDIA_CLAIM_FAILED");
+    }
+    const winner = handles[claims.findIndex(result => result.status === "fulfilled")];
+    const loser = handles[claims.findIndex(result => result.status === "rejected")];
+    const duplicates = await Promise.all(Array.from({ length: 8 }, () => record(winner)));
+    if (!duplicates.every(result => result.state === "recorded")) throw new Error("LOCAL_MEDIA_REPLAY_FAILED");
+    const input = { token, projectId: seeded.projects[0].id, requestId, title: "Local media ownership fixture", description: "", media: [file], uploadIntentId: winner.intentId, uploadIntentSecret: winner.secret };
+    const id = await ctx.runMutation(api.tickets.createTicket, input);
+    if (await ctx.runMutation(api.tickets.createTicket, input) !== id || (await record(winner)).state !== "recorded") throw new Error("LOCAL_MEDIA_ATTACHMENT_FAILED");
+    try { await record(loser); throw new Error("LOCAL_MEDIA_TAKEOVER_FAILED"); }
+    catch (error) { if (errorCode(error) !== "MEDIA_OWNERSHIP_CONFLICT") throw error; }
+    const cancellation = await ctx.runMutation(api.uploads.cancelUploadIntent, { token, intentId: winner.intentId, secret: winner.secret });
+    if (cancellation.state !== "completed" || cancellation.jobIds.length) throw new Error("LOCAL_MEDIA_ATTACHED_CANCEL_FAILED");
+    await ctx.runMutation(api.uploads.cancelUploadIntent, { token, intentId: loser.intentId, secret: loser.secret });
+    try { await record(loser, { ...file, key: `${file.key}-legacy` }); throw new Error("LOCAL_MEDIA_STAFF_LATE_FAILED"); }
+    catch (error) { if (errorCode(error) !== "UPLOAD_INTENT_INVALID") throw error; }
+    const late = await ctx.runMutation(api.uploads.recordUploadedFile, {
+      callbackToken: process.env.UPLOAD_CALLBACK_SECRET, intentId: loser.intentId, secret: loser.secret,
+      file: { ...file, key: `${file.key}-late` },
+    });
+    if (late.state !== "queued" || late.jobIds.length !== 1) throw new Error("LOCAL_MEDIA_LATE_FAILED");
+    const row = await ctx.runQuery(api.tickets.getTicket, { token, id });
+    if (row?.media.length !== 1 || row.media[0].key !== file.key) throw new Error("LOCAL_MEDIA_TICKET_FAILED");
+    const customer = seeded.sessions[1];
+    const customerFile = { ...file, key: `${file.key}-customer` };
+    const customerIntent = await ctx.runMutation(api.uploads.createUploadIntent, { token: customer, idempotencyKey: `${requestId}-customer`, files });
+    const callbackToken = process.env.UPLOAD_CALLBACK_SECRET;
+    if (!callbackToken) throw new Error("UPLOAD_CALLBACK_NOT_CONFIGURED");
+    if (!await ctx.runQuery(api.uploads.validateUploadIntent, {
+      token: customer, callbackToken, intentId: customerIntent.intentId, secret: customerIntent.secret, files,
+    })) throw new Error("LOCAL_MEDIA_PREFLIGHT_FAILED");
+    await ctx.runMutation(api.uploads.recordUploadedFile, { callbackToken, intentId: customerIntent.intentId, secret: customerIntent.secret, file: customerFile });
+    const customerId = await ctx.runMutation(api.tickets.createTicket, {
+      ...input, token: customer, requestId: `${requestId}-customer`, media: [customerFile],
+      uploadIntentId: customerIntent.intentId, uploadIntentSecret: customerIntent.secret,
+    });
+    if ((await ctx.runQuery(api.tickets.getTicket, { token: customer, id: customerId }))?.media[0].key !== customerFile.key) throw new Error("LOCAL_MEDIA_CUSTOMER_FAILED");
+    return { ok: true, checks: ["concurrent exclusive key claims", "eight identical recording replays", "atomic attachment and create replay", "attached key takeover denied", "attached cancellation reserves nothing", "customer callback preflight and media Ticket", "staff late key rejected", "trusted late new upload reserved under pending job"] };
   },
 });

@@ -1,9 +1,17 @@
+import { ConvexHttpClient } from "convex/browser";
+import { getFunctionName } from "convex/server";
+import * as ticketHandlers from "../convex/tickets";
+import * as authHandlers from "../convex/auth";
+import { ConvexTicketRemote } from "../scripts/ticket/remote";
+import * as uploadHandlers from "../convex/uploads";
+import type { ValidatorJSON } from "convex/values";
+import { ConvexError } from "convex/values";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { parseTicketArgs } from "../scripts/ticket/cli";
 import type { ConfigStore, TicketConfig } from "../scripts/ticket/config";
-import { EXIT, TicketCliError } from "../scripts/ticket/errors";
+import { EXIT, TicketCliError, remoteError, internalError } from "../scripts/ticket/errors";
 import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
 import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
 import type { TicketRef } from "../scripts/ticket/cli";
@@ -50,6 +58,30 @@ class MemoryCredentials implements CredentialStore {
   async delete(target: "dev" | "prod") { delete this.values[target]; }
 }
 
+// Validate transport shapes against the registered handlers, including extra fields.
+function validateArgs(registration: object, args: unknown) {
+  function check(validator: ValidatorJSON, value: unknown): void {
+    if (validator.type === "object") {
+      assert.ok(value && typeof value === "object" && !Array.isArray(value));
+      const fields = value as Record<string, unknown>;
+      for (const key of Object.keys(fields)) assert.ok(key in validator.value, `Unexpected field ${key}`);
+      for (const [key, field] of Object.entries(validator.value)) {
+        if (fields[key] === undefined && field.optional) continue;
+        check(field.fieldType, fields[key]);
+      }
+    } else if (validator.type === "array") {
+      assert.ok(Array.isArray(value));
+      value.forEach(item => check(validator.value, item));
+    } else if (validator.type === "union") {
+      assert.ok(validator.value.some(option => { try { check(option, value); return true; } catch { return false; } }));
+    } else if (validator.type === "id" || validator.type === "string") assert.equal(typeof value, "string");
+    else if (validator.type === "number" || validator.type === "boolean") assert.equal(typeof value, validator.type);
+    else if (validator.type === "literal") assert.equal(value, validator.value);
+    else assert.fail(`Unhandled validator ${validator.type}`);
+  }
+  check(JSON.parse((registration as { exportArgs(): string }).exportArgs()), args);
+}
+
 class FakeRemote implements TicketRemote {
   calls: Array<{ method: string; args: unknown[] }> = [];
   session: Awaited<ReturnType<TicketRemote["currentSession"]>> = { role: "staff", expiresAt: 20_000, customerId: null, email: null };
@@ -80,16 +112,21 @@ class FakeRemote implements TicketRemote {
     return { ticket: this.rows[0], created: true, requestId: input.requestId };
   }
   async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): ReturnType<TicketRemote["createUploadIntent"]> {
+    validateArgs(uploadHandlers.createUploadIntent, { token, idempotencyKey: input.requestId, files: input.files });
     this.record("createUploadIntent", url, token, input);
     return { intentId: "intent-id" as never, secret: "s".repeat(48), uploadedFiles: [] };
   }
-  async recordUploadedFile(url: string, input: { intentId: string; secret: string; file: TicketDocument["media"][number] }) {
+  async recordUploadedFile(url: string, input: { token: string; intentId: string; secret: string; file: TicketDocument["media"][number] }) {
+    validateArgs(uploadHandlers.recordUploadedFile, input);
     this.record("recordUploadedFile", url, input);
+  }
+  async cancelUploadIntent(url: string, token: string, input: { intentId: string; secret: string }) {
+    validateArgs(uploadHandlers.cancelUploadIntent, { token, ...input });
+    this.record("cancelUploadIntent", url, token, input);
   }
   async attachImages(url: string, token: string, input: TicketAttachInput) {
     this.record("attachImages", url, token, input);
     this.rows[0] = ticket({ ...this.rows[0], media: [...this.rows[0].media, ...input.media], version: input.expectedVersion + 1 });
-    return this.rows[0];
   }
   async update(url: string, token: string, input: { ref: TicketRef; title?: string; description?: string; expectedVersion: number }) {
     this.record("update", url, token, input);
@@ -133,7 +170,7 @@ function fixture() {
     images: {
       prepare: async (sources: string[]) => sources.map((source, index) => new File([`image-${index}`], source.split("/").at(-1) ?? `image-${index}.png`, { type: "image/png" })),
       upload: async (files: File[]) => files.map((file, index) => ({
-        key: `image-key-${index}`,
+        key: `image-key-${file.name}`,
         name: file.name,
         size: file.size,
         type: file.type,
@@ -438,7 +475,7 @@ test("attach uploads images through a verified intent and returns the updated Ti
   assert.equal(output.ticket.version, 1);
   assert.deepEqual(
     remote.calls.map((call) => call.method),
-    ["currentSession", "createUploadIntent", "recordUploadedFile", "recordUploadedFile", "attachImages"],
+    ["currentSession", "get", "createUploadIntent", "recordUploadedFile", "recordUploadedFile", "attachImages", "get"],
   );
 });
 
@@ -459,7 +496,7 @@ test("create with images creates the Ticket first then attaches media with the s
   assert.equal(JSON.parse(result.stdout).requestId, "create-images-0001");
   assert.deepEqual(
     remote.calls.map((call) => call.method),
-    ["currentSession", "create", "createUploadIntent", "recordUploadedFile", "attachImages"],
+    ["currentSession", "create", "get", "createUploadIntent", "recordUploadedFile", "attachImages", "get"],
   );
 });
 
@@ -488,7 +525,7 @@ test("an interrupted attachment retry reuses files already recorded by its uploa
 
   assert.equal(result.exitCode, 0);
   assert.equal(remote.calls.some((call) => call.method === "recordUploadedFile"), false);
-  assert.equal(remote.calls.at(-1)?.method, "attachImages");
+  assert.equal(remote.calls.at(-1)?.method, "get");
 });
 
 test("an idempotent create retry reports the original Ticket without claiming a new write", async () => {
@@ -509,7 +546,7 @@ test("an attached intent still sends the request id for authoritative attachment
   deps.images.upload = async () => { throw new Error("Must reuse the uploaded file"); };
   remote.attachImages = async (_url, _token, input) => {
     assert.equal(input.requestId, "same-attachment-id");
-    throw new Error("REQUEST_ID_CONFLICT");
+    throw new ConvexError({ code: "REQUEST_ID_CONFLICT" });
   };
   const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "same-attachment-id"], deps);
   assert.equal(result.exitCode, 5);
@@ -573,4 +610,172 @@ test("unmapped server failures preserve the CLI JSON error shape and exit 6", as
     ok: false, code: "REMOTE_CALL_FAILED", message: "The Convex deployment call failed (STORAGE_NOT_CONFIGURED).", deployment: "dev",
   });
   assert.equal(result.stderr.trim().split("\n").length, 1);
+});
+
+test("CLI reconciles lost recording and attachment responses with the same staff credential and request identity", async () => {
+  const { deps, remote } = fixture();
+  let recordings = 0;
+  let attachments = 0;
+  const recorded: unknown[] = [];
+  const attached: unknown[] = [];
+  remote.recordUploadedFile = async (_url, input) => {
+    recorded.push(input);
+    assert.equal((input as { token?: string }).token, "saved-dev-token");
+    if (++recordings === 1) throw new Error("Recording response lost");
+  };
+  const attach = remote.attachImages.bind(remote);
+  remote.attachImages = async (url, token, input) => {
+    attached.push(input);
+    if (++attachments === 1) { await attach(url, token, input); throw new Error("Attachment response lost"); }
+  };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "lost-response-request"], deps);
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(recorded[0], recorded[1]);
+  assert.deepEqual(attached[0], attached[1]);
+  assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+  assert.equal(remote.rows[0].media.length, 1);
+});
+
+test("unknown CLI recording and attachment outcomes retain ownership without cleanup", async () => {
+  for (const boundary of ["recordUploadedFile", "attachImages"] as const) {
+    const { deps, remote } = fixture();
+    let attempts = 0;
+    remote[boundary] = async () => { attempts++; throw new Error("Response lost"); };
+    const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "unknown-response-request"], deps);
+    assert.equal(result.exitCode, 6);
+    assert.equal(attempts, 2);
+    assert.equal(JSON.parse(result.stderr).requestId, "unknown-response-request");
+    assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+  }
+});
+
+test("a definitive CLI attachment rejection queues cleanup through the ownership mutation", async () => {
+  const { deps, remote } = fixture();
+  remote.attachImages = async () => { throw new ConvexError({ code: "VERSION_CONFLICT" }); };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "rejected-response-request"], deps);
+  assert.equal(result.exitCode, 5);
+  assert.equal(remote.calls.at(-1)?.method, "cancelUploadIntent");
+});
+
+test("a rejected reconciliation after response loss still never authorizes CLI cleanup", async () => {
+  const { deps, remote } = fixture();
+  let attempts = 0;
+  remote.recordUploadedFile = async () => { if (++attempts === 1) throw new Error("Response lost"); throw new ConvexError({ code: "UPLOAD_INTENT_NOT_FOUND" }); };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "unresolved-recording-request"], deps);
+  assert.equal(result.exitCode, 6);
+  assert.match(result.stderr, /UPLOAD_WRITE_UNKNOWN/);
+  assert.equal(attempts, 2);
+  assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+});
+
+
+test("CLI cleanup failures preserve the main rejection and expose an unknown cleanup outcome", async () => {
+  const { deps, remote } = fixture();
+  remote.attachImages = async () => { throw new ConvexError({ code: "VERSION_CONFLICT" }); };
+  remote.cancelUploadIntent = async () => { throw new Error("private transport details"); };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0"], deps);
+  assert.equal(result.exitCode, 5);
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.code, "VERSION_CONFLICT");
+  assert.deepEqual(output.details, { cleanup: { outcome: "unknown" } });
+  assert.doesNotMatch(result.stderr, /private transport details/);
+});
+
+test("CLI-local unknown outcomes, capitalized messages and unknown server codes never cancel uploads", async () => {
+  for (const error of [remoteError("Image upload outcome is unknown"), internalError("Unexpected upload result"),
+    new Error("VERSION_CONFLICT"), new ConvexError({ code: "UPLOAD_RECORDING_UNKNOWN" })]) {
+    const { deps, remote } = fixture();
+    deps.images.upload = async () => { throw error; };
+    const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0"], deps);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+  }
+});
+
+test("a Ticket re-read failure after committed CLI attachment never retries the mutation or cancels", async () => {
+  const originalQuery = ConvexHttpClient.prototype.query;
+  const originalMutation = ConvexHttpClient.prototype.mutation;
+  let attachments = 0;
+  let cancellations = 0;
+  ConvexHttpClient.prototype.query = async (reference, ..._args) => {
+    if (getFunctionName(reference) === "auth:currentSession") return { role: "staff", expiresAt: 20_000, customerId: null, email: null } as never;
+    if (attachments) throw new ConvexError({ code: "TICKET_UNAVAILABLE" });
+    return ticket() as never;
+  };
+  ConvexHttpClient.prototype.mutation = async (reference, ..._args) => {
+    const name = getFunctionName(reference);
+    if (name === "uploads:createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] } as never;
+    if (name === "uploads:recordUploadedFile") return { state: "recorded" } as never;
+    if (name === "tickets:attachTicketMedia") attachments++;
+    if (name === "uploads:cancelUploadIntent") cancellations++;
+    return { state: "committed", version: 1 } as never;
+  };
+  try {
+    const { deps } = fixture();
+    deps.remote = new ConvexTicketRemote();
+    const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0"], deps);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(attachments, 1);
+    assert.equal(cancellations, 0);
+  } finally {
+    ConvexHttpClient.prototype.query = originalQuery;
+    ConvexHttpClient.prototype.mutation = originalMutation;
+  }
+});
+
+test("queued CLI recording is a structured definitive rejection", async () => {
+  const originalMutation = ConvexHttpClient.prototype.mutation;
+  ConvexHttpClient.prototype.mutation = async () => ({ state: "queued", jobIds: ["job"] }) as never;
+  try {
+    await assert.rejects(new ConvexTicketRemote().recordUploadedFile("https://fixture.convex.cloud", {
+      token: "staff", intentId: "intent-id" as never, secret: "secret",
+      file: { key: "key", url: "https://fixture.invalid/file", name: "image.png", type: "image/png", size: 1 },
+    }), (error: unknown) => error instanceof ConvexError && (error.data as { code: string }).code === "UPLOAD_INTENT_INVALID");
+  } finally { ConvexHttpClient.prototype.mutation = originalMutation; }
+});
+
+
+test("every CLI transport call satisfies the real registered argument validators", async () => {
+  const originalQuery = ConvexHttpClient.prototype.query;
+  const originalMutation = ConvexHttpClient.prototype.mutation;
+  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
+  const called = new Set<string>();
+  const invoke = (reference: Parameters<typeof getFunctionName>[0], args: unknown) => {
+    const name = getFunctionName(reference);
+    const [module, method] = name.split(":");
+    validateArgs(handlers[module][method], args);
+    called.add(name);
+    if (method === "createTextTicket") return { ticket: ticket(), created: true, requestId: "request" };
+    if (method === "createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] };
+    if (method === "recordUploadedFile") return { state: "recorded" };
+    if (method === "listTickets") return [ticket()];
+    return ticket();
+  };
+  ConvexHttpClient.prototype.query = async (reference, ...args) => invoke(reference, args[0]) as never;
+  ConvexHttpClient.prototype.mutation = async (reference, ...args) => invoke(reference, args[0]) as never;
+  try {
+    const remote = new ConvexTicketRemote();
+    const url = "https://fixture.convex.cloud";
+    const token = "staff";
+    const ref = { projectKey: "TKT", ticketNumber: 7 };
+    const intent = { intentId: "intent-id" as never, secret: "secret", ticketId: undefined, uploadedFiles: [] };
+    await remote.login(url, "password", "client");
+    await remote.currentSession(url, token);
+    await remote.logout(url, token);
+    await remote.list(url, token, "TKT", false);
+    await remote.get(url, token, ref, false);
+    await remote.create(url, token, { title: "Ticket", description: "", requestId: "request" });
+    await remote.createUploadIntent(url, token, { requestId: "request", files: [] });
+    await remote.recordUploadedFile(url, { ...intent, token, file: { key: "key", url: "https://fixture.invalid/file", name: "image.png", type: "image/png", size: 1 } });
+    await remote.cancelUploadIntent(url, token, intent);
+    await remote.attachImages(url, token, { ...intent, id: ticket()._id, requestId: "request", expectedVersion: 0, media: [] });
+    await remote.update(url, token, { ref, title: "Changed", expectedVersion: 0 });
+    await remote.changeStatus(url, token, { ref, status: "acknowledged", expectedVersion: 0 });
+    await remote.archive(url, token, ref, 0);
+    await remote.restore(url, token, ref, 0);
+    assert.equal(called.size, 14);
+  } finally {
+    ConvexHttpClient.prototype.query = originalQuery;
+    ConvexHttpClient.prototype.mutation = originalMutation;
+  }
 });

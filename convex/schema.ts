@@ -213,6 +213,7 @@ export default defineSchema({
     .index("by_ticket", ["ticketId"]),
   mediaAssets: defineTable({
     key: v.string(),
+    source: v.union(v.literal("callback"), v.literal("staff")),
     intentId: v.id("uploadIntents"),
     ticketId: v.optional(v.id("tickets")),
     metadata: mediaItemValidator,
@@ -259,6 +260,6 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_session", ["sessionId", "createdAt"])
-    .index("by_idempotency", ["sessionId", "idempotencyKey"])
+    .index("by_idempotency", ["actorRole", "actorCustomerId", "idempotencyKey"])
     .index("by_expires_at", ["status", "expiresAt"]),
 });

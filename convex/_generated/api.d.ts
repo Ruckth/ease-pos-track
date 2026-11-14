@@ -15,6 +15,7 @@ import type * as authz from "../authz.js";
 import type * as crons from "../crons.js";
 import type * as customer_validation from "../customer_validation.js";
 import type * as customers from "../customers.js";
+import type * as domain_media from "../domain/media.js";
 import type * as domain_operation from "../domain/operation.js";
 import type * as domain_operations from "../domain/operations.js";
 import type * as domain_projects from "../domain/projects.js";
@@ -47,6 +48,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   customer_validation: typeof customer_validation;
   customers: typeof customers;
+  "domain/media": typeof domain_media;
   "domain/operation": typeof domain_operation;
   "domain/operations": typeof domain_operations;
   "domain/projects": typeof domain_projects;

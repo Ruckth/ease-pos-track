@@ -1,4 +1,5 @@
 import { errorCode } from "../../shared/errors";
+import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 /**
  * Command orchestration: turn one parsed command into one JSON line and one exit
  * code, and turn any failure into the single-object stderr contract.
@@ -76,36 +77,53 @@ async function attachTicketImages(
   input: { ref: TicketRef; expectedVersion: number; images: string[]; requestId: string },
   access: StaffAccess,
   deps: TicketCliDeps,
+  onCleanupUnknown: () => void,
 ) {
+  const current = await deps.remote.get(access.url, access.token, input.ref, false);
+  if (!current) throw inputError("TICKET_NOT_FOUND", "The Ticket does not exist or is not available for this operation.");
   const files = await deps.images.prepare(input.images);
-  const intent = await deps.remote.createUploadIntent(access.url, access.token, {
+  const intent = await reconcileUploadWrite(() => deps.remote.createUploadIntent(access.url, access.token, {
     requestId: uploadRequestId(input.requestId),
     files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
-  });
+  }));
   const reusable = [...intent.uploadedFiles];
   const resolved = files.map((file) => {
     const index = reusable.findIndex((media) => sameFileMetadata(file, media));
     if (index < 0) return undefined;
     return reusable.splice(index, 1)[0];
   });
-  const missing = files.flatMap((file, index) => resolved[index] ? [] : [{ file, index }]);
-  const uploaded = missing.length === 0 ? [] : await deps.images.upload(missing.map(({ file }) => file));
-  uploaded.forEach((media, offset) => {
-    resolved[missing[offset].index] = media;
-  });
-  for (const file of uploaded) {
-    await deps.remote.recordUploadedFile(access.url, { token: access.token, intentId: intent.intentId, secret: intent.secret, file });
+  try {
+    // Record each provider result before starting another upload, so a partial
+    // failure cannot discard receipts for other successfully uploaded files.
+    for (let index = 0; index < files.length; index++) {
+      if (resolved[index]) continue;
+      const [file] = await deps.images.upload([files[index]]);
+      if (!file) throw internalError("The image upload result did not match the requested files.");
+      await reconcileUploadWrite(() => deps.remote.recordUploadedFile(access.url, { token: access.token, intentId: intent.intentId, secret: intent.secret, file }));
+      resolved[index] = file;
+    }
+    const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
+    await reconcileUploadWrite(() => deps.remote.attachImages(access.url, access.token, {
+      id: current._id,
+      expectedVersion: input.expectedVersion,
+      requestId: input.requestId,
+      intentId: intent.intentId,
+      secret: intent.secret,
+      media,
+    }));
+  } catch (error) {
+    if (definitiveUploadRejection(error)) {
+      // The mutation reserves only this intent's unattached keys. It also
+      // reconciles an attachment which committed before its response was lost.
+      try { await deps.remote.cancelUploadIntent(access.url, access.token, { intentId: intent.intentId, secret: intent.secret }); }
+      catch { onCleanupUnknown(); }
+    }
+    throw error;
   }
-  const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
-  if (media.length !== files.length) throw internalError("The image upload result did not match the requested files.");
-  return await deps.remote.attachImages(access.url, access.token, {
-    ref: input.ref,
-    expectedVersion: input.expectedVersion,
-    requestId: input.requestId,
-    intentId: intent.intentId,
-    secret: intent.secret,
-    media,
-  });
+  // Attachment is committed. A failed read cannot authorize cancellation or replay the write.
+  const attached = await deps.remote.get(access.url, access.token, input.ref, false);
+  if (!attached) throw inputError("TICKET_NOT_FOUND", "The Ticket does not exist or is not available for this operation.");
+  return attached;
 }
 
 function unreachable(command: never): never {
@@ -216,6 +234,8 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
   // which idempotency key the run was using.
   let target: Deployment | undefined;
   let requestId: string | undefined;
+  let cleanupUnknown = false;
+  const onCleanupUnknown = () => { cleanupUnknown = true; };
   try {
     const command = parseTicketArgs(argv);
     if (command.kind === "help") return succeed(`${humanHelp(command.command)}\n`);
@@ -242,14 +262,14 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
           expectedVersion: created.ticket.version,
           images: command.images,
           requestId: idempotencyKey,
-        }, access, deps);
+        }, access, deps, onCleanupUnknown);
       }
       return succeed(jsonLine(createOutput(target, created)));
     }
     if (command.kind === "attach") {
       requestId = command.requestId ?? deps.newRequestId();
       const access = await sessions.requireStaff(target);
-      const attached = await attachTicketImages({ ...command, requestId }, access, deps);
+      const attached = await attachTicketImages({ ...command, requestId }, access, deps, onCleanupUnknown);
       return succeed(jsonLine(attachmentOutput(target, attached, requestId)));
     }
     return succeed(jsonLine(await runStaffCommand(command, await sessions.requireStaff(target), deps)));
@@ -259,6 +279,6 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       : target
         ? classifyRemoteError(error, target)
         : internalError(error instanceof Error ? error.message : String(error));
-    return { exitCode: failure.exitCode, stdout: "", stderr: jsonLine(errorOutput(failure, target, requestId)) };
+    return { exitCode: failure.exitCode, stdout: "", stderr: jsonLine(errorOutput(failure, target, requestId, cleanupUnknown ? { cleanup: { outcome: "unknown" } } : undefined)) };
   }
 }

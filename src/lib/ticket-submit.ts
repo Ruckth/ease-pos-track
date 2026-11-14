@@ -3,9 +3,8 @@
  * the customer three-step flow.
  *
  * Order matters: an upload intent is claimed first (idempotently), files upload
- * against that intent, and only then is the ticket created. Any failure after
- * the intent exists cancels it so the uploaded blobs are cleaned up instead of
- * being orphaned.
+ * against that intent, and only then is the Ticket created. Unknown writes are
+ * reconciled with the same input; only definitive rejections queue cleanup.
  */
 
 import type { Id } from "@convex/_generated/dataModel";
@@ -14,6 +13,9 @@ import { pendingAnnotationsForCreate, type CreateAnnotationInput, type PendingAn
 import type { MediaItem } from "@/lib/types";
 import { readUploadCancelResponse } from "@/lib/upload-cancel";
 import { uploadFiles } from "@/uploadthing";
+import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
+import { fileSignature } from "../../shared/media-policy";
+import { errorCode } from "../../shared/errors";
 
 export type UploadIntentHandle = {
   intentId: Id<"uploadIntents">;
@@ -54,9 +56,10 @@ export type SubmitTicketDeps = {
   signal?: AbortSignal;
   /** Reports a cleanup failure without masking the original error. */
   onCleanupError?: (error: unknown) => void;
+  onRequestConflict?: () => void;
 };
 
-/** Cancels an intent through the upload API, which also deletes stored files. */
+/** Queues guarded cleanup; this acknowledgement does not claim provider deletion. */
 export async function requestUploadIntentCancel(
   token: string,
   intentId: Id<"uploadIntents">,
@@ -73,7 +76,7 @@ export async function requestUploadIntentCancel(
 export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDraft) {
   let activeIntent: { intentId: Id<"uploadIntents">; secret: string } | null = null;
   try {
-    const intent = await deps.createUploadIntent({
+    const intent = await reconcileUploadWrite(() => deps.createUploadIntent({
       token: deps.token,
       idempotencyKey: draft.idempotencyKey,
       files: draft.items.map((item) => ({
@@ -81,44 +84,54 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
         size: item.file.size,
         type: item.file.type,
       })),
-    });
+    }));
     // An attached intent supplies the original media for receipt validation;
     // it cannot bypass comparison of the original create input.
     if (!intent.ticketId) activeIntent = { intentId: intent.intentId, secret: intent.secret };
-    const uploads = intent.ticketId ? intent.uploadedFiles : draft.items.length === 0
-      ? []
+    deps.signal?.throwIfAborted();
+    const reusable = [...intent.uploadedFiles];
+    const media = draft.items.map(item => {
+      const index = reusable.findIndex(uploaded => fileSignature(uploaded) === fileSignature(item.file));
+      return index < 0 ? undefined : reusable.splice(index, 1)[0];
+    });
+    const missing = draft.items.flatMap((item, index) => media[index] ? [] : [{ file: item.file, index }]);
+    const uploads = intent.ticketId || missing.length === 0 ? []
       : await (deps.uploadMedia ?? uploadFiles)("ticketMedia", {
-          files: draft.items.map((item) => item.file),
+          files: missing.map(item => item.file),
           input: { intentId: intent.intentId, secret: intent.secret },
           headers: { authorization: `Bearer ${deps.token}` },
           signal: deps.signal,
           onUploadProgress: ({ totalProgress }) => deps.onProgress?.(Math.round(totalProgress)),
         });
 
-    const media: MediaItem[] = uploads.map((uploaded, index) => {
+    uploads.forEach((uploaded, index) => {
       const raw = uploaded as typeof uploaded & { ufsUrl?: string; url?: string; type?: string };
-      return {
+      media[missing[index].index] = {
         key: uploaded.key,
         name: uploaded.name,
         size: uploaded.size,
-        type: raw.type ?? draft.items[index]?.file.type ?? "",
+        type: raw.type ?? missing[index].file.type,
         url: raw.ufsUrl ?? raw.url ?? "",
       };
     });
 
-    await deps.createTicket({
+    const resolved = media.filter((item): item is MediaItem => item !== undefined);
+    if (resolved.length !== draft.items.length) throw new Error("UPLOAD_INCOMPLETE");
+    deps.signal?.throwIfAborted();
+    await reconcileUploadWrite(() => deps.createTicket({
       token: deps.token,
       requestId: draft.idempotencyKey,
       title: draft.title,
       description: draft.description,
-      media,
+      media: resolved,
       annotations: pendingAnnotationsForCreate(draft.items, draft.annotations),
       uploadIntentId: intent.intentId,
       uploadIntentSecret: intent.secret,
-    });
+    }));
     activeIntent = null;
   } catch (error) {
-    if (activeIntent) {
+    if (deps.signal?.aborted || errorCode(error) === "REQUEST_ID_CONFLICT" || errorCode(error) === "UPLOAD_REQUEST_CONFLICT") deps.onRequestConflict?.();
+    if (activeIntent && (deps.signal?.aborted || definitiveUploadRejection(error))) {
       try {
         await requestUploadIntentCancel(deps.token, activeIntent.intentId, activeIntent.secret);
       } catch (cleanupError) {

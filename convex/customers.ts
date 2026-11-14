@@ -106,6 +106,7 @@ async function issueCustomerSession(ctx: MutationCtx, customerId: Id<"customers"
 }
 
 export const startRegistration = internalJobMutation({
+  name: "customers:startRegistration",
   args: { email: v.string(), clientId: v.string() },
   handler: async (ctx, args) => {
     const attemptKeys = customerRegistrationAttemptKeys(args.clientId);
@@ -123,6 +124,7 @@ export const startRegistration = internalJobMutation({
   },
 });
 export const finishRegistration = internalJobMutation({
+  name: "customers:finishRegistration",
   args: {
     email: v.string(),
     clientId: v.string(),
@@ -154,6 +156,7 @@ export const finishRegistration = internalJobMutation({
 });
 
 export const startLogin = internalJobMutation({
+  name: "customers:startLogin",
   args: { email: v.string(), clientId: v.string() },
   handler: async (ctx, args) => {
     await assertNotLockedOut(ctx, customerLoginAttemptKeys(args.clientId, args.email));
@@ -175,6 +178,7 @@ export const startLogin = internalJobMutation({
 });
 
 export const failLogin = internalJobMutation({
+  name: "customers:failLogin",
   args: { clientId: v.string(), email: v.string() },
   handler: async (ctx, args) => {
     await recordFailure(ctx, customerLoginAttemptKeys(args.clientId, args.email));
@@ -182,6 +186,7 @@ export const failLogin = internalJobMutation({
 });
 
 export const finishLogin = internalJobMutation({
+  name: "customers:finishLogin",
   args: { customerId: v.id("customers"), clientId: v.string() },
   handler: async (ctx, args) => {
     const customer = await ctx.db.get(args.customerId);
@@ -196,6 +201,7 @@ export const finishLogin = internalJobMutation({
  * work happens in the internal mutations above.
  */
 export const register = publicAuthAction("customer-register")({
+  name: "customers:register",
   args: { email: v.string(), password: v.string(), clientId: v.string() },
   handler: async (ctx, args): Promise<{ token: string; expiresAt: number }> => {
     // Checked first: a deployment with no pepper must not create accounts at all.
@@ -216,6 +222,7 @@ export const register = publicAuthAction("customer-register")({
 });
 
 export const login = publicAuthAction("customer-login")({
+  name: "customers:login",
   args: { email: v.string(), password: v.string(), clientId: v.string() },
   handler: async (ctx, args): Promise<{ token: string; expiresAt: number }> => {
     // Checked before the lookup, so a misconfigured deployment fails the same way

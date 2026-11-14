@@ -207,6 +207,7 @@ export function CustomerTicketWizard({
           onProgress: setProgress,
           signal: abortController.signal,
           onCleanupError: (cleanupError) => toast.error(localizeError(cleanupError, t)),
+          onRequestConflict: () => { idempotencyKeyRef.current = crypto.randomUUID(); },
         },
         { title, description, items, annotations, idempotencyKey: idempotencyKeyRef.current },
       );

@@ -12,11 +12,10 @@ function request(body: string, authorized = true) {
 }
 const valid = JSON.stringify({ intentId: "intent", secret: "secret" });
 
-test("both HTTP adapters share cancellation decoding, authorization, acknowledgement and safe failures", async () => {
+test("both HTTP adapters return queued reservations without calling storage or claiming deletion", async () => {
   let cancelled = 0;
   const handler = cancelUploadHandler({
-    cancel: async input => { assert.equal(input.token, "actor"); cancelled++; return { keys: ["fake"] }; },
-    storage: () => ({ deleteFiles: async keys => { assert.deepEqual(keys, ["fake"]); return { outcome: "deleted" }; } }),
+    cancel: async input => { assert.equal(input.token, "actor"); cancelled++; return { state: "queued", jobIds: ["job"] }; },
   });
   const hono = createUploadApp({ cancelUpload: handler }, async () => new Response());
   for (const adapter of [handler, (request: Request) => hono.request(request)]) {
@@ -26,26 +25,38 @@ test("both HTTP adapters share cancellation decoding, authorization, acknowledge
       assert.equal((await adapter(request(body))).status, 400);
     }
     assert.equal(cancelled, before);
-    assert.deepEqual(await (await adapter(request(valid))).json(), { ok: true, deleted: 1 });
+    assert.deepEqual(await (await adapter(request(valid))).json(), { ok: true, state: "queued", jobIds: ["job"] });
   }
-  const denied = cancelUploadHandler({ cancel: async () => { throw new ConvexError({ code: "SESSION_EXPIRED" }); }, storage: () => ({ deleteFiles: async () => ({ outcome: "deleted" }) }) });
+  const denied = cancelUploadHandler({ cancel: async () => { throw new ConvexError({ code: "SESSION_EXPIRED" }); } });
   assert.equal((await denied(request(valid))).status, 401);
-  const unknown = cancelUploadHandler({ cancel: async () => ({ keys: ["fake"] }), storage: () => ({ deleteFiles: async () => ({ outcome: "unknown" }) }) });
-  const response = await unknown(request(valid));
-  assert.equal(response.status, 502);
-  assert.deepEqual(await response.json(), { error: "UPLOAD_CLEANUP_UNKNOWN" });
-  const failed = cancelUploadHandler({ cancel: async () => { throw new Error("provider secret and Ticket content"); }, storage: () => ({ deleteFiles: async () => ({ outcome: "deleted" }) }) });
-  assert.deepEqual(await (await failed(request(valid))).json(), { error: "UPLOAD_CLEANUP_FAILED" });
+  for (const error of [new ConvexError({ code: "secret-key-or-token" })]) {
+    const failed = cancelUploadHandler({ cancel: async () => { throw error; } });
+    assert.deepEqual(await (await failed(request(valid))).json(), { error: "UPLOAD_CLEANUP_FAILED" });
+  }
 });
 
-test("missing provider configuration is a typed failure before cancellation commits", async () => {
-  for (const create of [createStorage]) {
-    assert.throws(() => create(undefined), error => error instanceof StorageConfigurationError && error.code === "STORAGE_NOT_CONFIGURED");
+test("typed storage normalizes provider acknowledgements and sanitizes configuration and provider errors", async () => {
+  assert.throws(() => createStorage(undefined), error => error instanceof StorageConfigurationError && error.code === "STORAGE_NOT_CONFIGURED");
+  assert.throws(() => createStorage("fake-token", () => { throw new Error("secret provider config"); }), /STORAGE_NOT_CONFIGURED/);
+  for (const result of [{ success: true, deletedCount: 2 }, { success: false, deletedCount: 2 }, { success: true, deletedCount: 1 }, { success: true, deletedCount: 0 }]) {
+    const storage = createStorage("fake-token", token => {
+      assert.equal(token, "fake-token");
+      return { deleteFiles: async keys => { assert.deepEqual(keys, ["fake-a", "fake-b"]); return result; } };
+    });
+    assert.deepEqual(await storage.deleteFiles(["fake-a", "fake-b"]), { outcome: result.success && result.deletedCount === 2 ? "deleted" : "unknown" });
   }
-  let cancelled = false;
-  const handler = cancelUploadHandler({ cancel: async () => { cancelled = true; return { keys: ["fake"] }; }, storage: () => createStorage(undefined) });
-  const response = await handler(request(valid));
-  assert.equal(response.status, 503);
-  assert.equal(cancelled, false);
-  assert.deepEqual(await response.json(), { error: "STORAGE_NOT_CONFIGURED" });
+  const storage = createStorage("fake-token", () => ({ deleteFiles: async () => { throw new Error("key/url/token/Ticket content"); } }));
+  assert.deepEqual(await storage.deleteFiles(["fake"]), { outcome: "unknown" });
+  assert.deepEqual(await storage.deleteFiles([]), { outcome: "deleted" });
+});
+
+
+test("both cancellation adapters distinguish unknown transport outcomes from rejection", async () => {
+  const handler = cancelUploadHandler({ cancel: async () => { throw new Error("transport contains private data"); } });
+  const hono = createUploadApp({ cancelUpload: handler }, async () => new Response());
+  for (const adapter of [handler, (request: Request) => hono.request(request)]) {
+    const response = await adapter(request(valid));
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "UPLOAD_CLEANUP_UNKNOWN", outcome: "unknown" });
+  }
 });

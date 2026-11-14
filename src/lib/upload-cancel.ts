@@ -23,9 +23,11 @@ export async function readUploadCancelResponse(response: Response) {
     ? (body as Record<string, unknown>)
     : null;
 
-  if (!response.ok || !isJson || payload === null || payload.ok !== true) {
+  if (!response.ok || !isJson || payload === null || payload.ok !== true
+    || !["queued", "completed"].includes(String(payload.state)) || !Array.isArray(payload.jobIds)
+    || !payload.jobIds.every(id => typeof id === "string")) {
     const reported = payload && typeof payload.error === "string" ? payload.error : null;
     throw new Error(reported ?? "UPLOAD_CLEANUP_FAILED");
   }
-  return { deleted: typeof payload.deleted === "number" ? payload.deleted : 0 };
+  return { state: payload.state as "queued" | "completed", jobIds: payload.jobIds as string[] };
 }

@@ -42,6 +42,14 @@ pnpm ticket create --title "<title>" --description "<description>" --project <KE
 - Create retries compare immutable normalized input, so later Ticket edits do
   not invalidate the retry. Replay requires the same durable actor and current
   access to an active Project; a purged Ticket returns `TICKET_UNAVAILABLE`.
+- Upload retries reuse the durable actor's intent and recorded files after
+  sign-in. Recording requires the server callback credential or the staff
+  session that acquired the intent. Unknown writes retain ownership; definitive
+  rejection queues guarded cleanup. If cancellation cannot be confirmed, error
+  JSON includes `details.cleanup.outcome: "unknown"` while preserving the original
+  error code and exit status. P4 will execute the pending media jobs.
+- Attachment reconciliation covers only the mutation. A failed subsequent Ticket
+  read never authorizes cancellation or cleanup.
 
 `pnpm ticket --help` documents every flag. Details and setup: [docs/ticket-cli.md](docs/ticket-cli.md).
 

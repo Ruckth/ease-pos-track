@@ -12,6 +12,7 @@ import { normalizeProjectKey, validateProjectName } from "./ticket_numbers";
 
 /** Projects the signed-in actor can use, by name. */
 export const listProjects = actorQuery({
+  name: "projects:listProjects",
   args: { token: v.string() },
   handler: async (ctx, args) => {
     const { actor } = ctx;
@@ -31,6 +32,7 @@ export const listProjects = actorQuery({
 });
 
 export const createProject = staffMutation({
+  name: "projects:createProject",
   args: { token: v.string(), name: v.string(), key: v.string() },
   handler: async (ctx, args) => {
     const name = validateProjectName(args.name);
@@ -43,6 +45,7 @@ export const createProject = staffMutation({
 });
 
 export const listProjectMembers = staffQuery({
+  name: "projects:listProjectMembers",
   args: { token: v.string(), projectId: v.id("projects") },
   handler: async (ctx, args) => {
     const rows = await ctx.db
@@ -61,6 +64,7 @@ export const listProjectMembers = staffQuery({
 
 /** Adds a customer, by the email they signed up with. Adding twice is a no-op. */
 export const addProjectMember = staffMutation({
+  name: "projects:addProjectMember",
   args: { token: v.string(), projectId: v.id("projects"), email: v.string() },
   handler: async (ctx, args) => {
     const { actor } = ctx;
@@ -83,6 +87,7 @@ export const addProjectMember = staffMutation({
 });
 
 export const removeProjectMember = staffMutation({
+  name: "projects:removeProjectMember",
   args: { token: v.string(), projectId: v.id("projects"), customerId: v.id("customers") },
   handler: async (ctx, args) => {
     const row = await ctx.db

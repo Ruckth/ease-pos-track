@@ -1,9 +1,7 @@
-import { ConvexError } from "convex/values";
-import type { Storage } from "../../shared/storage.js";
+import { errorCode } from "../../shared/errors.js";
 
 export type CancelUploadDependencies = {
-  cancel(input: { token: string; intentId: string; secret: string }): Promise<{ keys: string[] }>;
-  storage(): Storage;
+  cancel(input: { token: string; intentId: string; secret: string }): Promise<{ state: "queued" | "completed"; jobIds: string[] }>;
 };
 
 export function cancelUploadHandler(deps: CancelUploadDependencies) {
@@ -20,20 +18,14 @@ export function cancelUploadHandler(deps: CancelUploadDependencies) {
       return Response.json({ error: "UPLOAD_INTENT_INVALID" }, { status: 400 });
     }
     try {
-      const storage = deps.storage();
       const result = await deps.cancel({ token, intentId: body.intentId, secret: body.secret });
-      if (result.keys.length > 0) {
-        const outcome = await storage.deleteFiles(result.keys);
-        if (outcome.outcome !== "deleted" && outcome.outcome !== "absent_verified") {
-          return Response.json({ error: "UPLOAD_CLEANUP_UNKNOWN" }, { status: 502 });
-        }
-      }
-      return Response.json({ ok: true, deleted: result.keys.length });
+      return Response.json({ ok: true, ...result });
     } catch (error) {
-      const data = error instanceof ConvexError ? error.data : error;
-      const code = data && typeof data === "object" && "code" in data && typeof data.code === "string"
-        ? data.code : "UPLOAD_CLEANUP_FAILED";
-      return Response.json({ error: code }, { status: code === "SESSION_EXPIRED" ? 401 : code === "STORAGE_NOT_CONFIGURED" ? 503 : 400 });
+      const candidate = errorCode(error);
+      if (!candidate) return Response.json({ error: "UPLOAD_CLEANUP_UNKNOWN", outcome: "unknown" }, { status: 503 });
+      const code = candidate && ["SESSION_EXPIRED", "UPLOAD_INTENT_NOT_FOUND", "MEDIA_OWNERSHIP_CONFLICT"].includes(candidate)
+        ? candidate : "UPLOAD_CLEANUP_FAILED";
+      return Response.json({ error: code }, { status: code === "SESSION_EXPIRED" ? 401 : 400 });
     }
   };
 }

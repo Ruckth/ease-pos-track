@@ -24,6 +24,7 @@ import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./r
 import { normalizeProjectKey } from "../ticket_numbers";
 import { isMember, projectByKey, requireUsableProject, resolveStaffProject } from "./projects";
 import { validateMediaItems } from "../../shared/media-policy";
+import { requireOwnedUploadIntent, verifyPendingUploadIntent, verifyAssetReceipts, attachIntentAssets } from "./media";
 import {
   applyTicketChange,
   createTicketRecord,
@@ -81,47 +82,6 @@ async function requireWritableTicket(
   if (!doc || doc.lifecycle !== "active") throw new Error("TICKET_UNAVAILABLE");
   assertCanWriteTicket(actor, doc);
   return doc;
-}
-
-function requireOwnedUploadIntent(
-  intent: Doc<"uploadIntents"> | null,
-  session: Doc<"sessions">,
-  actor: Actor<Id<"customers">>,
-  secret: string,
-) {
-  if (
-    !intent
-    || intent.sessionId !== session._id
-    || intent.secret !== secret
-    || intent.actorRole !== actor.role
-    || intent.actorCustomerId !== actor.customerId
-  ) {
-    throw new Error("UPLOAD_INTENT_NOT_FOUND");
-  }
-  return intent;
-}
-
-function verifyPendingUploadIntent(
-  intent: Doc<"uploadIntents">,
-  media: Doc<"tickets">["media"],
-) {
-  if (intent.status !== "pending" || intent.expiresAt <= Date.now()) {
-    throw new Error("UPLOAD_INTENT_INVALID");
-  }
-  validateMediaItems(media);
-  if (intent.uploadedFiles.length !== media.length) throw new Error("UPLOAD_INCOMPLETE");
-  const uploadedByKey = new Map(intent.uploadedFiles.map((item) => [item.key, item]));
-  const verified = media.every((item) => {
-    const uploaded = uploadedByKey.get(item.key);
-    return uploaded
-      && uploaded.url === item.url
-      && uploaded.name === item.name
-      && uploaded.size === item.size
-      && uploaded.type === item.type;
-  });
-  if (!verified || new Set(media.map((item) => item.key)).size !== media.length) {
-    throw new Error("UPLOAD_VERIFICATION_FAILED");
-  }
 }
 
 /**
@@ -261,15 +221,18 @@ export const createTicket = mutationOperation({
       ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, mediaKeys: args.media.map(item => item.key) })),
     };
     const replay = await replayTicketRequest(ctx, request);
-    if (replay) return replay.ticket._id;
+    if (replay) {
+      requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId), actor, args.uploadIntentSecret);
+      await verifyAssetReceipts(ctx, args.uploadIntentId, args.media, replay.ticket._id);
+      return replay.ticket._id;
+    }
     const { title, description } = validateTicketText(args.title, args.description);
     const intent = requireOwnedUploadIntent(
       await ctx.db.get(args.uploadIntentId),
-      session,
       actor,
       args.uploadIntentSecret,
     );
-    verifyPendingUploadIntent(intent, args.media);
+    await verifyPendingUploadIntent(ctx, intent, args.media);
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
@@ -286,7 +249,7 @@ export const createTicket = mutationOperation({
       author: { sessionId: session._id, ...actorFields(actor) },
       now,
     });
-    await ctx.db.patch(intent._id, { status: "attached", ticketId: created._id, uploadedFiles: args.media, updatedAt: now });
+    await attachIntentAssets(ctx, intent, created._id, args.media);
     await commitTicketRequest(ctx, request, { ticketId: created._id, version: created.version });
     return created._id;
   },
@@ -352,17 +315,20 @@ export const attachTicketMedia = mutationOperation({
       ...await hashTicketRequest(ticketMediaRequestFingerprintInput({ actor, projectId: visible.projectId, ticketId: args.id, mediaKeys: args.media.map(item => item.key) })),
     };
     const replay = await replayTicketRequest(ctx, request);
-    if (replay) return { eventId: replay.receipt.eventId ?? null, version: replay.receipt.version };
+    if (replay) {
+      requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId), actor, args.uploadIntentSecret);
+      await verifyAssetReceipts(ctx, args.uploadIntentId, args.media, replay.ticket._id);
+      return { eventId: replay.receipt.eventId ?? null, version: replay.receipt.version };
+    }
     const doc = await requireWritableTicket(ctx, actor, args.id);
     const intent = requireOwnedUploadIntent(
       await ctx.db.get(args.uploadIntentId),
-      session,
       actor,
       args.uploadIntentSecret,
     );
     if (args.media.length === 0) throw new Error("UPLOAD_INCOMPLETE");
     validateMediaItems([...doc.media, ...args.media]);
-    verifyPendingUploadIntent(intent, args.media);
+    await verifyPendingUploadIntent(ctx, intent, args.media);
 
     const now = Date.now();
     const changed = await applyTicketChange(ctx, {
@@ -373,7 +339,7 @@ export const attachTicketMedia = mutationOperation({
       author: { sessionId: session._id, ...actorFields(actor), createdVia: "codex" },
       now,
     });
-    await ctx.db.patch(intent._id, { status: "attached", ticketId: doc._id, uploadedFiles: args.media, updatedAt: now });
+    await attachIntentAssets(ctx, intent, doc._id, args.media);
     await commitTicketRequest(ctx, request, { ticketId: doc._id, ...changed });
     return changed;
   },

@@ -7,10 +7,10 @@ export function validateFiles(files: Array<{ name: string; size: number; type: s
   const videos = files.filter((file) => file.type.startsWith("video/"));
   if (images.length + videos.length !== files.length) throw new Error("IMAGE_VIDEO_ONLY");
   if (images.length > 10 || videos.length > 3) throw new Error("MEDIA_LIMIT_EXCEEDED");
-  if (images.some((file) => file.size <= 0 || file.size > IMAGE_MAX_BYTES)) {
+  if (images.some((file) => !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > IMAGE_MAX_BYTES)) {
     throw new Error("IMAGE_TOO_LARGE");
   }
-  if (videos.some((file) => file.size <= 0 || file.size > VIDEO_MAX_BYTES)) {
+  if (videos.some((file) => !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > VIDEO_MAX_BYTES)) {
     throw new Error("VIDEO_TOO_LARGE");
   }
   if (files.some((file) => !file.name.trim() || file.name.length > 255 || file.type.length > 100)) {

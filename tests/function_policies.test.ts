@@ -57,10 +57,10 @@ test("policy check rejects raw registrations through re-exports, including insid
 });
 
 test("policy manifest rejects new public auth/callback exports and wrong purpose labels", () => {
-  const login = publicAuthMutation("staff-login")({ args: {}, handler: () => null });
-  const wrong = publicAuthMutation("logout")({ args: {}, handler: () => null });
-  const query = publicAuthQuery("current-session")({ args: {}, handler: () => null });
-  const callback = trustedCallbackMutation({ args: { token: v.optional(v.string()), callbackToken: v.optional(v.string()) }, handler: () => null });
+  const login = publicAuthMutation("staff-login")({ name: "fixture", args: {}, handler: () => null });
+  const wrong = publicAuthMutation("logout")({ name: "fixture", args: {}, handler: () => null });
+  const query = publicAuthQuery("current-session")({ name: "fixture", args: {}, handler: () => null });
+  const callback = trustedCallbackMutation({ name: "fixture", args: { token: v.optional(v.string()), callbackToken: v.optional(v.string()) }, handler: () => null });
   assert.deepEqual(violations("auth.ts", { login }), []);
   for (const [module, exports] of [["auth.ts", { login: wrong }], ["auth.ts", { login: query }],
     ["other.ts", { login }], ["other.ts", { callback }]] as const) {

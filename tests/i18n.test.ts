@@ -133,3 +133,22 @@ test("cleanup uncertainty, mismatched intent and invalid media index have locali
     }
   }
 });
+
+test("unknown writes and media ownership failures have localized recovery messages", () => {
+  for (const language of ["en", "th"] as const) {
+    const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+    for (const code of ["UPLOAD_WRITE_UNKNOWN", "UPLOAD_RECORDING_UNKNOWN", "MEDIA_OWNERSHIP_CONFLICT", "MEDIA_NOT_ATTACHABLE", "UPLOAD_REQUEST_CONFLICT"]) {
+      assert.notEqual(localizeError(new Error(code), t), t("genericError"));
+    }
+  }
+});
+
+
+test("submission conflicts use customer wording in both languages", () => {
+  for (const language of ["en", "th"] as const) {
+    const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+    for (const code of ["REQUEST_ID_CONFLICT", "UPLOAD_REQUEST_CONFLICT"]) {
+      assert.doesNotMatch(localizeError(new ConvexError({ code }), t), /request.?id|รหัสคำขอ/i);
+    }
+  }
+});
