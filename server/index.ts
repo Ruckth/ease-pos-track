@@ -4,6 +4,7 @@ import { createRouteHandler } from "uploadthing/server";
 import { createUploadRouter } from "./uploadthing";
 import { config } from "dotenv";
 import { createServerRuntime } from "./runtime";
+import { loadPorts } from "../scripts/worktree-ports.mjs";
 
 config({ path: ".env.local", quiet: true });
 const runtime = createServerRuntime();
@@ -11,7 +12,7 @@ const uploadHandler = createRouteHandler({ router: createUploadRouter(runtime.co
 
 const app = createUploadApp(runtime, uploadHandler);
 
-const port = Number(process.env.UPLOAD_API_PORT ?? 8787);
+const port = Number(process.env.UPLOAD_API_PORT ?? loadPorts().UPLOAD_API_PORT);
 
 serve({ fetch: app.fetch, port }, () => {
   console.log(`Upload API listening on http://localhost:${port}`);

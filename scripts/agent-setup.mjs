@@ -14,8 +14,11 @@ import { PORTS_FILE, loadPorts, portsForSlot, readPortsFile } from "./worktree-p
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const here = git("rev-parse", "--show-toplevel");
-const main = path.dirname(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
+const commonDir = git("rev-parse", "--path-format=absolute", "--git-common-dir");
+const main = path.dirname(commonDir);
 const isMain = path.resolve(here) === path.resolve(main);
+// convex-local.mjs parks the real .env.local here while the CLI runs.
+const ENV_BACKUP = ".env.local.shared-backup";
 
 function run(command, args) {
   console.log(`\n$ ${command} ${args.join(" ")}`);
@@ -26,22 +29,25 @@ function run(command, args) {
   }
 }
 
-function portFree(port) {
+// macOS lets a wildcard listen succeed beside a loopback-only one, so probe both.
+function listens(port, host) {
   return new Promise((resolve) => {
     const server = net.createServer().once("error", () => resolve(false));
-    server.listen(port, () => server.close(() => resolve(true)));
+    server.listen(port, host, () => server.close(() => resolve(true)));
   });
 }
+const portFree = async (port) => (await listens(port)) && (await listens(port, "127.0.0.1"));
 
-/** Atomic mkdir lock in the shared .git dir, so concurrent setups never pick the same slot. */
+/** Atomic mkdir lock in the shared git dir, so concurrent setups never pick the same slot. */
 async function withLock(fn) {
-  const lock = path.join(main, ".git", "agent-setup.lock");
+  const lock = path.join(commonDir, "agent-setup.lock");
   for (let attempt = 0; ; attempt++) {
     try {
       mkdirSync(lock);
       break;
-    } catch {
-      if (Date.now() - statSync(lock, { throwIfNoEntry: false })?.mtimeMs > 60_000) rmSync(lock, { recursive: true, force: true });
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (Date.now() - (statSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) > 60_000) rmSync(lock, { recursive: true, force: true });
       if (attempt > 600) throw new Error(`Timed out waiting for ${lock}`);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -71,16 +77,24 @@ async function claimPorts() {
   throw new Error("No free port slot between 4010 and 4999");
 }
 
-if (!isMain && !existsSync(path.join(here, ".env.local")) && existsSync(path.join(main, ".env.local"))) {
-  copyFileSync(path.join(main, ".env.local"), path.join(here, ".env.local"));
-  console.log("Copied .env.local from the main checkout.");
+if (!isMain && !existsSync(path.join(here, ".env.local"))) {
+  // While the main checkout runs `pnpm dev`, its .env.local is the CLI's rewrite.
+  const source = [ENV_BACKUP, ".env.local"].map((name) => path.join(main, name)).find(existsSync);
+  if (source) {
+    copyFileSync(source, path.join(here, ".env.local"));
+    console.log("Copied .env.local from the main checkout.");
+  }
 }
 
 if (!isMain && !readPortsFile(here)) await withLock(claimPorts);
 
-if (!existsSync(path.join(here, "node_modules"))) run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"]);
+run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"]);
 
-run("node", ["scripts/convex-local.mjs"]);
+if (existsSync(path.join(here, ENV_BACKUP))) {
+  console.log(`\nSkipped the schema push: ${ENV_BACKUP} exists, so the Convex CLI is running here (pnpm dev pushes on its own) or an earlier run was interrupted.`);
+} else {
+  run("pnpm", ["convex:local"]);
+}
 
 const ports = loadPorts(here);
 console.log(`

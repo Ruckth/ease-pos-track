@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: check-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -28,4 +28,7 @@ jobs:
       # Schema and functions must push to a fresh local backend.
       - run: pnpm convex:local
       # Generated bindings must be committed alongside the change that needs them.
-      - run: git diff --exit-code -- convex/_generated
+      - name: Generated bindings are committed
+        run: |
+          git status --porcelain -- convex/_generated
+          test -z "$(git status --porcelain -- convex/_generated)"

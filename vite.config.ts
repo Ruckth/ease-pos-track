@@ -1,8 +1,11 @@
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { loadPorts } from "./scripts/worktree-ports.mjs";
 
-const uploadApi = `http://localhost:${process.env.UPLOAD_API_PORT ?? 8787}`;
+// This checkout's ports (.env.worktree in parallel worktrees, see AGENTS.md).
+const ports = loadPorts();
+const uploadApi = `http://localhost:${ports.UPLOAD_API_PORT}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -14,6 +17,8 @@ export default defineConfig({
   },
   server: {
     host: true,
+    port: ports.VITE_PORT,
+    strictPort: true,
     proxy: {
       "/api/uploadthing": uploadApi,
       // Upload cancellation runs on the same local API; without this the dev
