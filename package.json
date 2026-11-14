@@ -13,7 +13,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "ticket": "tsx scripts/ticket.ts",
-    "test": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
+    "test": "pnpm run test:unit && pnpm run test:convex",
+    "test:unit": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
+    "test:convex": "vitest run --config vitest.convex.config.ts",
     "typecheck": "tsc -b"
   },
   "dependencies": {
@@ -43,17 +45,20 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "5.0.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
+    "convex-test": "0.0.71",
     "playwright": "^1.61.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "vitest": "3.2.7"
   }
 }

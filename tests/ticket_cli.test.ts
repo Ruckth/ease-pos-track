@@ -75,7 +75,7 @@ class FakeRemote implements TicketRemote {
     this.record("create", url, token, input);
     return { ticket: this.rows[0], created: true, requestId: input.requestId };
   }
-  async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
+  async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): ReturnType<TicketRemote["createUploadIntent"]> {
     this.record("createUploadIntent", url, token, input);
     return { intentId: "intent-id" as never, secret: "s".repeat(48), uploadedFiles: [] };
   }
@@ -276,8 +276,9 @@ test("login uses the hidden password dependency, persists URL/client id, and sto
   assert.equal(remote.calls[0].args[0], "https://first.example.com");
   assert.equal(remote.calls[0].args[1], "hidden-password");
   assert.equal(typeof remote.calls[0].args[2], "string");
-  assert.equal(config.value?.deployments.dev?.url, "https://first.example.com");
-  assert.equal(config.value?.clientId.length, 36);
+  const savedConfig = await config.load();
+  assert.equal(savedConfig?.deployments.dev?.url, "https://first.example.com");
+  assert.equal(savedConfig?.clientId.length, 36);
   assert.deepEqual(credentials.values.dev, { token: "secret-token", expiresAt: 20_000, url: "https://first.example.com" });
   assert.equal(JSON.parse(outcome.stdout).authenticated, true);
   assert.equal(JSON.stringify(config.value).includes("secret-token"), false);

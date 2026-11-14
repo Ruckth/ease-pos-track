@@ -110,7 +110,7 @@ test("archiving carries deletedAt into both the patch and the audit trail", () =
 
 test("leaves the ticket and the changes it was given untouched", () => {
   const doc = ticket();
-  const changes = { status: "done" as const };
+  const changes: { status: Doc<"feedback">["status"] } = { status: "done" };
   const snapshot = { ...doc };
 
   const plan = planTicketChange({ doc, expectedVersion: 3, changes, now: 500 });
