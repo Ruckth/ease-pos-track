@@ -1,6 +1,5 @@
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api.js";
-import type { Id } from "../convex/_generated/dataModel.js";
 import { cancelUploadHandler } from "./handlers/cancel-upload.js";
 
 export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
@@ -10,9 +9,7 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
   return {
     convex,
     cancelUpload: cancelUploadHandler({
-      cancel: ({ intentId, ...input }) => convex.mutation(api.uploads.cancelUploadIntent, {
-        ...input, intentId: intentId as Id<"uploadIntents">,
-      }),
+      cancel: input => convex.mutation(api.uploads.cancelUploadIntent, input),
     }),
   };
 }

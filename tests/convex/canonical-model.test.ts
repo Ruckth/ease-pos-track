@@ -4,7 +4,7 @@ import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
 import { modules } from "./modules";
 
-beforeEach(() => { vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true"); vi.stubEnv("CONVEX_CLOUD_URL", "http://127.0.0.1:3212"); });
+beforeEach(() => { vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true"); vi.stubEnv("CONVEX_CLOUD_URL", "http://127.0.0.1:3212"); vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true"); });
 afterEach(() => vi.unstubAllEnvs());
 
 async function fixture() {
@@ -174,7 +174,7 @@ test("seed is repeatable and final model numbering, totals and purging reads agr
   expect(await t.query(api.tickets.getTicket, { token: staff, id })).toBeNull();
   expect(await t.query(api.tickets.getTicketByTicketNumber, { token: staff, projectKey: "POS", ticketNumber: 2, includeDeleted: true })).toBeNull();
   expect((await t.query(api.tickets.listMyTickets, { token: alice, includeDeleted: true })).some(row => row._id === id)).toBe(false);
-  await expect(t.mutation(api.tickets.restoreTicket, { token: staff, id, expectedVersion: 0 })).rejects.toMatchObject({ data: { code: "TICKET_UNAVAILABLE" } });
+  await expect(t.mutation(api.tickets.restoreTicket, { token: staff, id, expectedVersion: 0 })).rejects.toMatchObject({ data: { code: "TICKET_PURGING" } });
 });
 
 test("trusted callback constructor rejects customers, unconfigured credentials and foreign staff sessions", async () => {

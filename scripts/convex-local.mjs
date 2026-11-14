@@ -4,6 +4,7 @@
 // development settings are saved first and always restored afterwards.
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { loadPorts } from "./worktree-ports.mjs";
 
 const ENV_FILE = ".env.convex-local";
 const LOCAL_DEPLOYMENT = "anonymous:anonymous-track-ease-pos";
@@ -22,6 +23,12 @@ if (existsSync(SAVED)) {
 
 const args = process.argv.slice(2);
 if (args.length === 0) args.push("dev", "--once", "--typecheck", "disable");
+// Pin the backend to this checkout's ports: if they are taken the CLI fails
+// loudly instead of silently moving, which would strand Vite and the API.
+if (args[0] === "dev" && !args.some((arg) => arg.startsWith("--local-cloud-port"))) {
+  const ports = loadPorts();
+  args.push("--local-cloud-port", String(ports.CONVEX_CLOUD_PORT), "--local-site-port", String(ports.CONVEX_SITE_PORT));
+}
 const hadEnv = existsSync(".env.local");
 if (hadEnv) copyFileSync(".env.local", SAVED);
 let restored = false;

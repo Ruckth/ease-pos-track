@@ -89,6 +89,7 @@ export const ticketCreatedVia = v.literal("codex");
 
 export const uploadIntentStatus = v.union(
   v.literal("pending"),
+  v.literal("expiring"),
   v.literal("attached"),
   v.literal("cancelled"),
   v.literal("cleaned"),
@@ -125,13 +126,14 @@ export default defineSchema({
     version: v.number(),
     lifecycle: ticketLifecycle,
     archivedAt: v.optional(v.number()),
+    purgeBlocked: v.optional(v.boolean()),
     ownerCustomerId: v.optional(v.id("customers")),
     origin: actorRole,
     createdVia: v.optional(ticketCreatedVia),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_lifecycle_archive", ["lifecycle", "archivedAt"])
+    .index("by_lifecycle_archive", ["lifecycle", "purgeBlocked", "archivedAt"])
     .index("by_project_lane", ["projectId", "lifecycle", "status", "ticketNumber"])
     .index("by_owner_project", ["ownerCustomerId", "projectId", "lifecycle", "ticketNumber"])
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
@@ -238,7 +240,7 @@ export default defineSchema({
     leaseId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
     availableAt: v.number(),
-    lastOutcome: v.optional(v.union(v.literal("deleted"), v.literal("absent_verified"), v.literal("failed_retryable"), v.literal("failed_permanent"), v.literal("unknown"), v.literal("not_configured"))),
+    lastOutcome: v.optional(v.union(v.literal("deleted"), v.literal("absent_verified"), v.literal("failed_retryable"), v.literal("failed_permanent"), v.literal("unknown"), v.literal("not_configured"), v.literal("ownership_unverified"), v.literal("ownership_conflict"))),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_scope", ["resourceScope", "state"])

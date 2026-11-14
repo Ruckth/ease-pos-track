@@ -1,0 +1,227 @@
+import { v } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalJobMutation, actorQuery } from "./functions";
+import { JOB_POLICY, SWEEP_LIMIT, AUDIT_BATCH, ARCHIVE_RETENTION_MS, createMediaJob, currentAttempt, logSettlement } from "./domain/media_jobs";
+import { MAX_MEDIA_FILES } from "../shared/media-policy";
+import { reserveIntentAssets, requireOwnedUploadIntent } from "./domain/media";
+import { tombstoneTicketRequests } from "./domain/requests";
+
+const fenceArgs = { jobId: v.id("mediaJobs"), attempt: v.number(), leaseId: v.string() };
+
+async function failJob(ctx: MutationCtx, job: Doc<"mediaJobs">, lastOutcome: "ownership_conflict" | "exhausted") {
+  await ctx.db.patch(job._id, { state: "failed", leaseId: undefined, leaseExpiresAt: undefined,
+    ...(lastOutcome === "ownership_conflict" ? { lastOutcome } : {}), updatedAt: Date.now() });
+  logSettlement(job, lastOutcome);
+  return null;
+}
+
+async function purgeAssets(ctx: MutationCtx, ticket: Doc<"tickets">) {
+  const assets = await ctx.db.query("mediaAssets").withIndex("by_ticket", q => q.eq("ticketId", ticket._id)).take(MAX_MEDIA_FILES + 1);
+  return assets.length === ticket.media.length && ticket.media.every(file => assets.some(asset =>
+    asset.key === file.key && asset.lifecycle === "attached" && !asset.jobId)) ? assets : null;
+}
+
+export const progress = actorQuery({
+  name: "retention:progress",
+  args: { token: v.string(), intentId: v.id("uploadIntents"), secret: v.string(), jobId: v.id("mediaJobs") },
+  handler: async (ctx, args) => {
+    requireOwnedUploadIntent(await ctx.db.get(args.intentId), ctx.actor, args.secret);
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.intentId !== args.intentId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
+    return { jobId: job._id, state: job.state, attempt: job.attempt, maxAttempts: job.maxAttempts, phase: job.phase,
+      completedCount: job.completedKeys.length, totalCount: job.keys.length, lastOutcome: job.lastOutcome };
+  },
+});
+
+export const claim = internalJobMutation({
+  name: "retention:claim", args: { jobId: v.id("mediaJobs") },
+  handler: async (ctx, args): Promise<(Doc<"mediaJobs"> & { verifyKeys: string[] }) | null> => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) return null;
+    const now = Date.now();
+    if (job.state === "pending" ? job.availableAt > now : job.state !== "running" || (job.leaseExpiresAt ?? 0) > now) return null;
+    if (process.env.MEDIA_CLEANUP_ENABLED !== "true") {
+      await ctx.db.patch(job._id, { state: "pending", availableAt: now + JOB_POLICY.backoffMs,
+        leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
+      console.info({ jobId: job._id, kind: job.kind, attempt: job.attempt, outcome: "cleanup_disabled" });
+      return null;
+    }
+    const needsProvider = job.phase === "delete_media" && job.completedKeys.length < job.keys.length;
+    if (needsProvider && job.attempt >= job.maxAttempts) return await failJob(ctx, job, "exhausted");
+    // Only provider work spends attempts. A new lease ID still fences database recovery.
+    const attempt = job.attempt + (needsProvider ? 1 : 0);
+    const leaseId = crypto.randomUUID();
+    const leaseExpiresAt = now + JOB_POLICY.leaseMs;
+    await ctx.db.patch(job._id, { state: "running", attempt, leaseId, leaseExpiresAt, updatedAt: now });
+    const verifyKeys: string[] = [];
+    for (const key of job.keys) {
+      const asset = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", key)).unique();
+      if (!asset || asset.jobId !== job._id || (asset.lifecycle !== "deleting" && asset.lifecycle !== "deleted")) {
+        return await failJob(ctx, { ...job, attempt }, "ownership_conflict");
+      }
+      if (asset.source === "staff" && !asset.ticketId) verifyKeys.push(key);
+    }
+    return { ...job, state: "running", attempt, leaseId, leaseExpiresAt, verifyKeys };
+  },
+});
+
+export const checkpoint = internalJobMutation({
+  name: "retention:checkpoint", args: { ...fenceArgs, key: v.string(), outcome: v.union(
+    v.literal("deleted"), v.literal("absent_verified"), v.literal("failed_retryable"), v.literal("failed_permanent"),
+    v.literal("unknown"), v.literal("not_configured"), v.literal("ownership_unverified")) },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || !currentAttempt(job, args) || job.phase !== "delete_media" || !job.keys.includes(args.key)) return false;
+    if (job.completedKeys.includes(args.key)) return true;
+    const now = Date.now();
+    if (args.outcome === "deleted" || args.outcome === "absent_verified") {
+      const asset = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", args.key)).unique();
+      if (!asset || asset.jobId !== job._id || asset.lifecycle !== "deleting") {
+        await failJob(ctx, job, "ownership_conflict");
+        return false;
+      }
+      await ctx.db.patch(asset._id, { lifecycle: "deleted", updatedAt: now });
+      await ctx.db.patch(job._id, { completedKeys: [...job.completedKeys, args.key], lastOutcome: args.outcome, updatedAt: now });
+      return true;
+    }
+    const attempt = args.outcome === "not_configured" ? job.attempt - 1 : job.attempt;
+    const permanent = args.outcome === "failed_permanent" || args.outcome === "ownership_unverified";
+    const availableAt = now + Math.min(JOB_POLICY.maxBackoffMs, JOB_POLICY.backoffMs * 2 ** Math.max(0, attempt - 1));
+    const exhausted = attempt >= job.maxAttempts;
+    const state = permanent || exhausted ? "failed" : "pending";
+    await ctx.db.patch(job._id, { state, attempt, availableAt, lastOutcome: args.outcome, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
+    logSettlement(job, exhausted ? "exhausted" : args.outcome);
+    if (state === "pending" && process.env.MEDIA_CLEANUP_ENABLED === "true") await ctx.scheduler.runAfter(availableAt - now, internal.media_job_actions.run, { jobId: job._id });
+    return false;
+  },
+});
+
+export const advance = internalJobMutation({
+  name: "retention:advance", args: fenceArgs,
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || !currentAttempt(job, args)) return false;
+    const now = Date.now();
+    let phase = job.phase;
+    if (phase === "delete_media") {
+      if (job.completedKeys.length !== job.keys.length) return false;
+      phase = job.kind === "ticket_purge" ? "delete_ticket" : "complete";
+    } else if (phase === "delete_ticket") {
+      if (!job.ticketId) { await failJob(ctx, job, "ownership_conflict"); return false; }
+      const ticket = await ctx.db.get(job.ticketId);
+      if (!ticket || ticket.lifecycle !== "purging") { await failJob(ctx, job, "ownership_conflict"); return false; }
+      for (const key of job.keys) {
+        const asset = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", key)).unique();
+        if (!asset || asset.jobId !== job._id || asset.lifecycle !== "deleted") { await failJob(ctx, job, "ownership_conflict"); return false; }
+      }
+      await tombstoneTicketRequests(ctx, ticket._id);
+      await ctx.db.delete(ticket._id);
+      phase = "delete_events";
+    } else if (phase === "delete_events") {
+      const events = await ctx.db.query("ticketEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
+      const annotations = await ctx.db.query("annotationEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
+      for (const event of [...events, ...annotations]) await ctx.db.delete(event._id);
+      if (events.length < AUDIT_BATCH && annotations.length < AUDIT_BATCH) phase = "complete";
+    }
+    if (phase === "complete") {
+      await ctx.db.patch(job._id, { state: "completed", phase, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
+      logSettlement(job, "completed");
+      if (job.intentId) {
+        const intent = await ctx.db.get(job.intentId);
+        if (intent?.status === "expiring") {
+          const pending = await ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id).eq("lifecycle", "pending")).first();
+          const deleting = await ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id).eq("lifecycle", "deleting")).first();
+          if (!pending && !deleting) await ctx.db.patch(intent._id, { status: "cleaned", updatedAt: now });
+        }
+      }
+    } else {
+      await ctx.db.patch(job._id, { phase, leaseExpiresAt: now + JOB_POLICY.leaseMs, updatedAt: now });
+      await ctx.scheduler.runAfter(0, internal.retention.advance, args);
+    }
+    return true;
+  },
+});
+
+/** Separate bounded indexed scans keep unrelated resources moving. */
+export const recover = internalJobMutation({
+  name: "retention:recover", args: {},
+  handler: async ctx => {
+    if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return 0;
+    const now = Date.now();
+    const pending = await ctx.db.query("mediaJobs").withIndex("by_available", q => q.eq("state", "pending").lte("availableAt", now)).take(SWEEP_LIMIT);
+    const expired = await ctx.db.query("mediaJobs").withIndex("by_lease", q => q.eq("state", "running").lte("leaseExpiresAt", now)).take(SWEEP_LIMIT);
+    for (const job of [...pending, ...expired]) await ctx.scheduler.runAfter(0, internal.media_job_actions.run, { jobId: job._id });
+    return pending.length + expired.length;
+  },
+});
+
+export const expireIntents = internalJobMutation({
+  name: "retention:expireIntents", args: {},
+  handler: async ctx => {
+    const intents = await ctx.db.query("uploadIntents").withIndex("by_expires_at", q => q.eq("status", "pending").lte("expiresAt", Date.now())).take(SWEEP_LIMIT);
+    for (const intent of intents) {
+      // Accepted pending uploads are bounded by the 10 image + 3 video budget.
+      const assets = await ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id).eq("lifecycle", "pending")).take(MAX_MEDIA_FILES);
+      const jobs = await reserveIntentAssets(ctx, intent, assets, "intent_expiry");
+      const deleting = await ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id).eq("lifecycle", "deleting")).first();
+      await ctx.db.patch(intent._id, { status: jobs.length || deleting ? "expiring" : "cleaned", updatedAt: Date.now() });
+    }
+    return intents.length;
+  },
+});
+
+export const claimPurges = internalJobMutation({
+  name: "retention:claimPurges", args: {},
+  handler: async ctx => {
+    if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return 0;
+    const now = Date.now();
+    const tickets = await ctx.db.query("tickets").withIndex("by_lifecycle_archive", q => q.eq("lifecycle", "archived").eq("purgeBlocked", undefined).lte("archivedAt", now - ARCHIVE_RETENTION_MS)).take(SWEEP_LIMIT);
+    for (const ticket of tickets) {
+      const assets = await purgeAssets(ctx, ticket);
+      const jobId = await createMediaJob(ctx, { kind: "ticket_purge", resourceScope: `ticket:${ticket._id}`, ticketId: ticket._id, keys: ticket.media.map(file => file.key) });
+      if (!assets) {
+        await failJob(ctx, (await ctx.db.get(jobId))!, "ownership_conflict");
+        await ctx.db.patch(ticket._id, { purgeBlocked: true });
+        continue;
+      }
+      for (const asset of assets) await ctx.db.patch(asset._id, { lifecycle: "deleting", jobId, updatedAt: now });
+      // Archive already removed this Ticket from totals; finalization never decrements again.
+      await ctx.db.patch(ticket._id, { lifecycle: "purging", version: ticket.version + 1, updatedAt: now });
+    }
+    return tickets.length;
+  },
+});
+
+/** Ops repairs ownership/configuration first; requeue retains keys and completed progress. */
+export const requeue = internalJobMutation({
+  name: "retention:requeue", args: { jobId: v.id("mediaJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.state !== "failed") return false;
+    const now = Date.now();
+    if (job.intentId && job.phase === "delete_media") {
+      for (const key of job.keys) {
+        const assets = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", key)).take(2);
+        const asset = assets[0];
+        if (assets.length !== 1 || asset.intentId !== job.intentId || asset.ticketId) return false;
+        if (asset.jobId !== job._id || (asset.lifecycle !== "deleting" && asset.lifecycle !== "deleted")) return false;
+      }
+    }
+    if (job.kind === "ticket_purge" && job.ticketId) {
+      const ticket = await ctx.db.get(job.ticketId);
+      if (ticket?.lifecycle === "archived") {
+        if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return false;
+        const assets = await purgeAssets(ctx, ticket);
+        if (!assets || ticket.media.length !== job.keys.length || ticket.media.some(file => !job.keys.includes(file.key))) return false;
+        for (const asset of assets) await ctx.db.patch(asset._id, { lifecycle: "deleting", jobId: job._id, updatedAt: now });
+        await ctx.db.patch(ticket._id, { lifecycle: "purging", purgeBlocked: undefined, version: ticket.version + 1, updatedAt: now });
+      } else if (job.phase !== "delete_events" && ticket?.lifecycle !== "purging") return false;
+    }
+    await ctx.db.patch(job._id, { state: "pending", attempt: 0, availableAt: now, lastOutcome: undefined,
+      leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
+    if (process.env.MEDIA_CLEANUP_ENABLED === "true") await ctx.scheduler.runAfter(0, internal.media_job_actions.run, { jobId: job._id });
+    return true;
+  },
+});

@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.5.2",
   "scripts": {
     "preinstall": "node scripts/ensure-pnpm.mjs",
-    "dev": "concurrently -k -n vite,api,convex \"VITE_CONVEX_URL=http://127.0.0.1:3212 VITE_CONVEX_SITE_URL=http://127.0.0.1:3213 vite\" \"CONVEX_URL=http://127.0.0.1:3212 tsx server/index.ts\" \"pnpm run dev:convex\"",
+    "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
     "dev:api": "tsx server/index.ts",
     "dev:convex": "node scripts/convex-local.mjs dev",
@@ -17,7 +17,11 @@
     "test": "pnpm run test:unit && pnpm run test:convex",
     "test:unit": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
     "test:convex": "vitest run --config vitest.convex.config.ts",
-    "typecheck": "tsc -b"
+    "test:one": "tsx --tsconfig tsconfig.test.json --test",
+    "typecheck": "tsgo -b",
+    "typecheck:tsc": "tsc -b",
+    "check": "concurrently --group --names typecheck,unit,convex,build \"pnpm:typecheck\" \"pnpm:test:unit\" \"pnpm:test:convex\" \"vite build --logLevel warn\"",
+    "agent:setup": "node scripts/agent-setup.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -50,6 +54,7 @@
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",

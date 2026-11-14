@@ -2,6 +2,7 @@ import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { actorFields, canReadTicket, type Actor } from "../authz";
 import { isMember } from "./projects";
+import { MAX_MEDIA_FILES } from "../../shared/media-policy";
 
 export type RequestScope = {
   operation: "ticket.create" | "ticket.attach_media";
@@ -49,8 +50,9 @@ export async function commitTicketRequest(ctx: MutationCtx, input: RequestScope,
  * No raw Ticket/media/annotation input is ever stored in a receipt.
  */
 export async function tombstoneTicketRequests(ctx: MutationCtx, ticketId: Id<"tickets">) {
+  // One create receipt plus at most one nonempty attachment per media slot.
   const receipts: Doc<"ticketRequests">[] = await ctx.db.query("ticketRequests")
-    .withIndex("by_ticket", q => q.eq("ticketId", ticketId)).collect();
+    .withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(MAX_MEDIA_FILES + 1);
   for (const receipt of receipts) {
     if (receipt.outcome !== "unavailable") await ctx.db.patch(receipt._id, { outcome: "unavailable" });
   }

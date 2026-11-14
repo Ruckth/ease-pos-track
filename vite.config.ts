@@ -2,6 +2,8 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+const uploadApi = `http://localhost:${process.env.UPLOAD_API_PORT ?? 8787}`;
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -13,10 +15,10 @@ export default defineConfig({
   server: {
     host: true,
     proxy: {
-      "/api/uploadthing": "http://localhost:8787",
+      "/api/uploadthing": uploadApi,
       // Upload cancellation runs on the same local API; without this the dev
       // server answers with index.html and cleanup silently fails.
-      "/api/uploads": "http://localhost:8787",
+      "/api/uploads": uploadApi,
     },
   },
   build: {

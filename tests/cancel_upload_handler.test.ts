@@ -60,3 +60,35 @@ test("both cancellation adapters distinguish unknown transport outcomes from rej
     assert.deepEqual(await response.json(), { error: "UPLOAD_CLEANUP_UNKNOWN", outcome: "unknown" });
   }
 });
+
+test("provider app verification looks up the requested key regardless of app size and fails closed", async () => {
+  const lookedUp: string[][] = [];
+  const storage = createStorage("fake-token", () => ({
+    deleteFiles: async () => { throw new Error("verification must not delete"); },
+    getFileUrls: async keys => {
+      lookedUp.push(keys);
+      return { data: keys[0] === "owned-after-500" ? [{ key: keys[0], url: "https://fake.invalid/file" }] : [] };
+    },
+  }));
+  assert.equal(await storage.verifyAppKey("owned-after-500"), true);
+  assert.equal(await storage.verifyAppKey("missing"), false);
+  assert.deepEqual(lookedUp, [["owned-after-500"], ["missing"]]);
+  for (const provider of [
+    { getFileUrls: async () => ({ data: [{ key: "different", url: "https://fake.invalid/file" }] }) },
+    { getFileUrls: async () => ({ data: [{ key: "owned", url: "" }] }) },
+    { getFileUrls: async () => { throw new Error("private provider body"); } },
+    {},
+  ]) {
+    assert.equal(await createStorage("fake-token", () => ({ ...provider, deleteFiles: async () => ({ success: true, deletedCount: 0 }) })).verifyAppKey("owned"), false);
+  }
+});
+
+test("both cancellation adapters expose failed jobs without a false queued or completed acknowledgement", async () => {
+  const handler = cancelUploadHandler({ cancel: async () => ({ state: "failed", jobIds: ["job"] }) });
+  const hono = createUploadApp({ cancelUpload: handler }, async () => new Response());
+  for (const adapter of [handler, (request: Request) => hono.request(request)]) {
+    const response = await adapter(request(valid));
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "UPLOAD_CLEANUP_FAILED", jobIds: ["job"] });
+  }
+});

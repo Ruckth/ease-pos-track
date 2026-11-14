@@ -1,7 +1,7 @@
 import { errorCode } from "../../shared/errors.js";
 
 export type CancelUploadDependencies = {
-  cancel(input: { token: string; intentId: string; secret: string }): Promise<{ state: "queued" | "completed"; jobIds: string[] }>;
+  cancel(input: { token: string; intentId: string; secret: string }): Promise<{ state: "queued" | "completed" | "failed"; jobIds: string[] }>;
 };
 
 export function cancelUploadHandler(deps: CancelUploadDependencies) {
@@ -19,6 +19,7 @@ export function cancelUploadHandler(deps: CancelUploadDependencies) {
     }
     try {
       const result = await deps.cancel({ token, intentId: body.intentId, secret: body.secret });
+      if (result.state === "failed") return Response.json({ error: "UPLOAD_CLEANUP_FAILED", jobIds: result.jobIds }, { status: 409 });
       return Response.json({ ok: true, ...result });
     } catch (error) {
       const candidate = errorCode(error);

@@ -127,6 +127,8 @@ export const media = internalJobAction({
   args: {},
   handler: async (ctx): Promise<{ ok: true; checks: string[] }> => {
     requireLocalFixtures();
+    // Fake keys must remain reserved without ever waking a real provider action.
+    if (process.env.MEDIA_CLEANUP_ENABLED === "true") throw new Error("LOCAL_MEDIA_REQUIRES_CLEANUP_DISABLED");
     const seeded = await ctx.runAction(internal.seed.run, {});
     const token = seeded.sessions[0];
     const requestId = crypto.randomUUID();
@@ -162,6 +164,10 @@ export const media = internalJobAction({
       file: { ...file, key: `${file.key}-late` },
     });
     if (late.state !== "queued" || late.jobIds.length !== 1) throw new Error("LOCAL_MEDIA_LATE_FAILED");
+    const progress = await ctx.runQuery(api.retention.progress, {
+      token, intentId: loser.intentId, secret: loser.secret, jobId: late.jobIds[0],
+    });
+    if (progress.state !== "pending" || progress.attempt !== 0 || progress.completedCount !== 0) throw new Error("LOCAL_MEDIA_DISABLED_PROGRESS_FAILED");
     const row = await ctx.runQuery(api.tickets.getTicket, { token, id });
     if (row?.media.length !== 1 || row.media[0].key !== file.key) throw new Error("LOCAL_MEDIA_TICKET_FAILED");
     const customer = seeded.sessions[1];
@@ -178,6 +184,6 @@ export const media = internalJobAction({
       uploadIntentId: customerIntent.intentId, uploadIntentSecret: customerIntent.secret,
     });
     if ((await ctx.runQuery(api.tickets.getTicket, { token: customer, id: customerId }))?.media[0].key !== customerFile.key) throw new Error("LOCAL_MEDIA_CUSTOMER_FAILED");
-    return { ok: true, checks: ["concurrent exclusive key claims", "eight identical recording replays", "atomic attachment and create replay", "attached key takeover denied", "attached cancellation reserves nothing", "customer callback preflight and media Ticket", "staff late key rejected", "trusted late new upload reserved under pending job"] };
+    return { ok: true, checks: ["concurrent exclusive key claims", "eight identical recording replays", "atomic attachment and create replay", "attached key takeover denied", "attached cancellation reserves nothing", "customer callback preflight and media Ticket", "staff late key rejected", "trusted late new upload reserved under pending job", "disabled cleanup exposes pending progress without provider attempts"] };
   },
 });

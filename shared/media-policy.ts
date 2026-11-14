@@ -1,6 +1,7 @@
 import { MEDIA_POLICY } from "./ticket-contracts";
 const IMAGE_MAX_BYTES = MEDIA_POLICY.image.maxBytes;
 const VIDEO_MAX_BYTES = MEDIA_POLICY.video.maxBytes;
+export const MAX_MEDIA_FILES = MEDIA_POLICY.image.maxCount + MEDIA_POLICY.video.maxCount;
 
 export function validateFiles(files: Array<{ name: string; size: number; type: string }>) {
   const images = files.filter((file) => file.type.startsWith("image/"));

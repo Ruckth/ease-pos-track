@@ -155,8 +155,16 @@ Recording and attachment reconcile a lost response by replaying the identical
 write once. If its outcome is still unknown, keep the same request id on retry;
 no deletion is authorized. A definitive rejection queues cleanup through an
 atomic ownership reservation. Cancellation and late rejected callbacks retain
-pending media jobs; P4 will execute them. A queued acknowledgement does not mean
-the files have been deleted. Callback and provider credentials stay server-side.
+durable media jobs, scheduled atomically with their reservations when cleanup is enabled. Jobs use eight
+provider attempts, capped exponential backoff (30 seconds–15 minutes), a 20-second action budget
+and 60-second leases; a bounded minute sweep recovers lost work. A queued
+acknowledgement does not mean the files have been deleted. Terminal cleanup
+failures retain ownership; the CLI preserves the original failure and marks
+cleanup unknown. Authorized `retention.progress` reads require the actor token,
+intent ID, intent secret and job ID. Staff-sourced unattached keys require a
+positive authenticated per-key provider lookup before deletion. Unverified ownership ends
+without deleting; ambiguous deletion acknowledgements remain unknown. Callback
+and provider credentials stay server-side.
 
 Every state-changing command requires the latest `version` returned by create,
 list, or get. This preserves the existing optimistic concurrency check:
@@ -274,6 +282,8 @@ pnpm convex:local env set LOCAL_FIXTURES_ENABLED true
 pnpm convex:local env set APP_PASSWORD 'LocalStaff123!'
 pnpm convex:local env set CUSTOMER_PASSWORD_PEPPER local-only-fixture-pepper
 pnpm convex:local env set UPLOAD_CALLBACK_SECRET local-only-callback-fixture
+pnpm convex:local env remove MEDIA_CLEANUP_ENABLED
+pnpm convex:local env list
 pnpm convex:local run seed:run '{}'
 pnpm convex:local run local_smoke:run '{}'
 pnpm convex:local run local_smoke:media '{}'
@@ -298,7 +308,9 @@ event, then checks replay after editing and content/Project conflicts.
 The media smoke uses fake receipts to exercise competing exclusive key claims,
 duplicate recording, attachment, takeover denial and late-upload reservations
 on the local backend, including customer callback preflight and media creation.
-It does not call UploadThing.
+It requires cleanup disabled (unset by default) so fake-key jobs remain pending
+and unscheduled. It does not call UploadThing; do not configure provider credentials
+for these smokes. The guard rejects an enabled cleanup flag before creating fixtures.
 `--start` keeps the local backend alive for the CLI process; standalone `run`
 commands stop their local backend when they exit.
 
@@ -310,8 +322,28 @@ that credential before accepting files and counts files already recorded for
 the intent. Staff recording cannot reserve new keys against rejected intents;
 only trusted provider callbacks can reserve rejected new uploads. Existing plaintext Keychain
 credentials are rejected; sign in again to write the current encoded format.
-Automatic media retention scheduling is paused until the durable P3–P4 media
-ownership/job implementation replaces the removed unsafe cleanup path.
+Local media cleanup scheduling now uses durable jobs: abandoned intents are
+claimed every five minutes, and Tickets archived for at least 30 days are
+claimed hourly. Purging blocks restore, retains media reservations through
+failure and removes the Ticket only after verified deletion. Audit history is
+then removed in batches of at most 100 entries per table. Shared development
+and production have not been changed.
+The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates job execution,
+recovery and new purge claims; P8 enables it last, after configuration and smoke
+checks. Cancellation, rejected callbacks and expiry always create pending jobs
+and reserve unattached assets (`deleting`, with a job reference). Cancellation
+returns queued progress without claiming deletion. Expiry still marks intents
+expiring/cleaned while disabled, since it needs no provider I/O. Disabled creation
+schedules nothing; a previously scheduled action defers the job by 30 seconds,
+logs one bounded line and spends no provider attempt. Disabled recovery and purge
+sweeps do nothing, leaving archived Tickets restorable. Enabling the flag lets
+recovery pick up due pending jobs automatically; no requeue is needed. Missing storage configuration leaves
+jobs pending without spending provider attempts. Database finalization renews
+leases and does not spend provider attempts. Failed jobs keep their progress
+and reservations; after repairing the cause, ops can run
+`pnpm convex:local run retention:requeue '{"jobId":"..."}'` locally. Ownership
+conflicts block only the affected job/Ticket; blocked archived Tickets remain
+visible/restorable and are skipped by later purge sweeps.
 Ticket annotations share the Ticket version and audit path. The embedded budget
 is 100 entries and 50,000 text characters per Ticket, with 2,000 characters per
 entry; soft-deleted entries still count. Initial creation, additions, edits and

@@ -129,7 +129,8 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async cancelUploadIntent(url: string, token: string, input: TicketUploadCredentials) {
-    await this.client(url).mutation(api.uploads.cancelUploadIntent, { token, intentId: input.intentId, secret: input.secret });
+    const result = await this.client(url).mutation(api.uploads.cancelUploadIntent, { token, intentId: input.intentId, secret: input.secret });
+    if (result.state === "failed") throw new ConvexError({ code: "UPLOAD_CLEANUP_FAILED", jobIds: result.jobIds });
   }
 
   async attachImages(url: string, token: string, input: TicketAttachInput) {

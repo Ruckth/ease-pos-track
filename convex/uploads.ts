@@ -1,4 +1,4 @@
-import { validateFiles, sameFiles, fileSignature } from "../shared/media-policy";
+import { validateFiles, sameFiles, fileSignature, MAX_MEDIA_FILES } from "../shared/media-policy";
 import { actorMutation, actorQuery, trustedCallbackMutation, requireCallbackCredential } from "./functions";
 import { v } from "convex/values";
 import { mediaItemValidator, pendingFileValidator } from "./schema";
@@ -120,15 +120,23 @@ export const cancelUploadIntent = actorMutation({
   name: "uploads:cancelUploadIntent",
   args: {
     token: v.string(),
-    intentId: v.id("uploadIntents"),
+    intentId: v.string(),
     secret: v.string(),
   },
   handler: async (ctx, args) => {
-    const intent = requireOwnedUploadIntent(await ctx.db.get(args.intentId), ctx.actor, args.secret);
-    if (intent.status === "attached" || intent.status === "cleaned") return { state: "completed" as const, jobIds: [] };
-    const assets = await ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id)).collect();
-    const jobIds = await reserveIntentAssets(ctx, intent, assets, "cancellation");
-    if (intent.status !== "cancelled") await ctx.db.patch(intent._id, { status: "cancelled", updatedAt: Date.now() });
-    return { state: jobIds.length ? "queued" as const : "completed" as const, jobIds };
+    const intentId = ctx.db.normalizeId("uploadIntents", args.intentId);
+    if (!intentId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
+    const intent = requireOwnedUploadIntent(await ctx.db.get(intentId), ctx.actor, args.secret);
+    // Separate lifecycle reads keep historical deletions from hiding the bounded
+    // accepted uploads which still need a reservation.
+    const assets = (await Promise.all((["pending", "deleting", "deleted"] as const).map(lifecycle =>
+      ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id).eq("lifecycle", lifecycle)).take(MAX_MEDIA_FILES)))).flat();
+    const jobIds = await reserveIntentAssets(ctx, intent, assets.filter(asset => !asset.ticketId), "cancellation");
+    if (intent.status === "pending" || intent.status === "expiring") await ctx.db.patch(intent._id, { status: "cancelled", updatedAt: Date.now() });
+    const jobs = await Promise.all(jobIds.map(id => ctx.db.get(id)));
+    // A terminal failure is data, so this response cannot roll back reservations
+    // for other assets newly cancelled in this transaction.
+    if (jobs.some(job => job?.state === "failed")) return { state: "failed" as const, jobIds };
+    return { state: jobs.some(job => job?.state !== "completed") ? "queued" as const : "completed" as const, jobIds };
   },
 });

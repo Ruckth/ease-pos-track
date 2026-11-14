@@ -536,6 +536,7 @@ export const restoreTicket = mutationOperation({
     const { session, actor } = ctx;
     // Restoring an archived ticket is a staff control.
     const doc = await ctx.db.get(args.id);
+    if (doc?.lifecycle === "purging") throw new Error("TICKET_PURGING");
     if (!doc || doc.lifecycle !== "archived") throw new Error("TICKET_UNAVAILABLE");
     return await applyTicketChange(ctx, {
       doc,

@@ -2,6 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { Actor } from "../authz";
 import { fileSignature, validateMediaItems } from "../../shared/media-policy";
+import { createMediaJob } from "./media_jobs";
 
 type Media = Doc<"tickets">["media"][number];
 
@@ -17,20 +18,17 @@ function sameReceipt(left: Media, right: Media) {
     && left.size === right.size && left.type === right.type;
 }
 
-/** Reserve immutable keys before any provider work. P4 executes these pending jobs.
- * P4 must verify with the provider that a staff-sourced unattached key exists before deleting it.
- */
+/** Reserve immutable keys and schedule work in the same transaction. */
 export async function reserveIntentAssets(ctx: MutationCtx, intent: Doc<"uploadIntents">,
-  assets: Doc<"mediaAssets">[], kind: "cancellation" | "rejected_upload") {
+  assets: Doc<"mediaAssets">[], kind: "cancellation" | "rejected_upload" | "intent_expiry"): Promise<Id<"mediaJobs">[]> {
   const jobIds: Id<"mediaJobs">[] = [];
   for (const asset of assets) {
     if (asset.intentId !== intent._id || asset.ticketId || asset.lifecycle === "attached") throw new Error("MEDIA_OWNERSHIP_CONFLICT");
     if (asset.jobId) { jobIds.push(asset.jobId); continue; }
     if (asset.lifecycle === "deleted") continue;
     const now = Date.now();
-    const jobId = await ctx.db.insert("mediaJobs", {
-      kind, resourceScope: `asset:${asset._id}`, intentId: intent._id, keys: [asset.key], completedKeys: [],
-      phase: "delete_media", state: "pending", attempt: 0, maxAttempts: 5, availableAt: now, createdAt: now, updatedAt: now,
+    const jobId = await createMediaJob(ctx, {
+      kind, resourceScope: `asset:${asset._id}`, intentId: intent._id, keys: [asset.key],
     });
     await ctx.db.patch(asset._id, { lifecycle: "deleting", jobId, updatedAt: now });
     jobIds.push(jobId);
@@ -83,6 +81,7 @@ export async function verifyAssetReceipts(ctx: MutationCtx, intentId: Id<"upload
     const asset = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", item.key)).unique();
     if (!asset || asset.intentId !== intentId || asset.ticketId !== ticketId) throw new Error("MEDIA_OWNERSHIP_CONFLICT");
     if (asset.lifecycle !== (ticketId ? "attached" : "pending")) throw new Error("MEDIA_NOT_ATTACHABLE");
+    if (!ticketId && asset.jobId) throw new Error("MEDIA_NOT_ATTACHABLE");
     if (!sameReceipt(asset.metadata, item)) throw new Error("UPLOAD_VERIFICATION_FAILED");
   }
 }

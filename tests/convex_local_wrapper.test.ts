@@ -23,13 +23,22 @@ fs.writeFileSync(".env.local", "CLI_SELECTED_LOCAL=true");
     });
     assert.equal(run.status, 0, run.stderr);
     assert.deepEqual(JSON.parse(readFileSync(join(dir, "args.json"), "utf8")), {
-      args: ["dev", "--typecheck", "disable", "--env-file", ".env.convex-local"], mode: "anonymous",
+      args: ["dev", "--typecheck", "disable", "--local-cloud-port", "3212", "--local-site-port", "3213", "--env-file", ".env.convex-local"],
+      mode: "anonymous",
     });
     assert.equal(readFileSync(join(dir, ".env.local"), "utf8"), "SHARED_SETTINGS=preserve\n");
     assert.equal(existsSync(join(dir, ".env.local.shared-backup")), false);
     const scripts = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8")).scripts;
     assert.equal(scripts["dev:convex"], "node scripts/convex-local.mjs dev");
-    assert.ok(scripts.dev.includes("pnpm run dev:convex"));
+    assert.equal(scripts.dev, "node scripts/dev.mjs");
+    assert.ok(readFileSync(resolve(import.meta.dirname, "../scripts/dev.mjs"), "utf8").includes("pnpm run dev:convex"));
+
+    // A worktree's claimed ports pin its own backend.
+    writeFileSync(join(dir, ".env.worktree"), "CONVEX_CLOUD_PORT=4010\nCONVEX_SITE_PORT=4011\n");
+    assert.equal(spawnSync("pnpm", ["convex:local"], { cwd: dir, encoding: "utf8" }).status, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, "args.json"), "utf8")).args, [
+      "dev", "--once", "--typecheck", "disable", "--local-cloud-port", "4010", "--local-site-port", "4011", "--env-file", ".env.convex-local",
+    ]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

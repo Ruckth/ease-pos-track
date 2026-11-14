@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as adapters_storage from "../adapters/storage.js";
 import type * as annotation_state from "../annotation_state.js";
 import type * as annotations from "../annotations.js";
 import type * as auth from "../auth.js";
@@ -16,6 +17,7 @@ import type * as crons from "../crons.js";
 import type * as customer_validation from "../customer_validation.js";
 import type * as customers from "../customers.js";
 import type * as domain_media from "../domain/media.js";
+import type * as domain_media_jobs from "../domain/media_jobs.js";
 import type * as domain_operation from "../domain/operation.js";
 import type * as domain_operations from "../domain/operations.js";
 import type * as domain_projects from "../domain/projects.js";
@@ -24,8 +26,10 @@ import type * as domain_tickets from "../domain/tickets.js";
 import type * as functions from "../functions.js";
 import type * as local_smoke from "../local_smoke.js";
 import type * as login_guard from "../login_guard.js";
+import type * as media_job_actions from "../media_job_actions.js";
 import type * as password from "../password.js";
 import type * as projects from "../projects.js";
+import type * as retention from "../retention.js";
 import type * as seed from "../seed.js";
 import type * as session_auth from "../session_auth.js";
 import type * as ticket_numbers from "../ticket_numbers.js";
@@ -41,6 +45,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "adapters/storage": typeof adapters_storage;
   annotation_state: typeof annotation_state;
   annotations: typeof annotations;
   auth: typeof auth;
@@ -49,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   customer_validation: typeof customer_validation;
   customers: typeof customers;
   "domain/media": typeof domain_media;
+  "domain/media_jobs": typeof domain_media_jobs;
   "domain/operation": typeof domain_operation;
   "domain/operations": typeof domain_operations;
   "domain/projects": typeof domain_projects;
@@ -57,8 +63,10 @@ declare const fullApi: ApiFromModules<{
   functions: typeof functions;
   local_smoke: typeof local_smoke;
   login_guard: typeof login_guard;
+  media_job_actions: typeof media_job_actions;
   password: typeof password;
   projects: typeof projects;
+  retention: typeof retention;
   seed: typeof seed;
   session_auth: typeof session_auth;
   ticket_numbers: typeof ticket_numbers;

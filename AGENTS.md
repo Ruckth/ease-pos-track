@@ -15,6 +15,19 @@ Local seed and smoke instructions are in [docs/ticket-cli.md](docs/ticket-cli.md
 Every Convex registration uses a policy constructor from `convex/functions.ts`;
 resource ownership and Project access belong in domain operations.
 
+The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates media job execution
+and purge claims. Leave it disabled until P8 cutover validation is complete;
+enable it last. Cancellation, rejected callbacks and expiry always queue pending
+jobs and reserve unattached assets. Disabled jobs are not scheduled; claims defer
+without provider calls or spending attempts, and recovery does nothing. Expiry
+still records reservations; archived Tickets remain restorable. Enabling the flag
+lets recovery resume pending jobs without requeue. Missing
+storage configuration retries without spending provider attempts. Failed jobs
+retain reservations; ops can repair the cause then invoke the internal
+`retention:requeue` mutation with `{ "jobId": "..." }`. Ownership-conflicted
+archived Tickets remain visible/restorable and are excluded from later claims
+until repaired and requeued. Local smoke flag setup is in docs/ticket-cli.md.
+
 ## Creating a Ticket
 
 Only run this when the user explicitly asks for a Ticket to be created.
@@ -47,7 +60,9 @@ pnpm ticket create --title "<title>" --description "<description>" --project <KE
   session that acquired the intent. Unknown writes retain ownership; definitive
   rejection queues guarded cleanup. If cancellation cannot be confirmed, error
   JSON includes `details.cleanup.outcome: "unknown"` while preserving the original
-  error code and exit status. P4 will execute the pending media jobs.
+  error code and exit status. Cleanup jobs execute with fenced leases and bounded
+  retries; queued cancellation does not claim deletion. Terminal cleanup failure
+  retains reservations and is available through authorized job progress.
 - Attachment reconciliation covers only the mutation. A failed subsequent Ticket
   read never authorizes cancellation or cleanup.
 
@@ -59,5 +74,21 @@ This repository is pnpm-only. Use `pnpm` for every command; `npm`, `npx`, yarn a
 bun are not supported, and `preinstall` refuses an install driven by any of them.
 `npx <tool>` becomes `pnpm exec <tool>`.
 
-Run `pnpm test`, `pnpm run typecheck` and `pnpm run build` before reporting work
-as done. Schema changes must also push cleanly with `pnpm convex:local`.
+While iterating, run only what you touched:
+
+- `pnpm test:one tests/<name>.test.ts` runs one unit test file.
+- `pnpm test:convex tests/convex/<name>.test.ts` runs one Convex test file.
+- `pnpm typecheck` uses the native TypeScript checker and is incremental.
+
+Run `pnpm check` before reporting work as done. It runs the type check, both test
+suites and the production build in parallel and fails if any of them fails.
+Schema changes must also push cleanly with `pnpm convex:local`. CI runs the same
+checks on every pull request.
+
+## Parallel worktrees
+
+Run `pnpm agent:setup` once in every new git worktree before anything else. It
+copies `.env.local` from the main checkout, claims a free port block in
+`.env.worktree`, installs dependencies and pushes the schema to that worktree's
+own local Convex backend. `pnpm dev` then serves on the printed ports, so several
+worktrees can run side by side. Do not edit `.env.worktree` by hand.

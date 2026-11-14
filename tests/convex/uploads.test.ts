@@ -7,11 +7,13 @@ import { recordUploadHandler } from "../../server/handlers/record-upload";
 import { reconcileUploadWrite } from "../../shared/upload-receipt";
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true");
   vi.stubEnv("CONVEX_CLOUD_URL", "http://127.0.0.1:3212");
   vi.stubEnv("UPLOAD_CALLBACK_SECRET", "fake-callback-secret");
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true");
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 async function fixture() {
   const t = convexTest(schema, modules);
