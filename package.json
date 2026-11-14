@@ -13,6 +13,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "ticket": "tsx scripts/ticket.ts",
+    "convex:local": "node scripts/convex-local.mjs",
     "test": "pnpm run test:unit && pnpm run test:convex",
     "test:unit": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
     "test:convex": "vitest run --config vitest.convex.config.ts",
