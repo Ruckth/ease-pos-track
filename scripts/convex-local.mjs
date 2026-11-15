@@ -10,7 +10,7 @@ import { localDeploymentName } from "./dev-reset-target.mjs";
 
 const args = process.argv.slice(2);
 const ENV_FILE = ".env.convex-local";
-const LOCAL_DEPLOYMENT = `anonymous:${localDeploymentName() ?? "anonymous-track-ease-pos"}`;
+const LOCAL_DEPLOYMENT = `anonymous:${localDeploymentName() ?? "anonymous-agent"}`;
 const SAVED = ".env.local.shared-backup";
 
 if (args.length && !["dev", "run", "env", "import", "export", "data", "codegen", "--help"].includes(args[0])) {
@@ -23,13 +23,10 @@ if (args.some(arg => /^--(reset-development|prod|deployment|deployment-name|env-
     console.error("Refusing deployment override arguments."); process.exit(4);
   }
 }
-// A file holding only a local anonymous target follows this checkout's backend.
-if (!existsSync(ENV_FILE) || /^CONVEX_DEPLOYMENT=anonymous:anonymous-[\w-]+\n$/.test(readFileSync(ENV_FILE, "utf8"))) {
-  writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
-}
+if (!existsSync(ENV_FILE)) writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
 const settings = existsSync(ENV_FILE) ? parse(readFileSync(ENV_FILE)) : {};
 const target = settings.CONVEX_DEPLOYMENT;
-if (target !== LOCAL_DEPLOYMENT || Object.keys(settings).some(key => key !== "CONVEX_DEPLOYMENT" && key.startsWith("CONVEX_"))) {
+if (![LOCAL_DEPLOYMENT, "anonymous:anonymous-track-ease-pos"].includes(target) || Object.keys(settings).some(key => key !== "CONVEX_DEPLOYMENT" && key.startsWith("CONVEX_"))) {
   console.error(`Refusing to run: ${ENV_FILE} must target ${LOCAL_DEPLOYMENT}, found ${target ?? "nothing"}.`);
   process.exit(4);
 }
@@ -37,6 +34,10 @@ if (existsSync(SAVED)) {
   console.error(`Refusing to run: ${SAVED} exists from an interrupted run. Restore it to .env.local first.`);
   process.exit(4);
 }
+
+// Migrate the previous wrapper's fixed identity only after validating the
+// entire local settings file and refusing another active wrapper.
+if (target !== LOCAL_DEPLOYMENT) writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
 
 if (args.length === 0) args.push("dev", "--once", "--typecheck", "disable");
 // Pin the backend to this checkout's ports: if they are taken the CLI fails

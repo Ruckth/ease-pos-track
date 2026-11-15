@@ -74,7 +74,7 @@ export function PinPopover({
   const below = annotation.y <= 0.6;
   return (
     <div
-      className="annotation-glass-popover absolute z-20 w-52 max-w-[calc(100%_-_16px)] rounded-lg border border-white/60 p-2.5 text-sm text-popover-foreground shadow-lg"
+      className="annotation-glass-popover absolute z-20 w-52 max-w-[calc(100%_-_16px)] rounded-lg border border-white/60 p-2.5 text-sm shadow-lg"
       style={{
         left: `clamp(112px, ${annotation.x * 100}%, calc(100% - 112px))`,
         top: `${annotation.y * 100}%`,
@@ -160,7 +160,7 @@ export function PinPopover({
             </Button>
           </div>
         </div>
-      ) : <p className="mt-1.5 whitespace-pre-wrap break-words leading-5">{annotation.text}</p>}
+      ) : <p className="mt-1.5 whitespace-pre-wrap leading-5">{annotation.text}</p>}
       {error ? <p role="alert" className="mt-2 text-destructive">{error}</p> : null}
       {annotation.time !== undefined ? (
         <p className="mt-1 text-muted-foreground">{t("videoAt", { time: formatClock(annotation.time) })}</p>

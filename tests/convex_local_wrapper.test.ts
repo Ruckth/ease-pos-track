@@ -134,30 +134,39 @@ require("node:fs").writeFileSync("invoked", "yes");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("local wrapper follows this checkout's own anonymous backend and still refuses other targets", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ticket-wrapper-local-name-"));
+test("local wrapper uses the checkout's anonymous deployment identity after agent-mode setup", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-local-identity-"));
   try {
     const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
     mkdirSync(join(dir, "bin"));
     mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
-    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}
-require("node:fs").writeFileSync("invoked", "yes");
-`, { mode: 0o755 });
-    // Fresh checkouts get the agent-mode name; the wrapper's earlier default must follow it.
     writeFileSync(join(dir, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
     writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=anonymous:anonymous-track-ease-pos\n");
-    const env = { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` };
-    assert.equal(spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" }).status, 0);
-    assert.equal(readFileSync(join(dir, ".env.convex-local"), "utf8"), "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\n");
-    rmSync(join(dir, "invoked"));
-    writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=dev:shared-cloud\n");
-    assert.equal(spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" }).status, 4);
-    assert.equal(existsSync(join(dir, "invoked")), false);
-    // An invalid backend config must not fall back to another local identity.
-    rmSync(join(dir, ".env.convex-local"));
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}
+const fs = require("node:fs");
+const selected = fs.readFileSync(".env.convex-local", "utf8").trim();
+if (selected !== "CONVEX_DEPLOYMENT=anonymous:anonymous-agent") { console.error("wrong local identity"); process.exit(7); }
+console.log("[]");
+`, { mode: 0o755 });
+    const result = spawnSync(process.execPath, [wrapper, "run", "_system/cli/tables", "{}"], {
+      cwd: dir, encoding: "utf8", env: { ...process.env, PATH: join(dir, "bin") },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("local wrapper refuses malformed backend configuration before invoking the CLI", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-invalid-local-identity-"));
+  try {
+    const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}\nrequire("node:fs").writeFileSync("invoked", "yes");\n`, { mode: 0o755 });
     for (const config of ["malformed", JSON.stringify({ deploymentName: "dev:shared-cloud" })]) {
       writeFileSync(join(dir, ".convex/local/default/config.json"), config);
-      const refused = spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" });
+      const refused = spawnSync(process.execPath, [wrapper, "run", "probe:noop"], {
+        cwd: dir, env: { ...process.env, PATH: join(dir, "bin") }, encoding: "utf8",
+      });
       assert.notEqual(refused.status, 0);
       assert.match(refused.stderr, /LOCAL_DEPLOYMENT_REFUSED/);
       assert.equal(existsSync(join(dir, "invoked")), false);

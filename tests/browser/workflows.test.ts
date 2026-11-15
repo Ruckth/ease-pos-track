@@ -23,7 +23,7 @@ async function open(role: "staff" | "customer", language: Language = "en", confi
   let uploads = 0;
   await context.route(/\/api\/uploadthing|https:\/\/[^/]*(?:uploadthing|ufs\.sh)/, async route => { uploads++; await route.abort(); });
   const credentials = role === "staff"
-    ? await convex.mutation(api.auth.login, { password: "LocalStaff123!", clientId: crypto.randomUUID() })
+    ? await convex.action(api.auth.login, { password: "LocalStaff123!", clientId: crypto.randomUUID() })
     : await convex.action(api.customers.login, { email: "alice@local.test", password: "LocalCustomer123!", clientId: crypto.randomUUID() });
   // tsx preserves nested function names with this helper when Playwright
   // serializes an evaluate callback; it exists only in the isolated test page.
@@ -395,3 +395,67 @@ for (const language of ["en", "th"] as const) {
     } finally { await f.context.close(); }
   });
 }
+
+test("staff sign-in uses the committed rate-limit action through the real form", async () => {
+  const context = await browser.newContext();
+  try {
+    await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
+    const page = await context.newPage();
+    await page.goto(`${baseURL}/staff`);
+    await page.locator("#staff-password").fill("wrong-password");
+    await page.getByRole("button", { name: copy("en", "enter"), exact: true }).click();
+    await page.getByRole("alert").waitFor();
+    await page.locator("#staff-password").fill("LocalStaff123!");
+    await page.getByRole("button", { name: copy("en", "enter"), exact: true }).click();
+    await page.getByRole("button", { name: "New Ticket", exact: true }).waitFor();
+    assert.equal(await page.locator("#staff-password").count(), 0);
+  } finally { await context.close(); }
+});
+
+test("staff explorer keeps table and filters across indexed search, tag assignment and archive restore", async () => {
+  const f = await open("staff");
+  const name = `Explorer ${crypto.randomUUID()}`;
+  const created = await convex.mutation(api.tickets.createTextTicket, {
+    token: f.token, projectKey: "POS", title: name, description: "Integration fixture", requestId: crypto.randomUUID(),
+  });
+  const id = created.ticket._id;
+  const tagName = `Tag ${crypto.randomUUID().slice(0, 8)}`;
+  try {
+    await f.page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    const search = f.page.getByPlaceholder(copy("en", "search"), { exact: true });
+    await search.fill(name);
+    await f.page.getByRole("button", { name: "Table", exact: true }).click();
+    await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).click();
+    const dialog = f.page.getByRole("dialog").last();
+    await dialog.getByLabel(copy("en", "tagName"), { exact: true }).fill(tagName);
+    await dialog.getByRole("button", { name: copy("en", "createTag"), exact: true }).click();
+    const tag = dialog.getByRole("button", { name: `+ ${tagName}`, exact: true });
+    await tag.click();
+    await dialog.getByRole("button", { name: `✓ ${tagName}`, exact: true }).waitFor();
+    const assigned = await convex.query(api.tickets.getTicket, { token: f.token, id });
+    assert.deepEqual(assigned?.tags.map(t => t.name), [tagName]);
+    await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+    await f.page.getByRole("button", { name: "Add filter", exact: true }).click();
+    await f.page.getByRole("option", { name: "Tags", exact: true }).click();
+    await f.page.getByRole("option", { name: "is any of", exact: true }).click();
+    await f.page.getByRole("option", { name: tagName, exact: true }).click();
+    await f.page.keyboard.press("Escape");
+    await search.fill("unmatchedfixturetext");
+    await f.page.getByText("No Tickets match these filters.", { exact: true }).waitFor();
+    assert.equal(await f.page.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
+    await search.fill(name);
+    await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).waitFor();
+    await convex.mutation(api.tickets.archiveTicket, { token: f.token, id, expectedVersion: assigned!.version });
+    await f.page.getByRole("button", { name: copy("en", "archive"), exact: true }).click();
+    await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).click();
+    const archived = f.page.getByRole("dialog").last();
+    assert.equal(await archived.getByRole("button", { name: copy("en", "edit"), exact: true }).count(), 0);
+    await archived.getByRole("button", { name: "Restore", exact: true }).click();
+    await archived.waitFor({ state: "hidden" });
+    const restored = await convex.query(api.tickets.getTicket, { token: f.token, id });
+    assert.equal(restored?.lifecycle, "active");
+    assert.deepEqual(restored?.tagIds, assigned?.tagIds);
+    assert.deepEqual(f.errors, []);
+    assert.equal(f.uploads(), 0);
+  } finally { await f.context.close(); }
+});

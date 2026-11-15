@@ -5,9 +5,6 @@ terminal users. It calls the same Convex authentication and Ticket functions as
 the app; it does not add a chat interface, a second authorization scheme, or a
 second Ticket workflow.
 
-For a short, copy-and-paste introduction, see the
-[simple Ticket CLI manual](ticket-cli-manual.md).
-
 Start by installing dependencies and discovering the command contract:
 
 ```bash

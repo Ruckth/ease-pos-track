@@ -2,29 +2,36 @@ import { isTicketSearchWithinLimits } from "../../shared/ticket-contracts";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
+import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { ticketStatus } from "../schema";
 import { parseTicketReference } from "../../shared/ticket-numbers";
 import { queryOperation } from "./operation";
 import { requireUsableProject } from "./projects";
 
-export function ticketSummary(row: Doc<"tickets">) {
+type PublicTag = Pick<Doc<"ticketTags">, "_id" | "name" | "color">;
+export async function resolveTicketTags(ctx: QueryCtx | MutationCtx, row: Doc<"tickets">): Promise<PublicTag[]> {
+  const tags = await Promise.all((row.tagIds ?? []).map(id => ctx.db.get(id)));
+  return tags.flatMap(tag => tag ? [{ _id: tag._id, name: tag.name, color: tag.color }] : []);
+}
+
+export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
   if (row.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
   return {
     _id: row._id, projectId: row.projectId, projectKey: row.projectKey,
     ticketNumber: row.ticketNumber, version: row.version, title: row.title,
     excerpt: Array.from(row.description).slice(0, 200).join(""), status: row.status,
     urgencyScore: row.urgencyScore, lifecycle: row.lifecycle,
-    ...(row.tagIds === undefined ? {} : { tagIds: row.tagIds }),
+    tagIds: row.tagIds ?? [], tags,
     archivedAt: row.archivedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
     mediaCount: row.media.length,
     annotationCount: row.annotations.filter(a => a.deletedAt === undefined).length,
   };
 }
 
-export function ticketDetail(row: Doc<"tickets">) {
+export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[] = []) {
   if (row.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
   const { ownerCustomerId: _owner, purgeBlocked: _purge, searchText: _search, ...detail } = row;
-  return { ...detail, lifecycle: row.lifecycle };
+  return { ...detail, tagIds: row.tagIds ?? [], tags, lifecycle: row.lifecycle };
 }
 
 /** One bounded row query for lanes, customer lists and staff CLI pages.
@@ -59,7 +66,7 @@ export const pageTickets = {
   ...pageTicketRows,
   handler: async (...args: Parameters<typeof pageTicketRows.handler>) => {
     const result = await pageTicketRows.handler(...args);
-    return { ...result, page: result.page.map(ticketSummary) };
+    return { ...result, page: await Promise.all(result.page.map(async row => ticketSummary(row, await resolveTicketTags(args[0], row)))) };
   },
 };
 
@@ -68,7 +75,7 @@ export const pageTicketDetails = {
   ...pageTicketRows,
   handler: async (...args: Parameters<typeof pageTicketRows.handler>) => {
     const result = await pageTicketRows.handler(...args);
-    return { ...result, page: result.page.map(ticketDetail) };
+    return { ...result, page: await Promise.all(result.page.map(async row => ticketDetail(row, await resolveTicketTags(args[0], row)))) };
   },
 };
 
@@ -103,13 +110,13 @@ export const searchTickets = queryOperation({
       const visible = row && row.projectId === project._id && row.lifecycle === args.lifecycle
         && (args.status === undefined || row.status === args.status)
         && (ctx.actor.role === "staff" || row.ownerCustomerId === ctx.actor.customerId);
-      if (visible) return { matches: [ticketSummary(row)], hasMore: false };
+      if (visible) return { matches: [ticketSummary(row, await resolveTicketTags(ctx, row))], hasMore: false };
     }
     const rows = await ctx.db.query("tickets").withSearchIndex("search_text", q => {
       const scoped = q.search("searchText", search).eq("projectId", project._id).eq("lifecycle", args.lifecycle);
       const owned = ctx.actor.role === "customer" ? scoped.eq("ownerCustomerId", ctx.actor.customerId) : scoped;
       return args.status === undefined ? owned : owned.eq("status", args.status);
     }).take(51);
-    return { matches: rows.slice(0, 50).map(ticketSummary), hasMore: rows.length > 50 };
+    return { matches: await Promise.all(rows.slice(0, 50).map(async row => ticketSummary(row, await resolveTicketTags(ctx, row)))), hasMore: rows.length > 50 };
   },
 });

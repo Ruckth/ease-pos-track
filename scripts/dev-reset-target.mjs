@@ -12,7 +12,7 @@ export function localDeploymentName(directory = process.cwd()) {
     throw new Error("LOCAL_DEPLOYMENT_REFUSED");
   }
   const name = config?.deploymentName;
-  if (typeof name !== "string" || !/^anonymous-[\w-]+$/.test(name)) throw new Error("LOCAL_DEPLOYMENT_REFUSED");
+  if (typeof name !== "string" || !/^anonymous-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("LOCAL_DEPLOYMENT_REFUSED");
   return name;
 }
 

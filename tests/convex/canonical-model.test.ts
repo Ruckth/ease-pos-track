@@ -41,13 +41,13 @@ test("registered sign-in creates explicit roles from staff credentials or durabl
   vi.stubEnv("CUSTOMER_PASSWORD_PEPPER", "test-only-pepper");
   const t = convexTest(schema, modules);
   await t.action(internal.seed.run, {});
-  const staff = await t.mutation(api.auth.login, { password: "LocalStaff123!", clientId: "test-staff-client-id" });
+  const staff = await t.action(api.auth.login, { password: "LocalStaff123!", clientId: "test-staff-client-id" });
   const customer = await t.action(api.customers.login, { email: "alice@local.test", password: "LocalCustomer123!", clientId: "test-customer-client-id" });
   expect(await t.query(api.auth.currentSession, { token: staff.token })).toMatchObject({ role: "staff", customerId: null });
   const account = await t.query(api.auth.currentSession, { token: customer.token });
   expect(account).toMatchObject({ role: "customer", email: "alice@local.test" });
   expect(account?.customerId).toBeTruthy();
-  await expect(t.mutation(api.auth.login, { password: "wrong", clientId: "test-staff-client-id" })).rejects.toThrow("INCORRECT_PASSWORD");
+  await expect(t.action(api.auth.login, { password: "wrong", clientId: "test-staff-client-id" })).rejects.toThrow("INCORRECT_PASSWORD");
   await expect(t.action(api.customers.login, { email: "alice@local.test", password: "wrong", clientId: "test-customer-client-id" })).rejects.toThrow("INVALID_CREDENTIALS");
   await expect(t.action(api.customers.register, { email: "alice@local.test", password: "LocalCustomer123!", clientId: "test-customer-client-id" }))
     .rejects.toThrow("EMAIL_ALREADY_REGISTERED");

@@ -15,12 +15,12 @@ export function ArchivedTicketDialog({ item, onClose, onRestore }: {
   return <Dialog open onOpenChange={(open) => {if (!open && !busy) onClose();}} title={`${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}`}>
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{t("archivedOn", {date:formatDate(item.archivedAt ?? item.updatedAt)})}</p>
-      <TicketTagList ids={item.tagIds} />
+      <TicketTagList tags={item.tags ?? []} />
       <p className="whitespace-pre-wrap break-words text-sm">{item.description || t("noDescription")}</p>
       {item.media.map((media) => isVideoMedia(media)
         ? <video key={media.key} src={media.url} controls className="max-h-96 w-full rounded-md" aria-label={media.name} />
         : <img key={media.key} src={media.url} alt={media.name} className="max-h-96 w-full rounded-md object-contain" />)}
-      {item.annotations.filter(isActiveAnnotation).map((note) => <p key={note.id} className="whitespace-pre-wrap break-words text-sm"><span className="font-semibold">[{note.label}]</span> {note.text}</p>)}
+      {(item.annotations ?? []).filter(isActiveAnnotation).map((note) => <p key={note.id} className="whitespace-pre-wrap break-words text-sm"><span className="font-semibold">[{note.label}]</span> {note.text}</p>)}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <Button disabled={busy} onClick={async () => {setBusy(true);setError("");try {await onRestore();onClose();} catch (error) {setError(localizeError(error,t));} finally {setBusy(false);}}}>{busy ? <Loader2 className="animate-spin" /> : <ArchiveRestore />}{t("restore")}</Button>
     </div>

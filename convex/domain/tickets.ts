@@ -37,8 +37,8 @@ export function ticketState(doc: Doc<"tickets">) {
     version: doc.version,
     lifecycle: doc.lifecycle,
     mediaCount: doc.media.length,
-    annotationCount: doc.annotations.length,
     ...(doc.tagIds === undefined ? {} : { tagIds: doc.tagIds }),
+    annotationCount: doc.annotations.length,
     ...(doc.archivedAt === undefined ? {} : { archivedAt: doc.archivedAt }),
   };
 }
@@ -87,7 +87,7 @@ type TicketState = ReturnType<typeof ticketState>;
 
 /** Ticket fields that versioned state mutations may change. */
 type TicketChanges = Partial<
-  Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "tagIds" | "media" | "annotations" | "archivedAt" | "lifecycle">
+  Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "media" | "annotations" | "archivedAt" | "lifecycle" | "tagIds">
 >;
 
 type TicketChangeAction =

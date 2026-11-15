@@ -28,8 +28,8 @@ export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPag
         </TableHead>)}</TableRow></TableHeader>
         <TableBody>{result.rows.map((item) => <TableRow key={item._id}>
           <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber, item.projectKey)}</TableCell>
-          <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.lifecycle === "archived" && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
-          <TableCell><div className="min-w-24"><TicketTagList ids={item.tagIds} /></div></TableCell>
+          <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
+          <TableCell><div className="min-w-24"><TicketTagList tags={item.tags ?? []} /></div></TableCell>
           <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge></TableCell>
           <TableCell className="tabular-nums">{item.urgencyScore === undefined ? <span className="text-muted-foreground">{c.unset}</span> : `${item.urgencyScore} / 100`}</TableCell>
           <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.createdAt)}</TableCell>

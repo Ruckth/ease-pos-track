@@ -4,6 +4,10 @@ import * as operations from "./domain/operations";
 import * as reads from "./domain/reads";
 import * as tags from "./domain/tags";
 
+export const listTicketTags = staffQuery({ name: "tickets:listTicketTags", ...tags.listTicketTags });
+export const createTicketTag = staffMutation({ name: "tickets:createTicketTag", ...tags.createTicketTag });
+export const setTicketTags = staffMutation({ name: "tickets:setTicketTags", ...tags.setTicketTags });
+
 export const pageTickets = actorQuery({ name: "tickets:pageTickets", ...reads.pageTickets });
 export const pageTicketDetails = staffQuery({ name: "tickets:pageTicketDetails", ...reads.pageTicketDetails });
 export const searchTickets = actorQuery({ name: "tickets:searchTickets", ...reads.searchTickets });
@@ -22,6 +26,3 @@ export const undoTicketEdit = actorMutation({ name: "tickets:undoTicketEdit", ..
 export const editTicket = actorMutation({ name: "tickets:editTicket", ...operations.editTicket });
 export const archiveTicket = actorMutation({ name: "tickets:archiveTicket", ...operations.archiveTicket });
 export const restoreTicket = staffMutation({ name: "tickets:restoreTicket", ...operations.restoreTicket });
-export const listTicketTags = staffQuery({ name: "tickets:listTicketTags", ...tags.listTicketTags });
-export const createTicketTag = staffMutation({ name: "tickets:createTicketTag", ...tags.createTicketTag });
-export const setTicketTags = staffMutation({ name: "tickets:setTicketTags", ...tags.setTicketTags });

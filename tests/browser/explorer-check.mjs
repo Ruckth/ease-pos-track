@@ -12,7 +12,7 @@ async function add(field, operator) {
   await page.getByRole("option", { name: operator, exact: true }).click();
 }
 try {
-  await page.goto("http://127.0.0.1:5193/tests/browser/explorer.html");
+  await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html`);
   await button("Language").click(); await button("Table").click(); await countRows(10);
   await button("Next page").click(); await summary("Page 2 of 6 · 54 Tickets");
   await page.getByRole("combobox",{name:"Rows per page"}).selectOption("25"); await countRows(25); await summary("Page 1 of 3 · 54 Tickets");

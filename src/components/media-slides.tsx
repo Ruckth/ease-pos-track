@@ -73,7 +73,7 @@ export function ImageSlide({
             <PinMarker
               key={annotation.id}
               annotation={annotation}
-              highlighted={focus?.id === annotation.id || openId === annotation.id}
+              highlighted={focus?.id === annotation.id}
               onClick={() => onOpenChange(openId === annotation.id ? null : annotation.id)}
             />
           ),
@@ -189,7 +189,7 @@ export function VideoSlide({
             <PinMarker
               key={annotation.id}
               annotation={annotation}
-              highlighted={focus?.id === annotation.id || openId === annotation.id}
+              highlighted={focus?.id === annotation.id}
               onClick={() => onOpenChange(openId === annotation.id ? null : annotation.id)}
             />
           ),

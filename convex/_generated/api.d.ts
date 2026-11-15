@@ -35,6 +35,7 @@ import type * as projects from "../projects.js";
 import type * as retention from "../retention.js";
 import type * as seed from "../seed.js";
 import type * as session_auth from "../session_auth.js";
+import type * as tag_rules from "../tag_rules.js";
 import type * as ticket_requests from "../ticket_requests.js";
 import type * as tickets from "../tickets.js";
 import type * as uploads from "../uploads.js";
@@ -73,6 +74,7 @@ declare const fullApi: ApiFromModules<{
   retention: typeof retention;
   seed: typeof seed;
   session_auth: typeof session_auth;
+  tag_rules: typeof tag_rules;
   ticket_requests: typeof ticket_requests;
   tickets: typeof tickets;
   uploads: typeof uploads;

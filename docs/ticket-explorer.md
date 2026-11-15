@@ -1,6 +1,6 @@
 # Ticket explorer
 
-Staff can switch between Board and Table without losing search or filters. Both consume the same filtered set of loaded Tickets. Each filter is ANDed with search and other filters; within one tags/status filter, any selected value matches. Separate tag filters can express “has A AND has B”. Chip menus support removal, duplication and negation. Clear all clears search and filters.
+Staff can switch between Board and Table without losing search or filters. Both consume the same filtered set. Each filter is ANDed with search and other filters; within one tags/status filter, any selected value matches. Separate tag filters can express “has A AND has B”. Chip menus support removal, duplication and negation. Clear all clears search and filters.
 
 Created/updated ranges include both entire dates in the browser's local timezone, using next-day calendar arithmetic (including daylight-saving changes). Incomplete editor drafts do not filter. Urgency is read-only: existing 1–100 scores can be filtered inclusively; Unset matches absent scores and sorts last in either direction. This change does not calculate or edit urgency.
 
@@ -8,9 +8,9 @@ Table columns sort before pagination, with deterministic ID tie-breaking. Rows p
 
 ## Scale and authorization
 
-The explorer works on the Tickets the staff workspace has already loaded: the paginated board lanes (or the top server search matches while searching), plus loaded archives when they are shown. Search itself stays on the server (`searchTickets`). Filters, sorting and table pagination run on those loaded summaries only, and the copy says so; loading more in a column brings older Tickets into scope. Nothing downloads the whole Ticket set.
+The explorer consumes Project-scoped, bounded `api.tickets.pageTickets` summaries. Filters, sorting and table totals apply to loaded Tickets; the UI states this scope and offers controls to load older Tickets. Board lanes retain their independent server pages and totals. Tag labels are joined on bounded reads, and tag management APIs require staff access.
 
-On the board, filters only hide Tickets when drawing. Drag moves still reconcile against every loaded row, so a Ticket filtered out mid-move cannot strand a pending move. Tag names come from the staff-only `listTicketTags`; no customer query or authorization changed.
+Text search runs on the indexed server query before summaries reach the browser, so full descriptions remain searchable even when the displayed excerpt is truncated. Search returns at most 50 matches per lifecycle and indicates when more exist. Project access and customer ownership are enforced by domain operations.
 
 ## Registry provenance
 
@@ -22,11 +22,9 @@ The CLI's generated filter source expects Base UI while new-york dependencies re
 
 ## Verification
 
-`pnpm test` covers combined filters/search, inclusive dates, negation, sorting, pagination/clamping, and unset urgency. `pnpm run typecheck` and `pnpm run build` cover integration. The browser fixture uses only local sample Tickets and makes no backend writes:
+`pnpm test` covers combined filters/search, inclusive dates, negation, sorting, pagination/clamping, and unset urgency. `pnpm typecheck` and `pnpm run build` cover integration. The browser fixture uses only local sample Tickets and makes no backend writes (its optional base URL is `BROWSER_BASE_URL`):
 
 1. `pnpm exec vite --host 127.0.0.1 --port 5193`
 2. `pnpm exec node tests/browser/explorer-check.mjs`
-
-The live staff board itself is covered by `pnpm test:browser`.
 
 The browser checks table/board switching, tags and status filters, dates and urgency, page sizes, live shrinking, sorting, archives, details callback, Thai, keyboard controls, and mobile overflow.

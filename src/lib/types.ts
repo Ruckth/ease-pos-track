@@ -1,11 +1,11 @@
 import type { Doc, Id } from "@convex/_generated/dataModel";
 import type { TicketDetail } from "../../shared/ticket-contracts";
 
+export type TicketTag = Pick<Doc<"ticketTags">, "_id" | "name" | "color">;
 export type Ticket = TicketDetail;
 export type TicketStatus = Ticket["status"];
 export type MediaItem = Ticket["media"][number];
 export type Annotation = NonNullable<Ticket["annotations"]>[number];
-export type TicketTag = Pick<Doc<"ticketTags">, "_id" | "name" | "color">;
 export type AnnotationEvent = Omit<Doc<"annotationEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
 export type TicketEvent = Omit<Doc<"ticketEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
 

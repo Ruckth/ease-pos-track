@@ -1,9 +1,8 @@
 import type { FilterNode, FilterQuery, FilterRule } from "@/components/reui/filters/filters-types";
-import type { TicketSummary } from "../../shared/ticket-contracts";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import type { TicketTag } from "./types";
 
-/** The explorer filters loaded summaries; text search stays on the server. */
-export type ExplorerTicket = TicketSummary;
+export type ExplorerTicket = import("../../shared/ticket-contracts").TicketSummary & { description?: string };
 export type ExplorerTag = TicketTag;
 export type SortField = "ticketNumber" | "title" | "tags" | "status" | "createdAt" | "updatedAt" | "urgencyScore";
 export type ExplorerSort = { field: SortField; direction: "asc" | "desc" };
@@ -44,13 +43,9 @@ function matches(item: ExplorerTicket, node: FilterNode): boolean {
   return node.combinator === "and" ? node.rules.every((rule) => matches(item, rule)) : node.rules.some((rule) => matches(item, rule));
 }
 
-/** Whether a Ticket satisfies every filter; an empty query matches everything. */
-export function matchesFilters(item: ExplorerTicket, query: FilterQuery): boolean {
-  return matches(item, query);
-}
-
-export function filterTickets<T extends ExplorerTicket>(items: T[], query: FilterQuery): T[] {
-  return items.filter((item) => matches(item, query));
+export function filterTickets<T extends ExplorerTicket>(items: T[], search: string, query: FilterQuery): T[] {
+  const text = search.trim().toLocaleLowerCase();
+  return items.filter((item) => (!text || `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description ?? item.excerpt ?? ""}`.toLocaleLowerCase().includes(text)) && matches(item, query));
 }
 
 export function sortTickets<T extends ExplorerTicket>(items: T[], sort: ExplorerSort, tags: ExplorerTag[], language: string): T[] {

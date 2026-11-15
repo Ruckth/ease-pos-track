@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeTagIds, normalizeTagName } from "../shared/tag-rules";
+import { normalizeTagIds, normalizeTagName } from "../convex/tag_rules";
 
 test("tag names normalize Unicode, spacing and case while retaining Thai", () => {
   assert.deepEqual(normalizeTagName("  ＰＯＳ   Support "), { name: "POS Support", normalizedName: "pos support" });

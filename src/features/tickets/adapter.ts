@@ -1,7 +1,6 @@
 import { useStaffLanes } from "./lane-adapter";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import type { TicketTag } from "@/lib/types";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { isTicketSearchWithinLimits } from "../../../shared/ticket-contracts";
 
@@ -21,21 +20,6 @@ export function useTicketAdapter() {
     undoAnnotation: useMutation(api.annotations.undoAnnotationUpdate),
     removeAnnotation: useMutation(api.annotations.removeAnnotation),
     restoreAnnotation: useMutation(api.annotations.restoreAnnotation),
-  };
-}
-
-/** Staff tag catalogue (one bounded read) and tag writes. */
-export function useTicketTagCatalogue(token: string) {
-  return useQuery(api.tickets.listTicketTags, { token });
-}
-
-export function useTagAdapter(token: string) {
-  const create = useMutation(api.tickets.createTicketTag);
-  const assign = useMutation(api.tickets.setTicketTags);
-  return {
-    create: (name: string, color: TicketTag["color"]) => create({ token, name, color }),
-    assign: (item: { _id: Id<"tickets">; version: number }, tagIds: TicketTag["_id"][]) =>
-      assign({ token, id: item._id, expectedVersion: item.version, tagIds }),
   };
 }
 
@@ -76,4 +60,12 @@ export function useStaffTickets(token: string, projectId: Id<"projects"> | undef
     token, projectId, lifecycle: "archived", search: query,
   } : "skip");
   return { ...lanes, invalidSearch, totals, matches, archive, archiveMatches, archivedItems: query ? archiveMatches?.matches ?? [] : archive.results };
+}
+
+export function useTicketTags(token: string) {
+  return useQuery(api.tickets.listTicketTags, { token });
+}
+
+export function useTagAdapter() {
+  return { create: useMutation(api.tickets.createTicketTag), assign: useMutation(api.tickets.setTicketTags) };
 }

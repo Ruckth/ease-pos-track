@@ -64,8 +64,8 @@ const annotationEventAction = v.union(
 );
 
 const ticketEventAction = v.union(
-  v.literal("created"),
   v.literal("tags_changed"),
+  v.literal("created"),
   v.literal("media_attached"),
   v.literal("edited"),
   v.literal("edit_undone"),
@@ -87,9 +87,9 @@ const ticketStateValidator = v.object({
   version: v.number(),
   mediaCount: v.number(),
   annotationCount: v.number(),
-  tagIds: v.optional(v.array(v.id("ticketTags"))),
   lifecycle: ticketLifecycle,
   archivedAt: v.optional(v.number()),
+  tagIds: v.optional(v.array(v.id("ticketTags"))),
 });
 
 const ticketCreatedVia = v.literal("codex");
@@ -103,6 +103,10 @@ const uploadIntentStatus = v.union(
 );
 
 export default defineSchema({
+  ticketTags: defineTable({
+    name: v.string(), normalizedName: v.string(), color: tagColor,
+    createdBy: v.id("sessions"), createdAt: v.number(),
+  }).index("by_normalized_name", ["normalizedName"]),
   projects: defineTable({
     name: v.string(),
     // Immutable once created: it prefixes every Ticket reference in the Project.
@@ -127,9 +131,8 @@ export default defineSchema({
     searchText: v.string(),
     status: ticketStatus,
     urgencyScore: v.optional(v.number()),
-    ticketNumber: v.number(),
-    // Sorted, deduplicated staff tags; absent means none.
     tagIds: v.optional(v.array(v.id("ticketTags"))),
+    ticketNumber: v.number(),
     media: v.array(mediaItemValidator),
     annotations: v.array(annotationValidator),
     version: v.number(),
@@ -148,14 +151,6 @@ export default defineSchema({
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
     .index("by_project_lifecycle", ["projectId", "lifecycle", "ticketNumber"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["projectId", "ownerCustomerId", "lifecycle", "status"] }),
-  // Reusable staff tags. Names are unique case-insensitively and immutable.
-  ticketTags: defineTable({
-    name: v.string(),
-    normalizedName: v.string(),
-    color: tagColor,
-    createdBy: v.id("sessions"),
-    createdAt: v.number(),
-  }).index("by_normalized_name", ["normalizedName"]),
   customers: defineTable({
     email: v.string(),
     passwordAlgorithm: v.string(),

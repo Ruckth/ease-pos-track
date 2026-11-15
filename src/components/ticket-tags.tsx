@@ -1,4 +1,3 @@
-import { createContext, useContext } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { TicketTag } from "@/lib/types";
 
@@ -11,19 +10,7 @@ export const tagTones: Record<TicketTag["color"], string> = {
   violet: "bg-violet-100 text-violet-900 border-violet-300",
 };
 
-/** Staff tag catalogue; undefined while loading or outside the staff workspace. */
-const TicketTagsContext = createContext<TicketTag[] | undefined>(undefined);
-export const TicketTagsProvider = TicketTagsContext.Provider;
-export const useTicketTags = () => useContext(TicketTagsContext);
-
-/** Tags in catalogue order, resolved from the ids stored on a Ticket. */
-export function resolveTags(ids: readonly string[] | undefined, catalogue: TicketTag[] | undefined) {
-  const selected = new Set(ids ?? []);
-  return (catalogue ?? []).filter((tag) => selected.has(tag._id));
-}
-
-export function TicketTagList({ ids }: { ids?: readonly string[] }) {
-  const tags = resolveTags(ids, useTicketTags());
+export function TicketTagList({ tags }: { tags: TicketTag[] }) {
   if (!tags.length) return null;
   return <div className="flex flex-wrap gap-1.5">{tags.map((tag) => (
     <Badge key={tag._id} variant="outline" className={`${tagTones[tag.color]} max-w-full whitespace-normal break-words [overflow-wrap:anywhere]`}>
