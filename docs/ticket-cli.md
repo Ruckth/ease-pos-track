@@ -5,9 +5,6 @@ terminal users. It calls the same Convex authentication and Ticket functions as
 the app; it does not add a chat interface, a second authorization scheme, or a
 second Ticket workflow.
 
-For a short, copy-and-paste introduction, see the
-[simple Ticket CLI manual](ticket-cli-manual.md).
-
 Start by installing dependencies and discovering the command contract:
 
 ```bash
@@ -292,7 +289,7 @@ use `--target local`. Reset execution also requires `--expect <reviewed inspect 
 remove the target's `UPLOADTHING_TOKEN` and set cleanup to exactly `false` first,
 using the reset tool's env commands. This does not change the Ticket CLI's flags or JSON contract.
 
-The implementation target is `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
+The implementation target is the anonymous deployment recorded in this checkout’s `.convex/local/default/config.json` (normally `anonymous:anonymous-agent`). The main checkout uses `http://127.0.0.1:3212`; agent worktrees use their assigned port block.
 The wrapper preserves `.env.local`, which still selects shared development for
 ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
 by these fixtures. Do not run bare Convex commands or edit either environment

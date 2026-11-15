@@ -133,3 +133,24 @@ require("node:fs").writeFileSync("invoked", "yes");
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("local wrapper uses the checkout's anonymous deployment identity after agent-mode setup", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-local-identity-"));
+  try {
+    const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
+    writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=anonymous:anonymous-track-ease-pos\n");
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}
+const fs = require("node:fs");
+const selected = fs.readFileSync(".env.convex-local", "utf8").trim();
+if (selected !== "CONVEX_DEPLOYMENT=anonymous:anonymous-agent") { console.error("wrong local identity"); process.exit(7); }
+console.log("[]");
+`, { mode: 0o755 });
+    const result = spawnSync(process.execPath, [wrapper, "run", "_system/cli/tables", "{}"], {
+      cwd: dir, encoding: "utf8", env: { ...process.env, PATH: join(dir, "bin") },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

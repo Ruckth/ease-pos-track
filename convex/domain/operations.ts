@@ -1,6 +1,6 @@
 import { patchMediaJob } from "./media_jobs";
 import { queryOperation, mutationOperation } from "./operation";
-import { ticketDetail } from "./reads";
+import { ticketDetail, resolveTicketTags } from "./reads";
 import { v } from "convex/values";
 import { annotationCreateInputValidator, ticketStatus, mediaItemValidator } from "../schema";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
@@ -93,7 +93,7 @@ export const getTicket = queryOperation({
   handler: async (ctx, args) => {
     const { actor } = ctx;
     const row = await readableTicket(ctx, actor, args.id);
-    return row ? ticketDetail(row) : null;
+    return row ? ticketDetail(row, await resolveTicketTags(ctx, row)) : null;
   },
 });
 
@@ -112,7 +112,7 @@ export const getTicketByTicketNumber = queryOperation({
       .withIndex("by_project_ticket", (q) => q.eq("projectKey", projectKey).eq("ticketNumber", args.ticketNumber))
       .unique();
     if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")) return null;
-    return ticketDetail(doc);
+    return ticketDetail(doc, await resolveTicketTags(ctx, doc));
   },
 });
 
@@ -226,7 +226,7 @@ export const createTextTicket = mutationOperation({
       ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, projectId: selected._id })),
     };
     const replay = await replayTicketRequest(ctx, request);
-    if (replay) return { ticket: ticketDetail(replay.ticket), created: false, requestId };
+    if (replay) return { ticket: ticketDetail(replay.ticket, await resolveTicketTags(ctx, replay.ticket)), created: false, requestId };
 
     const created = await createTicketRecord(ctx, {
       project,

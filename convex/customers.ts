@@ -119,8 +119,9 @@ export const startRegistration = internalJobMutation({
     // unthrottled probe for which emails already have accounts.
     if (existing) {
       await recordFailure(ctx, attemptKeys);
-      throw new Error("EMAIL_ALREADY_REGISTERED");
+      return { error: "EMAIL_ALREADY_REGISTERED" as const };
     }
+    return { error: null };
   },
 });
 export const finishRegistration = internalJobMutation({
@@ -139,7 +140,10 @@ export const finishRegistration = internalJobMutation({
       .query("customers")
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .unique();
-    if (existing) throw new Error("EMAIL_ALREADY_REGISTERED");
+    if (existing) {
+      await recordFailure(ctx, customerRegistrationAttemptKeys(args.clientId));
+      return { error: "EMAIL_ALREADY_REGISTERED" as const };
+    }
 
     const customerId = await ctx.db.insert("customers", {
       email: args.email,
@@ -211,13 +215,16 @@ export const register = publicAuthAction("customer-register")({
     assertPasswordIsNotEmail(email, password);
     const clientId = validateClientId(args.clientId);
 
-    await ctx.runMutation(internal.customers.startRegistration, { email, clientId });
+    const started = await ctx.runMutation(internal.customers.startRegistration, { email, clientId });
+    if (started.error) throw new Error(started.error);
     const record = await createPasswordRecord(password, pepper);
-    return await ctx.runMutation(internal.customers.finishRegistration, {
+    const finished = await ctx.runMutation(internal.customers.finishRegistration, {
       email,
       clientId,
       ...record,
     });
+    if ("error" in finished) throw new Error(finished.error);
+    return finished;
   },
 });
 

@@ -739,6 +739,7 @@ test("queued CLI recording is a structured definitive rejection", async () => {
 test("every CLI transport call satisfies the real registered argument validators", async () => {
   const originalQuery = ConvexHttpClient.prototype.query;
   const originalMutation = ConvexHttpClient.prototype.mutation;
+  const originalAction = ConvexHttpClient.prototype.action;
   const handlers: Record<string, Record<string, object>> = { auth: authHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
   const called = new Set<string>();
   const invoke = (reference: Parameters<typeof getFunctionName>[0], args: unknown) => {
@@ -755,6 +756,7 @@ test("every CLI transport call satisfies the real registered argument validators
   };
   ConvexHttpClient.prototype.query = async (reference, ...args) => invoke(reference, args[0]) as never;
   ConvexHttpClient.prototype.mutation = async (reference, ...args) => invoke(reference, args[0]) as never;
+  ConvexHttpClient.prototype.action = async (reference, ...args) => invoke(reference, args[0]) as never;
   try {
     const remote = new ConvexTicketRemote();
     const url = "https://fixture.convex.cloud";
@@ -779,6 +781,7 @@ test("every CLI transport call satisfies the real registered argument validators
   } finally {
     ConvexHttpClient.prototype.query = originalQuery;
     ConvexHttpClient.prototype.mutation = originalMutation;
+    ConvexHttpClient.prototype.action = originalAction;
   }
 });
 

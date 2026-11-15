@@ -5,7 +5,7 @@ import type { Id } from "@convex/_generated/dataModel";
 export function useSession(token: string) {
   return { logout: useMutation(api.auth.logout), session: useQuery(api.auth.currentSession, { token: token || undefined }) };
 }
-export function useStaffLogin() { return useMutation(api.auth.login); }
+export function useStaffLogin() { return useAction(api.auth.login); }
 export function useCustomerAuth() { return { register: useAction(api.customers.register), login: useAction(api.customers.login) }; }
 export function useProjects(token: string) { return useQuery(api.projects.listProjects, { token }); }
 export function useCreateProject() { return useMutation(api.projects.createProject); }

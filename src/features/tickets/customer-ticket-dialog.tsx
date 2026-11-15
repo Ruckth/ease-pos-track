@@ -41,7 +41,7 @@ export function CustomerTicketDialog({
   return (
     <Dialog open={Boolean(ticketId)} onOpenChange={open => !open && onClose()}
       title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("ticket")}>
-      {item ? <CustomerTicketContent key={item._id} ticket={item} token={token} onClose={onClose} /> : null}
+      {item ? <CustomerTicketContent key={item._id} ticket={item} token={token} onClose={onClose} /> : ticketId ? detail === undefined ? <Loader2 className="mx-auto size-6 animate-spin" /> : <p role="alert" className="text-sm text-muted-foreground">{t("ticketMissing")}</p> : null}
     </Dialog>
   );
 }

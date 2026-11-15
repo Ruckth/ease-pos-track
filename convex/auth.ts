@@ -1,6 +1,7 @@
-import { internalJobMutation, publicAuthMutation, publicAuthQuery } from "./functions";
+import { internalJobMutation, publicAuthAction, publicAuthMutation, publicAuthQuery } from "./functions";
 import { v } from "convex/values";
 import { actorFromSession } from "./authz";
+import { internal } from "./_generated/api";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
@@ -21,8 +22,20 @@ function makeToken() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export const login = publicAuthMutation("staff-login")({
+export const login = publicAuthAction("staff-login")({
   name: "auth:login",
+  args: { password: v.string(), clientId: v.string() },
+  handler: async (ctx, args): Promise<{ token: string; expiresAt: number }> => {
+    const result = await ctx.runMutation(internal.auth.attemptLogin, args);
+    if ("error" in result) throw new Error(result.error);
+    return result;
+  },
+});
+
+/** Expected failures return data so their attempt counters commit before the
+ * public action turns the rejection into the stable authentication error. */
+export const attemptLogin = internalJobMutation({
+  name: "auth:attemptLogin",
   args: {
     password: v.string(),
     clientId: v.string(),
@@ -45,7 +58,7 @@ export const login = publicAuthMutation("staff-login")({
 
     const lockedUntil = Math.max(existingAttempt?.lockedUntil ?? 0, globalAttempt?.lockedUntil ?? 0);
     if (lockedUntil > now) {
-      throw new Error("AUTH_RATE_LIMITED");
+      return { error: "AUTH_RATE_LIMITED" as const };
     }
 
     if (args.password !== getAppPassword()) {
@@ -74,7 +87,7 @@ export const login = publicAuthMutation("staff-login")({
       };
       if (globalAttempt) await ctx.db.replace(globalAttempt._id, globalValue);
       else await ctx.db.insert("loginAttempts", globalValue);
-      throw new Error("INCORRECT_PASSWORD");
+      return { error: "INCORRECT_PASSWORD" as const };
     }
 
     if (existingAttempt) await ctx.db.delete(existingAttempt._id);

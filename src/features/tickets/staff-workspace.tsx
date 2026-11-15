@@ -1,18 +1,17 @@
 import { StaffHealth } from "@/features/operations/staff-health";
 import { LanguageSelector } from "@/components/auth-screens";
 import { NewProjectDialog, NoProjects, StaffProjectControls, useCurrentProject } from "@/components/project-controls";
-import { StaffBoard } from "@/components/staff-board";
-import { TicketCard } from "@/components/ticket-card";
+import { TicketExplorer } from "@/components/ticket-explorer";
+import { ArchivedTicketDialog } from "@/components/archived-ticket-dialog";
+import { useTicketTags } from "./adapter";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { type Ticket, type TicketStatus } from "@/lib/types";
 import type { Id } from "@convex/_generated/dataModel";
 import {
   Archive,
-  ArchiveRestore,
   ImagePlus,
   Loader2,
   LogOut,
@@ -29,7 +28,7 @@ import { SubmitTicket } from "./staff-composer";
 import { StaffTicketDialog } from "./staff-ticket-dialog";
 
 export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: () => Promise<void> }) {
-  const { language, setLanguage, t, formatDate } = useI18n();
+  const { language, setLanguage, t } = useI18n();
   const [healthOpen, setHealthOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -40,10 +39,11 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
   const query = search.trim();
   const { lanes, items: activeItems, loading, invalidSearch, totals, matches, archive, archiveMatches, archivedItems } = useStaffTickets(token, project?._id, showArchived, query);
   const operations = useTicketOperations(token);
+  const tags = useTicketTags(token);
   const [selection, setSelection] = useState<{ id: Id<"tickets">; projectId: Id<"projects"> } | null>(null);
   const selectedId = selection?.projectId === project?._id ? selection?.id ?? null : null;
   const setSelectedId = (id: Id<"tickets"> | null) => setSelection(id && project ? { id, projectId: project._id } : null);
-  const selected = useSelectedTicket(token, selectedId) ?? null;
+  const selected = useSelectedTicket(token, selectedId);
 
   /** Return the committed version; null removes a rejected operation overlay. */
   async function moveItem(current: TicketSummary | Ticket, status: TicketStatus) {
@@ -118,39 +118,19 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
             <NoProjects action={<Button type="button" onClick={() => setNewProjectOpen(true)}>{t("newProject")}</Button>} />
           ) : invalidSearch ? (
             <p role="alert" className="text-sm text-destructive">{t("searchLimit")}</p>
-          ) : (query ? matches === undefined : loading) ? (
+          ) : project === undefined ? (
             <div className="grid min-h-72 place-items-center rounded-lg border bg-card">
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            query ? <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">{t("searchHint")}</p>
-              <p className="text-sm">{t(matches?.hasMore ? "searchLoaded" : "searchMatches", { count: matches?.matches.length ?? 0 })}</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{matches?.matches.map(item => <TicketCard key={item._id} item={item} onSelect={setSelectedId} />)}</div>
-            </div> : <StaffBoard key={project?._id} projectId={project!._id} token={token} items={activeItems} totals={totals ?? {}} pages={lanes} onSelect={setSelectedId} onMoveCard={moveItem} />
+            <TicketExplorer key={project?._id} projectId={project!._id} token={token}
+              items={query ? matches?.matches ?? [] : activeItems} archivedItems={archivedItems}
+              tags={tags ?? []} search={query} onSearch={setSearch} showArchived={showArchived}
+              totals={totals ?? {}} pages={lanes} archive={archive}
+              loading={query ? matches === undefined : loading} searchHasMore={matches?.hasMore} archiveSearchHasMore={archiveMatches?.hasMore}
+              onSelect={setSelectedId} onMove={moveItem}
+              onRestore={id => { void restoreItem(id).catch(error => toast.error(localizeError(error, t))); }} />
           )}
-          {showArchived && archivedItems.length > 0 ? (
-            <section className="mt-5 rounded-lg border bg-card p-4">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedTicket")}</h2>
-              <div className="space-y-2">
-                {archivedItems.map((item) => (
-                  <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{item.title}</span>
-                      <span className="text-sm leading-5 text-muted-foreground">
-                        <span className="font-mono">{formatTicketNumber(item.ticketNumber, item.projectKey)}</span>
-                        {" · "}{t("archivedOn", { date: formatDate(item.archivedAt ?? item.updatedAt) })}
-                      </span>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(localizeError(error, t)))}>
-                      <ArchiveRestore /> {t("restore")}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              {query ? archiveMatches?.hasMore ? <p className="text-sm text-muted-foreground">{t("searchLoaded", { count: archivedItems.length })}</p> : null : archive.status !== "Exhausted" ? <Button disabled={archive.status !== "CanLoadMore"} onClick={() => archive.loadMore(20)}>{t("loadOlder")}</Button> : null}
-            </section>
-          ) : null}
         </section>
       </div>
 
@@ -177,13 +157,14 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
 
       <NewProjectDialog token={token} open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={selectProject} />
 
-      <StaffTicketDialog
+      {selected?.lifecycle === "archived" ? <ArchivedTicketDialog item={selected} onClose={() => setSelectedId(null)} onRestore={async () => { await operations.restore(selected); }} /> : <StaffTicketDialog
         ticket={selected}
+        ticketId={selectedId}
         token={token}
         onClose={() => setSelectedId(null)}
         onMove={(_id, status) => { if (selected) void moveItem(selected, status); }}
         onArchive={archiveItem}
-      />
+      />}
     </main>
   );
 }

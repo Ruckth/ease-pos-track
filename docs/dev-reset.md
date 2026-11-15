@@ -45,7 +45,7 @@ For a populated backend (replace `<inspect-directory>` with the inspect output d
 
 ```bash
 pnpm dev:reset inspect --target local
-pnpm dev:reset execute --target local --confirm anonymous:anonymous-track-ease-pos --expect .reset/<inspect-directory>/manifest.json
+pnpm dev:reset execute --target local --confirm <exact-target-from-inspect> --expect .reset/<inspect-directory>/manifest.json
 ```
 
 For an empty backend, create an empty ZIP locally and clear only local rows, then inspect and execute:
@@ -54,7 +54,7 @@ For an empty backend, create an empty ZIP locally and clear only local rows, the
 pnpm exec tsx -e 'import AdmZip from "adm-zip"; import {mkdirSync} from "node:fs"; mkdirSync(".reset", {recursive:true,mode:0o700}); new AdmZip().writeZip(".reset/empty-rehearsal.zip")'
 pnpm convex:local import --replace-all --yes .reset/empty-rehearsal.zip
 pnpm dev:reset inspect --target local
-pnpm dev:reset execute --target local --confirm anonymous:anonymous-track-ease-pos --expect .reset/<inspect-directory>/manifest.json
+pnpm dev:reset execute --target local --confirm <exact-target-from-inspect> --expect .reset/<inspect-directory>/manifest.json
 ```
 
 Then run the existing local smokes. These deliberately replace random cutover credentials with fixed **local-only** test credentials; never apply them to development. Provider tokens remain empty and cleanup stays disabled.

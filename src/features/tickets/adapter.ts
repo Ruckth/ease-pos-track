@@ -61,3 +61,11 @@ export function useStaffTickets(token: string, projectId: Id<"projects"> | undef
   } : "skip");
   return { ...lanes, invalidSearch, totals, matches, archive, archiveMatches, archivedItems: query ? archiveMatches?.matches ?? [] : archive.results };
 }
+
+export function useTicketTags(token: string) {
+  return useQuery(api.tickets.listTicketTags, { token });
+}
+
+export function useTagAdapter() {
+  return { create: useMutation(api.tickets.createTicketTag), assign: useMutation(api.tickets.setTicketTags) };
+}

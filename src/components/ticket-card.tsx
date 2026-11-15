@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { ChevronRight, Gauge, Images, MapPin } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
+import { TicketTagList } from "@/components/ticket-tags";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { statusMeta } from "@/components/ticket-status";
@@ -45,6 +46,7 @@ export function TicketCard({
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
           {item.excerpt ? <p className="truncate text-sm leading-5 text-muted-foreground">{item.excerpt}</p> : null}
+          <TicketTagList tags={item.tags ?? []} />
           {/* The bar is labelled with the whole sentence, so the percent and step
               beside it are decoration a screen reader would only repeat. */}
           <Progress
