@@ -153,5 +153,15 @@ require("node:fs").writeFileSync("invoked", "yes");
     writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=dev:shared-cloud\n");
     assert.equal(spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" }).status, 4);
     assert.equal(existsSync(join(dir, "invoked")), false);
+    // An invalid backend config must not fall back to another local identity.
+    rmSync(join(dir, ".env.convex-local"));
+    for (const config of ["malformed", JSON.stringify({ deploymentName: "dev:shared-cloud" })]) {
+      writeFileSync(join(dir, ".convex/local/default/config.json"), config);
+      const refused = spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" });
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /LOCAL_DEPLOYMENT_REFUSED/);
+      assert.equal(existsSync(join(dir, "invoked")), false);
+      assert.equal(existsSync(join(dir, ".env.convex-local")), false);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

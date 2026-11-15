@@ -7,7 +7,7 @@ import { parse } from "dotenv";
 import AdmZip from "adm-zip";
 import { reset, type Manifest, type ResetConfig, type Snapshot } from "./dev-reset/core";
 import { fakeResetProvider, uploadthingResetProvider } from "./dev-reset/provider";
-import { LOCAL_RESET_TARGET, validateDevelopmentTarget } from "./dev-reset-target.mjs";
+import { localResetTarget, validateDevelopmentTarget } from "./dev-reset-target.mjs";
 import { loadPorts } from "./worktree-ports.mjs";
 import { parseEnvironment, runDevelopment, validatePasswords, verifyDeploymentUrl } from "./dev-reset/runner";
 
@@ -22,7 +22,7 @@ async function main() {
   const local = values.target === "local";
   const config: ResetConfig = JSON.parse(readFileSync(resolve(import.meta.dirname, "dev-reset.config.json"), "utf8"));
   const settings = parse(readFileSync(".env.local"));
-  const target = local ? LOCAL_RESET_TARGET : validateDevelopmentTarget(settings.CONVEX_DEPLOYMENT, config.deployment);
+  const target = local ? localResetTarget() : validateDevelopmentTarget(settings.CONVEX_DEPLOYMENT, config.deployment);
   if (mode === "execute" && values.confirm !== target) throw new Error("RESET_CONFIRM_REQUIRED");
   if (mode === "execute" && !values.expect) throw new Error("RESET_INSPECT_MANIFEST_REQUIRED");
   const expect: Manifest | undefined = values.expect ? JSON.parse(readFileSync(values.expect, "utf8")) : undefined;
