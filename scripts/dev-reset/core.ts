@@ -1,5 +1,5 @@
 import type { StorageDeletionOutcome } from "../../shared/ticket-contracts";
-import { LOCAL_RESET_TARGET, validateDevelopmentTarget } from "../dev-reset-target.mjs";
+import { localResetTarget, validateDevelopmentTarget } from "../dev-reset-target.mjs";
 
 export type ResetConfig = { deployment: string; uploadthingAppId: string };
 export type Snapshot = Record<string, Record<string, unknown>[]>;
@@ -51,7 +51,7 @@ export function inventory(snapshot: Snapshot, target: string): Manifest {
 export async function reset(input: {
   mode: "inspect" | "execute"; local: boolean; deployment?: string; confirm?: string; expect?: Manifest; config: ResetConfig;
 }, deps: { backend: ResetBackend; provider: ResetProvider; save(manifest: Manifest): Promise<void> }) {
-  const target = input.local ? LOCAL_RESET_TARGET : validateDevelopmentTarget(input.deployment, input.config.deployment);
+  const target = input.local ? localResetTarget() : validateDevelopmentTarget(input.deployment, input.config.deployment);
   if (input.mode === "execute" && input.confirm !== target) throw new Error("RESET_CONFIRM_REQUIRED");
   if (input.mode === "execute" && (!input.expect || input.expect.target !== target || input.expect.stage !== "inventoried"
     || !Array.isArray(input.expect.media) || input.expect.media.some(item => typeof item.key !== "string"))) throw new Error("RESET_INSPECT_MANIFEST_REQUIRED");

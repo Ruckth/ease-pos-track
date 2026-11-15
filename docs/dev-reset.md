@@ -41,7 +41,11 @@ pnpm dev:reset env-remove UPLOADTHING_TOKEN --target local
 pnpm dev:reset env-set MEDIA_CLEANUP_ENABLED false --target local
 ```
 
-For a populated backend (replace `<inspect-directory>` with the inspect output directory after reviewing its manifest):
+For a populated backend, review the inspect output and replace `<inspect-directory>`
+with its directory and `<exact-target-from-inspect>` with the exact `target` from
+its `manifest.json`. The identity comes from this checkout's local backend
+configuration; new backends commonly use `anonymous:anonymous-agent`. Do not
+reuse an identity or manifest from another checkout:
 
 ```bash
 pnpm dev:reset inspect --target local

@@ -6,11 +6,11 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { loadPorts } from "./worktree-ports.mjs";
 import { parse } from "dotenv";
-import { LOCAL_RESET_TARGET } from "./dev-reset-target.mjs";
+import { localDeploymentName } from "./dev-reset-target.mjs";
 
 const args = process.argv.slice(2);
 const ENV_FILE = ".env.convex-local";
-const LOCAL_DEPLOYMENT = LOCAL_RESET_TARGET;
+const LOCAL_DEPLOYMENT = `anonymous:${localDeploymentName() ?? "anonymous-agent"}`;
 const SAVED = ".env.local.shared-backup";
 
 if (args.length && !["dev", "run", "env", "import", "export", "data", "codegen", "--help"].includes(args[0])) {
