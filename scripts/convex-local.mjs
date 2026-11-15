@@ -9,7 +9,16 @@ import { parse } from "dotenv";
 
 const args = process.argv.slice(2);
 const ENV_FILE = ".env.convex-local";
-const LOCAL_DEPLOYMENT = "anonymous:anonymous-track-ease-pos";
+// Agent-mode CLIs name every new local backend anonymous-agent; the original
+// checkout's backend predates that. Target whichever anonymous (always local)
+// backend this checkout owns.
+function localDeploymentName() {
+  try {
+    const name = JSON.parse(readFileSync(".convex/local/default/config.json", "utf8")).deploymentName;
+    return /^anonymous-[\w-]+$/.test(name) ? name : null;
+  } catch { return null; }
+}
+const LOCAL_DEPLOYMENT = `anonymous:${localDeploymentName() ?? "anonymous-track-ease-pos"}`;
 const SAVED = ".env.local.shared-backup";
 
 if (args.length && !["dev", "run", "env", "import", "export", "data", "codegen", "--help"].includes(args[0])) {
@@ -22,7 +31,10 @@ if (args.some(arg => /^--(reset-development|prod|deployment|deployment-name|env-
     console.error("Refusing deployment override arguments."); process.exit(4);
   }
 }
-if (!existsSync(ENV_FILE)) writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
+// A file holding only a local anonymous target follows this checkout's backend.
+if (!existsSync(ENV_FILE) || /^CONVEX_DEPLOYMENT=anonymous:anonymous-[\w-]+\n$/.test(readFileSync(ENV_FILE, "utf8"))) {
+  writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
+}
 const settings = existsSync(ENV_FILE) ? parse(readFileSync(ENV_FILE)) : {};
 const target = settings.CONVEX_DEPLOYMENT;
 if (target !== LOCAL_DEPLOYMENT || Object.keys(settings).some(key => key !== "CONVEX_DEPLOYMENT" && key.startsWith("CONVEX_"))) {

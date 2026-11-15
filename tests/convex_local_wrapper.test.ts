@@ -133,3 +133,25 @@ require("node:fs").writeFileSync("invoked", "yes");
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("local wrapper follows this checkout's own anonymous backend and still refuses other targets", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-wrapper-local-name-"));
+  try {
+    const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}
+require("node:fs").writeFileSync("invoked", "yes");
+`, { mode: 0o755 });
+    // Fresh checkouts get the agent-mode name; the wrapper's earlier default must follow it.
+    writeFileSync(join(dir, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
+    writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=anonymous:anonymous-track-ease-pos\n");
+    const env = { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` };
+    assert.equal(spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" }).status, 0);
+    assert.equal(readFileSync(join(dir, ".env.convex-local"), "utf8"), "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\n");
+    rmSync(join(dir, "invoked"));
+    writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=dev:shared-cloud\n");
+    assert.equal(spawnSync(process.execPath, [wrapper, "run", "probe:noop"], { cwd: dir, env, encoding: "utf8" }).status, 4);
+    assert.equal(existsSync(join(dir, "invoked")), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

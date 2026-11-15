@@ -23,6 +23,7 @@ import type * as domain_operations from "../domain/operations.js";
 import type * as domain_projects from "../domain/projects.js";
 import type * as domain_reads from "../domain/reads.js";
 import type * as domain_requests from "../domain/requests.js";
+import type * as domain_tags from "../domain/tags.js";
 import type * as domain_tickets from "../domain/tickets.js";
 import type * as functions from "../functions.js";
 import type * as local_fixtures from "../local_fixtures.js";
@@ -60,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   "domain/projects": typeof domain_projects;
   "domain/reads": typeof domain_reads;
   "domain/requests": typeof domain_requests;
+  "domain/tags": typeof domain_tags;
   "domain/tickets": typeof domain_tickets;
   functions: typeof functions;
   local_fixtures: typeof local_fixtures;

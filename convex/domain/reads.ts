@@ -14,6 +14,7 @@ export function ticketSummary(row: Doc<"tickets">) {
     ticketNumber: row.ticketNumber, version: row.version, title: row.title,
     excerpt: Array.from(row.description).slice(0, 200).join(""), status: row.status,
     urgencyScore: row.urgencyScore, lifecycle: row.lifecycle,
+    ...(row.tagIds === undefined ? {} : { tagIds: row.tagIds }),
     archivedAt: row.archivedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
     mediaCount: row.media.length,
     annotationCount: row.annotations.filter(a => a.deletedAt === undefined).length,

@@ -11,6 +11,7 @@ import { ticketProgress, nextTicketStatus } from "@/lib/ticket-ui";
 import { urgencyBand, urgencyTone } from "@/lib/urgency-score";
 import { type TicketStatus } from "@/lib/types";
 import type { TicketSummary } from "../../shared/ticket-contracts";
+import { TicketTagList } from "@/components/ticket-tags";
 import { useI18n } from "@/lib/i18n";
 
 /** Compact Ticket summary with detail selection and a status action. */
@@ -45,6 +46,7 @@ export function TicketCard({
         <div className="space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-5">{item.title}</h3>
           {item.excerpt ? <p className="truncate text-sm leading-5 text-muted-foreground">{item.excerpt}</p> : null}
+          <TicketTagList ids={item.tagIds} />
           {/* The bar is labelled with the whole sentence, so the percent and step
               beside it are decoration a screen reader would only repeat. */}
           <Progress

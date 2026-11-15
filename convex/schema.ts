@@ -1,6 +1,8 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+export const tagColor = v.union(v.literal("slate"), v.literal("red"), v.literal("orange"), v.literal("green"), v.literal("blue"), v.literal("violet"));
+
 export const ticketStatus = v.union(
   v.literal("new"),
   v.literal("acknowledged"),
@@ -63,6 +65,7 @@ const annotationEventAction = v.union(
 
 const ticketEventAction = v.union(
   v.literal("created"),
+  v.literal("tags_changed"),
   v.literal("media_attached"),
   v.literal("edited"),
   v.literal("edit_undone"),
@@ -84,6 +87,7 @@ const ticketStateValidator = v.object({
   version: v.number(),
   mediaCount: v.number(),
   annotationCount: v.number(),
+  tagIds: v.optional(v.array(v.id("ticketTags"))),
   lifecycle: ticketLifecycle,
   archivedAt: v.optional(v.number()),
 });
@@ -124,6 +128,8 @@ export default defineSchema({
     status: ticketStatus,
     urgencyScore: v.optional(v.number()),
     ticketNumber: v.number(),
+    // Sorted, deduplicated staff tags; absent means none.
+    tagIds: v.optional(v.array(v.id("ticketTags"))),
     media: v.array(mediaItemValidator),
     annotations: v.array(annotationValidator),
     version: v.number(),
@@ -142,6 +148,14 @@ export default defineSchema({
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
     .index("by_project_lifecycle", ["projectId", "lifecycle", "ticketNumber"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["projectId", "ownerCustomerId", "lifecycle", "status"] }),
+  // Reusable staff tags. Names are unique case-insensitively and immutable.
+  ticketTags: defineTable({
+    name: v.string(),
+    normalizedName: v.string(),
+    color: tagColor,
+    createdBy: v.id("sessions"),
+    createdAt: v.number(),
+  }).index("by_normalized_name", ["normalizedName"]),
   customers: defineTable({
     email: v.string(),
     passwordAlgorithm: v.string(),

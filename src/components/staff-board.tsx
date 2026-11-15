@@ -66,7 +66,7 @@ const isMultiColumnOnServer = () => true;
  * applied locally first, then persisted with the ticket's expected version. A
  * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard }: {
+export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard, visible }: {
   items: TicketSummary[];
   projectId: Id<"projects">;
   token: string;
@@ -74,11 +74,14 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   pages: Record<TicketStatus, { status: string; loadMore: (count: number) => void }>;
   onSelect: (id: Id<"tickets">) => void;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
+  /** Explorer filters hide cards when drawing; moves still reconcile against every loaded row. */
+  visible?: (item: TicketSummary) => boolean;
 }) {
   const { t } = useI18n();
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = reconcileColumns(projectId, items, pending);
+  const shown = visible ? filterColumns(columns, visible) : columns;
   const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
   const [visibleStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
   const tabsId = useId();
@@ -111,7 +114,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
 
   return (
     <Kanban
-      value={columns}
+      value={shown}
       onValueChange={() => undefined}
       getItemValue={(item) => item._id}
       onDragStart={(event) => { draggedRef.current = Object.values(columns).flat().find(row => row._id === event.active.id) ?? null; }}
@@ -141,7 +144,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
           <BoardColumn
             key={status}
             status={status}
-            items={columns[status]}
+            items={shown[status]}
             initialHighest={initialHighest}
             onSelect={onSelect}
             onMoveCard={(id, status) => {
@@ -328,4 +331,8 @@ function MoveObservation({ token, entry, onObserve }: {
       mediaCount: media.length, annotationCount: annotations.filter(annotation => annotation.deletedAt === undefined).length });
   }, [row, entry.operationId, entry.resultVersion, onObserve]);
   return null;
+}
+
+function filterColumns<T>(columns: Record<TicketStatus, T[]>, visible: (item: T) => boolean) {
+  return Object.fromEntries(BOARD_COLUMNS.map(status => [status, columns[status].filter(visible)])) as Record<TicketStatus, T[]>;
 }

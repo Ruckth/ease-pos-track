@@ -6,6 +6,7 @@ import {
   type MediaViewerHandle
 } from "@/components/media-viewer";
 import { TicketActivityList } from "@/components/ticket-activity";
+import { TicketTagEditor } from "@/components/ticket-tag-editor";
 import { statuses, statusMeta } from "@/components/ticket-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useTicketActivity } from "./adapter";
+import { useTagAdapter, useTicketActivity } from "./adapter";
 import { useTicketOperations } from "./use-ticket-operations";
 
 export function StaffTicketDialog({
@@ -62,6 +63,7 @@ function StaffTicketContent({ ticket, token, onMove, onArchive }: {
   const { t, formatDate } = useI18n();
   const { activity, ticketActivity } = useTicketActivity(token, ticket?._id ?? null);
   const operations = useTicketOperations(token);
+  const tagAdapter = useTagAdapter(token);
   const viewerRef = useRef<MediaViewerHandle>(null);
   const item = ticket;
   const [editVersion, setEditVersion] = useState<number | null>(null);
@@ -169,6 +171,7 @@ function StaffTicketContent({ ticket, token, onMove, onArchive }: {
         </div>
         <p id="ticket-urgency-hint" className="mt-2 text-xs leading-5 text-muted-foreground">{t("urgencyScoreHint")}</p>
       </div>
+      <TicketTagEditor item={item} onCreate={tagAdapter.create} onAssign={(tagIds) => tagAdapter.assign(item, tagIds)} />
       <MediaViewer
         key={item._id}
         ref={viewerRef}

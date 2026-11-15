@@ -3,6 +3,8 @@ import { LanguageSelector } from "@/components/auth-screens";
 import { NewProjectDialog, NoProjects, StaffProjectControls, useCurrentProject } from "@/components/project-controls";
 import { StaffBoard } from "@/components/staff-board";
 import { TicketCard } from "@/components/ticket-card";
+import { TicketExplorer } from "@/components/ticket-explorer";
+import { ArchivedTicketDialog } from "@/components/archived-ticket-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -21,7 +23,8 @@ import {
 import { useState } from "react";
 import { toast, Toaster } from "sonner";
 import { type TicketSummary } from "../../../shared/ticket-contracts";
-import { useSelectedTicket, useStaffTickets } from "./adapter";
+import { useSelectedTicket, useStaffTickets, useTicketTagCatalogue } from "./adapter";
+import { TicketTagsProvider } from "@/components/ticket-tags";
 import { useComposer } from "./use-composer";
 import { useTicketOperations } from "./use-ticket-operations";
 
@@ -40,6 +43,7 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
   const query = search.trim();
   const { lanes, items: activeItems, loading, invalidSearch, totals, matches, archive, archiveMatches, archivedItems } = useStaffTickets(token, project?._id, showArchived, query);
   const operations = useTicketOperations(token);
+  const tagCatalogue = useTicketTagCatalogue(token);
   const [selection, setSelection] = useState<{ id: Id<"tickets">; projectId: Id<"projects"> } | null>(null);
   const selectedId = selection?.projectId === project?._id ? selection?.id ?? null : null;
   const setSelectedId = (id: Id<"tickets"> | null) => setSelection(id && project ? { id, projectId: project._id } : null);
@@ -67,6 +71,7 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
   }
 
   return (
+    <TicketTagsProvider value={tagCatalogue}>
     <main className="min-h-screen">
       <Toaster richColors position="bottom-right" />
       <header className="border-b bg-card/90 backdrop-blur">
@@ -123,34 +128,43 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
               <Loader2 className="size-7 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            query ? <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">{t("searchHint")}</p>
-              <p className="text-sm">{t(matches?.hasMore ? "searchLoaded" : "searchMatches", { count: matches?.matches.length ?? 0 })}</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{matches?.matches.map(item => <TicketCard key={item._id} item={item} onSelect={setSelectedId} />)}</div>
-            </div> : <StaffBoard key={project?._id} projectId={project!._id} token={token} items={activeItems} totals={totals ?? {}} pages={lanes} onSelect={setSelectedId} onMoveCard={moveItem} />
-          )}
-          {showArchived && archivedItems.length > 0 ? (
-            <section className="mt-5 rounded-lg border bg-card p-4">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedTicket")}</h2>
-              <div className="space-y-2">
-                {archivedItems.map((item) => (
-                  <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{item.title}</span>
-                      <span className="text-sm leading-5 text-muted-foreground">
-                        <span className="font-mono">{formatTicketNumber(item.ticketNumber, item.projectKey)}</span>
-                        {" · "}{t("archivedOn", { date: formatDate(item.archivedAt ?? item.updatedAt) })}
-                      </span>
+            <TicketExplorer
+              items={query ? matches?.matches ?? [] : activeItems}
+              archived={showArchived ? archivedItems : []}
+              search={query}
+              onClearSearch={() => setSearch("")}
+              onSelect={setSelectedId}
+              board={(visible) => <>
+                {query ? <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">{t("searchHint")}</p>
+                  <p className="text-sm">{t(matches?.hasMore ? "searchLoaded" : "searchMatches", { count: matches?.matches.length ?? 0 })}</p>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{matches?.matches.filter(visible).map(item => <TicketCard key={item._id} item={item} onSelect={setSelectedId} />)}</div>
+                </div> : <StaffBoard key={project?._id} projectId={project!._id} token={token} items={activeItems} totals={totals ?? {}} pages={lanes} onSelect={setSelectedId} onMoveCard={moveItem} visible={visible} />}
+                {showArchived && archivedItems.length > 0 ? (
+                  <section className="mt-5 rounded-lg border bg-card p-4">
+                    <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" />{t("archivedTicket")}</h2>
+                    <div className="space-y-2">
+                      {archivedItems.filter(visible).map((item) => (
+                        <div key={item._id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{item.title}</span>
+                            <span className="text-sm leading-5 text-muted-foreground">
+                              <span className="font-mono">{formatTicketNumber(item.ticketNumber, item.projectKey)}</span>
+                              {" · "}{t("archivedOn", { date: formatDate(item.archivedAt ?? item.updatedAt) })}
+                            </span>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(localizeError(error, t)))}>
+                            <ArchiveRestore /> {t("restore")}
+                          </Button>
+                        </div>
+                      ))}
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void restoreItem(item._id).catch((error) => toast.error(localizeError(error, t)))}>
-                      <ArchiveRestore /> {t("restore")}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              {query ? archiveMatches?.hasMore ? <p className="text-sm text-muted-foreground">{t("searchLoaded", { count: archivedItems.length })}</p> : null : archive.status !== "Exhausted" ? <Button disabled={archive.status !== "CanLoadMore"} onClick={() => archive.loadMore(20)}>{t("loadOlder")}</Button> : null}
-            </section>
-          ) : null}
+                    {query ? archiveMatches?.hasMore ? <p className="text-sm text-muted-foreground">{t("searchLoaded", { count: archivedItems.length })}</p> : null : archive.status !== "Exhausted" ? <Button disabled={archive.status !== "CanLoadMore"} onClick={() => archive.loadMore(20)}>{t("loadOlder")}</Button> : null}
+                  </section>
+                ) : null}
+              </>}
+            />
+          )}
         </section>
       </div>
 
@@ -177,13 +191,15 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
 
       <NewProjectDialog token={token} open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={selectProject} />
 
+      {selected?.lifecycle === "archived" ? <ArchivedTicketDialog item={selected} onClose={() => setSelectedId(null)} onRestore={() => restoreItem(selected._id)} /> : null}
       <StaffTicketDialog
-        ticket={selected}
+        ticket={selected?.lifecycle === "archived" ? null : selected}
         token={token}
         onClose={() => setSelectedId(null)}
         onMove={(_id, status) => { if (selected) void moveItem(selected, status); }}
         onArchive={archiveItem}
       />
     </main>
+    </TicketTagsProvider>
   );
 }

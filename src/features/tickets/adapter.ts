@@ -1,6 +1,7 @@
 import { useStaffLanes } from "./lane-adapter";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import type { TicketTag } from "@/lib/types";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { isTicketSearchWithinLimits } from "../../../shared/ticket-contracts";
 
@@ -20,6 +21,21 @@ export function useTicketAdapter() {
     undoAnnotation: useMutation(api.annotations.undoAnnotationUpdate),
     removeAnnotation: useMutation(api.annotations.removeAnnotation),
     restoreAnnotation: useMutation(api.annotations.restoreAnnotation),
+  };
+}
+
+/** Staff tag catalogue (one bounded read) and tag writes. */
+export function useTicketTagCatalogue(token: string) {
+  return useQuery(api.tickets.listTicketTags, { token });
+}
+
+export function useTagAdapter(token: string) {
+  const create = useMutation(api.tickets.createTicketTag);
+  const assign = useMutation(api.tickets.setTicketTags);
+  return {
+    create: (name: string, color: TicketTag["color"]) => create({ token, name, color }),
+    assign: (item: { _id: Id<"tickets">; version: number }, tagIds: TicketTag["_id"][]) =>
+      assign({ token, id: item._id, expectedVersion: item.version, tagIds }),
   };
 }
 
