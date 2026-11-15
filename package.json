@@ -6,15 +6,26 @@
   "packageManager": "pnpm@11.5.2",
   "scripts": {
     "preinstall": "node scripts/ensure-pnpm.mjs",
-    "dev": "concurrently -k -n vite,api,convex \"vite\" \"tsx server/index.ts\" \"convex dev\"",
+    "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
     "dev:api": "tsx server/index.ts",
-    "dev:convex": "convex dev",
+    "dev:reset": "tsx scripts/dev-reset.ts",
+    "dev:convex": "node scripts/convex-local.mjs dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "ticket": "tsx scripts/ticket.ts",
-    "test": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
-    "typecheck": "tsc -b"
+    "convex:local": "node scripts/convex-local.mjs",
+    "test": "pnpm run test:unit && pnpm run test:convex",
+    "test:unit": "tsx --tsconfig tsconfig.test.json --test tests/*.test.ts",
+    "test:convex": "vitest run --config vitest.convex.config.ts",
+    "test:one": "tsx --tsconfig tsconfig.test.json --test",
+    "typecheck": "tsgo -b",
+    "typecheck:tsc": "tsc -b",
+    "check": "concurrently --group --names typecheck,unit,convex,build \"pnpm:typecheck\" \"pnpm:test:unit\" \"pnpm:test:convex\" \"vite build --logLevel warn\"",
+    "agent:setup": "node scripts/agent-setup.mjs",
+    "agent:new": "node scripts/agent-new.mjs",
+    "test:browser": "node scripts/test-browser.mjs",
+    "check:arch": "pnpm test:one tests/architecture.test.ts tests/function_policies.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -46,17 +57,22 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "5.0.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "adm-zip": "^0.6.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
+    "convex-test": "0.0.71",
     "playwright": "^1.61.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "vitest": "3.2.7"
   }
 }

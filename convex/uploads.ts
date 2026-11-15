@@ -1,23 +1,11 @@
+import { validateFiles, sameFiles, fileSignature, MAX_MEDIA_FILES } from "../shared/media-policy";
+import { actorMutation, actorQuery, trustedCallbackMutation, requireCallbackCredential } from "./functions";
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mediaItemValidator, pendingFileValidator } from "./schema";
-import { actorFields, actorFromSession } from "./authz";
+import { actorFields } from "./authz";
+import { requireOwnedUploadIntent, recordUpload, reserveIntentAssets } from "./domain/media";
 
 const INTENT_TTL_MS = 30 * 60 * 1000;
-const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
-const VIDEO_MAX_BYTES = 64 * 1024 * 1024;
-
-async function requireSession(ctx: QueryCtx | MutationCtx, token: string) {
-  const session = await ctx.db
-    .query("sessions")
-    .withIndex("by_token", (q) => q.eq("token", token))
-    .unique();
-  if (!session || session.expiresAt <= Date.now()) {
-    throw new Error("SESSION_EXPIRED");
-  }
-  return session;
-}
 
 function makeSecret() {
   const bytes = new Uint8Array(24);
@@ -25,52 +13,15 @@ function makeSecret() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function validateFiles(files: Array<{ name: string; size: number; type: string }>) {
-  const images = files.filter((file) => file.type.startsWith("image/"));
-  const videos = files.filter((file) => file.type.startsWith("video/"));
-  if (images.length + videos.length !== files.length) throw new Error("IMAGE_VIDEO_ONLY");
-  if (images.length > 10 || videos.length > 3) throw new Error("MEDIA_LIMIT_EXCEEDED");
-  if (images.some((file) => file.size <= 0 || file.size > IMAGE_MAX_BYTES)) {
-    throw new Error("IMAGE_TOO_LARGE");
-  }
-  if (videos.some((file) => file.size <= 0 || file.size > VIDEO_MAX_BYTES)) {
-    throw new Error("VIDEO_TOO_LARGE");
-  }
-  if (files.some((file) => !file.name.trim() || file.name.length > 255 || file.type.length > 100)) {
-    throw new Error("INVALID_FILE_METADATA");
-  }
-}
-
-export function validateMediaItems(
-  media: Array<{ key: string; name: string; size: number; type: string; url: string }>,
-) {
-  validateFiles(media);
-  if (media.some((item) => !item.key.trim() || !item.url.startsWith("https://"))) {
-    throw new Error("INVALID_MEDIA_REFERENCE");
-  }
-}
-
-function fileSignature(file: { name: string; size: number; type: string }) {
-  return `${file.name}\u0000${file.size}\u0000${file.type}`;
-}
-
-export function sameFiles(
-  expected: Array<{ name: string; size: number; type: string }>,
-  actual: Array<{ name: string; size: number; type: string }>,
-) {
-  const left = expected.map(fileSignature).sort();
-  const right = actual.map(fileSignature).sort();
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-export const createUploadIntent = mutation({
+export const createUploadIntent = actorMutation({
+  name: "uploads:createUploadIntent",
   args: {
     token: v.string(),
     idempotencyKey: v.string(),
     files: v.array(pendingFileValidator),
   },
   handler: async (ctx, args) => {
-    const session = await requireSession(ctx, args.token);
+    const { session, actor } = ctx;
     const idempotencyKey = args.idempotencyKey.trim();
     if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
       throw new Error("INVALID_UPLOAD_REQUEST");
@@ -79,22 +30,25 @@ export const createUploadIntent = mutation({
 
     const existing = await ctx.db
       .query("uploadIntents")
-      .withIndex("by_idempotency", (q) => q.eq("sessionId", session._id).eq("idempotencyKey", idempotencyKey))
+      .withIndex("by_idempotency", (q) => q.eq("actorRole", actor.role).eq("actorCustomerId", actor.customerId).eq("idempotencyKey", idempotencyKey))
       .order("desc")
       .first();
-    if (existing && !sameFiles(existing.expectedFiles, args.files)) {
+    const reusable = existing && (existing.status === "attached" || (existing.status === "pending" && existing.expiresAt > Date.now()));
+    if (reusable && !sameFiles(existing.expectedFiles, args.files)) {
       throw new Error("UPLOAD_REQUEST_CONFLICT");
     }
     if (existing && existing.status === "pending" && existing.expiresAt > Date.now()) {
-      return { intentId: existing._id, secret: existing.secret, feedbackId: existing.feedbackId, uploadedFiles: existing.uploadedFiles };
+      // Ownership is durable; the privileged staff recording capability is bound
+      // to the session which most recently acquired this intent.
+      await ctx.db.patch(existing._id, { sessionId: session._id });
+      return { intentId: existing._id, secret: existing.secret, ticketId: existing.ticketId, uploadedFiles: existing.uploadedFiles };
     }
-    if (existing?.status === "attached" && existing.feedbackId) {
-      return { intentId: existing._id, secret: existing.secret, feedbackId: existing.feedbackId, uploadedFiles: existing.uploadedFiles };
+    if (existing?.status === "attached" && existing.ticketId) {
+      return { intentId: existing._id, secret: existing.secret, ticketId: existing.ticketId, uploadedFiles: existing.uploadedFiles };
     }
 
     const now = Date.now();
     const secret = makeSecret();
-    const actor = actorFromSession(session);
     const intentId = await ctx.db.insert("uploadIntents", {
       sessionId: session._id,
       secret,
@@ -109,98 +63,80 @@ export const createUploadIntent = mutation({
       expiresAt: now + INTENT_TTL_MS,
       updatedAt: now,
     });
-    return { intentId, secret, feedbackId: undefined, uploadedFiles: [] };
+    return { intentId, secret, ticketId: undefined, uploadedFiles: [] };
   },
 });
 
-export const validateUploadIntent = query({
+export const validateUploadIntent = actorQuery({
+  name: "uploads:validateUploadIntent",
   args: {
     token: v.string(),
+    callbackToken: v.string(),
     intentId: v.id("uploadIntents"),
     secret: v.string(),
     files: v.array(pendingFileValidator),
   },
   handler: async (ctx, args) => {
-    const session = await requireSession(ctx, args.token);
+    requireCallbackCredential(args.callbackToken);
+    const { actor } = ctx;
     const intent = await ctx.db.get(args.intentId);
+    const files = [...(intent?.uploadedFiles ?? []), ...args.files];
+    try { validateFiles(files); }
+    catch { return false; }
     return Boolean(
       intent
-      && intent.sessionId === session._id
+      && intent.actorRole === actor.role
+      && intent.actorCustomerId === actor.customerId
       && intent.secret === args.secret
       && intent.status === "pending"
       && intent.expiresAt > Date.now()
-      && sameFiles(intent.expectedFiles, args.files),
+      && args.files.length > 0
+      && files.every((file, index) => files.slice(0, index + 1).filter(item => fileSignature(item) === fileSignature(file)).length
+        <= intent.expectedFiles.filter(item => fileSignature(item) === fileSignature(file)).length),
     );
   },
 });
 
-export const recordUploadedFile = mutation({
+export const recordUploadedFile = trustedCallbackMutation({
+  name: "uploads:recordUploadedFile",
   args: {
+    token: v.optional(v.string()),
+    callbackToken: v.optional(v.string()),
     intentId: v.id("uploadIntents"),
     secret: v.string(),
     file: mediaItemValidator,
   },
   handler: async (ctx, args) => {
     const intent = await ctx.db.get(args.intentId);
-    if (!intent || intent.secret !== args.secret || intent.status !== "pending" || intent.expiresAt <= Date.now()) {
+    if (!intent || intent.secret !== args.secret) {
       throw new Error("UPLOAD_INTENT_INVALID");
     }
-    const expectedMatch = intent.expectedFiles.some((file) => fileSignature(file) === fileSignature(args.file));
-    if (!expectedMatch) throw new Error("UPLOAD_FILE_MISMATCH");
-    if (!args.file.key || !args.file.url.startsWith("https://")) throw new Error("INVALID_UPLOADED_FILE");
-    if (intent.uploadedFiles.some((file) => file.key === args.file.key)) return;
-    // An intent never needs more uploads than it declared, so the array cannot be
-    // grown past the document size limit by replaying with fresh keys.
-    if (intent.uploadedFiles.length >= intent.expectedFiles.length) {
-      throw new Error("UPLOAD_FILE_MISMATCH");
-    }
-    await ctx.db.patch(intent._id, {
-      uploadedFiles: [...intent.uploadedFiles, args.file],
-      updatedAt: Date.now(),
-    });
+    if (ctx.staffSessionId && intent.sessionId !== ctx.staffSessionId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
+    return await recordUpload(ctx, intent, args.file, !ctx.staffSessionId);
   },
 });
 
-export const cancelUploadIntent = mutation({
+export const cancelUploadIntent = actorMutation({
+  name: "uploads:cancelUploadIntent",
   args: {
     token: v.string(),
-    intentId: v.id("uploadIntents"),
+    intentId: v.string(),
     secret: v.string(),
   },
   handler: async (ctx, args) => {
-    const session = await requireSession(ctx, args.token);
-    const intent = await ctx.db.get(args.intentId);
-    if (!intent || intent.sessionId !== session._id || intent.secret !== args.secret) {
-      throw new Error("UPLOAD_INTENT_NOT_FOUND");
-    }
-    if (intent.status === "attached") return { keys: [] as string[] };
-    await ctx.db.patch(intent._id, { status: "cancelled", updatedAt: Date.now() });
-    return { keys: intent.uploadedFiles.map((file) => file.key) };
-  },
-});
-
-export const listExpiredIntents = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    const now = Date.now();
-    const pending = await ctx.db
-      .query("uploadIntents")
-      .withIndex("by_expires_at", (q) => q.eq("status", "pending").lt("expiresAt", now))
-      .take(50);
-    const cancelled = await ctx.db
-      .query("uploadIntents")
-      .withIndex("by_expires_at", (q) => q.eq("status", "cancelled").lt("expiresAt", now))
-      .take(50);
-    return [...pending, ...cancelled];
-  },
-});
-
-export const markIntentCleaned = internalMutation({
-  args: { intentId: v.id("uploadIntents") },
-  handler: async (ctx, args) => {
-    const intent = await ctx.db.get(args.intentId);
-    if (intent && intent.status !== "attached") {
-      await ctx.db.patch(args.intentId, { status: "cleaned", updatedAt: Date.now() });
-    }
+    const intentId = ctx.db.normalizeId("uploadIntents", args.intentId);
+    if (!intentId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
+    const intent = requireOwnedUploadIntent(await ctx.db.get(intentId), ctx.actor, args.secret);
+    // Separate lifecycle reads keep historical deletions from hiding the bounded
+    // accepted uploads which still need a reservation.
+    const assets = (await Promise.all((["pending", "deleting", "deleted"] as const).map(lifecycle =>
+      ctx.db.query("mediaAssets").withIndex("by_intent", q => q.eq("intentId", intent._id).eq("lifecycle", lifecycle)).take(MAX_MEDIA_FILES)))).flat();
+    const jobIds = await reserveIntentAssets(ctx, intent, assets.filter(asset => !asset.ticketId), "cancellation");
+    if (intent.status === "pending" || intent.status === "expiring") await ctx.db.patch(intent._id, { status: "cancelled", updatedAt: Date.now() });
+    const jobs = await Promise.all(jobIds.map(id => ctx.db.get(id)));
+    // A terminal failure is data, so this response cannot roll back reservations
+    // for other assets newly cancelled in this transaction.
+    if (jobs.some(job => job?.state === "failed")) return { state: "failed" as const, jobIds };
+    return { state: jobs.some(job => job?.state !== "completed") ? "queued" as const : "completed" as const, jobIds };
   },
 });

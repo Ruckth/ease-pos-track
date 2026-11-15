@@ -7,7 +7,7 @@ export type CommandOption = {
   requiredUnless?: string;
 };
 
-export type CommandArgument = {
+type CommandArgument = {
   name: string;
   description: string;
   required: boolean;
@@ -33,8 +33,8 @@ const EXPECTED_VERSION: CommandOption = {
   required: true,
 };
 const TICKET_ARGUMENT: CommandArgument = {
-  name: "TKT-####",
-  description: "Ticket reference returned by create, list, or get.",
+  name: "KEY-####",
+  description: "Ticket reference returned by create, list, or get, for example TKT-0007.",
   required: true,
 };
 
@@ -94,6 +94,7 @@ export const COMMAND_REGISTRY = [
     interactive: false,
     arguments: [],
     options: [
+      { name: "--project", value: "key", description: "Only list Tickets in this Project, for example POS." },
       { name: "--include-archived", description: "Include archived Tickets." },
       PROD,
     ],
@@ -118,7 +119,8 @@ export const COMMAND_REGISTRY = [
     options: [
       { name: "--title", value: "text", description: "Ticket title (1-100 characters).", requiredUnless: "--json contains title" },
       { name: "--description", value: "text", description: "Ticket description (up to 10000 characters)." },
-      { name: "--json", value: "object", description: "JSON object with title, description, and requestId." },
+      { name: "--project", value: "key", description: "Project key, for example POS; optional while only one Project exists." },
+      { name: "--json", value: "object", description: "JSON object with title, description, requestId, and project." },
       { name: "--request-id", value: "id", description: "Idempotency key; generated when omitted." },
       { name: "--image", value: "path-or-https-url", description: "Attach an image from a local path or HTTPS URL; repeat up to 10 times.", repeatable: true },
       { name: "--dry-run", description: "Validate and print the Ticket without writing." },
@@ -181,7 +183,7 @@ export const COMMAND_REGISTRY = [
   },
 ] as const satisfies readonly TicketCommandDefinition[];
 
-export type RegisteredCommandName = (typeof COMMAND_REGISTRY)[number]["name"];
+type RegisteredCommandName = (typeof COMMAND_REGISTRY)[number]["name"];
 
 export function commandDefinition(name: string): TicketCommandDefinition | undefined {
   return COMMAND_REGISTRY.find((command) => command.name === name);

@@ -103,13 +103,13 @@ test("macOS Keychain adapter never places session material in process arguments"
   assert.equal(calls.at(-1)?.args[0], "delete-generic-password");
 });
 
-test("Keychain adapter can still read legacy plaintext JSON credentials", async () => {
+test("Keychain adapter rejects superseded plaintext credentials", async () => {
   const legacy = new MacOsKeychainCredentialStore(async () => ({
     exitCode: 0,
     stdout: '{"token":"legacy-token","expiresAt":20000,"url":"https://dev.example.com"}\n',
     stderr: "",
   }), "darwin");
-  assert.equal((await legacy.get("dev"))?.token, "legacy-token");
+  await assert.rejects(() => legacy.get("dev"), (error: unknown) => error instanceof TicketCliError && error.code === "CREDENTIAL_INVALID");
 });
 
 test("Keychain not-found, invalid content, and non-macOS access have stable behavior", async () => {

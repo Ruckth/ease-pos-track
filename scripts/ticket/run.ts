@@ -1,3 +1,5 @@
+import { errorCode } from "../../shared/errors";
+import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 /**
  * Command orchestration: turn one parsed command into one JSON line and one exit
  * code, and turn any failure into the single-object stderr contract.
@@ -7,9 +9,9 @@
  * decides the order those are used in.
  */
 
-import { formatTicketNumber } from "../../convex/ticket_numbers";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import { createHash } from "node:crypto";
-import { parseTicketArgs, type TicketCommand } from "./cli";
+import { parseTicketArgs, type TicketCommand, type TicketRef } from "./cli";
 import type { ConfigStore } from "./config";
 import { authHint, type Deployment } from "./deployment";
 import {
@@ -52,7 +54,7 @@ export type TicketCliDeps = {
   images: TicketImages;
 };
 
-export type TicketCliOutcome = { exitCode: number; stdout: string; stderr: string };
+type TicketCliOutcome = { exitCode: number; stdout: string; stderr: string };
 
 /** Commands that need a deployment but not a staff session. */
 type SessionCommand = Extract<TicketCommand, { kind: "login" | "logout" }>;
@@ -72,43 +74,56 @@ function sameFileMetadata(file: File, media: { name: string; size: number; type:
 }
 
 async function attachTicketImages(
-  input: { ticketNumber: number; expectedVersion: number; images: string[]; requestId: string },
+  input: { ref: TicketRef; expectedVersion: number; images: string[]; requestId: string },
   access: StaffAccess,
   deps: TicketCliDeps,
+  onCleanupUnknown: () => void,
 ) {
+  const current = await deps.remote.get(access.url, access.token, input.ref, false);
+  if (!current) throw inputError("TICKET_NOT_FOUND", "The Ticket does not exist or is not available for this operation.");
   const files = await deps.images.prepare(input.images);
-  const intent = await deps.remote.createUploadIntent(access.url, access.token, {
+  const intent = await reconcileUploadWrite(() => deps.remote.createUploadIntent(access.url, access.token, {
     requestId: uploadRequestId(input.requestId),
     files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
-  });
-  if (intent.feedbackId) {
-    const existing = await deps.remote.get(access.url, access.token, input.ticketNumber, false);
-    if (!existing || existing._id !== intent.feedbackId) throw inputError("UPLOAD_INTENT_MISMATCH", "The image retry belongs to a different Ticket.");
-    return existing;
-  }
+  }));
   const reusable = [...intent.uploadedFiles];
   const resolved = files.map((file) => {
     const index = reusable.findIndex((media) => sameFileMetadata(file, media));
     if (index < 0) return undefined;
     return reusable.splice(index, 1)[0];
   });
-  const missing = files.flatMap((file, index) => resolved[index] ? [] : [{ file, index }]);
-  const uploaded = missing.length === 0 ? [] : await deps.images.upload(missing.map(({ file }) => file));
-  uploaded.forEach((media, offset) => {
-    resolved[missing[offset].index] = media;
-  });
-  for (const file of uploaded) {
-    await deps.remote.recordUploadedFile(access.url, { intentId: intent.intentId, secret: intent.secret, file });
+  try {
+    // Record each provider result before starting another upload, so a partial
+    // failure cannot discard receipts for other successfully uploaded files.
+    for (let index = 0; index < files.length; index++) {
+      if (resolved[index]) continue;
+      const [file] = await deps.images.upload([files[index]]);
+      if (!file) throw internalError("The image upload result did not match the requested files.");
+      await reconcileUploadWrite(() => deps.remote.recordUploadedFile(access.url, { token: access.token, intentId: intent.intentId, secret: intent.secret, file }));
+      resolved[index] = file;
+    }
+    const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
+    await reconcileUploadWrite(() => deps.remote.attachImages(access.url, access.token, {
+      id: current._id,
+      expectedVersion: input.expectedVersion,
+      requestId: input.requestId,
+      intentId: intent.intentId,
+      secret: intent.secret,
+      media,
+    }));
+  } catch (error) {
+    if (definitiveUploadRejection(error)) {
+      // The mutation reserves only this intent's unattached keys. It also
+      // reconciles an attachment which committed before its response was lost.
+      try { await deps.remote.cancelUploadIntent(access.url, access.token, { intentId: intent.intentId, secret: intent.secret }); }
+      catch { onCleanupUnknown(); }
+    }
+    throw error;
   }
-  const media = resolved.filter((item): item is NonNullable<typeof item> => item !== undefined);
-  if (media.length !== files.length) throw internalError("The image upload result did not match the requested files.");
-  return await deps.remote.attachImages(access.url, access.token, {
-    ticketNumber: input.ticketNumber,
-    expectedVersion: input.expectedVersion,
-    intentId: intent.intentId,
-    secret: intent.secret,
-    media,
-  });
+  // Attachment is committed. A failed read cannot authorize cancellation or replay the write.
+  const attached = await deps.remote.get(access.url, access.token, input.ref, false);
+  if (!attached) throw inputError("TICKET_NOT_FOUND", "The Ticket does not exist or is not available for this operation.");
+  return attached;
 }
 
 function unreachable(command: never): never {
@@ -128,7 +143,7 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
   },
   {
     codes: ["VERSION_CONFLICT"],
-    toError: () => conflictError("VERSION_CONFLICT", "The Ticket changed after it was read.", "Run `pnpm ticket get TKT-####`, then retry with its current version."),
+    toError: () => conflictError("VERSION_CONFLICT", "The Ticket changed after it was read.", "Run `pnpm ticket get KEY-####`, then retry with its current version."),
   },
   {
     codes: ["UPLOAD_REQUEST_CONFLICT"],
@@ -151,24 +166,20 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
     toError: (target) => authError("NOT_AUTHORIZED", "This command requires a staff session.", authHint(target)),
   },
   {
-    codes: ["FEEDBACK_NOT_FOUND", "ARCHIVED_FEEDBACK_NOT_FOUND"],
+    codes: ["TICKET_UNAVAILABLE"],
     toError: () => inputError("TICKET_NOT_FOUND", "The Ticket does not exist or is not available for this operation."),
   },
 ];
 
-const REMOTE_DETAIL_LIMIT = 300;
-
 export function classifyRemoteError(error: unknown, target: Deployment) {
   if (error instanceof TicketCliError) return error;
-  const text = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+  const code = errorCode(error);
   for (const rule of REMOTE_ERROR_RULES) {
-    if (rule.codes.some((code) => text.includes(code))) return rule.toError(target);
+    if (code && rule.codes.includes(code)) return rule.toError(target);
   }
-  for (const code of SERVER_INPUT_ERROR_CODES) {
-    if (text.includes(code)) return mapInputError(new Error(code));
-  }
-  const detail = text.trim().split("\n")[0].slice(0, REMOTE_DETAIL_LIMIT);
-  return remoteError(`The Convex deployment call failed${detail ? `: ${detail}` : "."}`);
+  if (code && SERVER_INPUT_ERROR_CODES.includes(code)) return mapInputError(new Error(code));
+  return remoteError(code && /^[A-Z][A-Z0-9_]*$/.test(code)
+    ? `The Convex deployment call failed (${code}).` : "The Convex deployment call failed.");
 }
 
 async function runSessionCommand(command: SessionCommand, sessions: TicketSessions, deps: TicketCliDeps) {
@@ -193,10 +204,12 @@ async function runStaffCommand(command: StaffCommand, access: StaffAccess, deps:
     case "whoami":
       return whoamiOutput(target, url, session);
     case "list":
-      return listOutput(target, await remote.list(url, token, command.includeArchived));
+      return listOutput(target, await remote.list(url, token, command.projectKey, command.includeArchived));
     case "get": {
-      const ticket = await remote.get(url, token, command.ticketNumber, command.includeArchived);
-      if (!ticket) throw inputError("TICKET_NOT_FOUND", `Ticket ${formatTicketNumber(command.ticketNumber)} was not found.`);
+      const ticket = await remote.get(url, token, command.ref, command.includeArchived);
+      if (!ticket) {
+        throw inputError("TICKET_NOT_FOUND", `Ticket ${formatTicketNumber(command.ref.ticketNumber, command.ref.projectKey)} was not found.`);
+      }
       return ticketOutput(target, ticket);
     }
     case "update":
@@ -204,9 +217,9 @@ async function runStaffCommand(command: StaffCommand, access: StaffAccess, deps:
     case "status":
       return ticketOutput(target, await remote.changeStatus(url, token, command));
     case "archive":
-      return ticketOutput(target, await remote.archive(url, token, command.ticketNumber, command.expectedVersion));
+      return ticketOutput(target, await remote.archive(url, token, command.ref, command.expectedVersion));
     case "restore":
-      return ticketOutput(target, await remote.restore(url, token, command.ticketNumber, command.expectedVersion));
+      return ticketOutput(target, await remote.restore(url, token, command.ref, command.expectedVersion));
     default:
       return unreachable(command);
   }
@@ -221,6 +234,8 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
   // which idempotency key the run was using.
   let target: Deployment | undefined;
   let requestId: string | undefined;
+  let cleanupUnknown = false;
+  const onCleanupUnknown = () => { cleanupUnknown = true; };
   try {
     const command = parseTicketArgs(argv);
     if (command.kind === "help") return succeed(`${humanHelp(command.command)}\n`);
@@ -243,18 +258,18 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       const created = await deps.remote.create(url, token, { ...command.request, requestId: idempotencyKey });
       if (command.images.length > 0) {
         created.ticket = await attachTicketImages({
-          ticketNumber: created.ticket.ticketNumber!,
-          expectedVersion: created.ticket.version ?? 0,
+          ref: { projectKey: created.ticket.projectKey!, ticketNumber: created.ticket.ticketNumber! },
+          expectedVersion: created.ticket.version,
           images: command.images,
           requestId: idempotencyKey,
-        }, access, deps);
+        }, access, deps, onCleanupUnknown);
       }
       return succeed(jsonLine(createOutput(target, created)));
     }
     if (command.kind === "attach") {
       requestId = command.requestId ?? deps.newRequestId();
       const access = await sessions.requireStaff(target);
-      const attached = await attachTicketImages({ ...command, requestId }, access, deps);
+      const attached = await attachTicketImages({ ...command, requestId }, access, deps, onCleanupUnknown);
       return succeed(jsonLine(attachmentOutput(target, attached, requestId)));
     }
     return succeed(jsonLine(await runStaffCommand(command, await sessions.requireStaff(target), deps)));
@@ -264,6 +279,6 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       : target
         ? classifyRemoteError(error, target)
         : internalError(error instanceof Error ? error.message : String(error));
-    return { exitCode: failure.exitCode, stdout: "", stderr: jsonLine(errorOutput(failure, target, requestId)) };
+    return { exitCode: failure.exitCode, stdout: "", stderr: jsonLine(errorOutput(failure, target, requestId, cleanupUnknown ? { cleanup: { outcome: "unknown" } } : undefined)) };
   }
 }

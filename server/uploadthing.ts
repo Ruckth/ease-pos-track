@@ -1,24 +1,12 @@
-import { config } from "dotenv";
+import type { OurFileRouter, UploadIntentInput } from "../shared/upload-router.js";
 import { ConvexHttpClient } from "convex/browser";
-import { createUploadthing, UploadThingError, UTApi } from "uploadthing/server";
-import type { FileRoute } from "uploadthing/types";
+import { createUploadthing, UploadThingError } from "uploadthing/server";
 import { z } from "zod";
-import type { Json } from "@uploadthing/shared";
+import { errorCode } from "../shared/errors.js";
 import { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel.js";
+import { recordUploadHandler } from "./handlers/record-upload.js";
 
-config({ path: ".env.local", quiet: true });
-
-const f = createUploadthing();
-const convexUrl = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
-if (!convexUrl) throw new Error("CONVEX_URL or VITE_CONVEX_URL is required by the upload server.");
-const convex = new ConvexHttpClient(convexUrl);
-const utapi = new UTApi();
-
-type UploadIntentInput = {
-  intentId: string;
-  secret: string;
-};
 
 const uploadIntentSchema = z.object({
   intentId: z.string().min(1),
@@ -50,16 +38,12 @@ function bearerToken(request: Request) {
   return authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
 }
 
-export type OurFileRouter = {
-  feedbackMedia: FileRoute<{
-    input: UploadIntentInput;
-    output: null;
-    errorShape: Json;
-  }>;
-};
 
-export const uploadRouter: OurFileRouter = {
-  feedbackMedia: f({
+export function createUploadRouter(convex: ConvexHttpClient, callbackToken: string | undefined): OurFileRouter {
+  const f = createUploadthing();
+  const record = recordUploadHandler(input => convex.mutation(api.uploads.recordUploadedFile, input), callbackToken);
+  return {
+  ticketMedia: f({
     image: {
       maxFileSize: "8MB",
       maxFileCount: 10,
@@ -71,14 +55,28 @@ export const uploadRouter: OurFileRouter = {
   })
     .input<UploadIntentInput, UploadIntentInput>(uploadIntentInput)
     .middleware(async ({ req, input, files }) => {
+      if (!callbackToken) {
+        console.error("UPLOAD_CALLBACK_NOT_CONFIGURED");
+        throw new UploadThingError({ code: "INTERNAL_SERVER_ERROR", message: "UPLOAD_CALLBACK_NOT_CONFIGURED" });
+      }
       const token = bearerToken(req);
       if (!token) throw new UploadThingError({ code: "FORBIDDEN", message: "Sign in before uploading." });
-      const valid = await convex.query(api.uploads.validateUploadIntent, {
-        token,
-        intentId: input.intentId as Id<"uploadIntents">,
-        secret: input.secret,
-        files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
-      });
+      let valid = false;
+      try {
+        valid = await convex.query(api.uploads.validateUploadIntent, {
+          token,
+          callbackToken,
+          intentId: input.intentId as Id<"uploadIntents">,
+          secret: input.secret,
+          files: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+        });
+      } catch (error) {
+        const candidate = errorCode(error);
+        const code = candidate && ["UPLOAD_CALLBACK_NOT_CONFIGURED", "TRUSTED_CALLBACK_REQUIRED"].includes(candidate)
+          ? candidate : "UPLOAD_AUTHORIZATION_FAILED";
+        console.error(code);
+        throw new UploadThingError({ code: "INTERNAL_SERVER_ERROR", message: code });
+      }
       if (!valid) throw new UploadThingError({ code: "FORBIDDEN", message: "Upload authorization expired or is invalid." });
       return input;
     })
@@ -86,22 +84,17 @@ export const uploadRouter: OurFileRouter = {
       // See the parser note above: Vercel's non-strict API check also erases the
       // properties of UploadThing's Effect Schema-derived UploadedFileData type.
       const uploaded = file as unknown as CompletedUpload;
-      try {
-        await convex.mutation(api.uploads.recordUploadedFile, {
-          intentId: metadata.intentId as Id<"uploadIntents">,
-          secret: metadata.secret,
-          file: {
-            key: uploaded.key,
-            name: uploaded.name,
-            size: uploaded.size,
-            type: uploaded.type,
-            url: uploaded.ufsUrl,
-          },
-        });
-        console.log("UploadThing completed", uploaded.name, uploaded.key);
-      } catch (error) {
-        await utapi.deleteFiles(uploaded.key).catch(() => undefined);
-        throw error;
-      }
+      await record({
+        intentId: metadata.intentId as Id<"uploadIntents">,
+        secret: metadata.secret,
+        file: {
+          key: uploaded.key,
+          name: uploaded.name,
+          size: uploaded.size,
+          type: uploaded.type,
+          url: uploaded.ufsUrl,
+        },
+      });
     }),
 };
+}

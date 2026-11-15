@@ -1,12 +1,22 @@
+import * as projectHandlers from "../convex/projects";
+import { ConvexHttpClient } from "convex/browser";
+import { getFunctionName } from "convex/server";
+import * as ticketHandlers from "../convex/tickets";
+import * as authHandlers from "../convex/auth";
+import { ConvexTicketRemote } from "../scripts/ticket/remote";
+import * as uploadHandlers from "../convex/uploads";
+import type { ValidatorJSON } from "convex/values";
+import { ConvexError } from "convex/values";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { parseTicketArgs } from "../scripts/ticket/cli";
 import type { ConfigStore, TicketConfig } from "../scripts/ticket/config";
-import { EXIT, TicketCliError } from "../scripts/ticket/errors";
+import { EXIT, TicketCliError, remoteError, internalError } from "../scripts/ticket/errors";
 import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
 import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
-import type { TicketDocument, TicketRemote } from "../scripts/ticket/remote";
+import type { TicketRef } from "../scripts/ticket/cli";
+import type { TicketAttachInput, TicketDocument, TicketRemote } from "../scripts/ticket/remote";
 import { classifyRemoteError, runTicketCli, type TicketCliDeps } from "../scripts/ticket/run";
 import { toStoredTicketStatus, type TicketStatus } from "../scripts/ticket/status";
 
@@ -14,11 +24,15 @@ const HELP = humanHelp();
 
 function ticket(overrides: Partial<TicketDocument> = {}) {
   return {
-    _id: "ticket-id",
+    _id: "ticket-id" as TicketDocument["_id"],
     _creationTime: 1_000,
     title: "Printer jams",
     description: "On long receipts",
     status: "new",
+    projectId: "project-id" as TicketDocument["projectId"],
+    projectKey: "TKT",
+    lifecycle: "active",
+    annotations: [],
     ticketNumber: 7,
     media: [],
     version: 0,
@@ -44,6 +58,31 @@ class MemoryCredentials implements CredentialStore {
   async delete(target: "dev" | "prod") { delete this.values[target]; }
 }
 
+// Validate transport shapes against the registered handlers, including extra fields.
+function validateArgs(registration: object, args: unknown) {
+  function check(validator: ValidatorJSON, value: unknown): void {
+    if (validator.type === "object") {
+      assert.ok(value && typeof value === "object" && !Array.isArray(value));
+      const fields = value as Record<string, unknown>;
+      for (const key of Object.keys(fields)) assert.ok(key in validator.value, `Unexpected field ${key}`);
+      for (const [key, field] of Object.entries(validator.value)) {
+        if (fields[key] === undefined && field.optional) continue;
+        check(field.fieldType, fields[key]);
+      }
+    } else if (validator.type === "array") {
+      assert.ok(Array.isArray(value));
+      value.forEach(item => check(validator.value, item));
+    } else if (validator.type === "union") {
+      assert.ok(validator.value.some(option => { try { check(option, value); return true; } catch { return false; } }));
+    } else if (validator.type === "id" || validator.type === "string") assert.equal(typeof value, "string");
+    else if (validator.type === "number" || validator.type === "boolean") assert.equal(typeof value, validator.type);
+    else if (validator.type === "null") assert.equal(value, null);
+    else if (validator.type === "literal") assert.equal(value, validator.value);
+    else assert.fail(`Unhandled validator ${validator.type}`);
+  }
+  check(JSON.parse((registration as { exportArgs(): string }).exportArgs()), args);
+}
+
 class FakeRemote implements TicketRemote {
   calls: Array<{ method: string; args: unknown[] }> = [];
   session: Awaited<ReturnType<TicketRemote["currentSession"]>> = { role: "staff", expiresAt: 20_000, customerId: null, email: null };
@@ -59,46 +98,56 @@ class FakeRemote implements TicketRemote {
   }
   async currentSession(url: string, token: string) { this.record("currentSession", url, token); return this.session; }
   async logout(url: string, token: string) { this.record("logout", url, token); }
-  async list(url: string, token: string, includeArchived: boolean) { this.record("list", url, token, includeArchived); return this.rows; }
-  async get(url: string, token: string, ticketNumber: number, includeArchived: boolean) {
-    this.record("get", url, token, ticketNumber, includeArchived);
-    return this.rows.find((row) => row.ticketNumber === ticketNumber && (includeArchived || row.deletedAt === undefined)) ?? null;
+  async list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean) {
+    this.record("list", url, token, projectKey, includeArchived);
+    return this.rows;
   }
-  async create(url: string, token: string, input: { title: string; description: string; requestId: string }) {
+  async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
+    this.record("get", url, token, ref, includeArchived);
+    return this.rows.find((row) =>
+      row.projectKey === ref.projectKey && row.ticketNumber === ref.ticketNumber && (includeArchived || row.archivedAt === undefined)
+    ) ?? null;
+  }
+  async create(url: string, token: string, input: { title: string; description: string; requestId: string; projectKey?: string }) {
     this.record("create", url, token, input);
     return { ticket: this.rows[0], created: true, requestId: input.requestId };
   }
-  async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
+  async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): ReturnType<TicketRemote["createUploadIntent"]> {
+    validateArgs(uploadHandlers.createUploadIntent, { token, idempotencyKey: input.requestId, files: input.files });
     this.record("createUploadIntent", url, token, input);
     return { intentId: "intent-id" as never, secret: "s".repeat(48), uploadedFiles: [] };
   }
-  async recordUploadedFile(url: string, input: { intentId: string; secret: string; file: TicketDocument["media"][number] }) {
+  async recordUploadedFile(url: string, input: { token: string; intentId: string; secret: string; file: TicketDocument["media"][number] }) {
+    validateArgs(uploadHandlers.recordUploadedFile, input);
     this.record("recordUploadedFile", url, input);
   }
-  async attachImages(url: string, token: string, input: { ticketNumber: number; expectedVersion: number; intentId: string; secret: string; media: TicketDocument["media"] }) {
+  async cancelUploadIntent(url: string, token: string, input: { intentId: string; secret: string }) {
+    validateArgs(uploadHandlers.cancelUploadIntent, { token, ...input });
+    this.record("cancelUploadIntent", url, token, input);
+  }
+  async attachImages(url: string, token: string, input: TicketAttachInput) {
     this.record("attachImages", url, token, input);
     this.rows[0] = ticket({ ...this.rows[0], media: [...this.rows[0].media, ...input.media], version: input.expectedVersion + 1 });
-    return this.rows[0];
   }
-  async update(url: string, token: string, input: { ticketNumber: number; title?: string; description?: string; expectedVersion: number }) {
+  async update(url: string, token: string, input: { ref: TicketRef; title?: string; description?: string; expectedVersion: number }) {
     this.record("update", url, token, input);
     if (input.expectedVersion !== (this.rows[0].version ?? 0)) throw new Error("VERSION_CONFLICT");
     this.rows[0] = ticket({ ...this.rows[0], ...input, version: input.expectedVersion + 1 });
     return this.rows[0];
   }
-  async changeStatus(url: string, token: string, input: { ticketNumber: number; status: TicketStatus; expectedVersion: number }) {
+  async changeStatus(url: string, token: string, input: { ref: TicketRef; status: TicketStatus; expectedVersion: number }) {
     this.record("changeStatus", url, token, input);
     this.rows[0] = ticket({ ...this.rows[0], status: toStoredTicketStatus(input.status), version: input.expectedVersion + 1 });
     return this.rows[0];
   }
-  async archive(url: string, token: string, ticketNumber: number, expectedVersion: number) {
-    this.record("archive", url, token, ticketNumber, expectedVersion);
-    this.rows[0] = ticket({ ...this.rows[0], deletedAt: 5_000, version: expectedVersion + 1 });
+  async archive(url: string, token: string, ref: TicketRef, expectedVersion: number) {
+    this.record("archive", url, token, ref, expectedVersion);
+    this.rows[0] = ticket({ ...this.rows[0], archivedAt: 5_000, version: expectedVersion + 1 });
     return this.rows[0];
   }
-  async restore(url: string, token: string, ticketNumber: number, expectedVersion: number) {
-    this.record("restore", url, token, ticketNumber, expectedVersion);
-    const { deletedAt: _deletedAt, ...active } = this.rows[0];
+  async restore(url: string, token: string, ref: TicketRef, expectedVersion: number) {
+    this.record("restore", url, token, ref, expectedVersion);
+    const { archivedAt: _archivedAt, ...active } = this.rows[0];
     this.rows[0] = ticket({ ...active, version: expectedVersion + 1 });
     return this.rows[0];
   }
@@ -122,7 +171,7 @@ function fixture() {
     images: {
       prepare: async (sources: string[]) => sources.map((source, index) => new File([`image-${index}`], source.split("/").at(-1) ?? `image-${index}.png`, { type: "image/png" })),
       upload: async (files: File[]) => files.map((file, index) => ({
-        key: `image-key-${index}`,
+        key: `image-key-${file.name}`,
         name: file.name,
         size: file.size,
         type: file.type,
@@ -172,11 +221,13 @@ test("the intended pnpm wrapper preserves exact stdout, stderr, and exit-code co
 
 test("parsing covers deployment selection, Ticket references, versions, and operation flags", () => {
   assert.deepEqual(parseTicketArgs(["list"]), { kind: "list", deployment: "dev", includeArchived: false });
-  assert.deepEqual(parseTicketArgs(["get", "TKT-0007", "--include-archived", "--prod"]), { kind: "get", deployment: "prod", ticketNumber: 7, includeArchived: true });
-  assert.deepEqual(parseTicketArgs(["status", "TKT-0007", "--status", "waiting_for_customer", "--expected-version", "2"]), { kind: "status", deployment: "dev", ticketNumber: 7, status: "waiting_for_customer", expectedVersion: 2 });
-  assert.deepEqual(parseTicketArgs(["archive", "TKT-0007", "--expected-version=3"]), { kind: "archive", deployment: "dev", ticketNumber: 7, expectedVersion: 3 });
-  assert.deepEqual(parseTicketArgs(["restore", "TKT-0007", "--expected-version", "4"]), { kind: "restore", deployment: "dev", ticketNumber: 7, expectedVersion: 4 });
-  assert.deepEqual(parseTicketArgs(["update", "TKT-0007", "--title", " New title ", "--expected-version", "1"]), { kind: "update", deployment: "dev", ticketNumber: 7, title: "New title", expectedVersion: 1 });
+  assert.deepEqual(parseTicketArgs(["list", "--project", "pos"]), { kind: "list", deployment: "dev", projectKey: "POS", includeArchived: false });
+  assert.deepEqual(parseTicketArgs(["get", "pos-0012"]), { kind: "get", deployment: "dev", ref: { projectKey: "POS", ticketNumber: 12 }, includeArchived: false });
+  assert.deepEqual(parseTicketArgs(["get", "TKT-0007", "--include-archived", "--prod"]), { kind: "get", deployment: "prod", ref: { projectKey: "TKT", ticketNumber: 7 }, includeArchived: true });
+  assert.deepEqual(parseTicketArgs(["status", "TKT-0007", "--status", "waiting_for_customer", "--expected-version", "2"]), { kind: "status", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, status: "waiting_for_customer", expectedVersion: 2 });
+  assert.deepEqual(parseTicketArgs(["archive", "TKT-0007", "--expected-version=3"]), { kind: "archive", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, expectedVersion: 3 });
+  assert.deepEqual(parseTicketArgs(["restore", "TKT-0007", "--expected-version", "4"]), { kind: "restore", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, expectedVersion: 4 });
+  assert.deepEqual(parseTicketArgs(["update", "TKT-0007", "--title", " New title ", "--expected-version", "1"]), { kind: "update", deployment: "dev", ref: { projectKey: "TKT", ticketNumber: 7 }, title: "New title", expectedVersion: 1 });
 });
 
 test("create and attach accept repeatable local or HTTPS image sources", () => {
@@ -214,7 +265,7 @@ test("create and attach accept repeatable local or HTTPS image sources", () => {
     {
       kind: "attach",
       deployment: "prod",
-      ticketNumber: 7,
+      ref: { projectKey: "TKT", ticketNumber: 7 },
       expectedVersion: 2,
       images: ["/tmp/first.png", "https://images.example.com/second.png"],
       requestId: "attach-images-0001",
@@ -230,6 +281,8 @@ test("parsing rejects unstable or unsafe operation inputs with stable codes", ()
     [["update", "TKT-0007", "--expected-version", "0"], "UPDATE_REQUIRED", EXIT.usage],
     [["status", "TKT-0007", "--status", "closed", "--expected-version", "0"], "INVALID_STATUS", EXIT.invalidInput],
     [["list", "--nope"], "UNKNOWN_FLAG", EXIT.usage],
+    [["list", "--project", "1X"], "INVALID_PROJECT", EXIT.invalidInput],
+    [["get", "TKT-07"], "INVALID_TICKET", EXIT.invalidInput],
   ];
   for (const [argv, code, exitCode] of cases) {
     assert.throws(() => parseTicketArgs(argv), (error: unknown) => error instanceof TicketCliError && error.code === code && error.exitCode === exitCode);
@@ -240,15 +293,15 @@ test("create supports JSON, validates locally, and dry-run touches no config, cr
   const { deps, remote, config, credentials } = fixture();
   config.value = null;
   credentials.values = {};
-  const parsed = parseTicketArgs(["create", "--json", '{"title":" Printer jams ","description":" Long receipts ","requestId":" req-1 "}']);
+  const parsed = parseTicketArgs(["create", "--json", '{"title":" Printer jams ","description":" Long receipts ","requestId":" req-1 ","project":"pos"}']);
   assert.equal(parsed.kind, "create");
-  if (parsed.kind === "create") assert.deepEqual(parsed.request, { title: "Printer jams", description: "Long receipts", requestId: "req-1" });
+  if (parsed.kind === "create") assert.deepEqual(parsed.request, { title: "Printer jams", description: "Long receipts", requestId: "req-1", projectKey: "POS" });
 
   const result = await runTicketCli(["create", "--title", "Printer jams", "--dry-run"], deps);
   assert.equal(result.exitCode, 0);
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: true, dryRun: true, created: false, deployment: "dev",
-    ticket: { title: "Printer jams", description: "", status: "new", media: [], origin: "staff", createdVia: "codex", requestId: "generated-request-id" },
+    ticket: { project: null, title: "Printer jams", description: "", status: "new", media: [], origin: "staff", createdVia: "codex", requestId: "generated-request-id" },
   });
   assert.deepEqual(remote.calls, []);
   assert.equal(config.saves, 0);
@@ -265,8 +318,9 @@ test("login uses the hidden password dependency, persists URL/client id, and sto
   assert.equal(remote.calls[0].args[0], "https://first.example.com");
   assert.equal(remote.calls[0].args[1], "hidden-password");
   assert.equal(typeof remote.calls[0].args[2], "string");
-  assert.equal(config.value?.deployments.dev?.url, "https://first.example.com");
-  assert.equal(config.value?.clientId.length, 36);
+  const savedConfig = await config.load();
+  assert.equal(savedConfig?.deployments.dev?.url, "https://first.example.com");
+  assert.equal(savedConfig?.clientId.length, 36);
   assert.deepEqual(credentials.values.dev, { token: "secret-token", expiresAt: 20_000, url: "https://first.example.com" });
   assert.equal(JSON.parse(outcome.stdout).authenticated, true);
   assert.equal(JSON.stringify(config.value).includes("secret-token"), false);
@@ -369,7 +423,7 @@ test("list and get return stable Ticket JSON shapes", async () => {
   const listed = JSON.parse((await runTicketCli(["list"], deps)).stdout);
   assert.equal(listed.count, 1);
   assert.deepEqual(listed.tickets[0], {
-    id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, title: "Printer jams", description: "On long receipts",
+    id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, project: "TKT", title: "Printer jams", description: "On long receipts",
     status: "new", version: 0, archived: false, createdAt: 1_000, updatedAt: 1_000, origin: "staff", createdVia: "codex", mediaCount: 0, annotationCount: 0,
   });
   const found = JSON.parse((await runTicketCli(["get", "TKT-0007"], deps)).stdout);
@@ -396,7 +450,7 @@ test("authenticated create is direct, idempotency-shaped, and keeps production e
   const created = await runTicketCli(["create", "--title", "Printer jams", "--request-id", "req-1", "--prod"], deps);
   assert.equal(remote.calls[0].args[0], "https://prod.example.com");
   assert.equal(remote.calls.find((call) => call.method === "create")?.args[1], "saved-prod-token");
-  assert.deepEqual(JSON.parse(created.stdout), { ok: true, id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, status: "new", version: 0, created: true, deployment: "prod", requestId: "req-1" });
+  assert.deepEqual(JSON.parse(created.stdout), { ok: true, id: "ticket-id", ticket: "TKT-0007", ticketNumber: 7, project: "TKT", status: "new", version: 0, created: true, deployment: "prod", requestId: "req-1" });
   assert.equal(classifyRemoteError(new Error("REQUEST_ID_CONFLICT"), "dev").exitCode, EXIT.conflict);
 });
 
@@ -422,7 +476,7 @@ test("attach uploads images through a verified intent and returns the updated Ti
   assert.equal(output.ticket.version, 1);
   assert.deepEqual(
     remote.calls.map((call) => call.method),
-    ["currentSession", "createUploadIntent", "recordUploadedFile", "recordUploadedFile", "attachImages"],
+    ["currentSession", "get", "createUploadIntent", "recordUploadedFile", "recordUploadedFile", "attachImages", "get"],
   );
 });
 
@@ -443,7 +497,7 @@ test("create with images creates the Ticket first then attaches media with the s
   assert.equal(JSON.parse(result.stdout).requestId, "create-images-0001");
   assert.deepEqual(
     remote.calls.map((call) => call.method),
-    ["currentSession", "create", "createUploadIntent", "recordUploadedFile", "attachImages"],
+    ["currentSession", "create", "get", "createUploadIntent", "recordUploadedFile", "attachImages", "get"],
   );
 });
 
@@ -472,7 +526,7 @@ test("an interrupted attachment retry reuses files already recorded by its uploa
 
   assert.equal(result.exitCode, 0);
   assert.equal(remote.calls.some((call) => call.method === "recordUploadedFile"), false);
-  assert.equal(remote.calls.at(-1)?.method, "attachImages");
+  assert.equal(remote.calls.at(-1)?.method, "get");
 });
 
 test("an idempotent create retry reports the original Ticket without claiming a new write", async () => {
@@ -482,6 +536,22 @@ test("an idempotent create retry reports the original Ticket without claiming a 
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).created, false);
   assert.equal(JSON.parse(result.stdout).requestId, "same-request");
+});
+
+test("an attached intent still sends the request id for authoritative attachment conflict checks", async () => {
+  const { deps, remote } = fixture();
+  remote.createUploadIntent = async () => ({
+    intentId: "intent-id" as never, secret: "secret", ticketId: remote.rows[0]._id,
+    uploadedFiles: [{ key: "existing-key", name: "first.png", size: 7, type: "image/png", url: "https://fixture.invalid/first.png" }],
+  });
+  deps.images.upload = async () => { throw new Error("Must reuse the uploaded file"); };
+  remote.attachImages = async (_url, _token, input) => {
+    assert.equal(input.requestId, "same-attachment-id");
+    throw new ConvexError({ code: "REQUEST_ID_CONFLICT" });
+  };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "same-attachment-id"], deps);
+  assert.equal(result.exitCode, 5);
+  assert.equal(JSON.parse(result.stderr).code, "REQUEST_ID_CONFLICT");
 });
 
 test("update, status, archive, and restore pass expectedVersion and return the new version", async () => {
@@ -505,7 +575,7 @@ test("version and authorization failures retain stable JSON and exit codes", asy
   assert.equal(JSON.parse(conflict.stderr).code, "VERSION_CONFLICT");
   assert.match(JSON.parse(conflict.stderr).hint, /pnpm ticket get/);
   assert.equal(classifyRemoteError(new Error("STAFF_ONLY"), "dev").code, "NOT_AUTHORIZED");
-  assert.equal(classifyRemoteError(new Error("FEEDBACK_NOT_FOUND"), "dev").code, "TICKET_NOT_FOUND");
+  assert.equal(classifyRemoteError(new Error("TICKET_UNAVAILABLE"), "dev").code, "TICKET_NOT_FOUND");
   assert.equal(classifyRemoteError(new Error("UPLOAD_REQUEST_CONFLICT"), "dev").code, "UPLOAD_REQUEST_CONFLICT");
   assert.equal(classifyRemoteError(new Error("UPLOAD_REQUEST_CONFLICT"), "dev").exitCode, EXIT.conflict);
 });
@@ -520,4 +590,227 @@ test("an attachment failure reports its generated retry id", async () => {
 
   assert.equal(result.exitCode, EXIT.remote);
   assert.equal(JSON.parse(result.stderr).requestId, "generated-request-id");
+});
+
+
+test("unmapped safe server codes remain visible with remote exit 6 and no raw error details", () => {
+  const error = classifyRemoteError({ data: { code: "UPLOAD_CALLBACK_NOT_CONFIGURED", secret: "private" } }, "dev");
+  assert.equal(error.exitCode, 6);
+  assert.equal(error.code, "REMOTE_CALL_FAILED");
+  assert.equal(error.message, "The Convex deployment call failed (UPLOAD_CALLBACK_NOT_CONFIGURED).");
+  assert.equal(classifyRemoteError({ data: { code: "secret token and Ticket content" } }, "dev").message, "The Convex deployment call failed.");
+});
+
+test("unmapped server failures preserve the CLI JSON error shape and exit 6", async () => {
+  const { deps, remote } = fixture();
+  remote.list = async () => { throw { data: { code: "STORAGE_NOT_CONFIGURED", details: "private" } }; };
+  const result = await runTicketCli(["list"], deps);
+  assert.equal(result.exitCode, 6);
+  assert.equal(result.stdout, "");
+  assert.deepEqual(JSON.parse(result.stderr), {
+    ok: false, code: "REMOTE_CALL_FAILED", message: "The Convex deployment call failed (STORAGE_NOT_CONFIGURED).", deployment: "dev",
+  });
+  assert.equal(result.stderr.trim().split("\n").length, 1);
+});
+
+test("CLI reconciles lost recording and attachment responses with the same staff credential and request identity", async () => {
+  const { deps, remote } = fixture();
+  let recordings = 0;
+  let attachments = 0;
+  const recorded: unknown[] = [];
+  const attached: unknown[] = [];
+  remote.recordUploadedFile = async (_url, input) => {
+    recorded.push(input);
+    assert.equal((input as { token?: string }).token, "saved-dev-token");
+    if (++recordings === 1) throw new Error("Recording response lost");
+  };
+  const attach = remote.attachImages.bind(remote);
+  remote.attachImages = async (url, token, input) => {
+    attached.push(input);
+    if (++attachments === 1) { await attach(url, token, input); throw new Error("Attachment response lost"); }
+  };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "lost-response-request"], deps);
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(recorded[0], recorded[1]);
+  assert.deepEqual(attached[0], attached[1]);
+  assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+  assert.equal(remote.rows[0].media.length, 1);
+});
+
+test("unknown CLI recording and attachment outcomes retain ownership without cleanup", async () => {
+  for (const boundary of ["recordUploadedFile", "attachImages"] as const) {
+    const { deps, remote } = fixture();
+    let attempts = 0;
+    remote[boundary] = async () => { attempts++; throw new Error("Response lost"); };
+    const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "unknown-response-request"], deps);
+    assert.equal(result.exitCode, 6);
+    assert.equal(attempts, 2);
+    assert.equal(JSON.parse(result.stderr).requestId, "unknown-response-request");
+    assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+  }
+});
+
+test("a definitive CLI attachment rejection queues cleanup through the ownership mutation", async () => {
+  const { deps, remote } = fixture();
+  remote.attachImages = async () => { throw new ConvexError({ code: "VERSION_CONFLICT" }); };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "rejected-response-request"], deps);
+  assert.equal(result.exitCode, 5);
+  assert.equal(remote.calls.at(-1)?.method, "cancelUploadIntent");
+});
+
+test("a rejected reconciliation after response loss still never authorizes CLI cleanup", async () => {
+  const { deps, remote } = fixture();
+  let attempts = 0;
+  remote.recordUploadedFile = async () => { if (++attempts === 1) throw new Error("Response lost"); throw new ConvexError({ code: "UPLOAD_INTENT_NOT_FOUND" }); };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0", "--request-id", "unresolved-recording-request"], deps);
+  assert.equal(result.exitCode, 6);
+  assert.match(result.stderr, /UPLOAD_WRITE_UNKNOWN/);
+  assert.equal(attempts, 2);
+  assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+});
+
+
+test("CLI cleanup failures preserve the main rejection and expose an unknown cleanup outcome", async () => {
+  const { deps, remote } = fixture();
+  remote.attachImages = async () => { throw new ConvexError({ code: "VERSION_CONFLICT" }); };
+  remote.cancelUploadIntent = async () => { throw new Error("private transport details"); };
+  const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0"], deps);
+  assert.equal(result.exitCode, 5);
+  const output = JSON.parse(result.stderr);
+  assert.equal(output.code, "VERSION_CONFLICT");
+  assert.deepEqual(output.details, { cleanup: { outcome: "unknown" } });
+  assert.doesNotMatch(result.stderr, /private transport details/);
+});
+
+test("CLI-local unknown outcomes, capitalized messages and unknown server codes never cancel uploads", async () => {
+  for (const error of [remoteError("Image upload outcome is unknown"), internalError("Unexpected upload result"),
+    new Error("VERSION_CONFLICT"), new ConvexError({ code: "UPLOAD_RECORDING_UNKNOWN" })]) {
+    const { deps, remote } = fixture();
+    deps.images.upload = async () => { throw error; };
+    const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0"], deps);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(remote.calls.some(call => call.method === "cancelUploadIntent"), false);
+  }
+});
+
+test("a Ticket re-read failure after committed CLI attachment never retries the mutation or cancels", async () => {
+  const originalQuery = ConvexHttpClient.prototype.query;
+  const originalMutation = ConvexHttpClient.prototype.mutation;
+  let attachments = 0;
+  let cancellations = 0;
+  ConvexHttpClient.prototype.query = async (reference, ..._args) => {
+    if (getFunctionName(reference) === "auth:currentSession") return { role: "staff", expiresAt: 20_000, customerId: null, email: null } as never;
+    if (attachments) throw new ConvexError({ code: "TICKET_UNAVAILABLE" });
+    return ticket() as never;
+  };
+  ConvexHttpClient.prototype.mutation = async (reference, ..._args) => {
+    const name = getFunctionName(reference);
+    if (name === "uploads:createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] } as never;
+    if (name === "uploads:recordUploadedFile") return { state: "recorded" } as never;
+    if (name === "tickets:attachTicketMedia") attachments++;
+    if (name === "uploads:cancelUploadIntent") cancellations++;
+    return { state: "committed", version: 1 } as never;
+  };
+  try {
+    const { deps } = fixture();
+    deps.remote = new ConvexTicketRemote();
+    const result = await runTicketCli(["attach", "TKT-0007", "--image", "/tmp/first.png", "--expected-version", "0"], deps);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(attachments, 1);
+    assert.equal(cancellations, 0);
+  } finally {
+    ConvexHttpClient.prototype.query = originalQuery;
+    ConvexHttpClient.prototype.mutation = originalMutation;
+  }
+});
+
+test("queued CLI recording is a structured definitive rejection", async () => {
+  const originalMutation = ConvexHttpClient.prototype.mutation;
+  ConvexHttpClient.prototype.mutation = async () => ({ state: "queued", jobIds: ["job"] }) as never;
+  try {
+    await assert.rejects(new ConvexTicketRemote().recordUploadedFile("https://fixture.convex.cloud", {
+      token: "staff", intentId: "intent-id" as never, secret: "secret",
+      file: { key: "key", url: "https://fixture.invalid/file", name: "image.png", type: "image/png", size: 1 },
+    }), (error: unknown) => error instanceof ConvexError && (error.data as { code: string }).code === "UPLOAD_INTENT_INVALID");
+  } finally { ConvexHttpClient.prototype.mutation = originalMutation; }
+});
+
+
+test("every CLI transport call satisfies the real registered argument validators", async () => {
+  const originalQuery = ConvexHttpClient.prototype.query;
+  const originalMutation = ConvexHttpClient.prototype.mutation;
+  const originalAction = ConvexHttpClient.prototype.action;
+  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
+  const called = new Set<string>();
+  const invoke = (reference: Parameters<typeof getFunctionName>[0], args: unknown) => {
+    const name = getFunctionName(reference);
+    const [module, method] = name.split(":");
+    validateArgs(handlers[module][method], args);
+    called.add(name);
+    if (method === "createTextTicket") return { ticket: ticket(), created: true, requestId: "request" };
+    if (method === "createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] };
+    if (method === "recordUploadedFile") return { state: "recorded" };
+    if (method === "listProjects") return [{ _id: ticket().projectId, key: "TKT" }];
+    if (method === "pageTicketDetails") return { page: [ticket()], isDone: true, continueCursor: "" };
+    return ticket();
+  };
+  ConvexHttpClient.prototype.query = async (reference, ...args) => invoke(reference, args[0]) as never;
+  ConvexHttpClient.prototype.mutation = async (reference, ...args) => invoke(reference, args[0]) as never;
+  ConvexHttpClient.prototype.action = async (reference, ...args) => invoke(reference, args[0]) as never;
+  try {
+    const remote = new ConvexTicketRemote();
+    const url = "https://fixture.convex.cloud";
+    const token = "staff";
+    const ref = { projectKey: "TKT", ticketNumber: 7 };
+    const intent = { intentId: "intent-id" as never, secret: "secret", ticketId: undefined, uploadedFiles: [] };
+    await remote.login(url, "password", "client");
+    await remote.currentSession(url, token);
+    await remote.logout(url, token);
+    await remote.list(url, token, "TKT", false);
+    await remote.get(url, token, ref, false);
+    await remote.create(url, token, { title: "Ticket", description: "", requestId: "request" });
+    await remote.createUploadIntent(url, token, { requestId: "request", files: [] });
+    await remote.recordUploadedFile(url, { ...intent, token, file: { key: "key", url: "https://fixture.invalid/file", name: "image.png", type: "image/png", size: 1 } });
+    await remote.cancelUploadIntent(url, token, intent);
+    await remote.attachImages(url, token, { ...intent, id: ticket()._id, requestId: "request", expectedVersion: 0, media: [] });
+    await remote.update(url, token, { ref, title: "Changed", expectedVersion: 0 });
+    await remote.changeStatus(url, token, { ref, status: "acknowledged", expectedVersion: 0 });
+    await remote.archive(url, token, ref, 0);
+    await remote.restore(url, token, ref, 0);
+    assert.equal(called.size, 15);
+  } finally {
+    ConvexHttpClient.prototype.query = originalQuery;
+    ConvexHttpClient.prototype.mutation = originalMutation;
+    ConvexHttpClient.prototype.action = originalAction;
+  }
+});
+
+
+test("CLI read adapter consumes every Project/lifecycle page and preserves full documented output", async () => {
+  const original = ConvexHttpClient.prototype.query;
+  const calls: Array<{ projectId: string; lifecycle: string; cursor: string | null }> = [];
+  const first = ticket();
+  const second = ticket({ _id: "older-id" as never, ticketNumber: 6, _creationTime: 900, description: "Full description outside the summary excerpt" });
+  const archived = ticket({ _id: "archived-id" as never, ticketNumber: 5, _creationTime: 800, lifecycle: "archived", archivedAt: 1200 });
+  ConvexHttpClient.prototype.query = async (reference, ...inputs) => {
+    const name = getFunctionName(reference);
+    const args = inputs[0] as Record<string, unknown>;
+    if (name === "projects:listProjects") return [{ _id: first.projectId, key: "TKT" }, { _id: "empty-project", key: "APP" }] as never;
+    if (name === "tickets:pageTicketDetails") {
+      const opts = args.paginationOpts as { cursor: string | null; numItems: number };
+      assert.equal(opts.numItems, 50);
+      calls.push({ projectId: String(args.projectId), lifecycle: String(args.lifecycle), cursor: opts.cursor });
+      const rows = args.projectId === "empty-project" ? [] : args.lifecycle === "archived" ? [archived] : opts.cursor === null ? [first] : [second];
+      return { page: rows, isDone: args.projectId === "empty-project" || args.lifecycle === "archived" || opts.cursor !== null, continueCursor: "next" } as never;
+    }
+    throw new Error(`Unexpected query ${name}`);
+  };
+  try {
+    const result = await new ConvexTicketRemote().list("https://fixture.convex.cloud", "staff", undefined, true);
+    assert.deepEqual(result, [first, second, archived]);
+    assert.deepEqual(calls.map(call => [call.projectId, call.lifecycle, call.cursor]), [
+      [first.projectId, "active", null], [first.projectId, "active", "next"], [first.projectId, "archived", null],
+      ["empty-project", "active", null], ["empty-project", "archived", null],
+    ]);
+  } finally { ConvexHttpClient.prototype.query = original; }
 });

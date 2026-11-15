@@ -65,6 +65,7 @@ export function CameraCaptureDialog({ open, onOpenChange, onCapture, onUseFilePi
 
   async function capturePhoto() {
     const video = videoRef.current;
+    const stream = streamRef.current;
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
 
     const canvas = document.createElement("canvas");
@@ -77,6 +78,7 @@ export function CameraCaptureDialog({ open, onOpenChange, onCapture, onUseFilePi
     }
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (streamRef.current !== stream || !stream) return;
     if (!blob) {
       setErrorKey("cameraStartFailed");
       return;

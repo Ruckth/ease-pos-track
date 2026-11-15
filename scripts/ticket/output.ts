@@ -6,7 +6,7 @@
  * public status value is decided.
  */
 
-import { formatTicketNumber } from "../../convex/ticket_numbers";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import type { TicketContent } from "../../convex/ticket_requests";
 import type { Deployment } from "./deployment";
 import type { TicketCliError } from "./errors";
@@ -21,19 +21,20 @@ export function jsonLine(payload: unknown) {
 export function ticketSummary(ticket: TicketDocument) {
   return {
     id: ticket._id,
-    ticket: formatTicketNumber(ticket.ticketNumber),
-    ticketNumber: ticket.ticketNumber ?? null,
+    ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey),
+    ticketNumber: ticket.ticketNumber,
+    project: ticket.projectKey,
     title: ticket.title,
     description: ticket.description,
     status: toPublicTicketStatus(ticket.status),
-    version: ticket.version ?? 0,
-    archived: ticket.deletedAt !== undefined,
+    version: ticket.version,
+    archived: ticket.archivedAt !== undefined,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
-    origin: ticket.origin ?? null,
+    origin: ticket.origin,
     createdVia: ticket.createdVia ?? null,
     mediaCount: ticket.media.length,
-    annotationCount: ticket.annotations?.length ?? 0,
+    annotationCount: ticket.annotations.length,
   };
 }
 
@@ -41,7 +42,7 @@ export function ticketDetail(ticket: TicketDocument) {
   return {
     ...ticketSummary(ticket),
     media: ticket.media,
-    annotations: ticket.annotations ?? [],
+    annotations: ticket.annotations,
   };
 }
 
@@ -65,10 +66,11 @@ export function createOutput(
   return {
     ok: true as const,
     id: result.ticket._id,
-    ticket: formatTicketNumber(result.ticket.ticketNumber),
+    ticket: formatTicketNumber(result.ticket.ticketNumber, result.ticket.projectKey),
     ticketNumber: result.ticket.ticketNumber,
+    project: result.ticket.projectKey,
     status: toPublicTicketStatus(result.ticket.status),
-    version: result.ticket.version ?? 0,
+    version: result.ticket.version,
     created: result.created,
     deployment,
     requestId: result.requestId,
@@ -78,7 +80,7 @@ export function createOutput(
 /** The Ticket a create would write, without contacting the deployment. */
 export function dryRunOutput(
   deployment: Deployment,
-  request: TicketContent,
+  request: TicketContent & { projectKey?: string },
   requestId: string,
   files: Array<Pick<File, "name" | "size" | "type">> = [],
 ) {
@@ -88,6 +90,7 @@ export function dryRunOutput(
     created: false as const,
     deployment,
     ticket: {
+      project: request.projectKey ?? null,
       title: request.title,
       description: request.description,
       status: "new" as const,
@@ -125,7 +128,7 @@ export function logoutOutput(deployment: Deployment, loggedOut: boolean) {
   return { ok: true as const, loggedOut, deployment };
 }
 
-export function errorOutput(error: TicketCliError, deployment?: Deployment, requestId?: string) {
+export function errorOutput(error: TicketCliError, deployment?: Deployment, requestId?: string, details?: { cleanup: { outcome: "unknown" } }) {
   return {
     ok: false as const,
     code: error.code,
@@ -133,5 +136,6 @@ export function errorOutput(error: TicketCliError, deployment?: Deployment, requ
     ...(deployment ? { deployment } : {}),
     ...(requestId ? { requestId } : {}),
     ...(error.hint ? { hint: error.hint } : {}),
+    ...(details ? { details } : {}),
   };
 }

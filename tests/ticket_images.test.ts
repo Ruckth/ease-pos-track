@@ -42,3 +42,20 @@ test("image inputs reject unsafe links, unsupported files, and more than ten ima
   await rejects(["https://images.example.com/file.txt"], "IMAGE_TYPE_UNSUPPORTED");
   await rejects(Array.from({ length: 11 }, (_, index) => `https://images.example.com/${index}.png`), "IMAGE_LIMIT_EXCEEDED");
 });
+
+test("the staff upload adapter uses an injected provider and never exposes provider error details", async () => {
+  const { UploadThingTicketImages } = await import("../scripts/ticket/images");
+  const file = new File(["image"], "fixture.png", { type: "image/png" });
+  const adapter = new UploadThingTicketImages("fake-token", token => {
+    assert.equal(token, "fake-token");
+    return { uploadFiles: async files => {
+      assert.deepEqual(files, [file]);
+      return [{ data: { key: "fake-key", name: file.name, size: file.size, type: file.type, ufsUrl: "https://fixture.invalid/image.png" } }];
+    } };
+  });
+  assert.deepEqual(await adapter.upload([file]), [{ key: "fake-key", name: file.name, size: file.size, type: file.type, url: "https://fixture.invalid/image.png" }]);
+  const failed = new UploadThingTicketImages("fake-token", () => ({ uploadFiles: async () => { throw new Error("secret-key https://private.invalid token Ticket content"); } }));
+  await assert.rejects(failed.upload([file]), error => error instanceof TicketCliError && !/secret-key|private.invalid|Ticket content/.test(error.message));
+  const misconfigured = new UploadThingTicketImages("fake-token", () => { throw new Error("secret config"); });
+  await assert.rejects(misconfigured.upload([file]), error => error instanceof TicketCliError && error.code === "UPLOAD_NOT_CONFIGURED" && !error.message.includes("secret config"));
+});

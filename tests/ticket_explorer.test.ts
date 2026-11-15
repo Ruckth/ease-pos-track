@@ -3,14 +3,14 @@ import test from "node:test";
 import type { Id } from "../convex/_generated/dataModel";
 import { createFilterQuery, createFilterRule } from "../src/components/reui/filters/filters-query";
 import { dateBoundary, filterTickets, paginateTickets, sortTickets, type ExplorerTicket } from "../src/lib/ticket-explorer";
-const ticket = (n: number, extra: Partial<ExplorerTicket> = {}): ExplorerTicket => ({ _id: String(n) as Id<"feedback">, _creationTime: n, ticketNumber: n, title: `Ticket ${n}`, description: "Printer", media: [], status: "new", createdAt: new Date(2026,8,15,12).getTime(), updatedAt: new Date(2026,8,16,12).getTime(), ...extra });
-const rule = (field: string, value: unknown) => createFilterRule({ path: [field], operator: field.endsWith("At") ? "between" : "in", value });
+const ticket = (n: number, extra: Partial<ExplorerTicket> = {}): ExplorerTicket => ({ _id: String(n) as Id<"tickets">, projectId: "project" as Id<"projects">, projectKey: "POS", version: 0, urgencyScore: undefined, archivedAt: undefined, lifecycle: "active", tagIds: [], tags: [], mediaCount: 0, annotationCount: 0, ticketNumber: n, title: `Ticket ${n}`, excerpt: "Printer", status: "new", createdAt: new Date(2026,8,15,12).getTime(), updatedAt: new Date(2026,8,16,12).getTime(), ...extra });
+const rule = (field: string, value: unknown) => createFilterRule({ id: crypto.randomUUID(), path: [field], operator: field.endsWith("At") ? "between" : "in", value });
 
 test("search and multiple filters combine, any selected tag matches, missing tags do not", () => {
   const rows = [ticket(1,{tagIds:["a" as Id<"ticketTags">]}),ticket(2,{tagIds:["b" as Id<"ticketTags">],status:"done"}),ticket(3),ticket(4,{tagIds:["c" as Id<"ticketTags">]})];
   const query=createFilterQuery([rule("tags",["a","b"]),rule("status",["new"])]);
   assert.deepEqual(filterTickets(rows,"printer",query).map(r=>r.ticketNumber),[1]);
-  assert.deepEqual(filterTickets(rows,"TKT-0001",query).map(r=>r.ticketNumber),[1]);
+  assert.deepEqual(filterTickets(rows,"POS-0001",query).map(r=>r.ticketNumber),[1]);
   assert.equal(filterTickets(rows,"no match",query).length,0);
   assert.equal(filterTickets(rows,"",createFilterQuery()).length,4);
 });
@@ -42,9 +42,9 @@ test("sort before pagination, stable ties, no mutation, and clamp on live deleti
 
 test("urgency ranges never treat unset as zero and unset sorts last in either direction", () => {
   const rows=[ticket(1),ticket(2,{urgencyScore:1}),ticket(3,{urgencyScore:100}),ticket(4,{urgencyScore:50})];
-  const range=createFilterQuery([createFilterRule({path:["urgencyScore"],operator:"between",value:[1,50]})]);
+  const range=createFilterQuery([createFilterRule({id: crypto.randomUUID(), path:["urgencyScore"],operator:"between",value:[1,50]})]);
   assert.deepEqual(filterTickets(rows,"",range).map(r=>r.ticketNumber),[2,4]);
-  assert.deepEqual(filterTickets(rows,"",createFilterQuery([createFilterRule({path:["urgencyScore"],operator:"unset"})])).map(r=>r.ticketNumber),[1]);
+  assert.deepEqual(filterTickets(rows,"",createFilterQuery([createFilterRule({id: crypto.randomUUID(), path:["urgencyScore"],operator:"unset"})])).map(r=>r.ticketNumber),[1]);
   assert.deepEqual(sortTickets(rows,{field:"urgencyScore",direction:"asc"},[],"en").map(r=>r.ticketNumber),[2,4,3,1]);
   assert.deepEqual(sortTickets(rows,{field:"urgencyScore",direction:"desc"},[],"en").map(r=>r.ticketNumber),[3,4,2,1]);
 });

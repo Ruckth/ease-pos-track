@@ -79,10 +79,10 @@ test("video comments can move to a new frame and timestamp", () => {
   assert.equal(updated.time, 18.5);
 });
 
-test("legacy pin comments keep image-point behavior", () => {
-  const legacyPin: AnnotationRecord = { ...imageComment, kind: "pin" };
+test("image-point comments reject a timestamp", () => {
+  const point: AnnotationRecord = { ...imageComment, kind: "point" };
   assert.throws(
-    () => updateAnnotationRecord(legacyPin, { time: 12 }, 500),
+    () => updateAnnotationRecord(point, { time: 12 }, 500),
     /INVALID_ANNOTATION_TIME/,
   );
 });

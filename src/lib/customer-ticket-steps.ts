@@ -5,7 +5,7 @@
  * button agree on when a step is complete.
  */
 
-export const CUSTOMER_STEP_COUNT = 3;
+const CUSTOMER_STEP_COUNT = 3;
 
 export type CustomerStep = 1 | 2 | 3;
 
@@ -26,7 +26,7 @@ export type CustomerTicketDraft = {
 };
 
 /** Stable codes, localized through the shared error table. */
-export type StepIssue = "REQUIRED_TITLE" | "TITLE_TOO_LONG" | "DESCRIPTION_TOO_LONG";
+type StepIssue = "REQUIRED_TITLE" | "TITLE_TOO_LONG" | "DESCRIPTION_TOO_LONG";
 
 export function stepIssues(step: CustomerStep, draft: CustomerTicketDraft): StepIssue[] {
   const issues: StepIssue[] = [];

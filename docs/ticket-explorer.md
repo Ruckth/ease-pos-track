@@ -8,7 +8,9 @@ Table columns sort before pagination, with deterministic ID tie-breaking. Rows p
 
 ## Scale and authorization
 
-This retains the existing staff-only `listFeedback` subscription and client filtering. `listTicketTags` is also staff-only. No customer queries or server authorization changed. Pagination reduces rendered table rows, **not** downloaded data: `listFeedback` still collects all Tickets and hydrates tags. This is appropriate for the existing internal board scale, but is not server pagination. If data volume becomes material, introduce indexed server filtering/search plus a separate board aggregation query; don't paginate the board subscription itself.
+The explorer consumes Project-scoped, bounded `api.tickets.pageTickets` summaries. Filters, sorting and table totals apply to loaded Tickets; the UI states this scope and offers controls to load older Tickets. Board lanes retain their independent server pages and totals. Tag labels are joined on bounded reads, and tag management APIs require staff access.
+
+Text search runs on the indexed server query before summaries reach the browser, so full descriptions remain searchable even when the displayed excerpt is truncated. Search returns at most 50 matches per lifecycle and indicates when more exist. Project access and customer ownership are enforced by domain operations.
 
 ## Registry provenance
 
@@ -20,7 +22,7 @@ The CLI's generated filter source expects Base UI while new-york dependencies re
 
 ## Verification
 
-`pnpm test` covers combined filters/search, inclusive dates, negation, sorting, pagination/clamping, and unset urgency. `pnpm run typecheck` and `pnpm run build` cover integration. The browser fixture uses only local sample Tickets and makes no backend writes:
+`pnpm test` covers combined filters/search, inclusive dates, negation, sorting, pagination/clamping, and unset urgency. `pnpm typecheck` and `pnpm run build` cover integration. The browser fixture uses only local sample Tickets and makes no backend writes (its optional base URL is `BROWSER_BASE_URL`):
 
 1. `pnpm exec vite --host 127.0.0.1 --port 5193`
 2. `pnpm exec node tests/browser/explorer-check.mjs`

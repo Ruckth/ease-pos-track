@@ -1,8 +1,7 @@
 import { useId, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@convex/_generated/api";
-import { TAG_COLORS, MAX_TAG_NAME_LENGTH } from "@convex/tag_rules";
-import type { Feedback, TicketTag } from "@/lib/types";
+import { useTagAdapter, useTicketTags } from "@/features/tickets/adapter";
+import { TAG_COLORS, MAX_TAG_NAME_LENGTH } from "../../shared/tag-rules";
+import type { Ticket, TicketTag } from "@/lib/types";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,11 +10,10 @@ import { tagTones } from "@/components/ticket-tags";
 const colorKeys = { slate: "tagSlate", red: "tagRed", orange: "tagOrange", green: "tagGreen", blue: "tagBlue", violet: "tagViolet" } as const;
 
 /** Staff-only editor; assignments always use the latest observed Ticket version. */
-export function TicketTagEditor({ item, token }: { item: Feedback; token: string }) {
+export function TicketTagEditor({ item, token }: { item: Ticket; token: string }) {
   const { t } = useI18n();
-  const tags = useQuery(api.feedback.listTicketTags, { token });
-  const create = useMutation(api.feedback.createTicketTag);
-  const assign = useMutation(api.feedback.setTicketTags);
+  const tags = useTicketTags(token);
+  const { create, assign } = useTagAdapter();
   const [name, setName] = useState("");
   const [color, setColor] = useState<TicketTag["color"]>("blue");
   const [busy, setBusy] = useState(false);
@@ -42,7 +40,7 @@ export function TicketTagEditor({ item, token }: { item: Feedback; token: string
       {tags === undefined ? <p className="text-sm text-muted-foreground">{t("syncing")}</p> : tags.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("noTicketTags")}</p>
       ) : <div className="flex flex-wrap gap-2">{tags.map((tag) => (
-        <Button key={tag._id} type="button" variant="outline" size="sm" disabled={busy || item.deletedAt !== undefined}
+        <Button key={tag._id} type="button" variant="outline" size="sm" disabled={busy || item.archivedAt !== undefined}
           aria-pressed={selected.includes(tag._id)}
           className={`${tagTones[tag.color]} h-auto min-h-9 max-w-full whitespace-normal break-words [overflow-wrap:anywhere] ${selected.includes(tag._id) ? "ring-2 ring-foreground ring-offset-1" : "opacity-70"}`}
           onClick={() => void run(() => assign({ token, id: item._id, expectedVersion: item.version ?? 0,

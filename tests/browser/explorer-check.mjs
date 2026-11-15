@@ -12,14 +12,14 @@ async function add(field, operator) {
   await page.getByRole("option", { name: operator, exact: true }).click();
 }
 try {
-  await page.goto("http://127.0.0.1:5193/tests/browser/explorer.html");
+  await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html`);
   await button("Language").click(); await button("Table").click(); await countRows(10);
   await button("Next page").click(); await summary("Page 2 of 6 · 54 Tickets");
   await page.getByRole("combobox",{name:"Rows per page"}).selectOption("25"); await countRows(25); await summary("Page 1 of 3 · 54 Tickets");
   await button("Last page").click(); await countRows(4);
   await button("Ticket number").click(); await countRows(25);
-  assert.match(await page.locator("tbody tr").first().innerText(),/TKT-0001/);
-  await page.getByRole("button",{name:/Open Ticket TKT-0001:/}).click(); assert.equal(await page.locator("output").innerText(),"0");
+  assert.match(await page.locator("tbody tr").first().innerText(),/POS-0001/);
+  await page.getByRole("button",{name:/Open Ticket POS-0001:/}).click(); assert.equal(await page.locator("output").innerText(),"0");
   await add("Tags","is any of"); await page.getByRole("option",{name:"Printer",exact:true}).click(); await page.keyboard.press("Escape"); await summary("Page 1 of 2 · 27 Tickets");
   await button("Board").click(); assert.equal(await button("Board").getAttribute("aria-pressed"),"true");
   await button("Table").click(); await summary("Page 1 of 2 · 27 Tickets");
@@ -38,8 +38,8 @@ try {
   await button("Apply").click(); await page.getByText("No Tickets match these filters.",{exact:true}).waitFor();
   await button("Clear all").click();
   await button("Archives").click(); await summary("Page 1 of 3 · 55 Tickets");
-  await page.getByRole("textbox",{name:"Search",exact:true}).fill("TKT-0055"); await countRows(1); assert.match(await page.locator("tbody").innerText(),/Archived/);
-  await page.getByRole("button",{name:/Open Ticket TKT-0055:/}).click();
+  await page.getByRole("textbox",{name:"Search",exact:true}).fill("POS-0055"); await countRows(1); assert.match(await page.locator("tbody").innerText(),/Archived/);
+  await page.getByRole("button",{name:/Open Ticket POS-0055:/}).click();
   const archivedDialog=page.getByRole("dialog"); await archivedDialog.waitFor();
   assert.equal(await archivedDialog.getByRole("button",{name:"Edit",exact:true}).count(),0);
   await archivedDialog.getByRole("button",{name:"Restore",exact:true}).click(); await archivedDialog.waitFor({state:"hidden"});

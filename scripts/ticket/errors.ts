@@ -7,7 +7,7 @@
  * exactly once.
  */
 
-import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../convex/feedback_state";
+import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../shared/ticket-state";
 import { MAX_REQUEST_ID_LENGTH } from "../../convex/ticket_requests";
 
 export const EXIT = {
@@ -20,7 +20,7 @@ export const EXIT = {
   remote: 6,
 } as const;
 
-export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
+type ExitCode = (typeof EXIT)[keyof typeof EXIT];
 
 export class TicketCliError extends Error {
   constructor(readonly code: string, message: string, readonly exitCode: number, readonly hint?: string) {
@@ -67,7 +67,7 @@ export function internalError(message: string) {
  * differently there.
  */
 const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
-  REQUIRED_FEEDBACK: { code: "TITLE_REQUIRED", message: "--title is required and cannot be blank." },
+  REQUIRED_TICKET: { code: "TITLE_REQUIRED", message: "--title is required and cannot be blank." },
   TITLE_TOO_LONG: { code: "TITLE_TOO_LONG", message: `--title must be ${MAX_TITLE_LENGTH} characters or fewer.` },
   DESCRIPTION_TOO_LONG: { code: "DESCRIPTION_TOO_LONG", message: `--description must be ${MAX_DESCRIPTION_LENGTH} characters or fewer.` },
   REQUIRED_REQUEST_ID: { code: "REQUEST_ID_REQUIRED", message: "--request-id cannot be blank." },
@@ -78,6 +78,9 @@ const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
   IMAGE_TOO_LARGE: { code: "IMAGE_SIZE_INVALID", message: "Each --image must be larger than zero and no more than 8 MB." },
   INVALID_FILE_METADATA: { code: "INVALID_IMAGE_SOURCE", message: "An image has invalid file metadata." },
   INVALID_MEDIA_REFERENCE: { code: "INVALID_IMAGE_SOURCE", message: "An image upload did not produce a valid HTTPS reference." },
+  INVALID_PROJECT_KEY: { code: "INVALID_PROJECT", message: "--project must be 2-10 letters or digits, starting with a letter." },
+  PROJECT_NOT_FOUND: { code: "PROJECT_NOT_FOUND", message: "No active Project has that key." },
+  PROJECT_REQUIRED: { code: "PROJECT_REQUIRED", message: "More than one Project exists; pass --project with its key." },
 };
 
 /** The validation codes a remote call can also report, for error classification. */

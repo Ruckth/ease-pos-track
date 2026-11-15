@@ -25,7 +25,7 @@ function deploymentFlag(target: Deployment) {
   return target === "prod" ? " --prod" : "";
 }
 
-export function deploymentLabel(target: Deployment) {
+function deploymentLabel(target: Deployment) {
   return target === "prod" ? "production" : "development";
 }
 

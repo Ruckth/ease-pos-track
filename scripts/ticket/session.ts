@@ -15,7 +15,7 @@ export function credentialError(code: string, message: string, target: Deploymen
   return authError(code, message, authHint(target));
 }
 
-export type SessionAccessDeps = {
+type SessionAccessDeps = {
   remote: Pick<TicketRemote, "login" | "currentSession" | "logout">;
   config: ConfigStore;
   credentials: CredentialStore;

@@ -4,7 +4,7 @@ import { Filters } from "@/components/reui/filters/filters";
 import type { FilterEditorProps, FilterField, FilterQuery } from "@/components/reui/filters/filters-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { statuses } from "@/components/feedback-status";
+import { statuses } from "@/components/ticket-status";
 import { useI18n } from "@/lib/i18n";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { thaiFilterLabels } from "@/lib/explorer-filter-labels";

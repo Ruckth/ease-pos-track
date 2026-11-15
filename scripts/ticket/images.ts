@@ -3,8 +3,8 @@ import { basename, extname } from "node:path";
 import { UTApi } from "uploadthing/server";
 import { authError, inputError, remoteError } from "./errors";
 
-export const MAX_TICKET_IMAGES = 10;
-export const MAX_TICKET_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TICKET_IMAGES = 10;
+const MAX_TICKET_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export type TicketMediaItem = {
   key: string;
@@ -18,6 +18,10 @@ export interface TicketImages {
   prepare(sources: string[]): Promise<File[]>;
   upload(files: File[]): Promise<TicketMediaItem[]>;
 }
+
+type UploadProvider = { uploadFiles(files: File[]): Promise<Array<{ data: {
+  key: string; name: string; size: number; type: string; ufsUrl: string;
+} | null }>> };
 
 const IMAGE_TYPES: Record<string, string> = {
   ".avif": "image/avif",
@@ -70,7 +74,7 @@ async function remoteImage(source: string, index: number, fetcher: typeof fetch)
   try {
     url = new URL(source);
   } catch {
-    throw inputError("INVALID_IMAGE_SOURCE", `Image source is neither a local path nor a valid HTTPS URL: ${source}`);
+    throw inputError("INVALID_IMAGE_SOURCE", "Image source must be a local path or a valid HTTPS URL.");
   }
   if (url.protocol !== "https:") throw inputError("INVALID_IMAGE_SOURCE", "Remote --image sources must use HTTPS.");
 
@@ -78,7 +82,7 @@ async function remoteImage(source: string, index: number, fetcher: typeof fetch)
   try {
     response = await fetcher(url, { redirect: "follow" });
   } catch {
-    throw inputError("IMAGE_DOWNLOAD_FAILED", `Unable to download image: ${url.toString()}`);
+    throw inputError("IMAGE_DOWNLOAD_FAILED", "Unable to download the image.");
   }
   if (!response.ok) throw inputError("IMAGE_DOWNLOAD_FAILED", `Image download returned HTTP ${response.status}.`);
   const finalUrl = new URL(response.url || url.toString());
@@ -106,24 +110,32 @@ export async function prepareTicketImages(sources: string[], fetcher: typeof fet
 
 /** Upload prepared originals with the server SDK; links and paths share one store. */
 export class UploadThingTicketImages implements TicketImages {
-  constructor(private readonly token: string | undefined = process.env.UPLOADTHING_TOKEN) {}
+  private readonly provider?: UploadProvider;
+  constructor(token: string | undefined, providerFactory: (token: string) => UploadProvider = token => new UTApi({ token })) {
+    if (token) {
+      try { this.provider = providerFactory(token); }
+      catch { /* upload() returns the typed failure inside the CLI JSON boundary. */ }
+    }
+  }
 
   prepare(sources: string[]) {
     return prepareTicketImages(sources);
   }
 
   async upload(files: File[]) {
-    if (!this.token) {
+    if (!this.provider) {
       throw authError(
         "UPLOAD_NOT_CONFIGURED",
         "Image upload requires UPLOADTHING_TOKEN.",
         "Configure UPLOADTHING_TOKEN, then retry with the same --request-id.",
       );
     }
-    const results = await new UTApi({ token: this.token }).uploadFiles(files, { concurrency: 4 });
+    let results;
+    try { results = await this.provider.uploadFiles(files); }
+    catch { throw remoteError("Image upload outcome is unknown. Retry with the same --request-id."); }
     return results.map((result) => {
       if (!result.data) {
-        throw remoteError(`Image upload failed: ${result.error?.message ?? "UploadThing returned no file."}`);
+        throw remoteError("Image upload failed. Retry with the same --request-id.");
       }
       return {
         key: result.data.key,

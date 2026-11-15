@@ -1,8 +1,8 @@
 import type { FilterNode, FilterQuery, FilterRule } from "@/components/reui/filters/filters-types";
-import { formatTicketNumber } from "./feedback-ui";
-import type { Feedback, TicketTag } from "./types";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
+import type { TicketTag } from "./types";
 
-export type ExplorerTicket = Feedback;
+export type ExplorerTicket = import("../../shared/ticket-contracts").TicketSummary & { description?: string };
 export type ExplorerTag = TicketTag;
 export type SortField = "ticketNumber" | "title" | "tags" | "status" | "createdAt" | "updatedAt" | "urgencyScore";
 export type ExplorerSort = { field: SortField; direction: "asc" | "desc" };
@@ -45,7 +45,7 @@ function matches(item: ExplorerTicket, node: FilterNode): boolean {
 
 export function filterTickets<T extends ExplorerTicket>(items: T[], search: string, query: FilterQuery): T[] {
   const text = search.trim().toLocaleLowerCase();
-  return items.filter((item) => (!text || `${formatTicketNumber(item.ticketNumber)} ${item.title} ${item.description}`.toLocaleLowerCase().includes(text)) && matches(item, query));
+  return items.filter((item) => (!text || `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description ?? item.excerpt ?? ""}`.toLocaleLowerCase().includes(text)) && matches(item, query));
 }
 
 export function sortTickets<T extends ExplorerTicket>(items: T[], sort: ExplorerSort, tags: ExplorerTag[], language: string): T[] {

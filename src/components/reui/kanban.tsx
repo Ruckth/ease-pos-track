@@ -141,7 +141,7 @@ const MEASURING_CONFIG = {
   droppable: { strategy: MeasuringStrategy.Always },
 }
 
-export interface KanbanMoveEvent {
+interface KanbanMoveEvent {
   event: DragEndEvent
   activeContainer: string
   activeIndex: number
@@ -149,7 +149,7 @@ export interface KanbanMoveEvent {
   overIndex: number
 }
 
-export interface KanbanCommitMeta<T> {
+interface KanbanCommitMeta<T> {
   kind: "item" | "column"
   event: DragEndEvent
   activeContainer: string
@@ -159,7 +159,7 @@ export interface KanbanCommitMeta<T> {
   previousValue: Record<string, T[]>
 }
 
-export interface KanbanRootProps<T> extends Omit<
+interface KanbanRootProps<T> extends Omit<
   useRender.ComponentProps<"div">,
   "children" | "onDragStart" | "onDragEnd"
 > {
@@ -319,7 +319,7 @@ function Kanban<T>({
       setActiveId(event.active.id)
       onDragStart?.(event)
 
-      if (onValueCommit || restoreOnCancel) {
+      if (onValueCommit || restoreOnCancel || onMove) {
         const snapshot = valueRef.current
         const id = event.active.id
         const keys = Object.keys(snapshot)
@@ -345,7 +345,7 @@ function Kanban<T>({
         }
       }
     },
-    [onDragStart, onValueCommit, restoreOnCancel]
+    [onDragStart, onValueCommit, restoreOnCancel, onMove]
   )
 
   const handleDragOver = useCallback(
@@ -454,13 +454,16 @@ function Kanban<T>({
 
       // Handle item move callback
       if (onMove && !isColumn(active.id)) {
-        const activeContainer = findContainer(active.id)
+        // Pagination or a live subscription may remove the source row during
+        // a drag. Keep the gesture's original source; consumers fence its version.
+        const origin = dragOriginRef.current
+        const activeContainer = origin?.container ?? findContainer(active.id)
         const overContainer = findContainer(over.id)
 
         if (activeContainer && overContainer) {
-          const activeIndex = columns[activeContainer].findIndex(
+          const activeIndex = origin?.index ?? columns[activeContainer]?.findIndex(
             (item: T) => getItemValue(item) === active.id
-          )
+          ) ?? -1
           const overIndex = isColumn(over.id)
             ? columns[overContainer].length
             : columns[overContainer].findIndex(
@@ -608,7 +611,7 @@ function Kanban<T>({
   )
 }
 
-export type KanbanBoardProps = useRender.ComponentProps<"div">
+type KanbanBoardProps = useRender.ComponentProps<"div">
 
 function KanbanBoard({ className, render, ...props }: KanbanBoardProps) {
   const { columnIds } = useContext(KanbanContext)
@@ -630,7 +633,7 @@ function KanbanBoard({ className, render, ...props }: KanbanBoardProps) {
   )
 }
 
-export interface KanbanColumnProps extends useRender.ComponentProps<"div"> {
+interface KanbanColumnProps extends useRender.ComponentProps<"div"> {
   value: string
   disabled?: boolean
   /**
@@ -721,7 +724,7 @@ function KanbanColumn({
   )
 }
 
-export interface KanbanColumnHandleProps extends useRender.ComponentProps<"div"> {
+interface KanbanColumnHandleProps extends useRender.ComponentProps<"div"> {
   cursor?: boolean
 }
 
@@ -755,7 +758,7 @@ function KanbanColumnHandle({
   })
 }
 
-export interface KanbanItemProps extends useRender.ComponentProps<"div"> {
+interface KanbanItemProps extends useRender.ComponentProps<"div"> {
   value: string
   disabled?: boolean
 }
@@ -850,7 +853,7 @@ function KanbanItem({
   )
 }
 
-export interface KanbanItemHandleProps extends useRender.ComponentProps<"div"> {
+interface KanbanItemHandleProps extends useRender.ComponentProps<"div"> {
   cursor?: boolean
 }
 
@@ -887,7 +890,7 @@ function KanbanItemHandle({
   })
 }
 
-export interface KanbanColumnContentProps extends useRender.ComponentProps<"div"> {
+interface KanbanColumnContentProps extends useRender.ComponentProps<"div"> {
   value: string
 }
 
@@ -927,7 +930,7 @@ function KanbanColumnContent({
   )
 }
 
-export interface KanbanOverlayProps extends Omit<
+interface KanbanOverlayProps extends Omit<
   React.ComponentProps<typeof DragOverlay>,
   "children"
 > {

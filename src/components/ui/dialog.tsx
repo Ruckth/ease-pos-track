@@ -10,17 +10,18 @@ type DialogProps = {
   title: string;
   description?: string;
   keepMounted?: boolean;
+  initialFocus?: () => HTMLElement | null;
   mobileFullScreen?: boolean;
   children: React.ReactNode;
 };
 
-export function Dialog({ open, onOpenChange, title, description, keepMounted = false, mobileFullScreen = false, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, title, description, keepMounted = false, mobileFullScreen = false, initialFocus, children }: DialogProps) {
   const { t } = useI18n();
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseDialog.Portal keepMounted={keepMounted}>
         <BaseDialog.Backdrop className="fixed inset-0 z-50 min-h-dvh bg-black/45 backdrop-blur-[2px] transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <BaseDialog.Popup className={cn(
+        <BaseDialog.Popup initialFocus={initialFocus} className={cn(
           "fixed z-50 overflow-auto bg-background shadow-2xl outline-none",
           mobileFullScreen
             ? "inset-0 max-h-dvh rounded-none border-0"

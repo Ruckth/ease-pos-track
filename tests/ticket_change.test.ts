@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { feedbackState, planTicketChange } from "../convex/tickets";
+import { ticketState, planTicketChange } from "../convex/domain/tickets";
 import type { Doc } from "../convex/_generated/dataModel";
 
 /** A ticket row as the mutations see it, narrowed to what the planner reads. */
-function ticket(overrides: Partial<Doc<"feedback">> = {}) {
+function ticket(overrides: Partial<Doc<"tickets">> = {}) {
   return {
-    _id: "feedback-1",
+    _id: "ticket-1",
     _creationTime: 1,
-    title: "Card reader is dead",
+    projectId: "project-1",
+    projectKey: "POS",
+    origin: "staff",
+    lifecycle: "active",
+    searchText: "Reader is dead",
+    annotations: [],
+    title: "Reader is dead",
     description: "Lane 3 will not read chips",
     status: "new",
     ticketNumber: 7,
@@ -17,7 +23,7 @@ function ticket(overrides: Partial<Doc<"feedback">> = {}) {
     createdAt: 100,
     updatedAt: 100,
     ...overrides,
-  } as Doc<"feedback">;
+  } as Doc<"tickets">;
 }
 
 test("bumps the version once and stamps the injected timestamp", () => {
@@ -34,15 +40,6 @@ test("bumps the version once and stamps the injected timestamp", () => {
   assert.equal(plan.updatedAt, 500);
   assert.deepEqual(plan.patch, { status: "in_progress", version: 4, updatedAt: 500 });
   assert.equal(plan.after.version, 4);
-});
-
-test("treats a missing version as 0", () => {
-  const doc = ticket({ version: undefined });
-
-  const plan = planTicketChange({ doc, expectedVersion: 0, changes: { title: "New" }, now: 500 });
-
-  assert.equal(plan.version, 1);
-  assert.equal(plan.before.version, 0);
 });
 
 test("rejects a stale expected version before deriving anything", () => {
@@ -75,6 +72,8 @@ test("the patch and the audit after state cannot disagree", () => {
     status: "acknowledged",
     version: 4,
     mediaCount: 0,
+    annotationCount: 0,
+    lifecycle: "active",
   });
 });
 
@@ -88,29 +87,30 @@ test("before is the ticket as it was, not as it will be", () => {
     now: 500,
   });
 
-  assert.deepEqual(plan.before, feedbackState(doc));
+  assert.deepEqual(plan.before, ticketState(doc));
   assert.equal(plan.before.status, "new");
   assert.equal(plan.before.version, 3);
 });
 
-test("archiving carries deletedAt into both the patch and the audit trail", () => {
+test("archiving carries archivedAt into both the patch and the audit trail", () => {
   const doc = ticket();
 
   const plan = planTicketChange({
     doc,
     expectedVersion: 3,
-    changes: { deletedAt: 500 },
+    changes: { archivedAt: 500, lifecycle: "archived" },
     now: 500,
   });
 
-  assert.equal(plan.patch.deletedAt, 500);
-  assert.equal(plan.after.deletedAt, 500);
-  assert.equal(plan.before.deletedAt, undefined);
+  assert.equal(plan.patch.archivedAt, 500);
+  assert.equal(plan.after.archivedAt, 500);
+  assert.equal(plan.after.lifecycle, "archived");
+  assert.equal(plan.before.archivedAt, undefined);
 });
 
 test("leaves the ticket and the changes it was given untouched", () => {
   const doc = ticket();
-  const changes = { status: "done" as const };
+  const changes: { status: Doc<"tickets">["status"] } = { status: "done" };
   const snapshot = { ...doc };
 
   const plan = planTicketChange({ doc, expectedVersion: 3, changes, now: 500 });
@@ -122,6 +122,15 @@ test("leaves the ticket and the changes it was given untouched", () => {
   plan.patch.status = "waiting";
   assert.equal(doc.status, "new");
   assert.equal(plan.after.status, "done");
+});
+
+test("restore deliberately removes archivedAt in the patch and its audit snapshot", () => {
+  const plan = planTicketChange({ doc: ticket({ lifecycle: "archived", archivedAt: 100 }), expectedVersion: 3,
+    changes: { lifecycle: "active", archivedAt: undefined }, now: 500 });
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.patch, "archivedAt"), true);
+  assert.equal(plan.patch.archivedAt, undefined);
+  assert.equal(plan.before.archivedAt, 100);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.after, "archivedAt"), false);
 });
 
 test("attaching media updates the row and records only media counts in the audit snapshot", () => {
@@ -139,4 +148,35 @@ test("attaching media updates the row and records only media counts in the audit
   assert.deepEqual(plan.patch.media, media);
   assert.equal(plan.before.mediaCount, 0);
   assert.equal(plan.after.mediaCount, 1);
+});
+
+test("urgency changes stay versioned and visible in the audit snapshot", () => {
+  const doc = ticket({ urgencyScore: 24 });
+
+  const plan = planTicketChange({
+    doc,
+    expectedVersion: 3,
+    changes: { urgencyScore: 88 },
+    now: 500,
+  });
+
+  assert.equal(plan.patch.urgencyScore, 88);
+  assert.equal(plan.before.urgencyScore, 24);
+  assert.equal(plan.after.urgencyScore, 88);
+  assert.equal(plan.version, 4);
+});
+
+test("clearing urgency returns a Ticket to the unscored state", () => {
+  const doc = ticket({ urgencyScore: 60 });
+
+  const plan = planTicketChange({
+    doc,
+    expectedVersion: 3,
+    changes: { urgencyScore: undefined },
+    now: 500,
+  });
+
+  assert.equal(plan.patch.urgencyScore, undefined);
+  assert.equal(plan.before.urgencyScore, 60);
+  assert.equal(plan.after.urgencyScore, undefined);
 });

@@ -6,14 +6,17 @@
  * behavior can be tested without a deployment.
  */
 
+import type { FunctionReturnType } from "convex/server";
 import { ConvexHttpClient } from "convex/browser";
+import { ConvexError } from "convex/values";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { TicketDetail } from "../../shared/ticket-contracts";
 import type { Id } from "../../convex/_generated/dataModel";
+import type { TicketRef } from "./cli";
 import type { TicketMediaItem } from "./images";
 import { toStoredTicketStatus, type TicketStatus } from "./status";
 
-export type TicketDocument = Doc<"feedback">;
+export type TicketDocument = TicketDetail;
 
 export type CurrentSession = {
   role: "staff" | "customer";
@@ -22,19 +25,20 @@ export type CurrentSession = {
   email: string | null;
 };
 
-export type TicketCreateInput = { title: string; description: string; requestId: string };
-export type TicketCreateResult = { ticket: TicketDocument; created: boolean; requestId: string };
-export type TicketUpdateInput = { ticketNumber: number; title?: string; description?: string; expectedVersion: number };
-export type TicketStatusInput = { ticketNumber: number; status: TicketStatus; expectedVersion: number };
-export type TicketUploadIntent = {
+type TicketCreateInput = { title: string; description: string; requestId: string; projectKey?: string };
+type TicketCreateResult = { ticket: TicketDocument; created: boolean; requestId: string };
+type TicketUpdateInput = { ref: TicketRef; title?: string; description?: string; expectedVersion: number };
+type TicketStatusInput = { ref: TicketRef; status: TicketStatus; expectedVersion: number };
+type TicketUploadIntent = {
   intentId: Id<"uploadIntents">;
   secret: string;
-  feedbackId?: Id<"feedback">;
+  ticketId?: Id<"tickets">;
   uploadedFiles: TicketMediaItem[];
 };
-export type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
+type TicketUploadCredentials = Pick<TicketUploadIntent, "intentId" | "secret">;
 export type TicketAttachInput = TicketUploadCredentials & {
-  ticketNumber: number;
+  requestId: string;
+  id: Id<"tickets">;
   expectedVersion: number;
   media: TicketMediaItem[];
 };
@@ -43,16 +47,17 @@ export interface TicketRemote {
   login(url: string, password: string, clientId: string): Promise<{ token: string; expiresAt: number }>;
   currentSession(url: string, token: string): Promise<CurrentSession | null>;
   logout(url: string, token: string): Promise<void>;
-  list(url: string, token: string, includeArchived: boolean): Promise<TicketDocument[]>;
-  get(url: string, token: string, ticketNumber: number, includeArchived: boolean): Promise<TicketDocument | null>;
+  list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean): Promise<TicketDocument[]>;
+  get(url: string, token: string, ref: TicketRef, includeArchived: boolean): Promise<TicketDocument | null>;
   create(url: string, token: string, input: TicketCreateInput): Promise<TicketCreateResult>;
   createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): Promise<TicketUploadIntent>;
-  recordUploadedFile(url: string, input: TicketUploadCredentials & { file: TicketMediaItem }): Promise<void>;
-  attachImages(url: string, token: string, input: TicketAttachInput): Promise<TicketDocument>;
+  recordUploadedFile(url: string, input: TicketUploadCredentials & { token: string; file: TicketMediaItem }): Promise<void>;
+  cancelUploadIntent(url: string, token: string, input: TicketUploadCredentials): Promise<void>;
+  attachImages(url: string, token: string, input: TicketAttachInput): Promise<void>;
   update(url: string, token: string, input: TicketUpdateInput): Promise<TicketDocument>;
   changeStatus(url: string, token: string, input: TicketStatusInput): Promise<TicketDocument>;
-  archive(url: string, token: string, ticketNumber: number, expectedVersion: number): Promise<TicketDocument>;
-  restore(url: string, token: string, ticketNumber: number, expectedVersion: number): Promise<TicketDocument>;
+  archive(url: string, token: string, ref: TicketRef, expectedVersion: number): Promise<TicketDocument>;
+  restore(url: string, token: string, ref: TicketRef, expectedVersion: number): Promise<TicketDocument>;
 }
 
 /**
@@ -79,7 +84,7 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async login(url: string, password: string, clientId: string) {
-    return await this.client(url).mutation(api.auth.login, { password, clientId });
+    return await this.client(url).action(api.auth.login, { password, clientId });
   }
 
   async currentSession(url: string, token: string) {
@@ -90,22 +95,37 @@ export class ConvexTicketRemote implements TicketRemote {
     await this.client(url).mutation(api.auth.logout, { token });
   }
 
-  async list(url: string, token: string, includeArchived: boolean) {
-    await this.ensureNumbering(url, token);
-    return await this.client(url).query(api.feedback.listFeedback, { token, includeDeleted: includeArchived });
+  async list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean) {
+    const client = this.client(url);
+    const projects = await client.query(api.projects.listProjects, { token });
+    const scoped = projectKey === undefined ? projects : projects.filter(project => project.key === projectKey.trim().toUpperCase());
+    if (projectKey !== undefined && scoped.length === 0) throw new ConvexError({ code: "PROJECT_NOT_FOUND" });
+    const tickets: TicketDocument[] = [];
+    for (const project of scoped) {
+      for (const lifecycle of (includeArchived ? ["active", "archived"] : ["active"]) as Array<"active" | "archived">) {
+        let cursor: string | null = null;
+        for (;;) {
+          const result: FunctionReturnType<typeof api.tickets.pageTicketDetails> = await client.query(api.tickets.pageTicketDetails, { token, projectId: project._id, lifecycle, paginationOpts: { numItems: 50, cursor } });
+          tickets.push(...result.page);
+          if (result.isDone) break;
+          cursor = result.continueCursor;
+        }
+      }
+    }
+    return Array.from(new Map(tickets.map(ticket => [ticket._id, ticket])).values()).sort((a, b) => b._creationTime - a._creationTime);
   }
 
-  async get(url: string, token: string, ticketNumber: number, includeArchived: boolean) {
-    await this.ensureNumbering(url, token);
-    return await this.client(url).query(api.feedback.getFeedbackByTicketNumber, {
+  async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
+    return await this.client(url).query(api.tickets.getTicketByTicketNumber, {
       token,
-      ticketNumber,
+      projectKey: ref.projectKey,
+      ticketNumber: ref.ticketNumber,
       includeDeleted: includeArchived,
     });
   }
 
   async create(url: string, token: string, input: TicketCreateInput) {
-    return await this.client(url).mutation(api.feedback.createTextFeedback, { token, ...input });
+    return await this.client(url).mutation(api.tickets.createTextTicket, { token, title: input.title, description: input.description, requestId: input.requestId, projectKey: input.projectKey });
   }
 
   async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
@@ -116,27 +136,32 @@ export class ConvexTicketRemote implements TicketRemote {
     });
   }
 
-  async recordUploadedFile(url: string, input: TicketUploadCredentials & { file: TicketMediaItem }) {
-    await this.client(url).mutation(api.uploads.recordUploadedFile, input);
+  async recordUploadedFile(url: string, input: TicketUploadCredentials & { token: string; file: TicketMediaItem }) {
+    const result = await this.client(url).mutation(api.uploads.recordUploadedFile, { token: input.token, intentId: input.intentId, secret: input.secret, file: input.file });
+    if (result.state === "queued") throw new ConvexError({ code: "UPLOAD_INTENT_INVALID" });
+  }
+
+  async cancelUploadIntent(url: string, token: string, input: TicketUploadCredentials) {
+    const result = await this.client(url).mutation(api.uploads.cancelUploadIntent, { token, intentId: input.intentId, secret: input.secret });
+    if (result.state === "failed") throw new ConvexError({ code: "UPLOAD_CLEANUP_FAILED", jobIds: result.jobIds });
   }
 
   async attachImages(url: string, token: string, input: TicketAttachInput) {
-    return await this.write(url, token, input.ticketNumber, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.feedback.attachFeedbackMedia, {
-        token,
-        id: current._id,
-        media: input.media,
-        uploadIntentId: input.intentId,
-        uploadIntentSecret: input.secret,
-        expectedVersion: input.expectedVersion,
-      });
+    await this.client(url).mutation(api.tickets.attachTicketMedia, {
+      token,
+      id: input.id,
+      media: input.media,
+      uploadIntentId: input.intentId,
+      uploadIntentSecret: input.secret,
+      expectedVersion: input.expectedVersion,
+      requestId: input.requestId,
     });
   }
 
   async update(url: string, token: string, input: TicketUpdateInput) {
     // Omitted fields keep their stored value; the mutation replaces both.
-    return await this.write(url, token, input.ticketNumber, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.feedback.editFeedback, {
+    return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
+      await this.client(url).mutation(api.tickets.editTicket, {
         token,
         id: current._id,
         title: input.title ?? current.title,
@@ -147,8 +172,8 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async changeStatus(url: string, token: string, input: TicketStatusInput) {
-    return await this.write(url, token, input.ticketNumber, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.feedback.updateFeedbackStatus, {
+    return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
+      await this.client(url).mutation(api.tickets.updateTicketStatus, {
         token,
         id: current._id,
         status: toStoredTicketStatus(input.status),
@@ -157,15 +182,15 @@ export class ConvexTicketRemote implements TicketRemote {
     });
   }
 
-  async archive(url: string, token: string, ticketNumber: number, expectedVersion: number) {
-    return await this.write(url, token, ticketNumber, ARCHIVING, async (current) => {
-      await this.client(url).mutation(api.feedback.archiveFeedback, { token, id: current._id, expectedVersion });
+  async archive(url: string, token: string, ref: TicketRef, expectedVersion: number) {
+    return await this.write(url, token, ref, ARCHIVING, async (current) => {
+      await this.client(url).mutation(api.tickets.archiveTicket, { token, id: current._id, expectedVersion });
     });
   }
 
-  async restore(url: string, token: string, ticketNumber: number, expectedVersion: number) {
-    return await this.write(url, token, ticketNumber, RESTORING, async (current) => {
-      await this.client(url).mutation(api.feedback.restoreFeedback, { token, id: current._id, expectedVersion });
+  async restore(url: string, token: string, ref: TicketRef, expectedVersion: number) {
+    return await this.write(url, token, ref, RESTORING, async (current) => {
+      await this.client(url).mutation(api.tickets.restoreTicket, { token, id: current._id, expectedVersion });
     });
   }
 
@@ -177,23 +202,19 @@ export class ConvexTicketRemote implements TicketRemote {
   private async write(
     url: string,
     token: string,
-    ticketNumber: number,
+    ref: TicketRef,
     archived: ArchivedVisibility,
     mutate: (current: TicketDocument) => Promise<void>,
   ) {
-    const current = await this.requireTicket(url, token, ticketNumber, archived.before);
+    const current = await this.requireTicket(url, token, ref, archived.before);
     await mutate(current);
-    return await this.requireTicket(url, token, ticketNumber, archived.after);
+    return await this.requireTicket(url, token, ref, archived.after);
   }
 
   /** Reports the domain's own not-found code so the CLI classifies it once. */
-  private async requireTicket(url: string, token: string, ticketNumber: number, includeArchived: boolean) {
-    const ticket = await this.get(url, token, ticketNumber, includeArchived);
-    if (!ticket) throw new Error("FEEDBACK_NOT_FOUND");
+  private async requireTicket(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
+    const ticket = await this.get(url, token, ref, includeArchived);
+    if (!ticket) throw new Error("TICKET_UNAVAILABLE");
     return ticket;
-  }
-
-  private async ensureNumbering(url: string, token: string) {
-    await this.client(url).mutation(api.feedback.ensureTicketNumbers, { token });
   }
 }

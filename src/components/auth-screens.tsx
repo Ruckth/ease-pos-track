@@ -1,7 +1,6 @@
 import { FormEvent, useState } from "react";
-import { useAction, useMutation } from "convex/react";
+import { useStaffLogin, useCustomerAuth } from "@/app/adapter";
 import { Headphones, Loader2 } from "lucide-react";
-import { api } from "@convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +8,7 @@ import { APP_PATHS } from "@/lib/app-routes";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { getClientId } from "@/lib/session";
 
-export type AuthPageKind = "staff-login" | "customer-login" | "customer-register";
+type AuthPageKind = "staff-login" | "customer-login" | "customer-register";
 
 export function LanguageSelector({
   language,
@@ -86,7 +85,7 @@ export function AuthPage({
 /** The original shared-password staff gate, unchanged in behaviour. */
 function StaffSignInForm({ onSignedIn }: { onSignedIn: (token: string) => void }) {
   const { t } = useI18n();
-  const login = useMutation(api.auth.login);
+  const login = useStaffLogin();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
@@ -137,8 +136,7 @@ function CustomerSignInForm({
   onNavigate: (path: string) => void;
 }) {
   const { t } = useI18n();
-  const register = useAction(api.customers.register);
-  const login = useAction(api.customers.login);
+  const { register, login } = useCustomerAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");

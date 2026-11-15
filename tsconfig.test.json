@@ -1,7 +1,8 @@
 {
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node", "vite/client"],
+    "tsBuildInfoFile": "./node_modules/.cache/tsc/test.tsbuildinfo"
   },
-  "include": ["src", "convex", "tests"]
+  "include": ["src", "convex", "shared", "tests", "vitest.convex.config.ts"]
 }

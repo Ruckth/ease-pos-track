@@ -5,9 +5,6 @@ terminal users. It calls the same Convex authentication and Ticket functions as
 the app; it does not add a chat interface, a second authorization scheme, or a
 second Ticket workflow.
 
-For a short, copy-and-paste introduction, see the
-[simple Ticket CLI manual](ticket-cli-manual.md).
-
 Start by installing dependencies and discovering the command contract:
 
 ```bash
@@ -38,6 +35,10 @@ The CLI asks for the existing staff password on the controlling terminal. Input
 is not echoed, there is no password flag, and the password is never placed in
 shell history. The app's existing staff login function performs the check and
 applies its existing per-client and global rate limits.
+
+The prompt restores terminal mode and releases its terminal streams when input
+finishes or is cancelled. Login prints its JSON result and exits promptly; Ctrl-C
+returns `LOGIN_CANCELLED` with exit code 4.
 
 Successful login stores:
 
@@ -74,16 +75,25 @@ separate Keychain items.
 ## Ticket operations
 
 All live Ticket operations require a valid staff session. Development is the
-default; append `--prod` only when production was explicitly requested. List and
-lookup also run the existing authenticated Ticket-number backfill before reading,
-so older Tickets receive stable references through the same allocator.
+default; append `--prod` only when production was explicitly requested.
+
+Every Ticket belongs to a Project, and its reference starts with the Project key:
+`POS-0012` is Ticket 12 in Project `POS`. Numbers count up per Project. Keys
+are case-insensitive on input. Projects are created in the staff app; the CLI does not create them.
 
 ```bash
 pnpm ticket list
+pnpm ticket list --project POS
 pnpm ticket list --include-archived
 pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
 ```
+
+`list` reads active Projects and consumes bounded summary pages (up to 50 Tickets
+per server page), then fetches detail by ID to preserve its complete descriptions,
+media counts, annotation counts and existing JSON shape. `--include-archived`
+also consumes archived lifecycle pages. The printed count is the number of Tickets
+returned; concurrent writes between pages do not form a single database snapshot.
 
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
@@ -92,23 +102,36 @@ URL:
 
 ```bash
 pnpm ticket create --title "Printer jams" --description "Receipt printer jams on long receipts"
+pnpm ticket create --project POS --title "Printer jams"
 pnpm ticket create --title "Calendar overlap" --image ./first.png --image https://example.com/second.jpg
-pnpm ticket create --json '{"title":"Printer jams","description":"Long receipts","requestId":"req-42"}'
+pnpm ticket create --json '{"title":"Printer jams","description":"Long receipts","requestId":"req-42","project":"POS"}'
 pnpm ticket create --title "Printer jams" --dry-run
 ```
 
 ```json
-{"ok":true,"id":"k17f…","ticket":"TKT-0007","ticketNumber":7,"status":"new","version":0,"created":true,"deployment":"dev","requestId":"6f1c…"}
+{"ok":true,"id":"k17f…","ticket":"TKT-0007","ticketNumber":7,"project":"TKT","status":"new","version":0,"created":true,"deployment":"dev","requestId":"6f1c…"}
 ```
+
+`--project` may be left out only while exactly one Project exists. With more than
+one, create fails with `PROJECT_REQUIRED` (exit 3) and writes nothing; an unknown
+key fails with `PROJECT_NOT_FOUND`.
 
 `--request-id` is the idempotency key. If omitted, one is generated and returned:
 
-- same request id, same title and description: the original Ticket is returned
-  with `"created":false`;
-- same request id, different content: `REQUEST_ID_CONFLICT`, exit 5, and no write.
+- same request id, same normalized original title and description: the original
+  Ticket is returned with `"created":false`, even after the Ticket is edited;
+- same request id, different content or a different Project: `REQUEST_ID_CONFLICT`,
+  exit 5, and no write.
 
 If a caller is uncertain whether a create completed, it must retry with the
 reported request id. A different request id can create a second Ticket.
+Receipts keep a SHA-256 digest of the original normalized input, durable actor
+and Project scope. Staff retries work across staff sessions; they cannot replay
+a customer's request identity. Creation and replay require an active Project;
+customers must still have membership. Missing, archived and inaccessible Projects
+all return `PROJECT_NOT_FOUND` to customers before comparing receipt input.
+After purge, a permanent receipt tombstone returns `TICKET_UNAVAILABLE` instead
+of recreating the Ticket. Rejected attempts reserve no request id.
 
 Images can also be added to an existing Ticket. Read its latest version first,
 then provide a retry key when the operation may need to be repeated:
@@ -120,12 +143,35 @@ pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/det
 
 Local files and downloaded HTTPS images are uploaded without resizing or
 re-encoding. Images must be non-empty, no larger than 8 MB each, and the Ticket
-may contain at most 10 images in total. The upload intent is bound to the staff
-session and retry key; an interrupted retry reuses files already recorded by the
-intent instead of uploading or attaching them twice. Image upload requires
+may contain at most 10 images in total. The upload intent is bound to the durable
+actor and retry key; an interrupted retry, including after sign-in, reuses files
+already recorded by the intent instead of uploading or attaching them twice.
+Recording requires the validated staff session that acquired the intent; this
+direct provider adapter is a deliberate staff capability. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
 `create --dry-run` reads or downloads each image and reports its original name,
 size, and type, but does not upload it or contact the deployment.
+Attachment receipts use their own operation scope and compare the target Ticket
+and ordered media keys. A replay returns the committed attachment's version and
+audit reference, even if the Ticket has since changed; the CLI reads the current
+Ticket for its JSON result.
+If that read fails after attachment commits, it does not replay the mutation or
+queue cancellation; retry with the same request id.
+
+Recording and attachment reconcile a lost response by replaying the identical
+write once. If its outcome is still unknown, keep the same request id on retry;
+no deletion is authorized. A definitive rejection queues cleanup through an
+atomic ownership reservation. Cancellation and late rejected callbacks retain
+durable media jobs, scheduled atomically with their reservations when cleanup is enabled. Jobs use eight
+provider attempts, capped exponential backoff (30 seconds–15 minutes), a 20-second action budget
+and 60-second leases; a bounded minute sweep recovers lost work. A queued
+acknowledgement does not mean the files have been deleted. Terminal cleanup
+failures retain ownership; the CLI preserves the original failure and marks
+cleanup unknown. Authorized `retention.progress` reads require the actor token,
+intent ID, intent secret and job ID. Staff-sourced unattached keys require a
+positive authenticated per-key provider lookup before deletion. Unverified ownership ends
+without deleting; ambiguous deletion acknowledgements remain unknown. Callback
+and provider credentials stay server-side.
 
 Every state-changing command requires the latest `version` returned by create,
 list, or get. This preserves the existing optimistic concurrency check:
@@ -173,6 +219,11 @@ the silent reporter so pnpm does not add lifecycle lines around those streams.
 | `5` | Request-id or optimistic-version conflict. |
 | `6` | Convex deployment/network call failure. |
 
+Unmapped safe server codes appear in the `REMOTE_CALL_FAILED` message, with exit 6
+and the same JSON fields. If guarded upload cancellation cannot be confirmed,
+the original error and exit status are retained with
+`details: { "cleanup": { "outcome": "unknown" } }`; reuse the same request ID.
+
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
 `SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`, and
@@ -210,14 +261,154 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
-| `convex/feedback.ts` | Existing Ticket domain functions plus authenticated create, image attachment, and Ticket-number lookup. |
-| `convex/feedback_state.ts` | Ticket text limits and the optimistic-version check. |
-| `convex/tickets.ts` | Shared Ticket allocation and audit-record helpers. |
+| `convex/tickets.ts` | Canonical policy-declared Ticket handlers for the browser and CLI. |
+| `convex/ticket_state.ts` | Ticket text limits and the optimistic-version check. |
+| `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
+| `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
 
 Verify changes with:
 
 ```bash
 pnpm test
-pnpm typecheck
+pnpm run typecheck
+pnpm run build
 ```
+
+The CLI process tests use `python3` and its standard-library `pty` module on
+macOS/Linux to exercise the real hidden prompt. HTTP responses and credential
+storage are fake; the tests assert natural process exit after success,
+rejection and cancellation.
+
+## Disposable local implementation target
+
+For the P8 reset/seed tooling, local rehearsals and the ordered checkpoint 20
+procedure, see [Development reset](dev-reset.md). `pnpm dev:reset` inspects the
+recorded development target by default; implementation rehearsals must explicitly
+use `--target local`. Reset execution also requires `--expect <reviewed inspect manifest>`;
+remove the target's `UPLOADTHING_TOKEN` and set cleanup to exactly `false` first,
+using the reset tool's env commands. This does not change the Ticket CLI's flags or JSON contract.
+
+The implementation target is the anonymous deployment recorded in this checkout’s `.convex/local/default/config.json` (normally `anonymous:anonymous-agent`). The main checkout uses `http://127.0.0.1:3212`; agent worktrees use their assigned port block.
+The wrapper preserves `.env.local`, which still selects shared development for
+ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
+by these fixtures. Do not run bare Convex commands or edit either environment
+file manually. The local wrapper accepts only `dev`, `run`, `env`, `import`,
+`export`, `data`, `codegen` and `--help`; no arguments defaults to a local push.
+
+```bash
+pnpm convex:local
+pnpm convex:local env set LOCAL_FIXTURES_ENABLED true
+pnpm convex:local env set APP_PASSWORD 'LocalStaff123!'
+pnpm convex:local env set CUSTOMER_PASSWORD_PEPPER local-only-fixture-pepper
+pnpm convex:local env set UPLOAD_CALLBACK_SECRET local-only-callback-fixture
+pnpm convex:local env remove MEDIA_CLEANUP_ENABLED
+pnpm convex:local env list
+pnpm convex:local run seed:run '{}'
+pnpm convex:local run seed:run '{"largeDataset":true}'
+pnpm convex:local run local_smoke:reads '{}'
+pnpm convex:local run local_smoke:run '{}'
+pnpm convex:local run local_smoke:media '{}'
+pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
+```
+
+The internal seed requires explicit fixture opt-in and a loopback deployment URL, and is repeatable. It creates Projects `POS` and `APP`,
+customers `alice@local.test` and `bob@local.test` (password `LocalCustomer123!`),
+POS memberships, explicit-role sessions and three text-only Tickets through the
+Ticket domain. Each seed run returns fresh random tokens in `sessions` (staff, Alice, Bob order)
+for tests and smoke clients; Ticket rows are reused. The staff
+password remains the configured global staff sign-in mechanism.
+
+The opt-in `largeDataset` fixture adds 300 text-only Tickets across POS and APP
+in bounded batches through Ticket domain commands. It grants both fixture customers
+APP membership, distributes all five statuses, and uses immutable seed receipts
+so reruns reuse rows and preserve later edits. The three `quartz` examples have
+deliberately different text lengths for real relevance-order validation.
+`local_smoke:reads` creates a fresh, isolated Project with 28 search examples, then
+verifies search scope/order, prefix matching, complete page ordering, deduplication
+and independent workflow totals, and prints actual summary page JSON byte sizes
+from POS. Existing disposable fixtures remain in place; the smoke prints actual
+active counts rather than assuming an empty backend.
+It also checks reference-shaped printer text and two Thai examples against the
+real tokenizer. Thai token boundaries do not always match words: `ชำระเงิน` does
+not match inside the fixture's `เมื่อกดปุ่มชำระเงิน`, while the longer phrase does.
+The CLI consumes staff-only `tickets:pageTicketDetails` pages (at most 50 Tickets
+per page), preserving full descriptions and the existing JSON shape without a
+separate detail query for every Ticket.
+The backend smoke also creates a fresh Project without customer membership for
+its access-denial check; APP membership may already exist after the large seed.
+All three smokes can be repeated in any order on the same local data.
+Unexpected errors include their original message in server logs only when
+`LOCAL_FIXTURES_ENABLED=true` and the deployment URL is loopback. Deployed logs
+and all error responses retain sanitized codes without the original message.
+
+Browser lists use `tickets:pageTickets`; staff lane counts use `tickets:laneTotals`.
+Customer filters/counts explicitly describe loaded summaries. Detail is selected
+by Ticket ID independently of loaded pages. `tickets:searchTickets` returns at most
+50 relevance-ordered matches plus `hasMore`. Exact formatted references use the
+Ticket-number index. Text search ignores case and punctuation; the final token
+matches prefixes and earlier tokens match whole words. It is not arbitrary
+substring or typo matching. When more matches exist, the UI asks users to refine
+the search and does not display an exact match total. Workflow totals stay separate.
+Convex 1.45 ignores row/byte pagination caps for search end-cursor ranges, so search
+uses a bounded `take(51)` rather than reactive search pagination. Ordinary pages
+cap reads at 50 rows and 1 MiB (with Convex page splitting); those budgets exclude
+session/Project/membership reads and may include a boundary document.
+
+The backend smoke exercises real sign-in, both roles, creation, detail, edit,
+workflow, urgency, archive/restore and annotations. Annotations require media;
+the smoke uses fake metadata with no provider upload. The CLI smoke uses the
+real orchestration and Convex adapter with in-memory credentials and a fixed
+loopback URL, checking JSON, retries after edits, content/Project conflict exit 5
+and text-only commands. The backend smoke starts eight concurrent identical
+creates in separate mutations and asserts one Ticket row and one creation audit
+event, then checks replay after editing and content/Project conflicts.
+The media smoke uses fake receipts to exercise competing exclusive key claims,
+duplicate recording, attachment, takeover denial and late-upload reservations
+on the local backend, including customer callback preflight and media creation.
+It requires cleanup disabled (unset by default) so fake-key jobs remain pending
+and unscheduled. It does not call UploadThing; do not configure provider credentials
+for these smokes. The guard rejects an enabled cleanup flag before creating fixtures.
+`--start` keeps the local backend alive for the CLI process; standalone `run`
+commands stop their local backend when they exit.
+
+Public handlers now return structured error codes. CLI flags, JSON fields and
+exit codes retain their documented meanings. Upload recording requires either
+the originating staff session or the server-only `UPLOAD_CALLBACK_SECRET`
+configured in both the HTTP process and Convex. Browser upload preflight verifies
+that credential before accepting files and counts files already recorded for
+the intent. Staff recording cannot reserve new keys against rejected intents;
+only trusted provider callbacks can reserve rejected new uploads. Existing plaintext Keychain
+credentials are rejected; sign in again to write the current encoded format.
+Local media cleanup scheduling now uses durable jobs: abandoned intents are
+claimed every five minutes, and Tickets archived for at least 30 days are
+claimed hourly. Purging blocks restore, retains media reservations through
+failure and removes the Ticket only after verified deletion. Audit history is
+then removed in batches of at most 100 entries per table. Shared development
+and production have not been changed.
+The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates job execution,
+recovery and new purge claims; P8 enables it last, after configuration and smoke
+checks. Cancellation, rejected callbacks and expiry always create pending jobs
+and reserve unattached assets (`deleting`, with a job reference). Cancellation
+returns queued progress without claiming deletion. Expiry still marks intents
+expiring/cleaned while disabled, since it needs no provider I/O. Disabled creation
+schedules nothing; a previously scheduled action defers the job by 30 seconds,
+logs one bounded line and spends no provider attempt. Disabled recovery and purge
+sweeps do nothing, leaving archived Tickets restorable. Enabling the flag lets
+recovery pick up due pending jobs automatically; no requeue is needed. Missing storage configuration leaves
+jobs pending without spending provider attempts. Database finalization renews
+leases and does not spend provider attempts. Failed jobs keep their progress
+and reservations; after repairing the cause, ops can run
+`pnpm convex:local run retention:requeue '{"jobId":"..."}'` locally. Ownership
+conflicts block only the affected job/Ticket; blocked archived Tickets remain
+visible/restorable and are skipped by later purge sweeps.
+Ticket annotations share the Ticket version and audit path. The embedded budget
+is 100 entries and 50,000 text characters per Ticket, with 2,000 characters per
+entry; soft-deleted entries still count. Initial creation, additions, edits and
+undo all enforce the budget. Restore removes the archive timestamp explicitly.
+
+Restoring a blocked archived Ticket supersedes the failed purge job and clears
+its block. Re-archiving starts a fresh 30-day retention window. Both internal
+and staff requeue enforce that window; Operations health asks for confirmation
+before requeuing permanent Ticket deletion. Superseded jobs are counted
+separately from completed deletions.

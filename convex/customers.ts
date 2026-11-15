@@ -1,5 +1,5 @@
+import { internalJobMutation, publicAuthAction } from "./functions";
 import { v } from "convex/values";
-import { action, internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -105,7 +105,8 @@ async function issueCustomerSession(ctx: MutationCtx, customerId: Id<"customers"
   return { token, expiresAt: now + SESSION_TTL_MS };
 }
 
-export const startRegistration = internalMutation({
+export const startRegistration = internalJobMutation({
+  name: "customers:startRegistration",
   args: { email: v.string(), clientId: v.string() },
   handler: async (ctx, args) => {
     const attemptKeys = customerRegistrationAttemptKeys(args.clientId);
@@ -118,11 +119,13 @@ export const startRegistration = internalMutation({
     // unthrottled probe for which emails already have accounts.
     if (existing) {
       await recordFailure(ctx, attemptKeys);
-      throw new Error("EMAIL_ALREADY_REGISTERED");
+      return { error: "EMAIL_ALREADY_REGISTERED" as const };
     }
+    return { error: null };
   },
 });
-export const finishRegistration = internalMutation({
+export const finishRegistration = internalJobMutation({
+  name: "customers:finishRegistration",
   args: {
     email: v.string(),
     clientId: v.string(),
@@ -137,7 +140,10 @@ export const finishRegistration = internalMutation({
       .query("customers")
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .unique();
-    if (existing) throw new Error("EMAIL_ALREADY_REGISTERED");
+    if (existing) {
+      await recordFailure(ctx, customerRegistrationAttemptKeys(args.clientId));
+      return { error: "EMAIL_ALREADY_REGISTERED" as const };
+    }
 
     const customerId = await ctx.db.insert("customers", {
       email: args.email,
@@ -153,7 +159,8 @@ export const finishRegistration = internalMutation({
   },
 });
 
-export const startLogin = internalMutation({
+export const startLogin = internalJobMutation({
+  name: "customers:startLogin",
   args: { email: v.string(), clientId: v.string() },
   handler: async (ctx, args) => {
     await assertNotLockedOut(ctx, customerLoginAttemptKeys(args.clientId, args.email));
@@ -174,14 +181,16 @@ export const startLogin = internalMutation({
   },
 });
 
-export const failLogin = internalMutation({
+export const failLogin = internalJobMutation({
+  name: "customers:failLogin",
   args: { clientId: v.string(), email: v.string() },
   handler: async (ctx, args) => {
     await recordFailure(ctx, customerLoginAttemptKeys(args.clientId, args.email));
   },
 });
 
-export const finishLogin = internalMutation({
+export const finishLogin = internalJobMutation({
+  name: "customers:finishLogin",
   args: { customerId: v.id("customers"), clientId: v.string() },
   handler: async (ctx, args) => {
     const customer = await ctx.db.get(args.customerId);
@@ -195,7 +204,8 @@ export const finishLogin = internalMutation({
  * Sign-up runs as an action because PBKDF2 derivation is CPU heavy; all database
  * work happens in the internal mutations above.
  */
-export const register = action({
+export const register = publicAuthAction("customer-register")({
+  name: "customers:register",
   args: { email: v.string(), password: v.string(), clientId: v.string() },
   handler: async (ctx, args): Promise<{ token: string; expiresAt: number }> => {
     // Checked first: a deployment with no pepper must not create accounts at all.
@@ -205,17 +215,21 @@ export const register = action({
     assertPasswordIsNotEmail(email, password);
     const clientId = validateClientId(args.clientId);
 
-    await ctx.runMutation(internal.customers.startRegistration, { email, clientId });
+    const started = await ctx.runMutation(internal.customers.startRegistration, { email, clientId });
+    if (started.error) throw new Error(started.error);
     const record = await createPasswordRecord(password, pepper);
-    return await ctx.runMutation(internal.customers.finishRegistration, {
+    const finished = await ctx.runMutation(internal.customers.finishRegistration, {
       email,
       clientId,
       ...record,
     });
+    if ("error" in finished) throw new Error(finished.error);
+    return finished;
   },
 });
 
-export const login = action({
+export const login = publicAuthAction("customer-login")({
+  name: "customers:login",
   args: { email: v.string(), password: v.string(), clientId: v.string() },
   handler: async (ctx, args): Promise<{ token: string; expiresAt: number }> => {
     // Checked before the lookup, so a misconfigured deployment fails the same way

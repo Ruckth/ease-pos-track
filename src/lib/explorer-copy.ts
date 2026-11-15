@@ -1,6 +1,7 @@
 import { useI18n } from "./i18n";
 
 const en = {
+  loadedScope: "Filters, sorting and table totals apply to loaded Tickets. Load older Tickets to include more.",
   urgency: "Urgency", unset: "Unset",
   board: "Board", table: "Table", view: "Ticket view", filters: "Filters", clearAll: "Clear all", tags: "Tags", status: "Status",
   createdDate: "Created date", updatedDate: "Updated date", anyOf: "is any of", between: "between", from: "From", to: "Through",
@@ -10,6 +11,7 @@ const en = {
   first: "First page", last: "Last page", open: "Open Ticket", archived: "Archived", remove: "Remove", sort: "Sort", ascending: "Ascending", descending: "Descending",
 };
 const th: typeof en = {
+  loadedScope: "ตัวกรอง การเรียง และจำนวนในตารางใช้กับ Ticket ที่โหลดแล้ว โหลดรายการเก่าเพื่อรวมเพิ่มเติม",
   urgency: "ความเร่งด่วน", unset: "ยังไม่ระบุ",
   board: "บอร์ด", table: "ตาราง", view: "มุมมอง Ticket", filters: "ตัวกรอง", clearAll: "ล้างทั้งหมด", tags: "แท็ก", status: "สถานะ",
   createdDate: "วันที่สร้าง", updatedDate: "วันที่แก้ไข", anyOf: "ตรงกับรายการใดก็ได้", between: "ระหว่าง", from: "ตั้งแต่", to: "ถึง",

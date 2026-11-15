@@ -25,3 +25,13 @@ export function resolveUploadThingCallbackUrl(env: CallbackEnvironment = process
   callback.searchParams.set("x-vercel-protection-bypass", bypassSecret);
   return callback.toString();
 }
+
+/** Only the standalone, non-production HTTP server simulates localhost callbacks. */
+export function resolveUploadThingConfig(env: CallbackEnvironment = process.env, localPort?: number) {
+  if (localPort !== undefined && env.NODE_ENV !== "production" && !env.VERCEL && !env.VERCEL_URL) {
+    return { isDev: true, callbackUrl: `http://localhost:${localPort}/api/uploadthing` };
+  }
+  const callbackUrl = resolveUploadThingCallbackUrl(env);
+  // Explicit false overrides UPLOADTHING_IS_DEV and NODE_ENV on hosted runtimes.
+  return { isDev: false, ...(callbackUrl ? { callbackUrl } : {}) };
+}

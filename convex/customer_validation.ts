@@ -3,8 +3,8 @@
  * and reused by the sign-up and sign-in paths.
  */
 
-export const EMAIL_MAX_LENGTH = 254;
-export const PASSWORD_MIN_LENGTH = 10;
+const EMAIL_MAX_LENGTH = 254;
+const PASSWORD_MIN_LENGTH = 10;
 export const PASSWORD_MAX_LENGTH = 128;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 

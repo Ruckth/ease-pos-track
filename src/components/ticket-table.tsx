@@ -4,17 +4,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TicketTagList } from "@/components/ticket-tags";
-import { statusMeta } from "@/components/feedback-status";
+import { statusMeta } from "@/components/ticket-status";
 import { useI18n } from "@/lib/i18n";
 import { useExplorerCopy } from "@/lib/explorer-copy";
-import { formatTicketNumber } from "@/lib/feedback-ui";
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import { paginateTickets, type ExplorerSort, type ExplorerTicket, type SortField } from "@/lib/ticket-explorer";
 
 /** Adapted from @reui/c-table-14 and @reui/c-pagination-15 for real Tickets. */
 export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPageSize, onSelect }: {
   items: ExplorerTicket[]; sort: ExplorerSort; onSort: (sort: ExplorerSort) => void;
   page: number; onPage: (page: number) => void; pageSize: number; onPageSize: (size: number) => void;
-  onSelect: (id: Id<"feedback">) => void;
+  onSelect: (id: Id<"tickets">) => void;
 }) {
   const { t, formatDate } = useI18n(); const c = useExplorerCopy();
   const result = paginateTickets(items, page, pageSize);
@@ -27,8 +27,8 @@ export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPag
           <Button size="sm" variant="ghost" className="-ml-2" onClick={() => onSort({field,direction: sort.field === field && sort.direction === "asc" ? "desc" : "asc"})}>{label}{sort.field === field ? sort.direction === "asc" ? <ArrowUp aria-hidden /> : <ArrowDown aria-hidden /> : <ArrowUpDown aria-hidden />}</Button>
         </TableHead>)}</TableRow></TableHeader>
         <TableBody>{result.rows.map((item) => <TableRow key={item._id}>
-          <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber)}</TableCell>
-          <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber)}: ${item.title}`}>{item.title}</button>{item.deletedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
+          <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber, item.projectKey)}</TableCell>
+          <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
           <TableCell><div className="min-w-24"><TicketTagList tags={item.tags ?? []} /></div></TableCell>
           <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge></TableCell>
           <TableCell className="tabular-nums">{item.urgencyScore === undefined ? <span className="text-muted-foreground">{c.unset}</span> : `${item.urgencyScore} / 100`}</TableCell>
