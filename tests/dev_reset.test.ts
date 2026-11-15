@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { inventory, reset, type Manifest, type ResetBackend, type ResetProvider } from "../scripts/dev-reset/core";
 import { fakeResetProvider, uploadthingResetProvider } from "../scripts/dev-reset/provider";
-import { LOCAL_RESET_TARGET } from "../scripts/dev-reset-target.mjs";
+import { localDeploymentName, localResetTarget } from "../scripts/dev-reset-target.mjs";
 
 const config = { deployment: "dev:disposable-123", uploadthingAppId: "dev-app" };
 function fixture() {
@@ -120,13 +123,42 @@ test("reset rejects enabled or malformed scheduler flags and stops on failed ver
   assert.equal(deps.saved.at(-1)!.stage, "rows-cleared");
 });
 test("local target requires fake provider and leaves non-fixture keys unresolved", async () => {
-  const deps = fixture();
-  const local = { ...execute, local: true, confirm: LOCAL_RESET_TARGET, expect: { ...reviewed, target: LOCAL_RESET_TARGET } };
-  await assert.rejects(reset(local, deps), /LOCAL_PROVIDER_MUST_BE_FAKE/);
-  assert.deepEqual(deps.calls, []);
-  deps.provider = fakeResetProvider();
-  const result = await reset(local, deps);
-  assert.equal(result.unresolved[0].outcome, "unverified");
+  const cwd = process.cwd();
+  const directory = mkdtempSync(join(tmpdir(), "ticket-reset-local-"));
+  try {
+    mkdirSync(join(directory, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(directory, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
+    process.chdir(directory);
+    const deps = fixture();
+    const target = localResetTarget();
+    const local = { ...execute, local: true, confirm: target, expect: { ...reviewed, target } };
+    await assert.rejects(reset({ ...local, confirm: "anonymous:anonymous-track-ease-pos" }, deps), /RESET_CONFIRM_REQUIRED/);
+    await assert.rejects(reset({ ...local, expect: { ...reviewed, target: "anonymous:anonymous-track-ease-pos" } }, deps), /RESET_INSPECT_MANIFEST_REQUIRED/);
+    await assert.rejects(reset(local, deps), /LOCAL_PROVIDER_MUST_BE_FAKE/);
+    assert.deepEqual(deps.calls, []);
+    deps.provider = fakeResetProvider();
+    const result = await reset(local, deps);
+    assert.equal(result.target, "anonymous:anonymous-agent");
+    assert.equal(result.unresolved[0].outcome, "unverified");
+  } finally { process.chdir(cwd); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("local reset identities require this checkout's configured anonymous backend", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ticket-reset-target-"));
+  try {
+    assert.equal(localDeploymentName(directory), null);
+    assert.throws(() => localResetTarget(directory), /RESET_LOCAL_TARGET_UNAVAILABLE/);
+    mkdirSync(join(directory, ".convex/local/default"), { recursive: true });
+    const file = join(directory, ".convex/local/default/config.json");
+    for (const name of ["anonymous-agent", "anonymous-track-ease-pos", "anonymous-other-checkout"]) {
+      writeFileSync(file, JSON.stringify({ deploymentName: name }));
+      assert.equal(localResetTarget(directory), `anonymous:${name}`);
+    }
+    for (const config of ["malformed", "null", "{}", ...["dev:shared", "prod:never", "shared", "anonymous:anonymous-agent", "anonymous-agent\n"].map(deploymentName => JSON.stringify({ deploymentName }))]) {
+      writeFileSync(file, config);
+      assert.throws(() => localResetTarget(directory), /LOCAL_DEPLOYMENT_REFUSED/);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test("inventory deduplicates registry, nested old media, upload receipts and job snapshots without counting Project keys", () => {
   const manifest = inventory({ projects: [{ key: "POS" }], mediaAssets: [{ _id: "asset", key: "same", metadata: { key: "same", url: "https://example.invalid" } }], uploadIntents: [{ uploadedFiles: [{ key: "same", url: "https://example.invalid" }] }], mediaJobs: [{ keys: ["same", "uncertain"] }] }, "dev:fixture");

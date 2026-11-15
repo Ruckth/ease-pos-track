@@ -6,18 +6,10 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { loadPorts } from "./worktree-ports.mjs";
 import { parse } from "dotenv";
+import { localDeploymentName } from "./dev-reset-target.mjs";
 
 const args = process.argv.slice(2);
 const ENV_FILE = ".env.convex-local";
-// Agent-mode CLIs name every new local backend anonymous-agent; the original
-// checkout's backend predates that. Target whichever anonymous (always local)
-// backend this checkout owns.
-function localDeploymentName() {
-  try {
-    const name = JSON.parse(readFileSync(".convex/local/default/config.json", "utf8")).deploymentName;
-    return /^anonymous-[\w-]+$/.test(name) ? name : null;
-  } catch { return null; }
-}
 const LOCAL_DEPLOYMENT = `anonymous:${localDeploymentName() ?? "anonymous-track-ease-pos"}`;
 const SAVED = ".env.local.shared-backup";
 
