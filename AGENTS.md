@@ -105,11 +105,20 @@ checks on every pull request.
 
 ## Parallel worktrees
 
-Run `pnpm agent:setup` once in every new git worktree before anything else. It
-copies `.env.local` from the main checkout, claims a free port block in
+Several agents work on this repository at once. Never edit files in the main
+checkout. Work in your own worktree, so other agents' unfinished changes cannot
+break your checks and your commits cannot sweep in their files:
+
+- If you start in the main checkout, run `pnpm agent:new <task-name>` and work in
+  the directory it prints, on branch `agent/<task-name>`.
+- If your tool already created a worktree for you, run `pnpm agent:setup` there
+  before anything else.
+
+Setup copies `.env.local` from the main checkout, claims a free port block in
 `.env.worktree`, installs dependencies and pushes the schema to that worktree's
 own local Convex backend. `pnpm dev` then serves on the printed ports, so several
-worktrees can run side by side. Do not edit `.env.worktree` by hand.
+worktrees can run side by side. Do not edit `.env.worktree` by hand. Commit only
+files you changed. Remove the worktree once its branch has merged.
 
 ## Browser workflow checks
 

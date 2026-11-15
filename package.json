@@ -23,6 +23,7 @@
     "typecheck:tsc": "tsc -b",
     "check": "concurrently --group --names typecheck,unit,convex,build \"pnpm:typecheck\" \"pnpm:test:unit\" \"pnpm:test:convex\" \"vite build --logLevel warn\"",
     "agent:setup": "node scripts/agent-setup.mjs",
+    "agent:new": "node scripts/agent-new.mjs",
     "test:browser": "node scripts/test-browser.mjs",
     "check:arch": "pnpm test:one tests/architecture.test.ts tests/function_policies.test.ts"
   },
