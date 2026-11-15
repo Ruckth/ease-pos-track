@@ -29,6 +29,9 @@ export async function readHiddenPassword() {
       input.setRawMode(false);
       input.pause();
       output.write("\n");
+      // Closing the original fd leaves the TTY streams' libuv handles alive.
+      input.destroy();
+      output.destroy();
       closeSync(fd);
       if (error) reject(error);
       else resolve(password);

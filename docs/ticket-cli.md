@@ -39,6 +39,10 @@ is not echoed, there is no password flag, and the password is never placed in
 shell history. The app's existing staff login function performs the check and
 applies its existing per-client and global rate limits.
 
+The prompt restores terminal mode and releases its terminal streams when input
+finishes or is cancelled. Login prints its JSON result and exits promptly; Ctrl-C
+returns `LOGIN_CANCELLED` with exit code 4.
+
 Successful login stores:
 
 - the secret session token, expiry, and bound deployment URL in macOS Keychain;
@@ -273,6 +277,11 @@ pnpm test
 pnpm run typecheck
 pnpm run build
 ```
+
+The CLI process tests use `python3` and its standard-library `pty` module on
+macOS/Linux to exercise the real hidden prompt. HTTP responses and credential
+storage are fake; the tests assert natural process exit after success,
+rejection and cancellation.
 
 ## Disposable local implementation target
 

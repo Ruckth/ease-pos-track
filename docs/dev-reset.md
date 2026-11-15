@@ -128,6 +128,8 @@ Do not run this section during checkpoint 19. The development cutover must be ex
 
 3. Configure the matched HTTP process and browser in separate shells. Replace `<run-directory>` with the execute output directory. Load the HTTP configuration through dotenv directly into its child process (do not source a dotenv file as shell code):
 
+   The standalone HTTP server enables UploadThing's dev callbacks automatically when `NODE_ENV` is not `production` and it is not running on Vercel. It uses `http://localhost:<api-port>/api/uploadthing`, where the port comes from `UPLOAD_API_PORT` or this checkout's assigned worktree port. No `UPLOADTHING_IS_DEV` or `UPLOADTHING_CALLBACK_URL` overrides are needed in `runtime.env`. Keep this local HTTP process running while uploading so it can forward completion callbacks and record media.
+
    ```bash
    pnpm exec tsx -e 'import {readFileSync} from "node:fs"; import {parse} from "dotenv"; import {spawnSync} from "node:child_process"; process.exit(spawnSync("pnpm", ["dev:api"], {stdio:"inherit", env:{...process.env,...parse(readFileSync(process.argv[1]))}}).status ?? 1)' .reset/<run-directory>/runtime.env
    ```
@@ -138,7 +140,7 @@ Do not run this section during checkpoint 19. The development cutover must be ex
    pnpm exec tsx -e 'import {readFileSync} from "node:fs"; import {parse} from "dotenv"; import {spawnSync} from "node:child_process"; const web=parse(readFileSync(process.argv[1])); if(Object.keys(web).some(key=>!key.startsWith("VITE_"))) throw new Error("Unexpected browser variable"); process.exit(spawnSync("pnpm", ["dev:web"], {stdio:"inherit", env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:process.env.TMPDIR,...web}}).status ?? 1)' .reset/<run-directory>/web.env
    ```
 
-   For hosted processes, set these same separate values through that host's configuration and deploy the updated callers under the separately authorized checkpoint 20 procedure. Do not use `pnpm dev`, which intentionally starts the local backend. Configure the provider's callback destination for this exact HTTP process.
+   For hosted processes, set these same separate values through that host's configuration and deploy the updated callers under the separately authorized checkpoint 20 procedure. Hosted `api/` handlers always disable dev callbacks, including on Vercel previews; production standalone servers also disable them. Their callback URL must be publicly reachable. Automatic URL detection, an explicit `UPLOADTHING_CALLBACK_URL`, and the protected-preview automation bypass remain supported. Do not use `pnpm dev`, which intentionally starts the local backend.
 
 4. Verify both generated credentials in the browser. Verify Project scopes, all six example Tickets, numbering/totals, text creation, search, edit, status/undo, annotations, archive/restore, draft cancellation and Project switching. Use the Ticket CLI against the explicit development URL:
 
