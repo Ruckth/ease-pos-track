@@ -41,11 +41,15 @@ pnpm dev:reset env-remove UPLOADTHING_TOKEN --target local
 pnpm dev:reset env-set MEDIA_CLEANUP_ENABLED false --target local
 ```
 
-For a populated backend (replace `<inspect-directory>` with the inspect output directory after reviewing its manifest):
+For a populated backend, review the inspect output and replace `<inspect-directory>`
+with its directory and `<local-identity>` with the exact `target` from its
+`manifest.json`. The identity comes from this checkout's local backend configuration;
+new backends commonly use `anonymous:anonymous-agent`. Do not reuse an identity or
+manifest from another checkout:
 
 ```bash
 pnpm dev:reset inspect --target local
-pnpm dev:reset execute --target local --confirm anonymous:anonymous-track-ease-pos --expect .reset/<inspect-directory>/manifest.json
+pnpm dev:reset execute --target local --confirm <local-identity> --expect .reset/<inspect-directory>/manifest.json
 ```
 
 For an empty backend, create an empty ZIP locally and clear only local rows, then inspect and execute:
@@ -54,7 +58,7 @@ For an empty backend, create an empty ZIP locally and clear only local rows, the
 pnpm exec tsx -e 'import AdmZip from "adm-zip"; import {mkdirSync} from "node:fs"; mkdirSync(".reset", {recursive:true,mode:0o700}); new AdmZip().writeZip(".reset/empty-rehearsal.zip")'
 pnpm convex:local import --replace-all --yes .reset/empty-rehearsal.zip
 pnpm dev:reset inspect --target local
-pnpm dev:reset execute --target local --confirm anonymous:anonymous-track-ease-pos --expect .reset/<inspect-directory>/manifest.json
+pnpm dev:reset execute --target local --confirm <local-identity> --expect .reset/<inspect-directory>/manifest.json
 ```
 
 Then run the existing local smokes. These deliberately replace random cutover credentials with fixed **local-only** test credentials; never apply them to development. Provider tokens remain empty and cleanup stays disabled.
