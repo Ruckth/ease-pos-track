@@ -92,11 +92,12 @@ pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
 ```
 
-`list` reads active Projects and consumes bounded summary pages (up to 50 Tickets
-per server page), then fetches detail by ID to preserve its complete descriptions,
-media counts, annotation counts and existing JSON shape. `--include-archived`
-also consumes archived lifecycle pages. The printed count is the number of Tickets
-returned; concurrent writes between pages do not form a single database snapshot.
+`list` reads active Projects and consumes staff-only `tickets:pageTicketDetails`
+pages (up to 50 Tickets per server page), preserving full descriptions, media
+counts, annotation counts and the existing JSON shape without a separate detail
+query for every Ticket. `--include-archived` also consumes archived lifecycle
+pages. The printed count is the number of Tickets returned; concurrent writes
+between pages do not form a single database snapshot.
 
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
@@ -265,7 +266,7 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
 | `convex/tickets.ts` | Canonical policy-declared Ticket handlers for the browser and CLI. |
-| `convex/ticket_state.ts` | Ticket text limits and the optimistic-version check. |
+| `shared/ticket-state.ts` | Ticket text limits and the optimistic-version check. |
 | `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 | `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
@@ -273,9 +274,7 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 Verify changes with:
 
 ```bash
-pnpm test
-pnpm run typecheck
-pnpm run build
+pnpm check
 ```
 
 The CLI process tests use `python3` and its standard-library `pty` module on
@@ -292,10 +291,15 @@ use `--target local`. Reset execution also requires `--expect <reviewed inspect 
 remove the target's `UPLOADTHING_TOKEN` and set cleanup to exactly `false` first,
 using the reset tool's env commands. This does not change the Ticket CLI's flags or JSON contract.
 
-The implementation target is `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
-The wrapper preserves `.env.local`, which still selects shared development for
-ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
-by these fixtures. Do not run bare Convex commands or edit either environment
+The implementation target is this checkout's disposable anonymous backend. Run
+`pnpm agent:setup` in a new worktree to install dependencies and initialize its
+local backend; use the URLs it prints. Ports are assigned per checkout in
+`.env.worktree`, so do not assume the main checkout's default ports or edit that
+file manually.
+The wrapper preserves `.env.local`; its saved deployment can differ from the
+local backend. `pnpm dev` sets local URLs for the web and API processes, and
+`pnpm dev:convex` pushes only to the local backend. No shared deployment or
+provider resources are changed by these fixtures. Do not run bare Convex commands or edit either environment
 file manually. The local wrapper accepts only `dev`, `run`, `env`, `import`,
 `export`, `data`, `codegen` and `--help`; no arguments defaults to a local push.
 
@@ -335,9 +339,6 @@ active counts rather than assuming an empty backend.
 It also checks reference-shaped printer text and two Thai examples against the
 real tokenizer. Thai token boundaries do not always match words: `ชำระเงิน` does
 not match inside the fixture's `เมื่อกดปุ่มชำระเงิน`, while the longer phrase does.
-The CLI consumes staff-only `tickets:pageTicketDetails` pages (at most 50 Tickets
-per page), preserving full descriptions and the existing JSON shape without a
-separate detail query for every Ticket.
 The backend smoke also creates a fresh Project without customer membership for
 its access-denial check; APP membership may already exist after the large seed.
 All three smokes can be repeated in any order on the same local data.

@@ -59,6 +59,11 @@ Commands return JSON. Note the Ticket reference, such as `TKT-0007`, and its
 
 ## 4. Create a Ticket
 
+Every Ticket belongs to a Project. Pass `--project KEY` (for example,
+`--project POS`) when more than one Project exists; it may be omitted only when
+there is exactly one. Projects are created in the staff app. Use the same Project
+when retrying a create with its request ID.
+
 Preview and validate without creating anything:
 
 ```bash

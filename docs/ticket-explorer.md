@@ -10,7 +10,7 @@ Table columns sort before pagination, with deterministic ID tie-breaking. Rows p
 
 The explorer works on the Tickets the staff workspace has already loaded: the paginated board lanes (or the top server search matches while searching), plus loaded archives when they are shown. Search itself stays on the server (`searchTickets`). Filters, sorting and table pagination run on those loaded summaries only, and the copy says so; loading more in a column brings older Tickets into scope. Nothing downloads the whole Ticket set.
 
-On the board, filters only hide cards when drawing. Drag moves still reconcile against every loaded row, so a card filtered out mid-move cannot strand a pending move. Tag names come from the staff-only `listTicketTags`; no customer query or authorization changed.
+On the board, filters only hide Tickets when drawing. Drag moves still reconcile against every loaded row, so a Ticket filtered out mid-move cannot strand a pending move. Tag names come from the staff-only `listTicketTags`; no customer query or authorization changed.
 
 ## Registry provenance
 
