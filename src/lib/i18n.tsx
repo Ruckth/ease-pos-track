@@ -24,6 +24,7 @@ const en = {
   pinAtTime: "At {{time}}",
 
   // Single-form composer and compact customer workspace
+  statusWriting: "Updating status…", statusChecking: "Checking current status…", statusNeedsConnection: "Reconnect to check the current status.", statusCheckAgain: "Check again",
   composerHint: "Only a topic is required. Add details or files when they help explain the Ticket.",
   composerRequired: "(required)",
   composerPreview: "Preview Ticket (optional)",
@@ -298,6 +299,7 @@ const th: Record<keyof typeof en, string> = {
   pinAtTime: "ที่เวลา {{time}}",
 
   // Single-form composer and compact customer workspace
+  statusWriting: "กำลังอัปเดตสถานะ…", statusChecking: "กำลังตรวจสอบสถานะล่าสุด…", statusNeedsConnection: "เชื่อมต่ออีกครั้งเพื่อตรวจสอบสถานะ", statusCheckAgain: "ตรวจสอบอีกครั้ง",
   composerHint: "กรอกเฉพาะหัวข้อก็ส่ง Ticket ได้ เพิ่มรายละเอียดหรือไฟล์เมื่อช่วยอธิบายได้ชัดเจนขึ้น",
   composerRequired: "(จำเป็น)",
   composerPreview: "ดูตัวอย่าง Ticket (ไม่บังคับ)",
