@@ -12,17 +12,17 @@ export type MoveSource = {
   version: number;
 };
 type PendingMove = { item: MoveSource; phase: "moving" | "checking" | "retry" };
+type MoveOutcome = { item: MoveSource } & ({ status: TicketStatus | null } | { error: unknown });
 
 type Dependencies = {
   write: (item: MoveSource, status: TicketStatus) => Promise<{ version: number }>;
   read: (project: Id<"projects">, id: TicketId) => Promise<TicketStatus | null>;
-  onRead: (item: MoveSource, current: TicketStatus | null) => void;
-  onRejected: (item: MoveSource, error: unknown) => void;
 };
 
 /** One in-flight intent per Ticket. Recovery reads the current status and never repeats the write. */
 export class TicketStatusMoves {
   private entries = new Map<TicketId, PendingMove>();
+  private outcomes = new Map<TicketId, MoveOutcome>();
   private listeners = new Set<() => void>();
 
   snapshot = () => this.entries;
@@ -30,6 +30,22 @@ export class TicketStatusMoves {
     this.listeners.add(fn);
     return () => { this.listeners.delete(fn); };
   };
+
+  /** A background read can finish while another Project is open. Consume each result once. */
+  takeOutcomes(projectId: Id<"projects"> | undefined) {
+    const visible: MoveOutcome[] = [];
+    for (const [id, outcome] of this.outcomes) {
+      if (outcome.item.projectId !== projectId) continue;
+      visible.push(outcome);
+      this.outcomes.delete(id);
+    }
+    return visible;
+  }
+
+  private finish(outcome: MoveOutcome) {
+    this.outcomes.set(outcome.item._id, outcome);
+    this.set(outcome.item);
+  }
 
   private set(item: MoveSource, phase?: PendingMove["phase"]) {
     const next = new Map(this.entries);
@@ -48,8 +64,7 @@ export class TicketStatusMoves {
       return result.version;
     } catch (error) {
       if (error instanceof TicketOperationFailure && error.disposition === "rejected") {
-        this.set(item);
-        deps.onRejected(item, error);
+        this.finish({ item, error });
       } else {
         await this.check(item, deps);
       }
@@ -69,14 +84,12 @@ export class TicketStatusMoves {
       current = await deps.read(item.projectId, item._id);
     } catch (error) {
       if (errorCode(error)) {
-        this.set(item);
-        deps.onRejected(item, error);
+        this.finish({ item, error });
         return;
       }
       this.set(item, "retry");
       return;
     }
-    this.set(item);
-    deps.onRead(item, current);
+    this.finish({ item, status: current });
   }
 }

@@ -135,10 +135,10 @@ export function StaffWorkspace({ token, onLogout }: { token: string; onLogout: (
     initialSection={nav.section} onMove={(_id, status) => { if (selected) void moves.moveItem(selected, status); }} onArchive={archiveItem} onRestore={restoreItem} />;
 
   return <main className="min-h-screen">
-    <a href="#staff-ticket-results" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:p-3 focus:ring-2" onClick={event => {
+    {!single && <a href="#staff-ticket-results" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:p-3 focus:ring-2" onClick={event => {
       event.preventDefault();
       document.getElementById("staff-ticket-results")?.focus();
-    }}>{t("queueSkip")}</a>
+    }}>{t("queueSkip")}</a>}
     <Toaster richColors position="bottom-right" />
     <div className={single ? "mx-auto max-w-4xl" : "xl:grid xl:grid-cols-[14rem_minmax(0,1fr)]"}>
       <div className={single ? "hidden" : "contents"}>

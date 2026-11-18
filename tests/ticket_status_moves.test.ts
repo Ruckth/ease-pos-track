@@ -16,7 +16,6 @@ test("uncertain status writes reconcile a later edit and block duplicates until 
   const phases: string[] = [];
   tracker.subscribe(() => phases.push(tracker.snapshot().get(source._id)?.phase ?? "settled"));
   let writes = 0, reads = 0;
-  const observed: (TicketStatus | null)[] = [];
   const deps = {
     write: async () => { writes++; throw new TicketOperationFailure(new Error("Connection lost")); },
     read: async (project: Id<"projects">, id: Id<"tickets">): Promise<TicketStatus | null> => {
@@ -25,8 +24,6 @@ test("uncertain status writes reconcile a later edit and block duplicates until 
       if (reads === 1) throw new Error("Offline");
       return "waiting"; // A different staff member edited the same Ticket.
     },
-    onRead: (_: MoveSource, status: TicketStatus | null) => { observed.push(status); },
-    onRejected: shouldNotRun,
   };
   const first = tracker.move(source, "acknowledged", deps);
   const duplicate = tracker.move(source, "acknowledged", deps);
@@ -35,33 +32,43 @@ test("uncertain status writes reconcile a later edit and block duplicates until 
   assert.equal(tracker.snapshot().get(source._id)?.phase, "retry");
   await Promise.all([tracker.retry(source._id, deps), tracker.retry(source._id, deps)]);
   assert.equal(writes, 1); assert.equal(reads, 2);
-  assert.deepEqual(observed, ["waiting"]);
+  assert.deepEqual(tracker.takeOutcomes(source.projectId), [{ item: source, status: "waiting" }]);
   assert.deepEqual(phases, ["moving", "checking", "retry", "checking", "settled"]);
 });
 
 test("a version conflict reads the newest status once and handles an unavailable Ticket neutrally", async () => {
   const tracker = new TicketStatusMoves();
-  const seen: (TicketStatus | null)[] = [];
   const deps = {
     write: async () => { throw new TicketOperationFailure({ data: { code: "VERSION_CONFLICT" } }); },
     read: async () => null,
-    onRead: (_: MoveSource, status: TicketStatus | null) => { seen.push(status); }, onRejected: shouldNotRun,
   };
   assert.equal(await tracker.move(source, "in_progress", deps), null);
-  assert.deepEqual(seen, [null]);
+  assert.deepEqual(tracker.takeOutcomes(source.projectId), [{ item: source, status: null }]);
   assert.equal(tracker.snapshot().size, 0);
 });
 
 test("a known rejection and a successful move do not issue reconciliation reads", async () => {
   const tracker = new TicketStatusMoves();
   const rejected = new TicketOperationFailure({ data: { code: "PROJECT_NOT_FOUND" } });
-  const errors: unknown[] = [];
   const deps = {
     write: async () => { throw rejected; },
-    read: shouldNotRun, onRead: shouldNotRun,
-    onRejected: (_: MoveSource, err: unknown) => { errors.push(err); },
+    read: shouldNotRun,
   };
   assert.equal(await tracker.move(source, "done", deps), null);
-  assert.deepEqual(errors, [rejected]);
+  assert.deepEqual(tracker.takeOutcomes(source.projectId), [{ item: source, error: rejected }]);
   assert.equal(await tracker.move(source, "done", { ...deps, write: async () => ({ version: 3 }) }), 3);
+});
+
+test("deferred outcomes stay with the owning Project and deliver only its latest result once", async () => {
+  const tracker = new TicketStatusMoves();
+  const other = { ...source, _id: "other" as Id<"tickets">, projectId: "other-project" as Id<"projects">, projectKey: "APP" };
+  const uncertain = async () => { throw new Error("Lost response"); };
+  await tracker.move(source, "acknowledged", { write: uncertain, read: async () => "acknowledged" });
+  await tracker.move(source, "waiting", { write: uncertain, read: async () => "waiting" });
+  await tracker.move(other, "done", { write: uncertain, read: async () => "done" });
+  assert.deepEqual(tracker.takeOutcomes(undefined), []);
+  assert.deepEqual(tracker.takeOutcomes(other.projectId), [{ item: other, status: "done" }]);
+  assert.deepEqual(tracker.takeOutcomes(other.projectId), []);
+  assert.deepEqual(tracker.takeOutcomes(source.projectId), [{ item: source, status: "waiting" }]);
+  assert.deepEqual(tracker.takeOutcomes(source.projectId), []);
 });
