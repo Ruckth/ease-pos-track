@@ -12,7 +12,7 @@ import type { PendingMedia } from "@/lib/types";
 import { pendingAnnotationsForCreate, type CreateAnnotationInput, type PendingAnnotation } from "@/lib/pending-annotations";
 import type { MediaItem } from "@/lib/types";
 import { readUploadCancelResponse } from "@/lib/upload-cancel";
-import { uploadFiles } from "@/uploadthing";
+import type { uploadFiles } from "@/uploadthing";
 import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 import { fileSignature } from "../../shared/media-policy";
 
@@ -96,7 +96,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     });
     const missing = draft.items.flatMap((item, index) => media[index] ? [] : [{ file: item.file, index }]);
     const uploads = intent.ticketId || missing.length === 0 ? []
-      : await (deps.uploadMedia ?? uploadFiles)("ticketMedia", {
+      : await (deps.uploadMedia ?? (await import("@/uploadthing")).uploadFiles)("ticketMedia", {
           files: missing.map(item => item.file),
           input: { intentId: intent.intentId, secret: intent.secret },
           headers: { authorization: `Bearer ${deps.token}` },
