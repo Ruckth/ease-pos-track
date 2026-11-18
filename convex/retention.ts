@@ -124,8 +124,9 @@ export const advance = internalJobMutation({
     } else if (phase === "delete_events") {
       const events = await ctx.db.query("ticketEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
       const annotations = await ctx.db.query("annotationEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      for (const event of [...events, ...annotations]) await ctx.db.delete(event._id);
-      if (events.length < AUDIT_BATCH && annotations.length < AUDIT_BATCH) phase = "complete";
+      const messages = await ctx.db.query("ticketMessages").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
+      for (const event of [...events, ...annotations, ...messages]) await ctx.db.delete(event._id);
+      if (events.length < AUDIT_BATCH && annotations.length < AUDIT_BATCH && messages.length < AUDIT_BATCH) phase = "complete";
     }
     if (phase === "complete") {
       await patchMediaJob(ctx, job, { state: "completed", phase, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });

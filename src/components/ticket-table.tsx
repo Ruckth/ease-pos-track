@@ -24,11 +24,11 @@ export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPag
     <div className="overflow-hidden rounded-lg border bg-card">
       <Table aria-label={c.table}>
         <TableHeader><TableRow>{columns.map(({field,label}) => <TableHead key={field} aria-sort={sort.field === field ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-          <Button size="sm" variant="ghost" className="-ml-2" onClick={() => onSort({field,direction: sort.field === field && sort.direction === "asc" ? "desc" : "asc"})}>{label}{sort.field === field ? sort.direction === "asc" ? <ArrowUp aria-hidden /> : <ArrowDown aria-hidden /> : <ArrowUpDown aria-hidden />}</Button>
+          <Button size="sm" variant="ghost" className="-ml-2 min-h-11" onClick={() => onSort({field,direction: sort.field === field && sort.direction === "asc" ? "desc" : "asc"})}>{label}{sort.field === field ? sort.direction === "asc" ? <ArrowUp aria-hidden /> : <ArrowDown aria-hidden /> : <ArrowUpDown aria-hidden />}</Button>
         </TableHead>)}</TableRow></TableHeader>
         <TableBody>{result.rows.map((item) => <TableRow key={item._id}>
           <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber, item.projectKey)}</TableCell>
-          <TableCell><button type="button" className="max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
+          <TableCell><button type="button" data-ticket-id={item._id} className="min-h-11 min-w-11 max-w-xs break-words rounded text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
           <TableCell><div className="min-w-24"><TicketTagList tags={item.tags ?? []} /></div></TableCell>
           <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge></TableCell>
           <TableCell className="tabular-nums">{item.urgencyScore === undefined ? <span className="text-muted-foreground">{c.unset}</span> : `${item.urgencyScore} / 100`}</TableCell>
@@ -39,14 +39,14 @@ export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPag
     </div>
     <nav aria-label={c.page} className="flex flex-wrap items-center justify-between gap-3">
       <p aria-live="polite" className="text-sm text-muted-foreground">{c.page} <span className="font-medium text-foreground">{result.page}</span> {c.of} {result.pages} · {items.length} {c.results}</p>
-      <div className="flex items-center gap-1">
-        <Button variant="outline" size="icon-sm" disabled={result.page === 1} aria-label={c.first} onClick={() => onPage(1)}><ChevronsLeft /></Button>
-        <Button variant="outline" size="icon-sm" disabled={result.page === 1} aria-label={c.previous} onClick={() => onPage(result.page - 1)}><ChevronLeft /></Button>
-        {visiblePages.map((n,index) => <span key={n} className="hidden items-center gap-1 sm:flex">{index > 0 && n - visiblePages[index - 1] > 1 && <MoreHorizontal className="size-4" aria-hidden />}<Button size="icon-sm" variant={n === result.page ? "default" : "ghost"} aria-label={`${c.page} ${n}`} aria-current={n === result.page ? "page" : undefined} onClick={() => onPage(n)}>{n}</Button></span>)}
-        <Button variant="outline" size="icon-sm" disabled={result.page === result.pages} aria-label={c.next} onClick={() => onPage(result.page + 1)}><ChevronRight /></Button>
-        <Button variant="outline" size="icon-sm" disabled={result.page === result.pages} aria-label={c.last} onClick={() => onPage(result.pages)}><ChevronsRight /></Button>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button variant="outline" size="icon-sm" className="size-11" disabled={result.page === 1} aria-label={c.first} onClick={() => onPage(1)}><ChevronsLeft /></Button>
+        <Button variant="outline" size="icon-sm" className="size-11" disabled={result.page === 1} aria-label={c.previous} onClick={() => onPage(result.page - 1)}><ChevronLeft /></Button>
+        {visiblePages.map((n,index) => <span key={n} className="hidden items-center gap-1 sm:flex">{index > 0 && n - visiblePages[index - 1] > 1 && <MoreHorizontal className="size-4" aria-hidden />}<Button size="icon-sm" className="size-11" variant={n === result.page ? "default" : "ghost"} aria-label={`${c.page} ${n}`} aria-current={n === result.page ? "page" : undefined} onClick={() => onPage(n)}>{n}</Button></span>)}
+        <Button variant="outline" size="icon-sm" className="size-11" disabled={result.page === result.pages} aria-label={c.next} onClick={() => onPage(result.page + 1)}><ChevronRight /></Button>
+        <Button variant="outline" size="icon-sm" className="size-11" disabled={result.page === result.pages} aria-label={c.last} onClick={() => onPage(result.pages)}><ChevronsRight /></Button>
       </div>
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">{c.perPage}<select className="h-9 rounded-md border border-input bg-background px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))}>{[10,25,50].map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">{c.perPage}<select className="min-h-11 rounded-md border border-input bg-background px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))}>{[10,25,50].map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
     </nav>
   </section>;
 }

@@ -1,17 +1,21 @@
 import { usePaginatedQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { BOARD_COLUMNS } from "@/lib/kanban-board";
+import type { TicketStatus } from "@/lib/types";
 
-export function useStaffLanes(token: string, projectId: Id<"projects"> | undefined, enabled: boolean) {
-  const args = projectId && enabled ? { token, projectId, lifecycle: "active" as const } : null;
-  const options = { initialNumItems: 20 };
-  const lanes = {
-    new: usePaginatedQuery(api.tickets.pageTickets, args ? { ...args, status: "new" } : "skip", options),
-    acknowledged: usePaginatedQuery(api.tickets.pageTickets, args ? { ...args, status: "acknowledged" } : "skip", options),
-    in_progress: usePaginatedQuery(api.tickets.pageTickets, args ? { ...args, status: "in_progress" } : "skip", options),
-    waiting: usePaginatedQuery(api.tickets.pageTickets, args ? { ...args, status: "waiting" } : "skip", options),
-    done: usePaginatedQuery(api.tickets.pageTickets, args ? { ...args, status: "done" } : "skip", options),
+function useLane(token: string, projectId: Id<"projects"> | undefined, status: TicketStatus, enabled: boolean) {
+  return usePaginatedQuery(api.tickets.pageTickets, projectId && enabled ? {
+    token, projectId, lifecycle: "active", status,
+  } : "skip", { initialNumItems: 20 });
+}
+
+/** Hooks stay in a fixed order. Only the lanes included in the current view subscribe. */
+export function useStaffLanes(token: string, projectId: Id<"projects"> | undefined, enabled: readonly TicketStatus[]) {
+  return {
+    new: useLane(token, projectId, "new", enabled.includes("new")),
+    acknowledged: useLane(token, projectId, "acknowledged", enabled.includes("acknowledged")),
+    in_progress: useLane(token, projectId, "in_progress", enabled.includes("in_progress")),
+    waiting: useLane(token, projectId, "waiting", enabled.includes("waiting")),
+    done: useLane(token, projectId, "done", enabled.includes("done")),
   };
-  return { lanes, items: BOARD_COLUMNS.flatMap(status => lanes[status].results), loading: BOARD_COLUMNS.some(status => lanes[status].status === "LoadingFirstPage") };
 }

@@ -1,6 +1,6 @@
 /**
  * The single submit pipeline for new tickets, shared by the staff composer and
- * the customer three-step flow.
+ * the customer composer.
  *
  * Order matters: an upload intent is claimed first (idempotently), files upload
  * against that intent, and only then is the Ticket created. Unknown writes are
@@ -119,7 +119,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     if (resolved.length !== draft.items.length) throw new Error("UPLOAD_INCOMPLETE");
     deps.signal?.throwIfAborted();
     creating = true;
-    await reconcileUploadWrite(() => deps.createTicket({
+    const created = await reconcileUploadWrite(() => deps.createTicket({
       token: deps.token,
       requestId: draft.idempotencyKey,
       title: draft.title,
@@ -130,6 +130,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
       uploadIntentSecret: intent.secret,
     }));
     activeIntent = null;
+    return created;
   } catch (error) {
     const abortedBeforeCreate = deps.signal?.aborted && !creating;
     const rejected = definitiveUploadRejection(error);

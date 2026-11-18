@@ -39,15 +39,19 @@ export const MediaViewer = forwardRef<
     annotations: Annotation[];
     initialIndex?: number;
     disabled?: boolean;
+    readOnly?: boolean;
     onCreateAnnotation: (input: AnnotationDraftInput) => Promise<void>;
     onUpdateAnnotation: (input: AnnotationUpdateInput) => Promise<void>;
     onDeleteAnnotation: (annotationId: string) => Promise<void>;
   }
->(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
+>(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
   const { t } = useI18n();
   const [mainApi, setMainApi] = useState<CarouselApi>();
   const [thumbApi, setThumbApi] = useState<CarouselApi>();
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(initialIndex);
+  const initialTarget = useRef(initialIndex);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const fieldset = useRef<HTMLFieldSetElement>(null);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -82,8 +86,8 @@ export const MediaViewer = forwardRef<
 
   useEffect(() => {
     if (!mainApi || media.length === 0) return;
-    const targetIndex = Math.min(Math.max(0, initialIndex), media.length - 1);
-    mainApi.scrollTo(targetIndex);
+    const targetIndex = Math.min(Math.max(0, initialTarget.current), media.length - 1);
+    mainApi.scrollTo(targetIndex, true);
     thumbApi?.scrollTo(targetIndex);
     setSelectedIndex(targetIndex);
   }, [initialIndex, mainApi, media.length, thumbApi]);
@@ -98,7 +102,8 @@ export const MediaViewer = forwardRef<
     ref,
     () => ({
       focusAnnotation: (annotation) => {
-        mainApi?.scrollTo(annotation.mediaIndex);
+        initialTarget.current = annotation.mediaIndex;
+        mainApi?.scrollTo(annotation.mediaIndex, true);
         setOpenId(annotation.id);
         focusNonceRef.current += 1;
         setFocus({ id: annotation.id, nonce: focusNonceRef.current });
@@ -108,6 +113,11 @@ export const MediaViewer = forwardRef<
     }),
     [mainApi],
   );
+
+  useEffect(() => {
+    if (!focus) return;
+    fieldset.current?.querySelector<HTMLElement>(`[data-pin-id="${CSS.escape(focus.id)}"]`)?.focus({ preventScroll: true });
+  }, [focus, selectedIndex]);
 
   const watchDrag = useCallback(
     (_api: EmblaCarouselType, event: MouseEvent | TouchEvent) => {
@@ -122,15 +132,23 @@ export const MediaViewer = forwardRef<
 
   const carouselOpts = useMemo(() => ({ watchDrag }), [watchDrag]);
 
+  function cancelPlacement() {
+    setDraft(null);
+    setMovingId(null);
+    setAnnotateMode(false);
+    setActionError("");
+    requestAnimationFrame(() => addButton.current?.focus());
+  }
+
   function beginDraft(target: DraftTarget) {
-    if (disabled) return;
+    if (disabled || readOnly) return;
     setOpenId(null);
     setDraft(target);
     setDraftText("");
   }
 
   function startMoving(annotationId: string) {
-    if (disabled) return;
+    if (disabled || readOnly) return;
     const annotation = annotations.find((item) => item.id === annotationId);
     if (annotation) mainApi?.scrollTo(annotation.mediaIndex);
     setMovingId(annotationId);
@@ -141,7 +159,7 @@ export const MediaViewer = forwardRef<
   }
 
   async function handleSurfaceClick(target: DraftTarget) {
-    if (disabled) return;
+    if (disabled || readOnly) return;
     if (!movingId) {
       beginDraft(target);
       return;
@@ -168,13 +186,14 @@ export const MediaViewer = forwardRef<
         ...(target.time === undefined ? {} : { time: target.time }),
       });
       setMovingId(null);
+      requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
     } catch (error) {
       setActionError(localizeError(error, t));
     }
   }
 
   async function saveDraft() {
-    if (disabled || !draft || !draftText.trim() || saving) return;
+    if (disabled || readOnly || !draft || !draftText.trim() || saving) return;
     setSaving(true);
     setActionError("");
     try {
@@ -182,6 +201,7 @@ export const MediaViewer = forwardRef<
       setDraft(null);
       setDraftText("");
       setAnnotateMode(false);
+      requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
     } catch (error) {
       setActionError(localizeError(error, t));
     } finally {
@@ -198,13 +218,20 @@ export const MediaViewer = forwardRef<
   }
 
   return (
-    <fieldset disabled={disabled} className="min-w-0 space-y-3">
+    <fieldset ref={fieldset} disabled={disabled} className="min-w-0 space-y-3" onKeyDown={event => {
+      if (event.key === "Escape" && (annotateMode || movingId || draft || openId)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpenId(null);
+        cancelPlacement();
+      }
+    }}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm leading-5 text-muted-foreground">
           {selectedIndex + 1} / {media.length}
         </p>
-        {movingId ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => setMovingId(null)}>
+        {!readOnly && (movingId ? (
+          <Button type="button" size="sm" variant="outline" onClick={cancelPlacement}>
             <X />
             {t("cancelMove")}
           </Button>
@@ -212,6 +239,8 @@ export const MediaViewer = forwardRef<
           <Button
             type="button"
             size="sm"
+            ref={addButton}
+            aria-pressed={annotateMode}
             variant={annotateMode ? "default" : "outline"}
             onClick={() => {
               setAnnotateMode((mode) => !mode);
@@ -223,7 +252,7 @@ export const MediaViewer = forwardRef<
             <MapPin />
             {annotateMode ? t("placePin") : t("addPin")}
           </Button>
-        )}
+        ))}
       </div>
 
       {movingId ? <p className="text-sm text-primary">{t("moveComment")}</p> : null}
@@ -231,41 +260,18 @@ export const MediaViewer = forwardRef<
 
       <Carousel setApi={setMainApi} opts={carouselOpts} className="overflow-hidden rounded-lg border bg-black">
         <CarouselContent className="-ml-0">
-          {media.map((item, index) => (
-            <CarouselItem key={item.key} className="pl-0">
-              {isVideoMedia(item) ? (
-                <VideoSlide
-                  item={item}
-                  index={index}
-                  annotations={annotations.filter((a) => a.mediaIndex === index)}
-                  annotateMode={!disabled && (annotateMode || Boolean(movingId))}
-                  draft={draft?.mediaIndex === index ? draft : null}
-                  focus={focus}
-                  openId={openId}
-                  onOpenChange={setOpenId}
-                  onSurfaceClick={handleSurfaceClick}
-                  onUpdate={onUpdateAnnotation}
-                  onMove={startMoving}
-                  onDelete={onDeleteAnnotation}
-                />
-              ) : (
-                <ImageSlide
-                  item={item}
-                  index={index}
-                  annotations={annotations.filter((a) => a.mediaIndex === index)}
-                  annotateMode={!disabled && (annotateMode || Boolean(movingId))}
-                  draft={draft?.mediaIndex === index ? draft : null}
-                  focus={focus}
-                  openId={openId}
-                  onOpenChange={setOpenId}
-                  onSurfaceClick={handleSurfaceClick}
-                  onUpdate={onUpdateAnnotation}
-                  onMove={startMoving}
-                  onDelete={onDeleteAnnotation}
-                />
-              )}
-            </CarouselItem>
-          ))}
+          {media.map((item, index) => {
+            const Slide = isVideoMedia(item) ? VideoSlide : ImageSlide;
+            return <CarouselItem key={item.key} className="pl-0">
+              {index === selectedIndex && <Slide item={item} index={index}
+                annotations={annotations.filter(note => note.mediaIndex === index)}
+                annotateMode={!disabled && !readOnly && !draft && (annotateMode || Boolean(movingId))}
+                movingPin={annotations.find(note => note.id === movingId)}
+                draft={draft?.mediaIndex === index ? draft : null}
+                readOnly={readOnly} focus={focus} openId={openId} onOpenChange={setOpenId}
+                onSurfaceClick={handleSurfaceClick} onUpdate={onUpdateAnnotation} onMove={startMoving} onDelete={onDeleteAnnotation} />}
+            </CarouselItem>;
+          })}
         </CarouselContent>
         {media.length > 1 ? (
           <>
@@ -293,7 +299,7 @@ export const MediaViewer = forwardRef<
                 >
                   {isVideoMedia(item) ? (
                     <>
-                      <video className="h-full w-full object-cover" src={item.url} muted playsInline preload="metadata" />
+                      <span className="sr-only">{item.name}</span>
                       <PlayCircle className="absolute left-1/2 top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 text-white" />
                     </>
                   ) : (
@@ -310,17 +316,19 @@ export const MediaViewer = forwardRef<
         <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
           <p className="text-sm font-medium leading-5 text-muted-foreground">
             {t("addPin")} {draft.mediaIndex + 1}
-            {draft.time !== undefined ? ` at ${formatClock(draft.time)}` : ""}
+            {draft.time !== undefined ? ` · ${t("pinAtTime", { time: formatClock(draft.time) })}` : ""}
           </p>
           <Textarea
             autoFocus
+            aria-label={t("describeIssue")}
+            maxLength={2000}
             rows={2}
             value={draftText}
             onChange={(event) => setDraftText(event.target.value)}
             placeholder={t("describeIssue")}
           />
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setDraft(null)}>
+            <Button type="button" variant="ghost" size="sm" onClick={cancelPlacement}>
               {t("cancel")}
             </Button>
             <Button type="button" size="sm" disabled={!draftText.trim() || saving} onClick={saveDraft}>

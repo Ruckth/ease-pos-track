@@ -1,12 +1,21 @@
 import { SessionBoundary } from "./session-boundary";
 import { AuthPage } from "@/components/auth-screens";
-import { CustomerPortal } from "@/features/tickets/customer-portal";
-import { StaffWorkspace } from "@/features/tickets/staff-workspace";
 import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { clearToken, getStoredToken, storeToken } from "@/lib/session";
 import { useSession } from "./adapter";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/lib/i18n";
+
+const StaffWorkspace = lazy(() => import("@/features/tickets/staff-workspace").then(m => ({ default: m.StaffWorkspace })));
+const CustomerPortal = lazy(() => import("@/features/tickets/customer-portal").then(m => ({ default: m.CustomerPortal })));
+
+function LoadingPage() {
+  const { t } = useI18n();
+  return <main className="grid min-h-screen place-items-center" role="status">
+    <Loader2 aria-hidden="true" className="size-7 animate-spin text-muted-foreground" /><span className="sr-only">{t("loadingWorkspace")}</span>
+  </main>;
+}
 
 function useAppPathname() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
@@ -18,9 +27,9 @@ function useAppPathname() {
   }, []);
 
   const navigate = useCallback((path: string, replace = false) => {
-    if (window.location.pathname === path) return;
+    if (window.location.pathname + window.location.search === path) return;
     window.history[replace ? "replaceState" : "pushState"](null, "", path);
-    setPathname(path);
+    setPathname(window.location.pathname);
   }, []);
 
   return { pathname, navigate };
@@ -28,6 +37,10 @@ function useAppPathname() {
 
 /** Routes by both URL namespace and the server-validated session role. */
 export function AppShell() {
+  return <Suspense fallback={<LoadingPage />}><RoutedApp /></Suspense>;
+}
+
+function RoutedApp() {
   const [token, setToken] = useState(getStoredToken);
   const { pathname, navigate } = useAppPathname();
   const { logout, session } = useSession(token);
@@ -47,12 +60,15 @@ export function AppShell() {
   }, [session, token]);
 
   useEffect(() => {
-    if (redirectTo) navigate(redirectTo, true);
-  }, [navigate, redirectTo]);
+    if (!redirectTo) return;
+    const sameRole = pathname.split("/")[1] === redirectTo.split("/")[1];
+    navigate(redirectTo + (sameRole ? window.location.search : ""), true);
+  }, [navigate, pathname, redirectTo]);
 
   function expire(role: "staff" | "customer") {
     clearToken();
     setToken("");
+    void import("sonner").then(({ toast }) => toast.dismiss());
     navigate(loginPathForRole(role), true);
   }
 
@@ -65,18 +81,14 @@ export function AppShell() {
   }
 
   if (route.page === "loading" || route.page === "redirect") {
-    return (
-      <main className="grid min-h-screen place-items-center">
-        <Loader2 className="size-7 animate-spin text-muted-foreground" />
-      </main>
-    );
+    return <LoadingPage />;
   }
 
   if (route.page === "staff-login" || route.page === "customer-login" || route.page === "customer-register") {
     return (
       <AuthPage
         page={route.page}
-        onNavigate={(path) => navigate(path)}
+        onNavigate={(path) => navigate(path + (path.split("/")[1] === pathname.split("/")[1] ? window.location.search : ""))}
         onSignedIn={(nextToken) => {
           storeToken(nextToken);
           setToken(nextToken);
@@ -93,9 +105,5 @@ export function AppShell() {
     return <SessionBoundary key={token} onExpired={() => expire("staff")}><StaffWorkspace token={token} onLogout={() => signOut("staff")} /></SessionBoundary>;
   }
 
-  return (
-    <main className="grid min-h-screen place-items-center">
-      <Loader2 className="size-7 animate-spin text-muted-foreground" />
-    </main>
-  );
+  return <LoadingPage />;
 }

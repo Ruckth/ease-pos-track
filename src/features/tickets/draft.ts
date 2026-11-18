@@ -12,6 +12,9 @@ export class DisposableTicketDraft {
   private listeners = new Set<() => void>();
   private controller: AbortController | null = null;
   private disposed = false;
+  /** Set only after the create receipt is reconciled and cancellation checked. */
+  private submittedId: Id<"tickets"> | undefined;
+  get lastSubmittedId() { return this.submittedId; }
   constructor(readonly projectId: Id<"projects">, private resources: Resources = {
     createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
     requestKey: () => crypto.randomUUID(), now: () => Date.now(),
@@ -81,13 +84,14 @@ export class DisposableTicketDraft {
     const draft = this.state;
     this.change({ progress: 0, error: null });
     try {
-      await submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
+      const created = await submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
         signal: controller.signal,
         onProgress: progress => { if (this.controller === controller) this.change({ progress }); },
         onRequestConflict: () => { if (this.controller === controller) this.change({ idempotencyKey: this.resources.requestKey() }); },
       }, draft);
       if (this.disposed || this.controller !== controller) return false;
       controller.signal.throwIfAborted();
+      this.submittedId = typeof created === "string" ? created as Id<"tickets"> : undefined;
       this.release();
       this.change(this.empty());
       return true;

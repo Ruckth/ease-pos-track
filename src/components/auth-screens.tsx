@@ -1,6 +1,6 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, type ComponentProps } from "react";
 import { useStaffLogin, useCustomerAuth } from "@/app/adapter";
-import { Headphones, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Headphones, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,8 @@ export function LanguageSelector({
   const { t } = useI18n();
   return (
     <div className="inline-flex rounded-md border p-0.5" aria-label={t("language")}>
-      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-9 px-3" onClick={() => onChange("th")}>ไทย</Button>
-      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-9 px-3" onClick={() => onChange("en")}>EN</Button>
+      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-11 px-3" aria-pressed={language === "th"} onClick={() => onChange("th")}>ไทย</Button>
+      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-11 px-3" aria-pressed={language === "en"} onClick={() => onChange("en")}>EN</Button>
     </div>
   );
 }
@@ -76,13 +76,28 @@ export function AuthPage({
               onNavigate={onNavigate}
             />
           )}
+          <a className="mt-3 flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4"
+            href={isStaff ? APP_PATHS.customerLogin : APP_PATHS.staffLogin}>
+            {t(isStaff ? "customerSignIn" : "staffSignIn")}
+          </a>
         </CardContent>
       </Card>
     </main>
   );
 }
 
-/** The original shared-password staff gate, unchanged in behaviour. */
+function PasswordInput(props: ComponentProps<typeof Input>) {
+  const { t } = useI18n();
+  const [shown, setShown] = useState(false);
+  return <div className="relative">
+    <Input {...props} className="h-11 pr-12" type={shown ? "text" : "password"} />
+    <button type="button" className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-md focus-visible:ring-2"
+      aria-label={t(shown ? "hidePassword" : "showPassword")} aria-controls={props.id} onClick={() => setShown(!shown)}>
+      {shown ? <EyeOff aria-hidden="true" className="size-4" /> : <Eye aria-hidden="true" className="size-4" />}
+    </button>
+  </div>;
+}
+
 function StaffSignInForm({ onSignedIn }: { onSignedIn: (token: string) => void }) {
   const { t } = useI18n();
   const login = useStaffLogin();
@@ -108,9 +123,8 @@ function StaffSignInForm({ onSignedIn }: { onSignedIn: (token: string) => void }
     <form className="space-y-4" onSubmit={onSubmit}>
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor="staff-password">{t("password")}</label>
-        <Input
+        <PasswordInput
           id="staff-password"
-          type="password"
           autoComplete="current-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -180,9 +194,8 @@ function CustomerSignInForm({
       </div>
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor="customer-password">{t(isRegistering ? "newPassword" : "password")}</label>
-        <Input
+        <PasswordInput
           id="customer-password"
-          type="password"
           autoComplete={isRegistering ? "new-password" : "current-password"}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -192,9 +205,8 @@ function CustomerSignInForm({
       {isRegistering ? (
         <div className="space-y-2">
           <label className="text-sm font-medium" htmlFor="customer-password-confirm">{t("confirmPassword")}</label>
-          <Input
+          <PasswordInput
             id="customer-password-confirm"
-            type="password"
             autoComplete="new-password"
             value={confirmation}
             onChange={(event) => setConfirmation(event.target.value)}

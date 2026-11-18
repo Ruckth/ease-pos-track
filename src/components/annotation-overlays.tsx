@@ -22,6 +22,7 @@ export function PinMarker({
   return (
     <button
       type="button"
+      data-pin-id={annotation.id}
       onClick={(event) => {
         event.stopPropagation();
         onClick();
@@ -41,7 +42,7 @@ export function PinMarker({
 export function DraftPin({ x, y }: { x: number; y: number }) {
   return (
     <span
-      className="pointer-events-none absolute z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 animate-pulse items-center justify-center rounded-full border-2 border-dashed border-white bg-primary/70 text-[11px] font-bold text-primary-foreground shadow-md"
+      className="pointer-events-none absolute z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 motion-safe:animate-pulse items-center justify-center rounded-full border-2 border-dashed border-white bg-primary/70 text-[11px] font-bold text-primary-foreground shadow-md"
       style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
     >
       +
@@ -51,12 +52,14 @@ export function DraftPin({ x, y }: { x: number; y: number }) {
 
 export function PinPopover({
   annotation,
+  readOnly = false,
   onClose,
   onUpdate,
   onMove,
   onDelete,
 }: {
   annotation: Annotation | null;
+  readOnly?: boolean;
   onClose: () => void;
   onUpdate: (input: AnnotationUpdateInput) => Promise<void>;
   onMove: (annotationId: string) => void;
@@ -85,7 +88,7 @@ export function PinPopover({
         <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
           {annotation.label}
         </span>
-        <div className="flex items-center gap-1">
+        {!readOnly && <div className="flex items-center gap-1">
           <button
             type="button"
             aria-label={t("editComment", { label: annotation.label })}
@@ -131,7 +134,7 @@ export function PinPopover({
           >
             {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
           </button>
-        </div>
+        </div>}
       </div>
       {editing ? (
         <div className="mt-2 space-y-2">

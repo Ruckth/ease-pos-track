@@ -130,3 +130,17 @@ test("a definitive request conflict renews the draft key for the next explicit s
   assert.notEqual(draft.getSnapshot().idempotencyKey, key);
   draft.dispose();
 });
+
+test("a reconciled successful create exposes its Ticket for selection after the composer closes", async () => {
+  const { draft, deps } = fixture();
+  const id = "created-ticket" as Id<"tickets">;
+  let calls = 0;
+  assert.equal(await draft.submit({ ...deps, createTicket: async () => {
+    if (++calls === 1) throw new Error("response lost after create");
+    return id;
+  } }), true);
+  assert.equal(calls, 2);
+  assert.equal(draft.lastSubmittedId, id);
+  assert.equal(draft.getSnapshot().title, "");
+  draft.dispose();
+});
