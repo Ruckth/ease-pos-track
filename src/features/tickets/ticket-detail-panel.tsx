@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronLeft, ChevronRight, Copy, Paperclip, Pencil, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, Paperclip, Pencil, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -32,9 +32,14 @@ export type DetailNavigation = {
   onPrevious?: () => void;
   onNext?: () => void;
   inline?: boolean;
+  focusMode?: boolean;
+  onToggleFocus?: () => void;
+  inResults?: boolean;
   initialSection?: "summary" | "media" | null;
 };
 export type StaffDetailActions = {
+  statusBusy?: boolean;
+  statusRecovery?: ReactNode;
   onMove: (id: Id<"tickets">, status: TicketStatus) => void;
   onArchive: (id: Id<"tickets">) => Promise<void>;
   onRestore?: (id: Id<"tickets">) => Promise<void>;
@@ -58,13 +63,17 @@ export function TicketDetailPanel(props: PanelProps) {
   const title = ticket ? formatTicketNumber(ticket.ticketNumber, ticket.projectKey) : t("ticket");
   const navigation = <nav aria-label={t("ticket")} className="flex flex-wrap items-center justify-between gap-1 border-b pb-2">
     {inline && <Button type="button" variant="ghost" className="min-h-11 px-2" onClick={close}><ArrowLeft />{t("detailBack")}</Button>}
-    <div className="ml-auto flex gap-1">
+    <div className="ml-auto flex flex-wrap gap-1">
+      {props.onToggleFocus && <Button type="button" variant="ghost" className="hidden min-h-11 px-2 lg:inline-flex" aria-pressed={props.focusMode} onClick={props.onToggleFocus}>
+        {props.focusMode ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}{t("queueFocus")}
+      </Button>}
       <Button type="button" variant="ghost" size="icon" className="size-11" disabled={!onPrevious} onClick={onPrevious} aria-label={t("detailPrevious")} title={t("detailPrevious")}><ChevronLeft /></Button>
       <Button type="button" variant="ghost" size="icon" className="size-11" disabled={!onNext} onClick={onNext} aria-label={t("detailNext")} title={t("detailNext")}><ChevronRight /></Button>
     </div>
   </nav>;
   const content = <>
     {navigation}
+    {ticket && <TicketListNotice key={ticketId} inResults={props.inResults} />}
     {ticket ? <DetailContent key={ticket._id} {...props} ticket={ticket} onClose={close} heading={heading} />
       : <p className="py-6 text-sm text-muted-foreground" role={ticket === undefined ? "status" : "alert"}>{t(ticket === undefined ? "syncing" : "ticketMissing")}</p>}
   </>;
@@ -75,7 +84,17 @@ export function TicketDetailPanel(props: PanelProps) {
     }
   }} aria-label={ticket ? undefined : t("ticket")} aria-labelledby={ticket ? heading : undefined}
     className="min-w-0 space-y-4 rounded-xl border bg-background p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5">{content}</section>;
-  return <Dialog open mobileFullScreen onOpenChange={open => { if (!open) close(); }} title={title}>{content}</Dialog>;
+  return <Dialog open mobileFullScreen placement={props.focusMode ? "fullscreen" : "side"} onOpenChange={open => { if (!open) close(); }} title={title}>{content}</Dialog>;
+}
+
+function TicketListNotice({ inResults }: { inResults?: boolean }) {
+  const { t } = useI18n();
+  const [wasListed, setWasListed] = useState(inResults === true);
+  useEffect(() => { if (inResults) setWasListed(true); }, [inResults]);
+  const leftResults = wasListed && inResults === false;
+  return <p role="status" aria-live="polite" className={leftResults ? "rounded-lg bg-muted px-3 py-2 text-sm" : "sr-only"}>
+    {leftResults && t("detailLeftResults")}
+  </p>;
 }
 
 function Disclosure({ title, children, icon }: { title: string; children: ReactNode; icon?: ReactNode }) {
@@ -167,10 +186,11 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
       <div className="flex flex-wrap items-center gap-2">
-        {props.role === "staff" && <Button onClick={() => props.onMove(ticket._id, primary.status)}>{t(primary.label)}<ArrowRight /></Button>}
+        {props.role === "staff" && <Button disabled={props.statusBusy} aria-label={t(primary.label) + " · " + number} onClick={() => props.onMove(ticket._id, primary.status)}>{t(primary.label)}<ArrowRight /></Button>}
         {!staff && <p className="w-full text-sm text-muted-foreground">{t(customerProgress[ticket.status])}</p>}
         <Button type="button" variant="outline" ref={editButton} onClick={() => setEdit("content")}><Pencil />{t(staff ? "edit" : "editTicket")}</Button>
       </div>
+      {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
       <TicketConversation ticket={ticket} token={token} role={props.role} />
     </>}
@@ -198,7 +218,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
         <div className="space-y-4">
           {props.role === "staff" && <>
             <label className="flex flex-wrap items-center justify-between gap-2 text-sm">{t("detailStatus")}
-              <select className="min-h-11 rounded-md border bg-background px-2" value={ticket.status} onChange={event => {
+              <select className="min-h-11 rounded-md border bg-background px-2" value={ticket.status} disabled={props.statusBusy} onChange={event => {
                 const status = statuses.find(value => value.value === event.target.value);
                 if (status) props.onMove(ticket._id, status.value);
               }}>{statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}</select>

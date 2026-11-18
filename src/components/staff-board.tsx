@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { useSelectedTicket } from "@/features/tickets/adapter";
@@ -13,6 +13,8 @@ import {
   KanbanItemHandle,
   KanbanOverlay,
 } from "@/components/reui/kanban";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { useExplorerCopy } from "@/lib/explorer-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TicketCard, type OpenTicket } from "@/components/ticket-card";
@@ -34,27 +36,8 @@ import {
 import type { TicketStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * Tailwind's `lg` breakpoint, the width at which the board becomes multi-column.
- *
- * Below it the five columns cannot sit side by side, so dragging between them is
- * impossible; the board switches to status tabs showing one column at a time and
- * cards are advanced with their status button instead. The breakpoint is read in
- * JS rather than with `lg:hidden` because both layouts must never be mounted at
- * once: duplicate column and card ids would break dnd-kit.
- */
-const MULTI_COLUMN_QUERY = "(min-width: 1024px)";
-
-function subscribeToViewport(onChange: () => void) {
-  const query = window.matchMedia(MULTI_COLUMN_QUERY);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-
-const isMultiColumnViewport = () => window.matchMedia(MULTI_COLUMN_QUERY).matches;
-
-/** No `window` while rendering on the server; assume the wide layout. */
-const isMultiColumnOnServer = () => true;
+type LaneCounts = Partial<Record<TicketStatus, number>>;
+type LanePage = { status: string; loadMore: (count: number) => void };
 
 /**
  * The staff board.
@@ -66,26 +49,28 @@ const isMultiColumnOnServer = () => true;
  * applied locally first, then persisted with the ticket's expected version. A
  * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard, visibleStatuses = BOARD_COLUMNS }: {
+export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard, shownByLane, loadedByLane, chosenStatus, onChooseStatus, constrained, busy, visibleStatuses = BOARD_COLUMNS }: {
   items: TicketSummary[];
   visibleStatuses?: readonly TicketStatus[];
   projectId: Id<"projects">;
   token: string;
   totals: Partial<Record<TicketStatus, number>>;
-  pages: Record<TicketStatus, { status: string; loadMore: (count: number) => void }>;
+  pages?: Record<TicketStatus, LanePage>;
+  shownByLane?: LaneCounts;
+  loadedByLane?: LaneCounts;
+  chosenStatus: TicketStatus;
+  onChooseStatus: (status: TicketStatus) => void;
+  constrained: boolean;
+  busy?: ReadonlySet<string>;
   onSelect: OpenTicket;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
 }) {
   const { t } = useI18n();
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
-  const columns = reconcileColumns(projectId, items, pending);
-  const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
-  const [chosenStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
+  const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
+  const multiColumn = useMediaQuery("(min-width: 1024px)");
   const visibleStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
-  const tabsId = useId();
-  const panelId = `${tabsId}-panel`;
-  const tabId = (status: TicketStatus) => `${tabsId}-${status}`;
   const draggedRef = useRef<TicketSummary | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -105,6 +90,12 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   }, [visibleStatuses]);
 
   async function move(item: TicketSummary, status: TicketStatus) {
+    // Filtered results are bounded by the current query. Only its subscription
+    // can decide whether a moved Ticket still belongs in that result set.
+    if (constrained) {
+      await onMoveCard(item, status);
+      return;
+    }
     if (pendingRef.current[item._id] && !pendingRef.current[item._id].observed) return;
     if (pendingMoveCount(pendingRef.current) >= 10) {
       toast.info(t("pendingMoveLimit"));
@@ -133,23 +124,18 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
       }}
     >
       {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} token={token} entry={entry} onObserve={observe} />)}
-      {multiColumn ? null : (
-        <StatusTabs
-          statuses={visibleStatuses}
-          totals={totals}
-          value={visibleStatus}
-          onValueChange={setVisibleStatus}
-          panelId={panelId}
-          tabId={tabId}
-        />
-      )}
+      {!multiColumn && <label className="mb-2 flex min-w-0 items-center gap-2 text-sm font-medium">
+        {t("boardStatusTabs")}
+        <select className="min-h-11 min-w-0 flex-1 rounded-md border bg-background px-2" value={visibleStatus}
+          onChange={event => onChooseStatus(event.target.value as TicketStatus)}>
+          {visibleStatuses.map(status => <option key={status} value={status}>
+            {t(statusMeta(status).labelKey)} · {shownByLane?.[status] ?? totals[status] ?? columns[status].length}
+          </option>)}
+        </select>
+      </label>}
       <KanbanBoard
-        className={cn("grid auto-rows-fr gap-4", {
-          "lg:grid-cols-2": visibleStatuses.length > 1,
-          "xl:grid-cols-4": visibleStatuses.length === 4,
-          "xl:grid-cols-5": visibleStatuses.length === 5,
-        })}
-        {...(multiColumn ? {} : { id: panelId, role: "tabpanel", "aria-labelledby": tabId(visibleStatus) })}
+        className={cn("grid items-start gap-3", multiColumn && "grid-flow-col overflow-x-auto pb-2")}
+        style={{ gridTemplateColumns: multiColumn ? `repeat(${visibleStatuses.length}, minmax(14rem, 1fr))` : "minmax(0, 1fr)" }}
       >
         {(multiColumn ? visibleStatuses : [visibleStatus]).map((status) => (
           <BoardColumn
@@ -158,12 +144,12 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
             items={columns[status]}
             initialHighest={initialHighest}
             onSelect={onSelect}
-            onMoveCard={(id, status) => {
-              const item = columns[status].find(row => row._id === id) ?? Object.values(columns).flat().find(row => row._id === id);
-              if (item) void move(item, status);
-            }}
-            total={totals[status] ?? 0}
-            page={pages[status]}
+            onMoveCard={move}
+            total={totals[status]}
+            shown={shownByLane?.[status]}
+            loaded={loadedByLane?.[status]}
+            busy={busy}
+            page={pages?.[status]}
             draggable={multiColumn}
           />
         ))}
@@ -184,72 +170,6 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   );
 }
 
-/**
- * The mobile status switcher: one tab per column, the selected one being the only
- * column rendered. Roving tabindex plus arrow keys, per the ARIA tabs pattern.
- */
-function StatusTabs({
-  statuses,
-  totals,
-  value,
-  onValueChange,
-  panelId,
-  tabId,
-}: {
-  totals: Partial<Record<TicketStatus, number>>;
-  value: TicketStatus;
-  onValueChange: (status: TicketStatus) => void;
-  panelId: string;
-  tabId: (status: TicketStatus) => string;
-  statuses: readonly TicketStatus[];
-}) {
-  const { t } = useI18n();
-  const tabRefs = useRef<Partial<Record<TicketStatus, HTMLButtonElement | null>>>({});
-
-  return (
-    <div role="tablist" aria-label={t("boardStatusTabs")} className="mb-4 grid grid-cols-2 gap-1 rounded-lg border bg-card p-1 sm:grid-cols-3">
-      {statuses.map((status, index) => {
-        const meta = statusMeta(status);
-        const Icon = meta.icon;
-        const label = t(meta.labelKey);
-        const selected = status === value;
-        return (
-          <button
-            key={status}
-            ref={(node) => {
-              tabRefs.current[status] = node;
-            }}
-            type="button"
-            role="tab"
-            id={tabId(status)}
-            aria-controls={panelId}
-            aria-selected={selected}
-            tabIndex={selected ? 0 : -1}
-            aria-label={t("boardColumnCards", { count: totals[status] ?? 0, status: label })}
-            onClick={() => onValueChange(status)}
-            onKeyDown={(event) => {
-              const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-              if (step === 0) return;
-              event.preventDefault();
-              const next = statuses[(index + step + statuses.length) % statuses.length];
-              onValueChange(next);
-              tabRefs.current[next]?.focus();
-            }}
-            className={cn(
-              "flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              selected ? cn("border", meta.tone) : "text-muted-foreground hover:bg-accent",
-            )}
-          >
-            <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">{label}</span>
-            <span className="tabular-nums">{totals[status] ?? 0}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function BoardColumn({
   status,
   items,
@@ -257,23 +177,31 @@ function BoardColumn({
   onMoveCard,
   draggable,
   total,
+  shown,
+  loaded,
+  busy,
   page,
   initialHighest,
 }: {
   status: TicketStatus;
   items: TicketSummary[];
   onSelect: OpenTicket;
-  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => void;
+  onMoveCard: (item: TicketSummary, status: TicketStatus) => void;
   /** False below `lg`, where one column is shown at a time and no card can be dragged. */
   draggable: boolean;
-  total: number;
-  page: { status: string; loadMore: (count: number) => void };
+  total?: number;
+  shown?: number;
+  loaded?: number;
+  busy?: ReadonlySet<string>;
+  page?: LanePage;
   initialHighest: number;
 }) {
   const { t } = useI18n();
   const meta = statusMeta(status);
   const Icon = meta.icon;
   const label = t(meta.labelKey);
+  const count = shown ?? total ?? items.length;
+  const c = useExplorerCopy();
 
   return (
     <KanbanColumn value={status} draggable={false} className="min-w-0 rounded-lg border bg-card">
@@ -282,17 +210,20 @@ function BoardColumn({
         <div className={cn("flex items-center justify-between rounded-t-lg border-b px-3 py-3", meta.tone)}>
           <div className="flex min-w-0 items-center gap-2">
             <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <h2 className="truncate text-sm font-semibold">{label}</h2>
+            <h2 className="break-words text-sm font-semibold">{label}</h2>
           </div>
-          <Badge variant="outline" className="bg-white/70" aria-label={t("boardColumnCards", { count: total, status: label })}>
-            {total}
+          <Badge variant="outline" className="bg-white/70" aria-label={t("boardColumnCards", { count, status: label })}>
+            {count}
           </Badge>
         </div>
       ) : null}
       <KanbanColumnContent value={status} className="min-h-24 space-y-3 p-3">
+        {shown !== undefined && loaded !== undefined && <p className="text-xs text-muted-foreground">
+          {c.matching(shown, loaded)}{total !== undefined && ` · ${c.laneTotal(total)}`}
+        </p>}
         {items.length === 0 ? (
           <div className="grid min-h-24 place-items-center rounded-md border border-dashed text-sm text-muted-foreground">
-            {t("empty")}
+            {shown === undefined ? t("empty") : c.loadedEmpty}
           </div>
         ) : (
           items.map((item) => (
@@ -302,7 +233,8 @@ function BoardColumn({
                 item={item}
                 inLane
                 onSelect={onSelect}
-                onMove={(id, next) => void onMoveCard(id, next)}
+                busy={busy?.has(item._id)}
+                onMove={(_id, next) => void onMoveCard(item, next)}
                 handle={
                   draggable ? (
                     <KanbanItemHandle
@@ -325,7 +257,7 @@ function BoardColumn({
             </KanbanItem>
           ))
         )}
-        {page.status === "CanLoadMore" || page.status === "LoadingMore" ? <Button type="button" variant="outline" className="min-h-11 w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
+        {page && (page.status === "CanLoadMore" || page.status === "LoadingMore") ? <Button type="button" variant="outline" className="min-h-11 w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
       </KanbanColumnContent>
     </KanbanColumn>
   );

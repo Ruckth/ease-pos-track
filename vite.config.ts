@@ -32,7 +32,6 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("/convex/")) return "convex-vendor";
-          if (id.includes("uploadthing")) return "upload-vendor";
           return undefined;
         },
       },

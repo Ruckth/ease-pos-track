@@ -32,36 +32,43 @@ export function useCurrentProject(token: string) {
   // Rewrite a missing or unusable key to the Project actually shown.
   useEffect(() => {
     if (current && readProjectParam(window.location.search) !== current.key) {
-      window.history.replaceState(null, "", withProjectParam(window.location.href, current.key, Boolean(readProjectParam(window.location.search))));
+      const requested = readProjectParam(window.location.search);
+      window.history.replaceState(requested ? null : window.history.state, "", withProjectParam(window.location.href, current.key, Boolean(requested)));
+      window.dispatchEvent(new PopStateEvent("popstate"));
     }
   }, [current]);
 
-  const select = useCallback((key: string) => {
-    window.history.pushState(null, "", withProjectParam(window.location.href, key, true));
+  const select = useCallback((key: string, view?: string) => {
+    const destination = new URL(withProjectParam(window.location.href, key, true), window.location.origin);
+    if (view === "queue") destination.searchParams.delete("view");
+    else if (view) destination.searchParams.set("view", view);
+    window.history.pushState(null, "", destination);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
 
   return { projects, current, select };
 }
 
-const selectClassName = "h-9 min-w-0 max-w-56 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const selectClassName = "min-h-11 min-w-0 w-full max-w-56 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** A plain select of Projects. Hidden behind a label when there is only one. */
 export function ProjectSwitcher({
   projects,
   current,
   onSelect,
+  onCreate,
 }: {
   projects: ProjectSummary[];
   current: ProjectSummary;
   onSelect: (key: string) => void;
+  onCreate?: () => void;
 }) {
   const { t } = useI18n();
   if (projects.length === 1) {
     return (
-      <span className="inline-flex h-9 min-w-0 max-w-48 items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm font-medium" title={current.name}>
+      <span className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm font-medium" title={current.name}>
         <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{current.name}</span>
+        <span className="truncate">{current.name} ({current.key})</span>
       </span>
     );
   }
@@ -70,11 +77,12 @@ export function ProjectSwitcher({
       className={selectClassName}
       aria-label={t("chooseProject")}
       value={current.key}
-      onChange={(event) => onSelect(event.target.value)}
+      onChange={(event) => event.target.value ? onSelect(event.target.value) : onCreate?.()}
     >
       {projects.map((project) => (
         <option key={project._id} value={project.key}>{project.name} ({project.key})</option>
       ))}
+      {onCreate && <option value="">{t("newProject")}…</option>}
     </select>
   );
 }

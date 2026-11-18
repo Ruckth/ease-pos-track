@@ -3,11 +3,12 @@ import { Columns3, Loader2, RotateCw, Table2 } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { TicketCard, type OpenTicket } from "@/components/ticket-card";
-import { createFilterQuery } from "@/components/reui/filters/filters-query";
+import { createFilterQuery, createFilterRule } from "@/components/reui/filters/filters-query";
 import type { FilterQuery } from "@/components/reui/filters/filters-types";
 import { filterTickets, sortTickets, type ExplorerSort, type ExplorerTag } from "@/lib/ticket-explorer";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { useI18n } from "@/lib/i18n";
+import { BOARD_COLUMNS } from "@/lib/kanban-board";
 import { stableQueue } from "@/lib/staff-ticket-queue";
 import type { TicketSummary } from "../../shared/ticket-contracts";
 import type { TicketStatus } from "@/lib/types";
@@ -15,6 +16,14 @@ import type { TicketStatus } from "@/lib/types";
 const TicketExplorerFilters = lazy(() => import("@/components/ticket-explorer-filters").then(module => ({ default: module.TicketExplorerFilters })));
 const TicketTable = lazy(() => import("@/components/ticket-table").then(module => ({ default: module.TicketTable })));
 const StaffBoard = lazy(() => import("@/components/staff-board").then(module => ({ default: module.StaffBoard })));
+
+const priorityRule = createFilterRule({ id: "high-or-critical", path: ["urgencyScore"], operator: "between", value: [51, 100] });
+
+function laneCounts(rows: TicketSummary[]) {
+  const counts = { new: 0, acknowledged: 0, in_progress: 0, waiting: 0, done: 0 };
+  for (const row of rows) counts[row.status]++;
+  return counts;
+}
 
 type Page = { status: string; loadMore: (count: number) => void };
 type View = "queue" | "focus" | "board" | "table";
@@ -48,14 +57,20 @@ export function TicketExplorer({ projectId, token, items, archivedItems, tags, s
   const view = workspace?.view ?? localView;
   const [filterQuery, setFilterQuery] = useState<FilterQuery>(() => createFilterQuery());
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [highUrgency, setHighUrgency] = useState(false);
+  const [searchLane, setSearchLane] = useState<{ query: string; lane: TicketStatus } | null>(null);
+  const [boardLane, setBoardLane] = useState<TicketStatus>("new");
+  const effectiveQuery = useMemo(() => highUrgency
+    ? createFilterQuery([filterQuery, priorityRule])
+    : filterQuery, [filterQuery, highUrgency]);
   const [sort, setSort] = useState<ExplorerSort>({ field: "createdAt", direction: "desc" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [revision, setRevision] = useState(0);
   const priorOrder = useRef<{ key: string; ids: string[] }>({ key: "", ids: [] });
   const orderKey = JSON.stringify([workspace?.orderKey, search, revision]);
-  const active = useMemo(() => filterTickets(items, "", filterQuery), [items, filterQuery]);
-  const archived = useMemo(() => filterTickets(archivedItems, "", filterQuery), [archivedItems, filterQuery]);
+  const active = useMemo(() => filterTickets(items, "", effectiveQuery), [items, effectiveQuery]);
+  const archived = useMemo(() => filterTickets(archivedItems, "", effectiveQuery), [archivedItems, effectiveQuery]);
   const combined = useMemo(() => showArchived ? [...active, ...archived] : active, [active, archived, showArchived]);
   const ordered = useMemo(() => {
     if (view === "table") return sortTickets(combined, sort, tags, language);
@@ -69,7 +84,7 @@ export function TicketExplorer({ projectId, token, items, archivedItems, tags, s
     if (!search && !showArchived && (view === "queue" || view === "focus")) priorOrder.current = { key: orderKey, ids };
     onOrder?.(ids);
   }, [ordered, loading, onOrder, orderKey, view, search, showArchived]);
-  useEffect(() => { setPage(1); }, [search, filterQuery, sort, showArchived, pageSize]);
+  useEffect(() => { setPage(1); }, [search, effectiveQuery, sort, showArchived, pageSize, workspace?.orderKey]);
   const first = ordered[0]?._id;
   const focusFirst = workspace?.onFocusFirst;
   const selectedId = workspace?.selectedId;
@@ -84,21 +99,40 @@ export function TicketExplorer({ projectId, token, items, archivedItems, tags, s
   }, [onFiltersOpen, filtersOpen]);
 
   const rules = filterQuery.rules.length;
-  const filteredTotals = rules ? Object.fromEntries(Object.keys(pages).map(status => [status, active.filter(item => item.status === status).length])) : totals;
+  const filtering = rules > 0 || highUrgency;
+  const board = view === "board" && (!workspace || !showArchived);
+  const loadedByLane = useMemo(() => board ? laneCounts(items) : undefined, [board, items]);
+  const shownByLane = useMemo(() => board && (filtering || search) ? laneCounts(active) : undefined, [board, filtering, search, active]);
+  const loaded = items.length + (showArchived ? archivedItems.length : 0);
+  const capped = Boolean(search && (searchHasMore || (showArchived && archiveSearchHasMore)));
   const legacyPages = [...Object.values(pages), ...(showArchived && archive ? [archive] : [])];
   const morePages = workspace?.hasMore ?? (!search && legacyPages.some(page => page.status === "CanLoadMore"));
   const loadingMore = workspace?.loadingMore ?? legacyPages.some(page => page.status === "LoadingMore");
   const loadMore = workspace?.loadMore ?? (() => legacyPages.forEach(page => { if (page.status === "CanLoadMore") page.loadMore(20); }));
-  const board = view === "board" && !search && (!workspace || !showArchived);
+  const partial = capped || morePages;
+  const emptyText = partial ? c.loadedEmpty : filtering || search ? c.noResults : c.emptyView;
+  const resultSummary = capped ? c.cappedMatches(combined.length, loaded)
+    : filtering ? c.matching(combined.length, loaded)
+    : search ? t("searchMatches", { count: combined.length })
+    : morePages && view === "table" ? t("loadedTickets", { count: loaded }) : undefined;
+  const preferredLane = search
+    ? searchLane?.query === search ? searchLane.lane : active[0]?.status ?? boardLane
+    : boardLane;
+  const chooseLane = (lane: TicketStatus) => {
+    if (search) setSearchLane({ query: search, lane });
+    else setBoardLane(lane);
+  };
   const fallback = <p role="status" className="py-3 text-sm text-muted-foreground">{t("syncing")}</p>;
   const filters = <Suspense fallback={fallback}><TicketExplorerFilters query={filterQuery} onChange={setFilterQuery} tags={tags} /></Suspense>;
-  const reset = () => { onSearch(""); setFilterQuery(createFilterQuery()); };
+  const reset = () => { onSearch(""); setFilterQuery(createFilterQuery()); setHighUrgency(false); };
   const summary = (item: TicketSummary) => <TicketCard key={item._id} item={item} onSelect={onSelect} selected={item._id === selectedId}
     busy={workspace?.busy.has(item._id)} onMove={(_id, status) => { void onMove(item, status); }} onRestore={onRestore} />;
 
   return <section className="min-w-0 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      {workspace ? <details className="min-w-0 flex-1" open={filtersOpen} onToggle={event => {
+      <Button type="button" variant={highUrgency ? "secondary" : "outline"} size="sm" className="min-h-11" aria-pressed={highUrgency}
+        onClick={() => setHighUrgency(value => !value)}>{c.highOrCritical}</Button>
+      {workspace ? <details className="min-w-0 flex-1 open:basis-full" open={filtersOpen} onToggle={event => {
         const open = event.currentTarget.open;
         setFiltersOpen(open);
       }}>
@@ -106,25 +140,27 @@ export function TicketExplorer({ projectId, token, items, archivedItems, tags, s
           {t("queueFilters")}{rules > 0 ? ` (${rules})` : ""}
         </summary>
         {filtersOpen && <div className="space-y-2 pb-2">{filters}<p className="text-xs text-muted-foreground">{c.loadedScope}</p></div>}
-      </details> : <div className="min-w-0 flex-1">{filters}</div>}
-      {(search || rules > 0) && <Button variant="ghost" size="sm" className="min-h-11" onClick={reset}>{c.clearAll}</Button>}
+      </details> : <div className="min-w-0 basis-full md:flex-1">{filters}</div>}
+      {(search || filtering) && <Button variant="ghost" size="sm" className="min-h-11" onClick={reset}>{c.clearAll}</Button>}
       {!workspace && <div className="flex rounded-md border bg-card p-1" role="group" aria-label={c.view}>
         <Button size="sm" variant={view === "board" ? "secondary" : "ghost"} aria-pressed={view === "board"} onClick={() => setLocalView("board")}><Columns3 />{c.board}</Button>
         <Button size="sm" variant={view === "table" ? "secondary" : "ghost"} aria-pressed={view === "table"} onClick={() => setLocalView("table")}><Table2 />{c.table}</Button>
       </div>}
       {workspace && view === "queue" && !search && !showArchived && <Button size="sm" variant="ghost" className="min-h-11" onClick={() => setRevision(current => current + 1)}><RotateCw />{t("queueRefresh")}</Button>}
     </div>
-    {search && !loading && <p role="status" className="text-sm text-muted-foreground">
-      {t((showArchived ? archiveSearchHasMore : searchHasMore) ? "searchLoaded" : "searchMatches", { count: combined.length })}
-    </p>}
+    {!loading && resultSummary && <p role="status" className="text-sm text-muted-foreground">{resultSummary}</p>}
     <Suspense fallback={fallback}>
     {loading ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 aria-hidden className="size-6 animate-spin text-muted-foreground" /></div>
-      : view === "table" ? <TicketTable items={ordered} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect} />
-      : board ? <StaffBoard projectId={projectId} token={token} items={active} totals={filteredTotals} visibleStatuses={workspace?.visibleStatuses} pages={pages} onSelect={onSelect} onMoveCard={onMove} />
+      : view === "table" ? <TicketTable items={ordered} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect}
+          onMove={onMove} onRestore={onRestore} busy={workspace?.busy} emptyText={emptyText} />
+      : board ? <StaffBoard projectId={projectId} token={token} items={active} totals={totals} shownByLane={shownByLane} loadedByLane={filtering && !search ? loadedByLane : undefined}
+          visibleStatuses={workspace?.visibleStatuses ?? BOARD_COLUMNS} pages={search ? undefined : pages} constrained={Boolean(search || filtering)}
+          chosenStatus={preferredLane} onChooseStatus={chooseLane} busy={workspace?.busy}
+          onSelect={onSelect} onMoveCard={onMove} />
       : ordered.length ? <div className="space-y-2">
-        {!search && <p className="text-xs text-muted-foreground">{t("loadedTickets", { count: ordered.length })}{!showArchived ? ` · ${t("queuePriority")}` : ""}</p>}
+        {!search && !filtering && <p className="text-xs text-muted-foreground">{t("loadedTickets", { count: ordered.length })}{!showArchived ? ` · ${t("queuePriority")}` : ""}</p>}
         {ordered.map(summary)}
-      </div> : <div role="status" className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">{c.noResults}</div>}
+      </div> : <div role="status" className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">{emptyText}</div>}
     </Suspense>
     {board && !workspace && showArchived && <section className="space-y-2"><h2>{t("archivedTicket")}</h2>{archived.map(summary)}</section>}
     {!loading && !board && morePages && <Button variant="outline" className="min-h-11" disabled={loadingMore} onClick={loadMore}>{t("loadOlder")}</Button>}

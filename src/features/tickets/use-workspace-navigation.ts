@@ -1,8 +1,22 @@
 import { useSyncExternalStore } from "react";
 import type { Id } from "@convex/_generated/dataModel";
 
-type WorkspaceView = "queue" | "board" | "focus" | "table";
+export type ListView = "queue" | "board" | "table";
+type WorkspaceView = ListView | "focus";
 const locationEvent = "ticket-workspace-location";
+
+type NavigationSnapshot = { search: string; focusOrigin: ListView; ticketFromList: boolean };
+let cachedSnapshot: NavigationSnapshot | undefined;
+
+function getSnapshot(): NavigationSnapshot {
+  const { search } = window.location;
+  const { focusOrigin: origin, ticketFromList: opened } = window.history.state ?? {};
+  const focusOrigin = origin === "board" || origin === "table" ? origin : "queue";
+  const ticketFromList = opened === true;
+  if (!cachedSnapshot || cachedSnapshot.search !== search || cachedSnapshot.focusOrigin !== focusOrigin ||
+      cachedSnapshot.ticketFromList !== ticketFromList) cachedSnapshot = { search, focusOrigin, ticketFromList };
+  return cachedSnapshot;
+}
 
 function subscribe(notify: () => void) {
   window.addEventListener("popstate", notify);
@@ -13,7 +27,7 @@ function subscribe(notify: () => void) {
   };
 }
 
-function update(changes: Record<string, string | null>, replace = false, openedFromList = false) {
+function update(changes: Record<string, string | null>, replace = false, openedFromList = false, focusOrigin?: ListView) {
   const url = new URL(window.location.href);
   for (const [key, value] of Object.entries(changes)) {
     if (value) url.searchParams.set(key, value);
@@ -21,12 +35,13 @@ function update(changes: Record<string, string | null>, replace = false, openedF
   }
   if (url.href === window.location.href) return;
   const fromList = openedFromList || (replace && url.searchParams.has("ticket") && window.history.state?.ticketFromList);
-  window.history[replace ? "replaceState" : "pushState"]({ ticketFromList: Boolean(fromList) }, "", url);
+  const fromView = url.searchParams.get("view") === "focus" ? focusOrigin ?? window.history.state?.focusOrigin : undefined;
+  window.history[replace ? "replaceState" : "pushState"]({ ticketFromList: Boolean(fromList), focusOrigin: fromView }, "", url);
   window.dispatchEvent(new Event(locationEvent));
 }
 
 export function useWorkspaceNavigation(role: "staff" | "customer", projectKey: string | null | undefined) {
-  const search = useSyncExternalStore(subscribe, () => window.location.search);
+  const { search, focusOrigin, ticketFromList } = useSyncExternalStore(subscribe, getSnapshot);
   const params = new URLSearchParams(search);
   const requestedView = params.get("view");
   const view: WorkspaceView = role === "staff" && (requestedView === "board" || requestedView === "table" || requestedView === "focus") ? requestedView : "queue";
@@ -39,16 +54,19 @@ export function useWorkspaceNavigation(role: "staff" | "customer", projectKey: s
   const allowed = role === "customer" ? ["active", "waiting", "done", "all"] :
     ["active", "all", "new", "acknowledged", "in_progress", "waiting", "done", "archive"];
   const filter = allowed.includes(candidate) ? candidate : "active";
+  const listView: ListView = view === "focus" ? focusOrigin : view;
   return {
-    view, filter, query: params.get("q") ?? "", ticketId, section,
+    view, listView, filter, query: params.get("q") ?? "", ticketId, section,
     setView: (next: WorkspaceView) => update({ view: next === "queue" ? null : next, ticket: null, section: null }),
     setFilter: (next: string) => update({ filter: next === "active" ? null : next, ticket: null, section: null }),
     setQuery: (next: string) => update({ q: next, ticket: null, section: null }, true),
+    enterFocus: () => update({ view: "focus" }, true, false, listView),
+    leaveFocus: () => update({ view: listView === "queue" ? null : listView }, true),
     openTicket: (id: Id<"tickets">, section?: "media") => update({ ticket: id, section: section ?? null }, Boolean(ticketId), !ticketId),
     changeTicket: (id: Id<"tickets">) => update({ ticket: id, section: null }, true),
     closeTicket: () => {
-      if (window.history.state?.ticketFromList) window.history.back();
-      else update({ ticket: null, section: null }, true);
+      if (ticketFromList) window.history.back();
+      else update({ ticket: null, section: null, ...(view === "focus" ? { view: listView === "queue" ? null : listView } : {}) }, true);
     },
   };
 }
