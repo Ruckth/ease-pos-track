@@ -1,5 +1,5 @@
 import { errorCode } from "../../shared/errors";
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 export type Language = "th" | "en";
 const STORAGE_KEY = "ease-pos-tracking-language";
@@ -15,6 +15,7 @@ const en = {
   detailStatus: "Change status",
   detailUrgency: "Edit urgency",
   detailCurrent: "Latest saved version",
+  detailLeftResults: "This Ticket no longer matches the current results.",
   detailUseLatest: "Use latest version",
   detailKeepDraft: "Keep my changes",
   detailRetryHint: "Review the latest version below, then choose which values to edit.",
@@ -25,6 +26,7 @@ const en = {
 
   // Single-form composer and compact customer workspace
   statusWriting: "Updating status…", statusChecking: "Checking current status…", statusNeedsConnection: "Reconnect to check the current status.", statusCheckAgain: "Check again",
+  draftDiscardDescription: "Discard the text, files and notes in this draft?", draftSessionHint: "Your draft stays in this tab until you reload or sign out.", copyTicketLink: "Copy Ticket link",
   composerHint: "Only a topic is required. Add details or files when they help explain the Ticket.",
   composerRequired: "(required)",
   composerPreview: "Preview Ticket (optional)",
@@ -290,6 +292,7 @@ const th: Record<keyof typeof en, string> = {
   detailStatus: "เปลี่ยนสถานะ",
   detailUrgency: "แก้ไขความเร่งด่วน",
   detailCurrent: "เวอร์ชันล่าสุดที่บันทึก",
+  detailLeftResults: "Ticket นี้ไม่อยู่ในรายการที่แสดงแล้ว",
   detailUseLatest: "ใช้เวอร์ชันล่าสุด",
   detailKeepDraft: "เก็บการแก้ไขของฉัน",
   detailRetryHint: "ตรวจสอบเวอร์ชันล่าสุดด้านล่าง แล้วเลือกข้อมูลที่ต้องการแก้ไข",
@@ -300,6 +303,7 @@ const th: Record<keyof typeof en, string> = {
 
   // Single-form composer and compact customer workspace
   statusWriting: "กำลังอัปเดตสถานะ…", statusChecking: "กำลังตรวจสอบสถานะล่าสุด…", statusNeedsConnection: "เชื่อมต่ออีกครั้งเพื่อตรวจสอบสถานะ", statusCheckAgain: "ตรวจสอบอีกครั้ง",
+  draftDiscardDescription: "ลบข้อความ ไฟล์ และหมายเหตุในฉบับร่างนี้หรือไม่", draftSessionHint: "ฉบับร่างนี้เก็บไว้ในหน้านี้จนกว่าจะรีโหลดหรือออกจากระบบ", copyTicketLink: "คัดลอกลิงก์ Ticket",
   composerHint: "กรอกเฉพาะหัวข้อก็ส่ง Ticket ได้ เพิ่มรายละเอียดหรือไฟล์เมื่อช่วยอธิบายได้ชัดเจนขึ้น",
   composerRequired: "(จำเป็น)",
   composerPreview: "ดูตัวอย่าง Ticket (ไม่บังคับ)",
@@ -566,8 +570,16 @@ export function translate(language: Language, key: Key, values: Record<string, s
   return (language === "th" ? th : en)[key].replace(/{{(\w+)}}/g, (_, name) => String(values[name] ?? ""));
 }
 
+const dateOptions: Intl.DateTimeFormatOptions = {
+  month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
+};
+const dateFormatters: Partial<Record<Language, Intl.DateTimeFormat>> = {};
+
 export function formatLocalizedDate(language: Language, timestamp: number) {
-  return new Intl.DateTimeFormat(language === "th" ? "th-TH-u-ca-buddhist" : "en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(timestamp);
+  const formatter = dateFormatters[language] ??= new Intl.DateTimeFormat(
+    language === "th" ? "th-TH-u-ca-buddhist" : "en-US", dateOptions,
+  );
+  return formatter.format(timestamp);
 }
 
 function savedLanguage(): Language {
@@ -576,6 +588,7 @@ function savedLanguage(): Language {
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(savedLanguage);
+  useEffect(() => { document.documentElement.lang = language; }, [language]);
   const value = useMemo<I18n>(() => ({
     language,
     setLanguage(next) { window.localStorage.setItem(STORAGE_KEY, next); setLanguageState(next); },

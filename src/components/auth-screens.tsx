@@ -1,6 +1,7 @@
 import { FormEvent, useState, type ComponentProps } from "react";
 import { useStaffLogin, useCustomerAuth } from "@/app/adapter";
-import { Eye, EyeOff, Headphones, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { ProductWordmark } from "@/components/product-wordmark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -45,12 +46,7 @@ export function AuthPage({
       <Card className="w-full max-w-md overflow-hidden rounded-2xl border-primary/10 bg-card/95 shadow-xl shadow-primary/5">
         <CardHeader className="space-y-5 border-b bg-muted/20 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-                <Headphones className="size-5" aria-hidden="true" />
-              </div>
-              <p className="truncate text-sm font-semibold">{t("appName")}</p>
-            </div>
+            <ProductWordmark />
             <LanguageSelector language={language} onChange={setLanguage} />
           </div>
           <div>

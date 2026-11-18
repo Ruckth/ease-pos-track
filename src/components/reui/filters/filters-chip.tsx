@@ -1062,6 +1062,13 @@ function FilterChipImpl<V, O>({ rule, index }: FilterChipProps<V>) {
           <FilterRuleMenuItems ruleId={rule.id} />
         </DropdownMenuContent>
       </DropdownMenu>
+      <Button type="button" variant="outline" size={sizes.icon}
+        className="min-h-11 min-w-11 bg-background" disabled={actions.disabled}
+        {...filterReadOnlyProps(actions)}
+        aria-label={`${actions.labels.remove} · ${pathText} ${operatorLabel} ${valueName}`.trim()}
+        onClick={() => actions.removeNode(rule.id)}>
+        <XIcon aria-hidden />
+      </Button>
     </ButtonGroup>
   )
 }
