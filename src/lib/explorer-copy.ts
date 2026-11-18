@@ -1,6 +1,12 @@
 import { useI18n } from "./i18n";
 
 const en = {
+  highOrCritical: "High or critical",
+  bands: { unscored: "Unscored", low: "Low", medium: "Medium", high: "High", critical: "Critical" },
+  action: "Action", loadedEmpty: "No matches among loaded Tickets.", emptyView: "No Tickets in this view.",
+  matching: (shown: number, loaded: number) => `${shown} matching among ${loaded} loaded`,
+  laneTotal: (total: number) => `${total} total`,
+  cappedMatches: (shown: number, returned: number) => `${shown} shown from the first ${returned} matches · Refine search`,
   loadedScope: "Filters, sorting and table totals apply to loaded Tickets. Load older Tickets to include more.",
   urgency: "Urgency", unset: "Unset",
   board: "Board", table: "Table", view: "Ticket view", filters: "Filters", clearAll: "Clear all", tags: "Tags", status: "Status",
@@ -11,6 +17,12 @@ const en = {
   first: "First page", last: "Last page", open: "Open Ticket", archived: "Archived", remove: "Remove", sort: "Sort", ascending: "Ascending", descending: "Descending",
 };
 const th: typeof en = {
+  highOrCritical: "เร่งด่วนสูงหรือวิกฤต",
+  bands: { unscored: "ยังไม่ระบุ", low: "ต่ำ", medium: "ปานกลาง", high: "สูง", critical: "วิกฤต" },
+  action: "การดำเนินการ", loadedEmpty: "ไม่พบรายการที่ตรงกันใน Ticket ที่โหลดแล้ว", emptyView: "ไม่มี Ticket ในมุมมองนี้",
+  matching: (shown, loaded) => `ตรงเงื่อนไข ${shown} จาก ${loaded} รายการที่โหลดแล้ว`,
+  laneTotal: total => `ทั้งหมด ${total} รายการ`,
+  cappedMatches: (shown, returned) => `แสดง ${shown} จาก ${returned} ผลลัพธ์แรก · ระบุคำค้นหาให้เจาะจงขึ้น`,
   loadedScope: "ตัวกรอง การเรียง และจำนวนในตารางใช้กับ Ticket ที่โหลดแล้ว โหลดรายการเก่าเพื่อรวมเพิ่มเติม",
   urgency: "ความเร่งด่วน", unset: "ยังไม่ระบุ",
   board: "บอร์ด", table: "ตาราง", view: "มุมมอง Ticket", filters: "ตัวกรอง", clearAll: "ล้างทั้งหมด", tags: "แท็ก", status: "สถานะ",

@@ -52,5 +52,34 @@ try {
   await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:"/tmp/ticket-explorer-mobile.png",fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,"no horizontal page overflow");
+  // A populated phone Table keeps its sort and primary action within reach.
+  await button("Language").click();
+  await page.getByRole("combobox", { name: "Sort", exact: true }).selectOption("ticketNumber:asc");
+  assert.equal(await page.getByRole("table").count(), 0, "only the compact Table is mounted");
+  await button("Acknowledge · POS-0002").click();
+  await button("Start work · POS-0002").waitFor();
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.getByRole("table").waitFor();
+  await button("Start work · POS-0002").waitFor();
+
+  // Browse counts and capped indexed search have different denominators.
+  await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html?partial`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await button("High or critical").click();
+  await summary("2 matching among 20 loaded · 80 total");
+  await button("Load older Tickets").click();
+  await summary("4 matching among 40 loaded · 80 total");
+  const search = page.getByRole("textbox", { name: "Search", exact: true });
+  await search.fill("Printer");
+  await summary("5 shown from the first 50 matches · Refine search");
+  await page.locator('[data-slot="kanban-board"]').waitFor();
+  await button("Table").click();
+  await summary("5 shown from the first 50 matches · Refine search");
+  assert.equal(await page.locator("[data-ticket-id]").count(), 5);
+  await button("High or critical").click();
+  await summary("50 shown from the first 50 matches · Refine search");
+  await search.fill("POS-0002");
+  await button("Board").click();
+  await button("Acknowledge · POS-0002").waitFor();
   assert.deepEqual(errors,[]); console.log("Explorer browser checks passed: table, board, filters, dates, urgency, pagination, archives, details, Thai and mobile.");
 } finally { await browser.close(); }

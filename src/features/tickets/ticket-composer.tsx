@@ -61,8 +61,19 @@ export function TicketComposer({ token, draftOwner, active, role, onSubmitted }:
       setSelectedMediaId(null);
       setPendingRemoval(null);
       setPreview(false);
-      toast.success(t("ticketSubmitted"));
-      onSubmitted(owner.lastSubmittedId);
+      const id = owner.lastSubmittedId;
+      onSubmitted(id);
+      const link = new URL(window.location.pathname, window.location.origin);
+      const project = new URLSearchParams(window.location.search).get("project");
+      if (project) link.searchParams.set("project", project);
+      if (id) link.searchParams.set("ticket", id);
+      toast.success(t("ticketSubmitted"), id ? { action: {
+        label: t("copyTicketLink"),
+        onClick: async () => {
+          try { await navigator.clipboard.writeText(link.href); }
+          catch { toast.error(t("ticketCopyFailed")); }
+        },
+      } } : undefined);
     }
   }
 
@@ -101,6 +112,7 @@ export function TicketComposer({ token, draftOwner, active, role, onSubmitted }:
       {progress !== null ? <div role="progressbar" aria-label={t("submitting")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-2 overflow-hidden rounded-full bg-muted">
         <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
       </div> : null}
+      {(title || description || items.length > 0) && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
       {error && !titleInvalid ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       <div className="sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:bg-transparent sm:px-0 sm:pb-0">
         <Button className="min-h-11 flex-1" disabled={isUploading}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t(role === "staff" ? "submit" : "submitTicket")}</Button>

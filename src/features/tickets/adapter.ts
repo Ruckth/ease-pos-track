@@ -62,9 +62,10 @@ export function useStaffTickets(token: string, projectId: Id<"projects"> | undef
   // Active work spans four workflow states. Separate indexed lanes avoid
   // scanning page after page of resolved Tickets to find actionable work.
   const useLanes = !query && !archived && (view === "board" || filter === "active");
-  const enabledLanes = useMemo(() => useLanes ? BOARD_COLUMNS.filter(lane =>
+  const visibleStatuses = useMemo(() => BOARD_COLUMNS.filter(lane =>
     status ? lane === status : filter !== "active" || lane !== "done"
-  ) : [], [useLanes, status, filter]);
+  ), [status, filter]);
+  const enabledLanes = useLanes ? visibleStatuses : [];
   const lanes = useStaffLanes(token, projectId, enabledLanes);
   const page = usePaginatedQuery(api.tickets.pageTickets, projectId && !query && !useLanes ? {
     token, projectId, lifecycle, status,
@@ -74,11 +75,17 @@ export function useStaffTickets(token: string, projectId: Id<"projects"> | undef
     token, projectId, lifecycle, search: query, status, activeOnly: filter === "active" || undefined,
   } : "skip");
   const pages = useLanes ? enabledLanes.map(lane => lanes[lane]) : query ? [] : [page];
-  const rows = query ? matches?.matches ?? [] : useLanes
-    ? mergeQueueLanes(pages.flatMap(page => page.results))
-    : page.results;
+  const { new: { results: newRows }, acknowledged: { results: acknowledged },
+    in_progress: { results: inProgress }, waiting: { results: waiting }, done: { results: done } } = lanes;
+  // Pagination returns fresh wrappers even when their results are identical.
+  // Keep the merged array stable so opening detail does not re-sort the list.
+  const laneRows = useMemo(() => {
+    const rows = { new: newRows, acknowledged, in_progress: inProgress, waiting, done };
+    return useLanes ? mergeQueueLanes(visibleStatuses.flatMap(lane => rows[lane])) : [];
+  }, [useLanes, visibleStatuses, newRows, acknowledged, inProgress, waiting, done]);
+  const rows = query ? matches?.matches ?? laneRows : useLanes ? laneRows : page.results;
   return {
-    lanes, enabledLanes, totals, invalidSearch, items: rows,
+    lanes, enabledLanes, visibleStatuses, totals, invalidSearch, items: rows,
     loading: query ? matches === undefined : pages.some(page => page.status === "LoadingFirstPage"),
     hasMore: pages.some(page => page.status === "CanLoadMore" || page.status === "LoadingMore"),
     loadingMore: pages.some(page => page.status === "LoadingMore"),

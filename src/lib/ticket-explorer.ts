@@ -45,15 +45,22 @@ function matches(item: ExplorerTicket, node: FilterNode): boolean {
 
 export function filterTickets<T extends ExplorerTicket>(items: T[], search: string, query: FilterQuery): T[] {
   const text = search.trim().toLocaleLowerCase();
+  if (!text && !query.rules.length) return items;
   return items.filter((item) => (!text || `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description ?? item.excerpt ?? ""}`.toLocaleLowerCase().includes(text)) && matches(item, query));
 }
 
 export function sortTickets<T extends ExplorerTicket>(items: T[], sort: ExplorerSort, tags: ExplorerTag[], language: string): T[] {
-  const tagNames = new Map(tags.map((tag) => [tag._id, tag.name]));
   const collator = new Intl.Collator(language, { numeric: true, sensitivity: "base" });
-  const value = (item: T) => sort.field === "tags"
-    ? (item.tagIds ?? []).map((id) => tagNames.get(id) ?? "").sort(collator.compare).join(", ")
-    : item[sort.field] ?? 0;
+  // A tag name list is a sort key. Build it once per Ticket, outside the comparator.
+  let tagsByTicket: Map<string, string> | undefined;
+  if (sort.field === "tags") {
+    const tagNames = new Map(tags.map(tag => [tag._id, tag.name]));
+    tagsByTicket = new Map(items.map(item => [
+      item._id,
+      (item.tagIds ?? []).map(id => tagNames.get(id) ?? "").sort(collator.compare).join(", "),
+    ]));
+  }
+  const value = (item: T) => sort.field === "tags" ? tagsByTicket?.get(item._id) ?? "" : item[sort.field] ?? 0;
   return [...items].sort((a, b) => {
     if (sort.field === "urgencyScore" && (a.urgencyScore === undefined || b.urgencyScore === undefined)) {
       if (a.urgencyScore !== b.urgencyScore) return a.urgencyScore === undefined ? 1 : -1;
