@@ -99,7 +99,7 @@ async function mergeRankedLanes(queries: AsyncIterable<Doc<"tickets">>[]) {
   const rows: Doc<"tickets">[] = [];
   try {
     while (remaining.size && rows.length <= SEARCH_LIMIT) {
-      const batch = [...remaining].slice(0, SEARCH_LIMIT + 1 - rows.length);
+      const batch = Array.from(remaining).slice(0, SEARCH_LIMIT + 1 - rows.length);
       const results = await Promise.all(batch.map(stream => stream.next()));
       results.forEach((result, index) => {
         if (result.done) remaining.delete(batch[index]);
@@ -108,7 +108,7 @@ async function mergeRankedLanes(queries: AsyncIterable<Doc<"tickets">>[]) {
     }
     return rows;
   } finally {
-    await Promise.all([...remaining].map(stream => stream.return?.()));
+    await Promise.all(Array.from(remaining, stream => stream.return?.()));
   }
 }
 
