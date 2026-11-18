@@ -15,8 +15,11 @@ export function readProjectParam(search: string) {
 }
 
 /** The same URL with the project parameter set, other parameters untouched. */
-export function withProjectParam(href: string, key: string) {
+export function withProjectParam(href: string, key: string, clearContext = false) {
   const url = new URL(href);
+  if (clearContext) {
+    for (const param of ["ticket", "section", "q", "filter"]) url.searchParams.delete(param);
+  }
   url.searchParams.set(PROJECT_PARAM, key);
   return `${url.pathname}${url.search}${url.hash}`;
 }

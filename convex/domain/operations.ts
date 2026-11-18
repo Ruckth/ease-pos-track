@@ -36,7 +36,7 @@ import {
  * Loads a ticket the actor may read, or null. Denied and non-existent tickets are
  * indistinguishable, so the portal cannot be used to probe for ticket ids.
  */
-async function readableTicket(
+export async function readableTicket(
   ctx: QueryCtx | MutationCtx,
   actor: Actor<Id<"customers">>,
   id: Id<"tickets">,
@@ -94,6 +94,20 @@ export const getTicket = queryOperation({
     const { actor } = ctx;
     const row = await readableTicket(ctx, actor, args.id);
     return row ? ticketDetail(row, await resolveTicketTags(ctx, row)) : null;
+  },
+});
+
+/** Normalize a browser deep link before resolving it within the current Project. */
+export const getWorkspaceTicket = queryOperation({
+  args: { token: v.string(), projectId: v.id("projects"), ticket: v.string() },
+  handler: async (ctx, args) => {
+    const id = ctx.db.normalizeId("tickets", args.ticket);
+    if (!id) return null;
+    const row = await readableTicket(ctx, ctx.actor, id);
+    if (!row || row.projectId !== args.projectId) return null;
+    const project = await ctx.db.get(row.projectId);
+    if (!project || project.archivedAt !== undefined) return null;
+    return ticketDetail(row, await resolveTicketTags(ctx, row));
   },
 });
 

@@ -3,11 +3,9 @@
 import * as React from "react"
 import {
   Children,
-  cloneElement,
   createContext,
   CSSProperties,
   isValidElement,
-  ReactElement,
   ReactNode,
   useCallback,
   useContext,
@@ -52,6 +50,8 @@ import { cn } from "@/lib/utils"
 // Sortable Item Context
 const SortableItemContext = createContext<{
   listeners: DraggableSyntheticListeners | undefined
+  attributes?: ReturnType<typeof useSortable>["attributes"]
+  setActivatorNodeRef?: ReturnType<typeof useSortable>["setActivatorNodeRef"]
   isDragging?: boolean
   disabled?: boolean
 }>({
@@ -210,11 +210,11 @@ function Sortable<T>({
     if (!activeId) return null
     let result: ReactNode = null
     Children.forEach(children, (child) => {
-      if (isValidElement(child) && (child.props as any).value === activeId) {
-        result = cloneElement(child as ReactElement<any>, {
-          ...(child.props as any),
-          className: cn((child.props as any).className, "z-50"),
-        })
+      if (isValidElement<SortableItemProps>(child) && child.props.value === activeId) {
+        // A visual duplicate must not register a second draggable with the same ID.
+        result = <div inert aria-hidden="true" className={cn(child.props.className, "z-50")}>
+          {child.props.children}
+        </div>
       }
     })
     return result
@@ -275,6 +275,7 @@ function SortableItem({
 
   const {
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     attributes,
@@ -296,6 +297,8 @@ function SortableItem({
         "data-slot": "sortable-item",
         "data-value": value,
         "data-dragging": true,
+        inert: true,
+        "aria-hidden": true,
         className: cn(className),
         children: props.children,
       }
@@ -306,7 +309,6 @@ function SortableItem({
         "data-disabled": disabled,
         ref: setNodeRef,
         style,
-        ...attributes,
         className: cn(
           isSortableDragging && "opacity-50 z-50",
           disabled && "opacity-50",
@@ -320,7 +322,7 @@ function SortableItem({
       value={
         isOverlay
           ? { listeners: undefined, isDragging: true, disabled: false }
-          : { listeners, isDragging: isSortableDragging, disabled }
+          : { listeners, attributes, setActivatorNodeRef, isDragging: isSortableDragging, disabled }
       }
     >
       {useRender({
@@ -342,13 +344,15 @@ function SortableItemHandle({
   cursor = true,
   ...props
 }: SortableItemHandleProps) {
-  const { listeners, isDragging, disabled } = useContext(SortableItemContext)
+  const { listeners, attributes, setActivatorNodeRef, isDragging, disabled } = useContext(SortableItemContext)
 
   const defaultProps = {
     "data-slot": "sortable-item-handle",
     "data-dragging": isDragging,
     "data-disabled": disabled,
+    ...attributes,
     ...listeners,
+    ref: setActivatorNodeRef,
     className: cn(
       cursor && (isDragging ? "!cursor-grabbing" : "!cursor-grab"),
       className

@@ -6,7 +6,7 @@ import { supportsCamera } from "@/lib/camera";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Camera, FileImage, GripVertical, ImagePlus, Info, MapPin, PlayCircle, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
 const VIDEO_LIMIT = 3;
@@ -36,6 +36,26 @@ export function MediaUploadField({
   const [cameraOpen, setCameraOpen] = useState(false);
   if (disabled && cameraOpen) setCameraOpen(false);
   const [isDragging, setDragging] = useState(false);
+  const [positioning, setPositioning] = useState<string | null>(null);
+  const orderHint = useId();
+  const positionId = useId();
+  const positionIndex = items.findIndex(item => item.id === positioning);
+  const field = useRef<HTMLDivElement>(null);
+
+  function closePosition(id: string) {
+    setPositioning(null);
+    requestAnimationFrame(() => field.current?.querySelector<HTMLButtonElement>(
+      `[data-order-handle="${CSS.escape(id)}"]`,
+    )?.focus());
+  }
+
+  function placeFile(from: number, to: number) {
+    const reordered = [...items];
+    const [file] = reordered.splice(from, 1);
+    reordered.splice(to, 0, file);
+    onItemsChange(reordered);
+    closePosition(file.id);
+  }
   const [errors, setErrors] = useState<string[]>([]);
   const addFiles = useCallback(
     (list: FileList | File[]) => {
@@ -118,6 +138,7 @@ export function MediaUploadField({
   return (
     <div
       className="space-y-3"
+      ref={field}
       onDragEnter={(event) => {
         event.preventDefault();
         if (!disabled) setDragging(true);
@@ -197,12 +218,21 @@ export function MediaUploadField({
           <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/45 px-3 py-2.5">
             <div className="min-w-0">
               <p className="text-sm font-medium">{t("filesReady", { count: items.length })}</p>
-              <p className="text-xs leading-4 text-muted-foreground">{t("reorderHint")}</p>
+              <p id={orderHint} className="text-xs leading-4 text-muted-foreground">{t("reorderHint")}</p>
             </div>
             <Button type="button" size="sm" variant="ghost" className="shrink-0" disabled={disabled} onClick={() => uploadInputRef.current?.click()}>
               <ImagePlus /> {t("addMore")}
             </Button>
           </div>
+          {positionIndex >= 0 && <fieldset id={positionId} className="flex flex-wrap gap-1 rounded-md border p-2"
+            onKeyDown={event => {
+              if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePosition(items[positionIndex].id); }
+            }}>
+            <legend className="px-1 text-sm">{t("filePosition", { name: items[positionIndex].file.name })}</legend>
+            {items.map((file, index) => <button type="button" key={file.id} autoFocus={index === positionIndex}
+              aria-pressed={index === positionIndex} className="min-h-11 min-w-11 rounded-md border px-2 aria-pressed:bg-muted focus-visible:ring-2"
+              onClick={() => placeFile(positionIndex, index)}>{index + 1}</button>)}
+          </fieldset>}
           <Sortable
             value={items}
             onValueChange={onItemsChange}
@@ -240,11 +270,18 @@ export function MediaUploadField({
                       {annotationCounts[item.id]}
                     </span>
                   ) : null}
-                  <SortableItemHandle className="absolute left-1 top-1 z-10">
-                    <span className="flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm">
+                  {items.length > 1 && <SortableItemHandle render={<button type="button" disabled={disabled} />}
+                    data-order-handle={item.id} aria-label={t("reorderFile", { name: item.file.name })} aria-describedby={orderHint}
+                    aria-expanded={positioning === item.id} aria-controls={positionId}
+                    onClick={() => setPositioning(current => current === item.id ? null : item.id)}
+                    onKeyDownCapture={event => {
+                      // Enter and Space activate the position chooser; pointer dragging uses the same handle.
+                      if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+                    }} className="absolute left-1 top-1 z-10">
+                    <span className="flex size-11 items-center justify-center rounded-full border bg-background/90 shadow-sm">
                       <GripVertical className="size-4" />
                     </span>
-                  </SortableItemHandle>
+                  </SortableItemHandle>}
                   <button
                     type="button"
                     disabled={disabled}

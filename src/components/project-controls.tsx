@@ -20,6 +20,8 @@ export function useCurrentProject(token: string) {
   const projects = useProjects(token);
   const [requestedKey, setRequestedKey] = useState(() => readProjectParam(window.location.search));
   const current = projects ? pickProject(projects, requestedKey) : undefined;
+  // An Undo closure belongs to the Project and session that produced it.
+  useEffect(() => () => { toast.dismiss(); }, [current?.key, token]);
 
   useEffect(() => {
     const sync = () => setRequestedKey(readProjectParam(window.location.search));
@@ -30,13 +32,13 @@ export function useCurrentProject(token: string) {
   // Rewrite a missing or unusable key to the Project actually shown.
   useEffect(() => {
     if (current && readProjectParam(window.location.search) !== current.key) {
-      window.history.replaceState(null, "", withProjectParam(window.location.href, current.key));
+      window.history.replaceState(null, "", withProjectParam(window.location.href, current.key, Boolean(readProjectParam(window.location.search))));
     }
   }, [current]);
 
   const select = useCallback((key: string) => {
-    window.history.pushState(null, "", withProjectParam(window.location.href, key));
-    setRequestedKey(key);
+    window.history.pushState(null, "", withProjectParam(window.location.href, key, true));
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
 
   return { projects, current, select };
@@ -171,7 +173,7 @@ export function NewProjectDialog({
   );
 }
 
-function ProjectMembersDialog({
+export function ProjectMembersDialog({
   token,
   project,
   open,

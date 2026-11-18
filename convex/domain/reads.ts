@@ -88,35 +88,64 @@ export const laneTotals = queryOperation({
   },
 });
 
+const SEARCH_LIMIT = 50;
+const OPEN_STATUSES = ["new", "acknowledged", "in_progress", "waiting"] as const;
+
+/** The index ranks each status independently and does not expose comparable
+ * scores. Interleave equal rank positions in workflow order. Read one extra
+ * candidate across all four streams to detect overflow without fetching 204 rows. */
+async function mergeRankedLanes(queries: AsyncIterable<Doc<"tickets">>[]) {
+  const remaining = new Set(queries.map(query => query[Symbol.asyncIterator]()));
+  const rows: Doc<"tickets">[] = [];
+  try {
+    while (remaining.size && rows.length <= SEARCH_LIMIT) {
+      const batch = [...remaining].slice(0, SEARCH_LIMIT + 1 - rows.length);
+      const results = await Promise.all(batch.map(stream => stream.next()));
+      results.forEach((result, index) => {
+        if (result.done) remaining.delete(batch[index]);
+        else rows.push(result.value);
+      });
+    }
+    return rows;
+  } finally {
+    await Promise.all([...remaining].map(stream => stream.return?.()));
+  }
+}
+
 /** Convex 1.45 search pagination does not enforce maximumRows/BytesRead on
- * reactive endCursor ranges. Bound search explicitly to the top 50 matches.
- * hasMore is a lower-bound hint, never an exact search total.
- */
+ * reactive endCursor ranges. Bound search explicitly and resolve tags only
+ * on the fifty results actually returned. */
 export const searchTickets = queryOperation({
   args: {
     token: v.string(), projectId: v.id("projects"),
     lifecycle: v.union(v.literal("active"), v.literal("archived")),
-    status: v.optional(ticketStatus), search: v.string(),
+    status: v.optional(ticketStatus), activeOnly: v.optional(v.boolean()), search: v.string(),
   },
   handler: async (ctx, args) => {
     const project = await requireUsableProject(ctx, ctx.actor, args.projectId);
     const search = args.search.trim();
     if (!isTicketSearchWithinLimits(search)) throw new Error("INVALID_INPUT");
+    if (args.activeOnly && (args.lifecycle !== "active" || args.status !== undefined)) throw new Error("INVALID_INPUT");
     if (!search.match(new RegExp("[\\p{L}\\p{N}]", "u"))) return { matches: [], hasMore: false };
     const reference = parseTicketReference(search);
     if (reference) {
       const row = await ctx.db.query("tickets").withIndex("by_project_ticket", q =>
         q.eq("projectKey", reference.projectKey).eq("ticketNumber", reference.ticketNumber)).unique();
       const visible = row && row.projectId === project._id && row.lifecycle === args.lifecycle
+        && (!args.activeOnly || row.status !== "done")
         && (args.status === undefined || row.status === args.status)
         && (ctx.actor.role === "staff" || row.ownerCustomerId === ctx.actor.customerId);
       if (visible) return { matches: [ticketSummary(row, await resolveTicketTags(ctx, row))], hasMore: false };
     }
-    const rows = await ctx.db.query("tickets").withSearchIndex("search_text", q => {
+    const searchLane = (status?: Doc<"tickets">["status"]) => ctx.db.query("tickets").withSearchIndex("search_text", q => {
       const scoped = q.search("searchText", search).eq("projectId", project._id).eq("lifecycle", args.lifecycle);
       const owned = ctx.actor.role === "customer" ? scoped.eq("ownerCustomerId", ctx.actor.customerId) : scoped;
-      return args.status === undefined ? owned : owned.eq("status", args.status);
-    }).take(51);
-    return { matches: await Promise.all(rows.slice(0, 50).map(async row => ticketSummary(row, await resolveTicketTags(ctx, row)))), hasMore: rows.length > 50 };
+      return status === undefined ? owned : owned.eq("status", status);
+    });
+    const rows = args.activeOnly
+      ? await mergeRankedLanes(OPEN_STATUSES.map(searchLane))
+      : await searchLane(args.status).take(SEARCH_LIMIT + 1);
+    const matches = await Promise.all(rows.slice(0, SEARCH_LIMIT).map(async row => ticketSummary(row, await resolveTicketTags(ctx, row))));
+    return { matches, hasMore: rows.length > SEARCH_LIMIT };
   },
 });

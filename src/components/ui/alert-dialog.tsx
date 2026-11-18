@@ -1,6 +1,7 @@
 import * as React from "react";
 import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type AlertDialogProps = {
@@ -20,6 +21,7 @@ export function AlertDialog({
   confirmLabel,
   onConfirm,
 }: AlertDialogProps) {
+  const { t } = useI18n();
   return (
     <BaseAlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseAlertDialog.Portal>
@@ -34,7 +36,7 @@ export function AlertDialog({
           </BaseAlertDialog.Description>
           <div className="mt-6 flex justify-end gap-2">
             <BaseAlertDialog.Close className={buttonVariants({ variant: "outline" })}>
-              Cancel
+              {t("cancel")}
             </BaseAlertDialog.Close>
             <BaseAlertDialog.Close
               className={buttonVariants({ variant: "destructive" })}

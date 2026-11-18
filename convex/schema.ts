@@ -170,6 +170,16 @@ export default defineSchema({
     nextNumber: v.number(),
     updatedAt: v.number(),
   }).index("by_name", ["name"]),
+  ticketMessages: defineTable({
+    ticketId: v.id("tickets"),
+    role: actorRole,
+    authorSessionId: v.id("sessions"),
+    customerId: v.optional(v.id("customers")),
+    body: v.string(),
+    requestId: v.string(),
+    inReplyTo: v.optional(v.id("ticketMessages")),
+  }).index("by_ticket", ["ticketId"])
+    .index("by_ticket_request", ["ticketId", "requestId"]),
   ticketEvents: defineTable({
     ticketId: v.id("tickets"),
     action: ticketEventAction,

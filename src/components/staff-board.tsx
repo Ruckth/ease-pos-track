@@ -15,7 +15,7 @@ import {
 } from "@/components/reui/kanban";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TicketCard } from "@/components/ticket-card";
+import { TicketCard, type OpenTicket } from "@/components/ticket-card";
 import { statusMeta } from "@/components/ticket-status";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
@@ -66,13 +66,14 @@ const isMultiColumnOnServer = () => true;
  * applied locally first, then persisted with the ticket's expected version. A
  * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard }: {
+export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard, visibleStatuses = BOARD_COLUMNS }: {
   items: TicketSummary[];
+  visibleStatuses?: readonly TicketStatus[];
   projectId: Id<"projects">;
   token: string;
   totals: Partial<Record<TicketStatus, number>>;
   pages: Record<TicketStatus, { status: string; loadMore: (count: number) => void }>;
-  onSelect: (id: Id<"tickets">) => void;
+  onSelect: OpenTicket;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
 }) {
   const { t } = useI18n();
@@ -80,7 +81,8 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = reconcileColumns(projectId, items, pending);
   const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
-  const [visibleStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
+  const [chosenStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
+  const visibleStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
   const tabsId = useId();
   const panelId = `${tabsId}-panel`;
   const tabId = (status: TicketStatus) => `${tabsId}-${status}`;
@@ -92,8 +94,15 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   }, [items, projectId, pending]);
 
   const observe = useCallback((operationId: string, row: TicketSummary | null) => {
-    setPending(current => observeMove(current, operationId, row));
-  }, []);
+    setPending(current => {
+      const next = observeMove(current, operationId, row);
+      if (!row || next[row._id]?.operationId !== operationId || !next[row._id].observed) return next;
+      if (row.lifecycle === "active" && visibleStatuses.includes(row.status)) return next;
+      const remaining = { ...next };
+      delete remaining[row._id];
+      return remaining;
+    });
+  }, [visibleStatuses]);
 
   async function move(item: TicketSummary, status: TicketStatus) {
     if (pendingRef.current[item._id] && !pendingRef.current[item._id].observed) return;
@@ -126,6 +135,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
       {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} token={token} entry={entry} onObserve={observe} />)}
       {multiColumn ? null : (
         <StatusTabs
+          statuses={visibleStatuses}
           totals={totals}
           value={visibleStatus}
           onValueChange={setVisibleStatus}
@@ -134,10 +144,14 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
         />
       )}
       <KanbanBoard
-        className="grid auto-rows-fr gap-4 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-5"
+        className={cn("grid auto-rows-fr gap-4", {
+          "lg:grid-cols-2": visibleStatuses.length > 1,
+          "xl:grid-cols-4": visibleStatuses.length === 4,
+          "xl:grid-cols-5": visibleStatuses.length === 5,
+        })}
         {...(multiColumn ? {} : { id: panelId, role: "tabpanel", "aria-labelledby": tabId(visibleStatus) })}
       >
-        {(multiColumn ? BOARD_COLUMNS : [visibleStatus]).map((status) => (
+        {(multiColumn ? visibleStatuses : [visibleStatus]).map((status) => (
           <BoardColumn
             key={status}
             status={status}
@@ -175,6 +189,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
  * column rendered. Roving tabindex plus arrow keys, per the ARIA tabs pattern.
  */
 function StatusTabs({
+  statuses,
   totals,
   value,
   onValueChange,
@@ -186,13 +201,14 @@ function StatusTabs({
   onValueChange: (status: TicketStatus) => void;
   panelId: string;
   tabId: (status: TicketStatus) => string;
+  statuses: readonly TicketStatus[];
 }) {
   const { t } = useI18n();
   const tabRefs = useRef<Partial<Record<TicketStatus, HTMLButtonElement | null>>>({});
 
   return (
     <div role="tablist" aria-label={t("boardStatusTabs")} className="mb-4 grid grid-cols-2 gap-1 rounded-lg border bg-card p-1 sm:grid-cols-3">
-      {BOARD_COLUMNS.map((status, index) => {
+      {statuses.map((status, index) => {
         const meta = statusMeta(status);
         const Icon = meta.icon;
         const label = t(meta.labelKey);
@@ -215,12 +231,12 @@ function StatusTabs({
               const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
               if (step === 0) return;
               event.preventDefault();
-              const next = BOARD_COLUMNS[(index + step + BOARD_COLUMNS.length) % BOARD_COLUMNS.length];
+              const next = statuses[(index + step + statuses.length) % statuses.length];
               onValueChange(next);
               tabRefs.current[next]?.focus();
             }}
             className={cn(
-              "flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               selected ? cn("border", meta.tone) : "text-muted-foreground hover:bg-accent",
             )}
           >
@@ -246,7 +262,7 @@ function BoardColumn({
 }: {
   status: TicketStatus;
   items: TicketSummary[];
-  onSelect: (id: Id<"tickets">) => void;
+  onSelect: OpenTicket;
   onMoveCard: (id: Id<"tickets">, status: TicketStatus) => void;
   /** False below `lg`, where one column is shown at a time and no card can be dragged. */
   draggable: boolean;
@@ -284,6 +300,7 @@ function BoardColumn({
               {isNewArrival(item, initialHighest) ? <p className="mb-1 text-xs text-muted-foreground">{t("liveArrival")}</p> : null}
               <TicketCard
                 item={item}
+                inLane
                 onSelect={onSelect}
                 onMove={(id, next) => void onMoveCard(id, next)}
                 handle={
@@ -295,7 +312,7 @@ function BoardColumn({
                           type="button"
                           variant="outline"
                           size="icon"
-                          className="size-9 touch-none bg-background/90"
+                          className="size-11 touch-none bg-background/90"
                           aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber, item.projectKey) })}
                         >
                           <GripVertical />
@@ -308,7 +325,7 @@ function BoardColumn({
             </KanbanItem>
           ))
         )}
-        {page.status === "CanLoadMore" || page.status === "LoadingMore" ? <Button type="button" variant="outline" className="w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
+        {page.status === "CanLoadMore" || page.status === "LoadingMore" ? <Button type="button" variant="outline" className="min-h-11 w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
       </KanbanColumnContent>
     </KanbanColumn>
   );
