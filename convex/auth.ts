@@ -15,7 +15,7 @@ import { accessTokenSessionId, checkNewPassword, normalizeDisplayName, normalize
 import {
   admitGoogleCompletion, admitSession, audit, budgetExhausted, clearAttempts, INVITE_GUARD, recordAttemptFailure,
   recordGoogleFlow, recoveryCodeMatches, redeemProjectInvitation, requireRedeemableProjectInvitation, revokeUserSessions,
-  customerCredentialSelector, recoveryAttemptKey, replaceCustomerPassword, RECOVERY_GUARD, RECOVERY_INGRESS_GUARD,
+  verifyCustomerPassword, customerCredentialSelector, recoveryAttemptKey, replaceCustomerPassword, RECOVERY_GUARD, CREDENTIAL_INGRESS_GUARD,
 } from "./domain/identity";
 import { requireActor } from "./session_auth";
 import { requireLocalFixtures } from "./local_fixtures";
@@ -121,7 +121,7 @@ export const signInWithPassword = authMethodMutation(password, "customer-sign-in
       customerCredentialSelector(username),
     ]);
     const eligible = customer?.userId === userId && customer?.status === "active" && customerCredentialIsCurrent(customer, pilot);
-    const verified = await ctx.runMutation(components.authPassword.public.verifyPassword, {
+    const verified = await verifyCustomerPassword(ctx, {
       userId: eligible ? customer.userId : undefined, password: args.password.normalize("NFC"), rateLimitKey,
     });
     if (!eligible || !verified.success) return failure("INVALID_CREDENTIALS");
@@ -196,7 +196,7 @@ export const changePassword = authMethodMutation(password, "customer-change-pass
     const checked = checkNewPassword(args.newPassword);
     if ("problem" in checked) return { success: false as const, error: checked.problem };
     const customer = (await ctx.db.get(actor.customerId!))!;
-    const verified = await ctx.runMutation(components.authPassword.public.verifyPassword, {
+    const verified = await verifyCustomerPassword(ctx, {
       userId: session.userId, password: args.currentPassword.normalize("NFC"),
       rateLimitKey: await customerCredentialSelector(customer.username),
     });
@@ -234,7 +234,7 @@ export const recoverWithCode = publicIdentityMutation("customer-recover")({
       if (!await budgetExhausted(ctx, rpcKey)) {
         const selectorKey = recoveryAttemptKey(await customerCredentialSelector(username));
         if (!await budgetExhausted(ctx, selectorKey)) {
-          await recordAttemptFailure(ctx, rpcKey, RECOVERY_INGRESS_GUARD);
+          await recordAttemptFailure(ctx, rpcKey, CREDENTIAL_INGRESS_GUARD);
           await recordAttemptFailure(ctx, selectorKey, RECOVERY_GUARD);
         }
       }

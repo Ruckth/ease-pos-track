@@ -131,6 +131,22 @@ test("sign-in gives normalized known and unknown usernames the same verification
   expect(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD })).toEqual(generic);
 });
 
+test("the unknown-account ingress budget covers distinct usernames and leaves enrolled customers independent", async () => {
+  const { t, enroll } = await world();
+  session(await enroll("alice"));
+  const now = Date.now();
+  await t.run(ctx => ctx.db.insert("identityAttempts", {
+    key: "signin:unrecognized", attempts: 199, firstAttemptAt: now, updatedAt: now,
+  }));
+  const verify = vi.spyOn(argon2, "verifyPassword");
+  for (const username of ["firstunused", "secondunused"]) {
+    expect(await t.mutation(api.auth.signInWithPassword, { username, password: PASSWORD }))
+      .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
+  }
+  expect(verify).toHaveBeenCalledTimes(1);
+  session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+});
+
 test("live disable denies the open session and its refresh; re-enable needs a fresh sign-in", async () => {
   const { t, owner, pos, enroll } = await world();
   const signedUp = await enroll("alice");
@@ -348,7 +364,7 @@ test("proof email budget spans purposes and sessions and retains the last commit
   const other = await t.mutation(fixtures.staff, { email: "other-owner@fixture.test" });
   const email = "owner@fixture.test";
   for (const token of [owner.session, secondSession]) {
-    for (const purpose of ["t3-key-issue", "t3-key-revoke"] as const) {
+    for (const purpose of ["staff-enable", "staff-role"] as const) {
       await t.action(api.identity.sendChallengeCode, { token, purpose, target: "fixture" });
       vi.advanceTimersByTime(1);
     }

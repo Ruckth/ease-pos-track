@@ -138,7 +138,7 @@ export async function viewerFor(ctx: Ctx, admission: Doc<"sessionAdmissions">) {
 // ---------------------------------------------------------------- attempt budgets
 
 export const RECOVERY_GUARD: GuardConfig = { windowMs: 60 * 60 * 1000, maxAttempts: 10, lockoutMs: 60 * 60 * 1000 };
-export const RECOVERY_INGRESS_GUARD: GuardConfig = { windowMs: 10 * 60 * 1000, maxAttempts: 200, lockoutMs: 10 * 60 * 1000 };
+export const CREDENTIAL_INGRESS_GUARD: GuardConfig = { windowMs: 10 * 60 * 1000, maxAttempts: 200, lockoutMs: 10 * 60 * 1000 };
 export const INVITE_GUARD: GuardConfig = { windowMs: 60 * 60 * 1000, maxAttempts: 20, lockoutMs: 60 * 60 * 1000 };
 const CHALLENGE_EMAIL_GUARD: GuardConfig = { windowMs: 15 * 60 * 1000, maxAttempts: 5, lockoutMs: 15 * 60 * 1000 };
 
@@ -167,6 +167,32 @@ export async function recordAttemptFailure(ctx: MutationCtx, key: string, config
 export async function clearAttempts(ctx: MutationCtx, key: string) {
   const existing = await attemptRow(ctx, key);
   if (existing) await ctx.db.delete(existing._id);
+}
+
+// The component owns per-selector throttling. This index lets the approved
+// retention job remove the component bucket and its last-activity record together.
+export async function verifyCustomerPassword(ctx: MutationCtx, input: {
+  userId?: string; password: string; rateLimitKey: string;
+}) {
+  const unknownBudget = "signin:unrecognized";
+  if (input.userId === undefined) {
+    if (await budgetExhausted(ctx, unknownBudget)) {
+      return { success: false as const, userError: { error: "INVALID_CREDENTIALS" as const } };
+    }
+    await recordAttemptFailure(ctx, unknownBudget, CREDENTIAL_INGRESS_GUARD);
+  }
+  const result = await ctx.runMutation(components.authPassword.public.verifyPassword, input);
+  if (result.success) {
+    await clearAttempts(ctx, input.rateLimitKey);
+  } else {
+    const previous = await attemptRow(ctx, input.rateLimitKey);
+    const now = Date.now();
+    if (previous) await ctx.db.patch(previous._id, { updatedAt: now, attempts: previous.attempts + 1 });
+    else await ctx.db.insert("identityAttempts", {
+      key: input.rateLimitKey, updatedAt: now, attempts: 1, firstAttemptAt: now,
+    });
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------- principals
@@ -382,6 +408,7 @@ export async function replaceCustomerPassword(
     recoveryCodeDigest: undefined, recoveryCodeCreatedAt: undefined,
   });
   await revokeUserSessions(ctx, customer.userId);
+  await clearAttempts(ctx, rateLimitKey);
   await clearAttempts(ctx, recoveryAttemptKey(rateLimitKey));
   return { success: true as const };
 }

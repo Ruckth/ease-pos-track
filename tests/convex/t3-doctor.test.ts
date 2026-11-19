@@ -211,10 +211,21 @@ test("expiry, live staff role, generation, Project access, release gating and ex
   await f.t.run(ctx => ctx.db.patch(f.project, { archivedAt: Date.now() }));
   await check(401);
   await f.t.run(ctx => ctx.db.patch(f.project, { archivedAt: undefined }));
+  const newKey = f.input(2);
+  const earlierProof = await f.proof(newKey);
   vi.stubEnv("T3_DOCTOR_ISSUANCE_ENABLED", "false");
   await check(200);
-  const newKey = f.input(2);
-  await expect(f.as(f.staff).mutation(api.t3_keys.change, { change: newKey, proof: await f.proof(newKey) })).rejects.toThrow("DOCTOR_ISSUANCE_UNAVAILABLE");
+  const emailState = () => f.t.run(async ctx => ({
+    challenges: await ctx.db.query("identityChallenges").collect(),
+    attempts: await ctx.db.query("identityAttempts").collect(),
+    outbox: await ctx.db.query("identityOutbox").collect(),
+  }));
+  const before = await emailState();
+  for (const purpose of ["t3-key-issue", "t3-key-rotate"] as const) {
+    await expect(f.as(f.staff).action(api.identity.sendChallengeCode, { purpose, target: "disabled" })).rejects.toThrow();
+  }
+  expect(await emailState()).toEqual(before);
+  await expect(f.as(f.staff).mutation(api.t3_keys.change, { change: newKey, proof: earlierProof })).rejects.toThrow("DOCTOR_ISSUANCE_UNAVAILABLE");
   vi.stubEnv("T3_DOCTOR_EPOCH", "b".repeat(64));
   await check(401);
   vi.stubEnv("T3_DOCTOR_RELEASE", JSON.stringify({ ...release, releaseOrigin: "https://other.example.test" }));

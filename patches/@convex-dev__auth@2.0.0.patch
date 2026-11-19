@@ -1,8 +1,12 @@
 diff --git a/dist/components/password/_generated/component.d.ts b/dist/components/password/_generated/component.d.ts
-index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511fbc5f6aba 100644
+index 803786467e1a758891a595e10a1a0187cd255625..6e0711eb5d50c228ae0debe66a07554dbf587243 100644
 --- a/dist/components/password/_generated/component.d.ts
 +++ b/dist/components/password/_generated/component.d.ts
-@@ -23,6 +23,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -20,9 +20,12 @@ import type { FunctionReference } from "convex/server";
+  */
+ export type ComponentApi<Name extends string | undefined = string | undefined> = {
+     public: {
++        forgetVerification: FunctionReference<"mutation", "internal", { key: string }, null, Name>;
          _internal_dangerous_setPassword: FunctionReference<"mutation", "internal", {
              minimumLength: number;
              password: string;
@@ -11,7 +15,7 @@ index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511f
              userId: string;
          }, {
              success: true;
-@@ -37,12 +39,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -37,12 +40,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
              } | {
                  error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
              } | {
@@ -28,7 +32,7 @@ index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511f
              success: true;
          } | {
 diff --git a/dist/components/password/public.d.ts b/dist/components/password/public.d.ts
-index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..c629b7163bd83391bcdfb6e661fdfcf9451063b9 100644
+index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..db971461531c8aa5588f471ddb05b480300469d9 100644
 --- a/dist/components/password/public.d.ts
 +++ b/dist/components/password/public.d.ts
 @@ -20,6 +20,8 @@
@@ -59,22 +63,37 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..c629b7163bd83391bcdfb6e661fdfcf9
      password: string;
  }, Promise<{
      success: true;
+@@ -68,3 +71,4 @@ export declare const verifyPassword: import("convex/server").RegisteredMutation<
+     success: false;
+ }>>;
+ //# sourceMappingURL=public.d.ts.map
++export declare const forgetVerification: import("convex/server").RegisteredMutation<"public", { key: string }, Promise<null>>;
 diff --git a/dist/components/password/public.js b/dist/components/password/public.js
-index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..1ca6840c7686da580463c9a8f254f4682e1c27a3 100644
+index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..b946a530ba2bd4a0ec9684924fe2fe1a8f485c43 100644
 --- a/dist/components/password/public.js
 +++ b/dist/components/password/public.js
-@@ -27,7 +27,9 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
+@@ -27,7 +27,19 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
          capacity: 5,
      },
  });
 -const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.object({ success: v.literal(false), userError: setPasswordUserError }));
 +// Produced by hashPassword with the same Argon2id parameters as stored passwords.
 +const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=16384,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$Em0gfwPguve1viHkkKgULo+VVYwDJ0zBfjeyfRc8+kE";
++/** Forget a verification counter after the app's approved inactivity period. */
++export const forgetVerification = mutation({
++  args: { key: v.string() },
++  returns: v.null(),
++  handler: async (ctx, { key }) => {
++    await rateLimiter.reset(ctx, "verifyPassword", { key });
++    return null;
++  },
++});
++
 +const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.object({ success: v.literal(false), userError: v.union(setPasswordUserError, v.object({ error: v.literal("PASSWORD_REUSE") })) }));
  /**
   * Set (or replace) a user's password.
   *
-@@ -48,21 +50,28 @@ const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.obje
+@@ -48,21 +60,28 @@ const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.obje
   * of this package do, for a user they just created or verified.
   */
  export const _internal_dangerous_setPassword = mutation({
@@ -106,7 +125,7 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..1ca6840c7686da580463c9a8f254f468
          return { success: true };
      },
  });
-@@ -76,11 +85,15 @@ const verifyPasswordResult = v.union(v.object({ success: v.literal(true) }), v.o
+@@ -76,11 +95,15 @@ const verifyPasswordResult = v.union(v.object({ success: v.literal(true) }), v.o
   * that do not match the latest security recommendations.
   */
  export const verifyPassword = mutation({
@@ -125,7 +144,7 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..1ca6840c7686da580463c9a8f254f468
          });
          if (!status.ok) {
              return {
-@@ -103,16 +116,13 @@ export const verifyPassword = mutation({
+@@ -103,16 +126,13 @@ export const verifyPassword = mutation({
          if (userError !== null) {
              return { success: false, userError };
          }
@@ -148,10 +167,14 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..1ca6840c7686da580463c9a8f254f468
      },
  });
 diff --git a/dist/internal-types/components/password/_generated/component.d.ts b/dist/internal-types/components/password/_generated/component.d.ts
-index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511fbc5f6aba 100644
+index 803786467e1a758891a595e10a1a0187cd255625..6e0711eb5d50c228ae0debe66a07554dbf587243 100644
 --- a/dist/internal-types/components/password/_generated/component.d.ts
 +++ b/dist/internal-types/components/password/_generated/component.d.ts
-@@ -23,6 +23,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -20,9 +20,12 @@ import type { FunctionReference } from "convex/server";
+  */
+ export type ComponentApi<Name extends string | undefined = string | undefined> = {
+     public: {
++        forgetVerification: FunctionReference<"mutation", "internal", { key: string }, null, Name>;
          _internal_dangerous_setPassword: FunctionReference<"mutation", "internal", {
              minimumLength: number;
              password: string;
@@ -160,7 +183,7 @@ index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511f
              userId: string;
          }, {
              success: true;
-@@ -37,12 +39,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -37,12 +40,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
              } | {
                  error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
              } | {
@@ -177,7 +200,7 @@ index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511f
              success: true;
          } | {
 diff --git a/dist/internal-types/components/password/public.d.ts b/dist/internal-types/components/password/public.d.ts
-index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..c629b7163bd83391bcdfb6e661fdfcf9451063b9 100644
+index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..db971461531c8aa5588f471ddb05b480300469d9 100644
 --- a/dist/internal-types/components/password/public.d.ts
 +++ b/dist/internal-types/components/password/public.d.ts
 @@ -20,6 +20,8 @@
@@ -208,12 +231,22 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..c629b7163bd83391bcdfb6e661fdfcf9
      password: string;
  }, Promise<{
      success: true;
+@@ -68,3 +71,4 @@ export declare const verifyPassword: import("convex/server").RegisteredMutation<
+     success: false;
+ }>>;
+ //# sourceMappingURL=public.d.ts.map
++export declare const forgetVerification: import("convex/server").RegisteredMutation<"public", { key: string }, Promise<null>>;
 diff --git a/src/components/password/_generated/component.ts b/src/components/password/_generated/component.ts
-index 7676907be53be9e5623a66fe051cc505ac4dcfff..8c785d8eee8a5125820a7f7b7455da21619decf0 100644
+index 7676907be53be9e5623a66fe051cc505ac4dcfff..128f485c5e0f9ee971b2bf1328c700975ad4557f 100644
 --- a/src/components/password/_generated/component.ts
 +++ b/src/components/password/_generated/component.ts
-@@ -27,7 +27,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
-       _internal_dangerous_setPassword: FunctionReference<
+@@ -24,10 +24,11 @@ import type { FunctionReference } from "convex/server";
+ export type ComponentApi<Name extends string | undefined = string | undefined> =
+   {
+     public: {
+-      _internal_dangerous_setPassword: FunctionReference<
++      forgetVerification: FunctionReference<"mutation", "internal", { key: string }, null, Name>;
++        _internal_dangerous_setPassword: FunctionReference<
          "mutation",
          "internal",
 -        { minimumLength: number; password: string; userId: string },
@@ -221,7 +254,7 @@ index 7676907be53be9e5623a66fe051cc505ac4dcfff..8c785d8eee8a5125820a7f7b7455da21
          | { success: true }
          | {
              success: false;
-@@ -35,14 +35,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -35,14 +36,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                | { error: "PASSWORD_TOO_SHORT"; minimumLength: number }
                | { error: "PASSWORD_TOO_LONG"; maximumLength: number }
                | { error: "PASSWORD_HAS_SURROUNDING_WHITESPACE" }
@@ -239,15 +272,25 @@ index 7676907be53be9e5623a66fe051cc505ac4dcfff..8c785d8eee8a5125820a7f7b7455da21
          | {
              success: false;
 diff --git a/src/components/password/public.ts b/src/components/password/public.ts
-index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..7a743b1d8a669a42f26ea512dcfe674ddb80c948 100644
+index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..4f1bf7bbce55ffdef4905715af0f1bd3314dfd53 100644
 --- a/src/components/password/public.ts
 +++ b/src/components/password/public.ts
-@@ -40,9 +40,12 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
+@@ -40,9 +40,22 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
    },
  });
 
 +// Produced by hashPassword with the same Argon2id parameters as stored passwords.
 +const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=16384,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$Em0gfwPguve1viHkkKgULo+VVYwDJ0zBfjeyfRc8+kE";
++
++/** Forget a verification counter after the app's approved inactivity period. */
++export const forgetVerification = mutation({
++  args: { key: v.string() },
++  returns: v.null(),
++  handler: async (ctx, { key }) => {
++    await rateLimiter.reset(ctx, "verifyPassword", { key });
++    return null;
++  },
++});
 +
  const setPasswordResult = v.union(
    v.object({ success: v.literal(true) }),
@@ -256,7 +299,7 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..7a743b1d8a669a42f26ea512dcfe674d
  );
  type SetPasswordResult = Infer<typeof setPasswordResult>;
 
-@@ -66,25 +69,31 @@ type SetPasswordResult = Infer<typeof setPasswordResult>;
+@@ -66,25 +79,31 @@ type SetPasswordResult = Infer<typeof setPasswordResult>;
   * of this package do, for a user they just created or verified.
   */
  export const _internal_dangerous_setPassword = mutation({
@@ -291,7 +334,7 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..7a743b1d8a669a42f26ea512dcfe674d
      return { success: true };
    },
  });
-@@ -104,11 +113,14 @@ type VerifyPasswordResult = Infer<typeof verifyPasswordResult>;
+@@ -104,11 +123,14 @@ type VerifyPasswordResult = Infer<typeof verifyPasswordResult>;
   * that do not match the latest security recommendations.
   */
  export const verifyPassword = mutation({
@@ -309,7 +352,7 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..7a743b1d8a669a42f26ea512dcfe674d
      });
      if (!status.ok) {
        return {
-@@ -136,19 +148,15 @@ export const verifyPassword = mutation({
+@@ -136,19 +158,15 @@ export const verifyPassword = mutation({
        return { success: false, userError };
      }
 

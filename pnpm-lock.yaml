@@ -9,7 +9,7 @@ overrides:
   axe-core: 4.14.0
 
 patchedDependencies:
-  '@convex-dev/auth@2.0.0': 81350e3d471aaf444b178c149401f459278890b11ba0376535631ce2590e0b4e
+  '@convex-dev/auth@2.0.0': 3ef80813decc1bed854f144294e483feb58b7bd4bcb6cb3566ef78aa5c35ea00
 
 importers:
 
@@ -20,7 +20,7 @@ importers:
         version: 1.7.0(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@convex-dev/auth':
         specifier: 2.0.0
-        version: 2.0.0(patch_hash=81350e3d471aaf444b178c149401f459278890b11ba0376535631ce2590e0b4e)(@standard-schema/spec@1.1.0)(convex@1.49.0(react@19.2.8))(hono@4.13.5)(prettier@3.9.6)(react@19.2.8)(typescript@5.9.3)(zod@3.25.76)
+        version: 2.0.0(patch_hash=3ef80813decc1bed854f144294e483feb58b7bd4bcb6cb3566ef78aa5c35ea00)(@standard-schema/spec@1.1.0)(convex@1.49.0(react@19.2.8))(hono@4.13.5)(prettier@3.9.6)(react@19.2.8)(typescript@5.9.3)(zod@3.25.76)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -2844,7 +2844,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  '@convex-dev/auth@2.0.0(patch_hash=81350e3d471aaf444b178c149401f459278890b11ba0376535631ce2590e0b4e)(@standard-schema/spec@1.1.0)(convex@1.49.0(react@19.2.8))(hono@4.13.5)(prettier@3.9.6)(react@19.2.8)(typescript@5.9.3)(zod@3.25.76)':
+  '@convex-dev/auth@2.0.0(patch_hash=3ef80813decc1bed854f144294e483feb58b7bd4bcb6cb3566ef78aa5c35ea00)(@standard-schema/spec@1.1.0)(convex@1.49.0(react@19.2.8))(hono@4.13.5)(prettier@3.9.6)(react@19.2.8)(typescript@5.9.3)(zod@3.25.76)':
     dependencies:
       '@convex-dev/batch-worker': 0.3.6(@standard-schema/spec@1.1.0)(convex@1.49.0(react@19.2.8))(hono@4.13.5)(prettier@3.9.6)(react@19.2.8)(typescript@5.9.3)(zod@3.25.76)
       '@convex-dev/rate-limiter': 0.3.2(convex@1.49.0(react@19.2.8))(react@19.2.8)

@@ -1,10 +1,10 @@
 import { makeFunctionReference } from "convex/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { api, internal } from "../../convex/_generated/api";
+import { api, components, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { requireCurrentPilotEpoch, requirePilotAdmission, activeDeploymentProject } from "../../convex/pilot_access";
 import { customerInboxReader, inboxMembership } from "../../convex/domain/inbox";
-import { createChallenge } from "../../convex/domain/identity";
+import { createChallenge, customerCredentialSelector, verifyCustomerPassword } from "../../convex/domain/identity";
 import { ARCHIVE_RETENTION_MS, createMediaJob } from "../../convex/domain/media_jobs";
 import { accessTokenSessionId } from "../../convex/identity_rules";
 import { LOCAL_CUSTOMER_PASSWORD } from "../../convex/local_identity";
@@ -486,6 +486,15 @@ test("inbox and identity expiry need the matching approved release, open traffic
         expiresAt: now - 31 * day, createdAt: now - 35 * day, updatedAt: now - 35 * day, role: "staff", secretDigest: "expired" }),
     };
   });
+  const selector = await customerCredentialSelector("retentionfixture");
+  const input = { rateLimitKey: selector, password: "fixture password guess" };
+  for (let i = 0; i < 5; i++) await f.t.run(ctx => verifyCustomerPassword(ctx, input));
+  // Freeze the component bucket at exhaustion and age only its last-activity index.
+  await f.t.run(async ctx => {
+    const marker = await ctx.db.query("identityAttempts").withIndex("by_key", q => q.eq("key", selector)).unique();
+    await ctx.db.patch(marker!._id, { updatedAt: Date.now() - 31 * day });
+  });
+  const componentVerification = () => f.t.run(ctx => ctx.runMutation(components.authPassword.public.verifyPassword, input));
   // Issuing a new challenge never deletes earlier records outside the approved job.
   vi.stubEnv("IDENTITY_CODE_KEY", "pilot-only-identity-code-key-0123456789abcdef");
   await f.t.run(async ctx => createChallenge(ctx, (await ctx.db.get(ids.admission))!, "staff-disable", "synthetic", "123456"));
@@ -515,7 +524,9 @@ test("inbox and identity expiry need the matching approved release, open traffic
   await configure(raw, firstEpoch);
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
 
+  expect(await componentVerification()).toMatchObject({ userError: { error: "RATE_LIMITED" } });
   const [inboxExpired] = await expireAll();
+  expect(await componentVerification()).toMatchObject({ userError: { error: "INVALID_CREDENTIALS" } });
   expect(inboxExpired).toBe(2);
   const rows = await f.t.run(ctx => Promise.all([inbox.customer, inbox.staff, recentInbox, ids.oldChallenge, ids.expiredChallenge,
     ids.stale, ids.fresh, ids.attempt, ids.invite].map(id => ctx.db.get(id))));

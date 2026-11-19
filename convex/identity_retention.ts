@@ -1,3 +1,4 @@
+import { components } from "./_generated/api";
 import { internalJobMutation } from "./functions";
 import { approvedRetention } from "./pilot_access";
 
@@ -13,14 +14,19 @@ export const expire = internalJobMutation({
     const retention = await approvedRetention(ctx);
     if (!retention) return 0;
     const now = Date.now();
-    const records = await Promise.all([
+    const [challenges, staffInvites, projectInvites, attempts, audits] = await Promise.all([
       ctx.db.query("identityChallenges").withIndex("by_created", q => q.lte("createdAt", now - retention.challengeHours * HOUR)).take(BATCH),
       ctx.db.query("staffInvitations").withIndex("by_expiry", q => q.lte("expiresAt", now - retention.invitationDays * DAY)).take(BATCH),
       ctx.db.query("projectInvitations").withIndex("by_expiry", q => q.lte("expiresAt", now - retention.invitationDays * DAY)).take(BATCH),
       ctx.db.query("identityAttempts").withIndex("by_updated", q => q.lte("updatedAt", now - retention.attemptDays * DAY)).take(BATCH),
       ctx.db.query("identityAudit").withIndex("by_created", q => q.lte("createdAt", now - retention.auditDays * DAY)).take(BATCH),
     ]);
-    const expired = records.flat();
+    for (const row of attempts) {
+      if (row.key.startsWith("customer:")) {
+        await ctx.runMutation(components.authPassword.public.forgetVerification, { key: row.key });
+      }
+    }
+    const expired = [...challenges, ...staffInvites, ...projectInvites, ...attempts, ...audits];
     await Promise.all(expired.map(row => ctx.db.delete(row._id)));
     return expired.length;
   },

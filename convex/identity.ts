@@ -16,12 +16,13 @@ import { newChallengeCode, normalizeEmail } from "./identity_rules";
 import { liveAdmission, requireActor } from "./session_auth";
 import { localFixturesEnabled } from "./local_fixtures";
 import {
-  audit, bootstrapOwner as bootstrap, consumeChallenge, createChallenge, createProjectInvitation, createStaffInvitation, customerCredentialSelector,
+  audit, bootstrapOwner as bootstrap, consumeChallenge, createChallenge, createProjectInvitation, createStaffInvitation, verifyCustomerPassword, customerCredentialSelector,
   invitationState, issueRecoveryCode, joinProjectInvitation, recoveryCodeMatches, projectInvitationBySecret,
   requireInvitationEpoch, reserveChallengeEmail, revokeUserSessions, setStaffRole as changeRole, staffInvitationBySecret, t3ChallengeIntent,
   transitionCustomer, transitionStaff, viewerFor, type ChallengePurpose,
 } from "./domain/identity";
 import { activeDeploymentProject, epochStamp, namedIdentityEpoch, requireClosedPilot, requireCurrentPilotEpoch, requireNamedEpoch } from "./pilot_access";
+import { t3Runtime } from "./t3_config";
 import { staffInvitationIntent } from "../shared/staff-invitation-intent";
 
 // ------------------------------------------------------------------ Convex Auth user callbacks
@@ -337,6 +338,7 @@ export const issueChallenge = internalJobMutation({
     if (T3_PURPOSES.includes(purpose)) {
       // Personal T3 key changes: the holder's own mailbox, bound to this session and generation.
       if (actor.role !== "staff" || !actor.staffId || args.target === undefined || args.target.length > 1024) throw new Error("INVALID_INPUT");
+      if (purpose !== "t3-key-revoke" && !t3Runtime()?.issuing) throw new Error("DOCTOR_ISSUANCE_UNAVAILABLE");
       const holder = (await ctx.db.get(actor.staffId))!;
       return await deliver(holder.email, t3ChallengeIntent(admission, args.target));
     }
@@ -507,7 +509,7 @@ export const createRecoveryCode = customerRecoveryMutation({
     const customer = (await ctx.db.get(ctx.actor.customerId!))!;
     if (customer.recoveryCodeDigest !== undefined) {
       if (!args.currentPassword) return { ok: false as const, error: "PROOF_REQUIRED" };
-      const verified = await ctx.runMutation(components.authPassword.public.verifyPassword, {
+      const verified = await verifyCustomerPassword(ctx, {
         userId: customer.userId, password: args.currentPassword.normalize("NFC"),
         rateLimitKey: await customerCredentialSelector(customer.username),
       });
