@@ -8,13 +8,13 @@
 //   pnpm test:visual --update        write the local baseline from this run
 //   pnpm test:visual --repeat 5      capture 5 times and require identical pixels (stability; no baseline needed)
 //   pnpm test:visual --probe         apply a 4px layout shift and require a reported diff (sensitivity)
-import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 import { chromium, type Browser, type Page } from "playwright";
+import { build, preview, type PreviewServer } from "vite";
 import { resultDirectory } from "./browser-result-paths";
 
 const args = process.argv.slice(2);
@@ -51,21 +51,6 @@ const STATES: State[] = [
   } },
 ];
 
-async function freePort() {
-  return new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => { const { port } = server.address() as { port: number }; server.close(() => resolve(port)); });
-    server.on("error", reject);
-  });
-}
-async function waitFor(url: string) {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try { if ((await fetch(url)).ok) return; } catch { /* Starting. */ }
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  throw new Error(`Vite did not start: ${url}`);
-}
 function compare(expectedFile: string, actualFile: string, diffFile: string) {
   const expected = PNG.sync.read(readFileSync(expectedFile));
   const actual = PNG.sync.read(readFileSync(actualFile));
@@ -80,17 +65,28 @@ function compare(expectedFile: string, actualFile: string, diffFile: string) {
 
 async function main() {
   rmSync(outDir, { recursive: true, force: true });
-  const port = await freePort();
-  const vite = spawn("pnpm", ["exec", "vite", "--host", "127.0.0.1", "--port", String(port), "--strictPort"], { stdio: "ignore", detached: true });
+  const buildDir = mkdtempSync(path.join(tmpdir(), "ticket-visual-"));
+  let vite: PreviewServer | undefined;
   let browser: Browser | undefined;
-  const report: { platform: string; chromium: string; repeat: number; probe: boolean; states: Array<{ name: string; run: number; against: string; pixels: number; size?: string }> } =
+  const comparisons: { platform: string; chromium: string; repeat: number; probe: boolean; states: Array<{ name: string; run: number; against: string; pixels: number; size?: string }> } =
     { platform, chromium: "", repeat, probe: flag("--probe"), states: [] };
   let failed = false;
   try {
+    // Capture the synthetic entry from a dedicated static build. Dependency
+    // optimization and dev reloads can otherwise discard the selected view.
+    await build({
+      logLevel: "warn",
+      build: { outDir: buildDir, emptyOutDir: false, rollupOptions: { input: path.resolve("tests/browser/explorer.html") } },
+    });
+    vite = await preview({
+      logLevel: "warn", build: { outDir: buildDir },
+      preview: { host: "127.0.0.1", port: 0, strictPort: true, proxy: {} },
+    });
+    const address = vite.httpServer.address();
+    if (!address || typeof address === "string") throw new Error("The visual pilot needs a loopback HTTP port");
     browser = await chromium.launch({ headless: true, args: ["--font-render-hinting=none", "--disable-lcd-text", "--force-color-profile=srgb", "--hide-scrollbars"] });
-    report.chromium = browser.version();
-    const url = `http://127.0.0.1:${port}/tests/browser/explorer.html`;
-    await waitFor(url);
+    comparisons.chromium = browser.version();
+    const url = `http://127.0.0.1:${address.port}/tests/browser/explorer.html`;
     for (let run = 1; run <= repeat; run++) for (const state of STATES) {
       const context = await browser.newContext({ viewport: state.viewport, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce", serviceWorkers: "block" });
       await context.route(request => !/^(127\.0\.0\.1|localhost)$/.test(request.hostname), route => route.abort());
@@ -98,10 +94,10 @@ async function main() {
       const page = await context.newPage();
       await page.clock.setFixedTime(FROZEN_TIME);
       await page.goto(url);
-      await state.act(page);
       // Lazy filter controls render a "Syncing" fallback first; wait for the settled UI.
       await button(page, "Add filter").waitFor();
       await page.waitForLoadState("networkidle");
+      await state.act(page);
       if (flag("--probe")) await page.addStyleTag({ content: "main { padding-left: calc(1rem + 4px) !important; }" });
       await page.evaluate(() => document.fonts.ready);
       const actual = path.join(outDir, "actual", `${state.name}-${run}.png`);
@@ -111,27 +107,30 @@ async function main() {
       // Repeats compare with run 1; the first run compares with the baseline.
       const against = run > 1 ? path.join(outDir, "actual", `${state.name}-1.png`) : path.join(baselineDir, `${state.name}.png`);
       if (flag("--update") && run === 1) { mkdirSync(baselineDir, { recursive: true }); copyFileSync(actual, against); continue; }
-      if (!existsSync(against)) { report.states.push({ name: state.name, run, against: "missing", pixels: -1 }); continue; }
+      if (!existsSync(against)) { comparisons.states.push({ name: state.name, run, against: "missing", pixels: -1 }); continue; }
       const result = compare(against, actual, path.join(outDir, "diff", `${state.name}-${run}.png`));
-      report.states.push({ name: state.name, run, against: run > 1 ? "run-1" : "baseline", ...result });
+      comparisons.states.push({ name: state.name, run, against: run > 1 ? "run-1" : "baseline", ...result });
     }
   } finally {
     try { await browser?.close(); }
-    finally { if (vite.pid) try { process.kill(-vite.pid, "SIGTERM"); } catch { /* Exited. */ } }
+    finally {
+      try { await vite?.close(); }
+      finally { rmSync(buildDir, { recursive: true, force: true }); }
+    }
   }
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(path.join(outDir, "report.json"), JSON.stringify(report, null, 2) + "\n");
-  for (const state of report.states) console.log(`${state.pixels < 0 ? "MISSING" : state.pixels > THRESHOLD ? "DIFF   " : "same   "} ${state.name} run ${state.run} vs ${state.against}: ${state.pixels < 0 ? "no baseline" : `${state.pixels} px`}${state.size ? ` (${state.size})` : ""}`);
-  const diffs = report.states.filter(state => state.pixels > THRESHOLD);
-  const missing = report.states.filter(state => state.pixels < 0);
+  writeFileSync(path.join(outDir, "comparisons.json"), JSON.stringify(comparisons, null, 2) + "\n");
+  for (const state of comparisons.states) console.log(`${state.pixels < 0 ? "MISSING" : state.pixels > THRESHOLD ? "DIFF   " : "same   "} ${state.name} run ${state.run} vs ${state.against}: ${state.pixels < 0 ? "no baseline" : `${state.pixels} px`}${state.size ? ` (${state.size})` : ""}`);
+  const diffs = comparisons.states.filter(state => state.pixels > THRESHOLD);
+  const missing = comparisons.states.filter(state => state.pixels < 0);
   if (flag("--update")) console.log(`Baseline written to ${baselineDir}`);
   if (flag("--probe")) {
     // The probe passes only if every compared state reports the deliberate change.
-    const compared = report.states.filter(state => state.pixels >= 0 && state.run === 1);
+    const compared = comparisons.states.filter(state => state.pixels >= 0 && state.run === 1);
     failed = compared.length !== STATES.length || compared.some(state => state.pixels <= THRESHOLD);
     console.log(failed ? "Probe NOT detected: the comparison is insensitive." : `Probe detected in ${compared.length} state(s); diffs in ${path.join(outDir, "diff")}.`);
   } else failed = diffs.length > 0;
-  console.log(`Report: ${path.join(outDir, "report.json")}`);
+  console.log(`Evidence: ${path.join(outDir, "comparisons.json")}`);
   // Without a baseline, --repeat still proves stability; a single run reports exit 3.
   process.exitCode = failed ? 1 : missing.length && repeat === 1 && !flag("--update") ? 3 : 0;
 }

@@ -12,7 +12,7 @@ cleared provider credentials and blocked non-loopback traffic.
 | `pnpm test:browser` | Bootstrap stages, 40 workflow and accessibility checks, then the Ticket Explorer harness check | ~2.5 min |
 | `pnpm test:browser --grep "<pattern>"` | Bootstrap, then only matching workflow/accessibility tests (Explorer skipped) | ~1 min + tests |
 | `pnpm test:explore` | Bootstrap, then the seeded draft exploration (default seeds 1,2,3) | ~1 min |
-| `pnpm test:visual --repeat 3` | Vite only, three Explorer harness screenshots captured three times, pixels compared | ~30 s |
+| `pnpm test:visual --repeat 3` | Builds and serves the synthetic Explorer harness, then compares three states across three captures | ~30 s |
 | `pnpm browser:evidence summary` | Stages, failing checks, screenshots and local trace commands from the last run | instant |
 | `pnpm browser:evidence verify` | Exit 1 unless `public/` holds only allowlisted, sanitized files | instant |
 | `pnpm browser:evidence clean` | Delete `test-results/browser` (traces included) | instant |
@@ -133,7 +133,7 @@ pixelmatch (threshold 0.1, 0 differing pixels allowed).
 - `pnpm test:visual` compares with it; diffs go to `test-results/visual/diff/`.
   Missing baseline: exit 3. Any diff: exit 1.
 - `pnpm test:visual --repeat 5` requires identical repeats (no baseline needed).
-- `pnpm test:visual --probe` adds a 4 px left padding to `main` and must report
+- `pnpm test:visual --probe` adds a 4 px left padding to `main` and must detect
   a diff in every state; it exits 1 if the comparison misses it.
 
 Measured 2026-11-19: 12/12 macOS repeats and 6/6 Linux container repeats
