@@ -25,6 +25,6 @@ The CLI's generated filter source expects Base UI while new-york dependencies re
 `pnpm test` covers combined filters/search, inclusive dates, negation, sorting, pagination/clamping, and unset urgency. `pnpm typecheck` and `pnpm run build` cover integration. The browser fixture uses only local sample Tickets and makes no backend writes (its optional base URL is `BROWSER_BASE_URL`):
 
 1. `pnpm exec vite --host 127.0.0.1 --port 5193`
-2. `pnpm exec node tests/browser/explorer-check.mjs`
+2. `pnpm exec tsx tests/browser/explorer-check.mjs` (failure evidence goes to `test-results/browser`; see [browser-verification.md](browser-verification.md))
 
 The browser checks table/board switching, tags and status filters, dates and urgency, page sizes, live shrinking, sorting, archives, details callback, Thai, keyboard controls, and mobile overflow.

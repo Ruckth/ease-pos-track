@@ -1,85 +1,17 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
-import { ConvexHttpClient } from "convex/browser";
+import { after, test as nodeTest } from "node:test";
+import type { BrowserContext, Page } from "playwright";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { loadPorts } from "../../scripts/worktree-ports.mjs";
-import { translations, translate } from "../../src/lib/i18n";
+import { capture, newContext } from "../../scripts/browser-evidence";
+import { baseURL, convex, copy, files, suiteBrowser, open as openWith, seed, stats, type Language } from "./harness";
 
-const baseURL = process.env.BROWSER_BASE_URL!;
-const seed = JSON.parse(process.env.BROWSER_FIXTURE!) as { sessions: string[]; projects: { id: Id<"projects">; key: string }[] };
-const convex = new ConvexHttpClient(`http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`);
-let browser: Browser;
-before(async () => { browser = await chromium.launch({ headless: true, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] }); });
-after(async () => { await browser?.close(); });
-
-type Language = "en" | "th";
-type DraftStats = { created: string[]; revoked: string[]; streams: string[]; stops: string[]; aborts: number };
-declare global { interface Window { draftStats: DraftStats } }
-function copy(language: Language, key: keyof typeof translations.en, values?: Record<string, string | number>) { return translate(language, key, values); }
-async function open(role: "staff" | "customer", language: Language = "en", configure?: (context: BrowserContext) => Promise<void>) {
-  const context = await browser.newContext({ permissions: ["camera"], viewport: { width: 1280, height: 900 } });
-  let uploads = 0;
-  await context.route(/\/api\/uploadthing|https:\/\/[^/]*(?:uploadthing|ufs\.sh)/, async route => { uploads++; await route.abort(); });
-  const credentials = role === "staff"
-    ? await convex.action(api.auth.login, { password: "LocalStaff123!", clientId: crypto.randomUUID() })
-    : await convex.action(api.customers.login, { email: "alice@local.test", password: "LocalCustomer123!", clientId: crypto.randomUUID() });
-  // tsx preserves nested function names with this helper when Playwright
-  // serializes an evaluate callback; it exists only in the isolated test page.
-  await context.addInitScript("globalThis.__name = (fn) => fn;");
-  await context.addInitScript(({ token, language }) => {
-    sessionStorage.setItem("ease-pos-tracking-session", token);
-    localStorage.setItem("ease-pos-tracking-language", language);
-    const stats = { created: [] as string[], revoked: [] as string[], stops: [] as string[], streams: [] as string[], aborts: 0 };
-    Object.assign(window, { draftStats: stats });
-    const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
-    URL.createObjectURL = blob => { const url = create(blob); stats.created.push(url); return url; };
-    URL.revokeObjectURL = url => { stats.revoked.push(url); revoke(url); };
-    const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia = async constraints => {
-      const stream = await getMedia(constraints);
-      for (const track of stream.getTracks()) {
-        stats.streams.push(track.id);
-        const stop = track.stop.bind(track);
-        track.stop = () => { stats.stops.push(track.id); stop(); };
-      }
-      return stream;
-    };
-    const abort = AbortController.prototype.abort;
-    AbortController.prototype.abort = function (reason) { stats.aborts++; abort.call(this, reason); };
-  }, { token: credentials.token, language });
-  await configure?.(context);
-  const page = await context.newPage();
-  page.setDefaultTimeout(10_000);
-  const errors: string[] = [];
-  page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`${baseURL}/${role}?project=POS`);
-  try {
-    await page.getByRole("button", { name: copy(language, "newTicket"), exact: true }).first().click();
-  } catch (error) {
-    console.error("App startup failure", page.url(), (await page.locator("body").innerText()).slice(-3000), errors);
-    await context.close(); throw error;
-  }
-  const title = page.locator(role === "staff" ? "#title" : "#customer-ticket-title");
-  await title.waitFor({ state: "visible" });
-  try {
-    await page.waitForFunction(id => document.activeElement?.id === id, role === "staff" ? "title" : "customer-ticket-title", { timeout: 5000 });
-  } catch (error) {
-    console.error("Focus failure", (await page.locator("body").innerText()).slice(-3000), await page.evaluate(() => document.activeElement?.outerHTML), errors);
-    await context.close(); throw error;
-  }
-  return { context, page, title, errors, token: credentials.token, uploads: () => uploads };
-}
-async function stats(page: Page) { return page.evaluate(() => window.draftStats); }
-async function files(page: Page, name = "draft.png") {
-  const base64 = await page.evaluate(() => {
-    const canvas = document.createElement("canvas"); canvas.width = 320; canvas.height = 240;
-    const ctx = canvas.getContext("2d")!; ctx.fillStyle = "#8ab"; ctx.fillRect(0, 0, 320, 240);
-    return canvas.toDataURL("image/png").split(",")[1];
-  });
-  await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
-}
+const browsers = suiteBrowser();
+after(() => browsers.close());
+const open = async (role: "staff" | "customer", language?: Language, configure?: (context: BrowserContext) => Promise<void>) => openWith(await browsers.get(), role, language, configure);
+// Every check runs in an evidence scope: failures keep a screenshot, the
+// assertion, and (locally) a Playwright trace taken before teardown.
+const test = (name: string, run: () => Promise<void>) => nodeTest(name, () => capture("workflows", name, run));
 
 for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
   test(`${role} ${language}: focus, pointer pin removal, camera teardown and unmount`, async () => {
@@ -224,7 +156,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
     let loseResponses = true;
     const requests: Array<{ requestId: string; title: string; description: string; annotations: unknown[] }> = [];
     const { context, page, title, token, errors, uploads } = await open(role, language, async context => {
-      await context.routeWebSocket(/\/sync$/, socket => {
+      await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
         const server = socket.connectToServer();
         const mutations = new Map<number, { udfPath: string; args: Array<{ files?: Array<{ name: string; size: number; type: string }> }> }>();
         socket.onMessage(raw => {
@@ -468,7 +400,7 @@ for (const language of ["en", "th"] as const) {
 }
 
 test("staff sign-in uses the committed rate-limit action through the real form", async () => {
-  const context = await browser.newContext();
+  const context = await newContext(await browsers.get());
   try {
     await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
     const page = await context.newPage();
@@ -539,7 +471,7 @@ test("a status check finishing in another Project is shown once on return", asyn
   const held = new Promise<void>(resolve => { release = resolve; });
   let writes = 0;
   const { page, context, token } = await open("staff", "en", async context => {
-    await context.routeWebSocket(/\/sync$/, socket => {
+    await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
       const server = socket.connectToServer();
       socket.onMessage(raw => {
         const message = JSON.parse(String(raw));
@@ -617,8 +549,35 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     await f.page.getByText("No Tickets match these filters.", { exact: true }).waitFor();
     assert.equal(await f.page.getByRole("group", { name: "Ticket view" }).getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
     await search.fill(name);
-    await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).waitFor();
-    await convex.mutation(api.tickets.archiveTicket, { token: f.token, id, expectedVersion: assigned!.version });
+    const row = f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) });
+    await row.click();
+    await dialog.getByRole("button", { name: copy("en", "detailActions"), exact: true }).click();
+    // Staff archive goes through the real confirmation. Cancel and Escape both
+    // dismiss it without a write; focus returns to the Archive trigger.
+    const archiveTrigger = dialog.getByRole("button", { name: copy("en", "archive"), exact: true });
+    const confirm = f.page.getByRole("alertdialog", { name: copy("en", "archive"), exact: true });
+    await archiveTrigger.click();
+    await confirm.getByText(copy("en", "archiveConfirm"), { exact: true }).waitFor();
+    await confirm.getByRole("button", { name: copy("en", "cancel"), exact: true }).click();
+    await confirm.waitFor({ state: "hidden" });
+    await archiveTrigger.focus();
+    await f.page.keyboard.press("Enter");
+    await confirm.waitFor();
+    await f.page.keyboard.press("Escape");
+    await confirm.waitFor({ state: "hidden" });
+    await f.page.waitForFunction(trigger => trigger === document.activeElement, await archiveTrigger.elementHandle());
+    const dismissed = await convex.query(api.tickets.getTicket, { token: f.token, id });
+    assert.equal(dismissed?.lifecycle, "active");
+    assert.equal(dismissed?.version, assigned?.version, "Dismissing the confirmation must not write");
+    await archiveTrigger.click();
+    await confirm.getByRole("button", { name: copy("en", "archive"), exact: true }).click();
+    await confirm.waitFor({ state: "hidden" });
+    await dialog.waitFor({ state: "hidden" });
+    await row.waitFor({ state: "hidden" });
+    const archivedTicket = await convex.query(api.tickets.getTicket, { token: f.token, id });
+    assert.equal(archivedTicket?.lifecycle, "archived");
+    assert.ok(archivedTicket?.archivedAt);
+    assert.deepEqual(archivedTicket?.tagIds, assigned?.tagIds);
     await f.page.getByRole("button", { name: copy("en", "archive"), exact: true }).click();
     await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).click();
     const archived = f.page.getByRole("dialog").last();

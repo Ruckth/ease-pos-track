@@ -14,20 +14,24 @@ const getIdle = () => idle;
 export function useComposer(project: ProjectSummary | null | undefined) {
   const [entry, setEntry] = useState<{ project: ProjectSummary; owner: DisposableTicketDraft } | null>(null);
   const [open, setOpen] = useState(false);
-  const current = useRef(entry);
-  const lifetime = useRef(0);
+  const lifetime = useRef({ generation: 0, entry });
   useEffect(() => {
-    const generation = ++lifetime.current;
+    const ownerLifetime = lifetime.current;
+    const generation = ++ownerLifetime.generation;
     // StrictMode replays setup synchronously. Defer final disposal so that replay
     // cannot destroy a live draft; a genuine unmount still disposes exactly once.
-    return () => { queueMicrotask(() => { if (generation === lifetime.current) current.current?.owner.dispose(); }); };
+    return () => {
+      queueMicrotask(() => {
+        if (generation === ownerLifetime.generation) ownerLifetime.entry?.owner.dispose();
+      });
+    };
   }, []);
   const state = useSyncExternalStore(entry?.owner.subscribe ?? subscribeIdle, entry?.owner.getSnapshot ?? getIdle);
   const busy = state.progress !== null;
   const hasDraft = Boolean(state.title || state.description || state.items.length || state.annotations.length);
   function replace(next: typeof entry) {
-    current.current?.owner.dispose();
-    current.current = next;
+    lifetime.current.entry?.owner.dispose();
+    lifetime.current.entry = next;
     setEntry(next);
   }
   function complete() { replace(null); setOpen(false); }

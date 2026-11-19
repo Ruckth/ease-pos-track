@@ -313,6 +313,38 @@ test("disabling cleanup fences expired leases and pauses already scheduled provi
   expect(await f.job(pendingId)).toMatchObject({ state: "completed", attempt: 1 });
 });
 
+test("disabling cleanup defers a new job while allowing an admitted provider call to settle", async () => {
+  const f = await fixture();
+  const first = await f.upload();
+  const next = await f.upload();
+  const [firstId] = (await f.cancel(first)).jobIds;
+  const [nextId] = (await f.cancel(next)).jobIds;
+  const started = deferred<void>();
+  const result = deferred<StorageDeletionOutcome>();
+  f.storage.deleteFiles = vi.fn<Storage["deleteFiles"]>(() => {
+    started.resolve();
+    return result.promise;
+  });
+
+  const running = f.t.action(internal.media_job_actions.run, { jobId: firstId });
+  try {
+    await Promise.race([
+      started.promise,
+      running.then(() => { throw new Error("Cleanup finished before starting the fake provider"); }),
+    ]);
+    vi.stubEnv("MEDIA_CLEANUP_ENABLED", "false");
+    await f.t.action(internal.media_job_actions.run, { jobId: nextId });
+    expect(await f.job(nextId)).toMatchObject({ state: "pending", attempt: 0, completedKeys: [] });
+  } finally {
+    result.resolve({ outcome: "deleted" });
+    await running;
+  }
+
+  await f.drain();
+  expect(await f.job(firstId)).toMatchObject({ state: "completed", attempt: 1, completedKeys: [first.files[0].key] });
+  expect(f.storage.deleteFiles).toHaveBeenCalledExactlyOnceWith([first.files[0].key]);
+});
+
 test("disabled rejected callbacks queue reserved receipts without scheduling deletion or allowing attachment", async () => {
   const f = await fixture();
   const handle = await f.upload();
