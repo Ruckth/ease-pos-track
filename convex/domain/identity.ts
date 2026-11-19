@@ -405,7 +405,7 @@ export async function replaceCustomerPassword(
   const now = Date.now();
   await ctx.db.patch(customer._id, {
     generation: customer.generation + 1, validAfter: now, updatedAt: now,
-    recoveryCodeDigest: undefined, recoveryCodeCreatedAt: undefined,
+    recoveryCodeDigest: undefined, recoveryCodeCreatedAt: undefined, recoveryEnrollmentRequired: true,
   });
   await revokeUserSessions(ctx, customer.userId);
   await clearAttempts(ctx, rateLimitKey);

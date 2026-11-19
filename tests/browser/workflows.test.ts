@@ -774,8 +774,11 @@ test("a customer joins from an invitation link, saves a recovery code, then reco
     await page.locator("#customer-username").fill(username);
     await page.locator("#customer-password").fill("recovered browser passphrase");
     await page.getByRole("button", { name: copy("en", "signIn"), exact: true }).click();
-    await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
     await page.getByText(copy("en", "recoveryCodeNeeded"), { exact: true }).waitFor();
+    await page.getByRole("button", { name: copy("en", "recoveryCodeCreate"), exact: true }).press("Enter");
+    redact((await page.locator("output").innerText()).trim());
+    await page.getByRole("button", { name: copy("en", "recoveryCodeSaved"), exact: true }).press("Enter");
+    await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
   } finally { await fresh.close(); }
 });
 
@@ -868,6 +871,9 @@ test("Thai keyboard customer recovery returns to sign-in and resumes Join with t
     await page.keyboard.press("Tab");
     await page.keyboard.insertText(newPassword);
     await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: copy("th", "recoveryCodeCreate"), exact: true }).press("Enter");
+    redact((await page.locator("output").innerText()).trim());
+    await page.getByRole("button", { name: copy("th", "recoveryCodeSaved"), exact: true }).press("Enter");
     await page.waitForURL(joinPath);
     await page.getByText(copy("th", "joinAsCustomer", { project: "Customer App", username }), { exact: true }).waitFor();
     const join = page.getByRole("button", { name: copy("th", "joinAction"), exact: true });

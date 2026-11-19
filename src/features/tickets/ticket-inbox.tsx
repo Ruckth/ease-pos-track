@@ -87,6 +87,6 @@ function InboxList<Row extends InboxRow>({ projectKey, items, openTicket, onClos
         <small className="text-muted-foreground">{!item.read && t("inboxUnread") + " · "}{new Date(item.date).toLocaleString(language)}</small>
       </button>
     </li>)}</ul>
-    {items.status === "CanLoadMore" && <Button variant="outline" onClick={() => items.loadMore(20)}>{t("inboxMore")}</Button>}
+    {items.status === "CanLoadMore" && <Button variant="outline" className="min-h-11" onClick={() => items.loadMore(20)}>{t("inboxMore")}</Button>}
   </>;
 }

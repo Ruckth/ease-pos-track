@@ -4,6 +4,12 @@ This runbook covers the text-only pilot and its first three implementation phase
 
 The browser pilot uses reconciled named accounts, manual assignment and the authenticated inbox. Keep the shared staff credential, public password signup, legacy CLI writers, attachment-upload transport, public upload callbacks, retention workers, doctor, assisted recovery, AI routing, Ticket email and LINE closed. Staff identity proof has an independent sender switch.
 
+## Why restore controls ship with the first pilot
+
+The pilot starts with zero users. Its first customer can create a privately owned Ticket immediately. After a snapshot restore, a new customer account would lose access to that Ticket. A restored password or staff binding could also regain access after it was revoked. We accept the cost of keeping the outside epoch, two-operator private credential replacement and sole-Owner recovery in this delivery to preserve ownership and revocation from the first Ticket onward.
+
+Ordinary enrollment and daily Ticket work need none of the restore tools. The tools have no customer-facing endpoint. Configure independent operator credentials when a restore is declared, keep traffic closed, and reconcile only affected identities. An empty snapshot has no customer credentials to replace. The pilot can operate indefinitely with manual assignment and its in-app inbox. The T3 doctor has its own opt-in and evidence requirements.
+
 ## Release switches
 
 | Switch or boundary | Closed state | Browser pilot state |
@@ -27,7 +33,7 @@ Hosted legacy deployments require an explicit `TICKET_DEPLOYMENT_MODE=legacy` on
 
 Pull requests build the web application on Vercel. Merging to `main` leaves the current production deployment serving. The preview build runs Vite without deploying Convex. Set the public frontend URL `VITE_CONVEX_URL` only for the intended backend. At an authorized cutover the operator releases the reviewed Convex build and matching web artifact, verifies direct invitation and recovery links, and records both versions in the release evidence. [Vercel Git deployment controls](https://vercel.com/docs/project-configuration/git-configuration)
 
-Build the pilot frontend with `TICKET_DEPLOYMENT_MODE=named-pilot pnpm build`. Set both `VITE_PILOT_PRIVACY_NOTICE_TH` and `VITE_PILOT_PRIVACY_NOTICE_EN` in the web build environment. The pilot build and Vercel production build reject a missing or invalid HTTPS URL. The controller must publish a working contact and instructions for access and deletion requests in both notices. Customers can reach the notice from Account after signing in. Exercise a request through that contact during release verification.
+Build the pilot frontend with `TICKET_DEPLOYMENT_MODE=named-pilot pnpm build`. Set both `VITE_PILOT_PRIVACY_NOTICE_TH` and `VITE_PILOT_PRIVACY_NOTICE_EN` in the web build environment. The pilot build and Vercel production build reject a missing or invalid HTTPS URL. The controller must publish a working contact and instructions for access and deletion requests in both notices. Customers can reach the notice from Account after signing in. Exercise a request through that contact during release verification. Have the controller approve the evidence window for the Owner’s eligibility confirmation before opening invitations. The invitation expires from storage 30 days after expiry and the identity audit after 90 days. If the controller needs evidence beyond those windows, resolve its storage, access and retention before enrollment.
 
 The release manifest must contain the approved HTTPS notice URLs in `privacyNotices.th` and `privacyNotices.en`. Inspect the actual links on the built sign-in and join pages in each language, and enter their destinations in the independent switch observation as `webNotices.th` and `webNotices.en`. Both must match the approved manifest. Record the two doctor switches (`T3_DOCTOR_ENABLED` and `T3_DOCTOR_ISSUANCE_ENABLED`) in both runtime inventories. Manual pilot admission requires both to be off.
 

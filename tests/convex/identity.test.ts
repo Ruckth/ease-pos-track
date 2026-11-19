@@ -211,12 +211,13 @@ test("saved-code recovery resets once, revokes every session and keeps ownership
   const winner = outcomes[0] ? "a brand new passphrase" : "another new passphrase";
   expect(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD })).toMatchObject({ status: "error" });
   const fresh = session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: winner }));
-  expect(await t.query(api.identity.viewer, { token: fresh })).toMatchObject({ needsRecoveryCode: true });
-  expect(await t.query(api.tickets.getTicket, { token: fresh, id: ticket.ticket._id })).toMatchObject({ _id: ticket.ticket._id });
+  expect(await t.query(api.identity.viewer, { token: fresh })).toMatchObject({ needsRecoveryCode: true, recoveryEnrollmentRequired: true });
+  await expect(t.query(api.tickets.getTicket, { token: fresh, id: ticket.ticket._id })).rejects.toThrow("RECOVERY_ENROLLMENT_REQUIRED");
   // The consumed code never works again.
   expect(await t.mutation(api.auth.recoverWithCode, { username: "alice", recoveryCode: issued.code, newPassword: "yet another passphrase" })).toEqual(failed);
   // A disabled customer cannot recover.
-  const code = await t.mutation(api.identity.createRecoveryCode, { token: fresh });
+  const code = await saveRecoveryCode(t, fresh);
+  expect(await t.query(api.tickets.getTicket, { token: fresh, id: ticket.ticket._id })).toMatchObject({ _id: ticket.ticket._id });
   const { customerId } = await whoami(t, fresh);
   await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: customerId!, status: "disabled" });
   expect(await t.mutation(api.auth.recoverWithCode, { username: "alice", recoveryCode: code.ok ? code.code : "", newPassword: "yet another passphrase" })).toEqual(failed);
