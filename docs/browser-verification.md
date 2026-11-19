@@ -9,14 +9,14 @@ cleared provider credentials and blocked non-loopback traffic.
 
 | Command | What it runs | Typical time (macOS, warm) |
 | --- | --- | --- |
-| `pnpm test:browser` | Bootstrap stages, every workflow and accessibility check, then the Ticket Explorer harness check | ~6 min |
-| `pnpm test:browser --grep "<pattern>"` | Bootstrap, then only matching workflow/accessibility tests (Explorer skipped) | ~3 min |
-| `pnpm test:explore` | Bootstrap, then the seeded draft exploration (default seeds 1,2,3) | ~4 min |
+| `pnpm test:browser` | Bootstrap stages, 40 workflow and accessibility checks, then the Ticket Explorer harness check | ~2.5 min |
+| `pnpm test:browser --grep "<pattern>"` | Bootstrap, then only matching workflow/accessibility tests (Explorer skipped) | ~1 min + tests |
+| `pnpm test:explore` | Bootstrap, then the seeded draft exploration (default seeds 1,2,3) | ~1 min |
 | `pnpm test:visual --repeat 3` | Vite only, three Explorer harness screenshots captured three times, pixels compared | ~30 s |
 | `pnpm browser:evidence summary` | Stages, failing checks, screenshots and local trace commands from the last run | instant |
 | `pnpm browser:evidence verify` | Exit 1 unless `public/` holds only allowlisted, sanitized files | instant |
 | `pnpm browser:evidence clean` | Delete `test-results/browser` (traces included) | instant |
-| `scripts/browser-linux-rehearsal.sh <docker context>` | The CI job's steps in a fresh `ubuntu:24.04` container | ~15 min cold |
+| `scripts/browser-linux-rehearsal.sh <docker context> [test:browser args]` | The CI job's steps in a fresh `ubuntu:24.04` container; evidence copied to `test-results/linux-rehearsal/` | ~4.5 min |
 
 Run one browser command at a time per checkout: each owns the local backend and
 resets `test-results/browser`. Do not run another `pnpm convex:local` command
@@ -31,6 +31,14 @@ it, sanitized, to `public/logs/runner.log`. A nonzero stage stops the run with
 1. `cleanup-flag` sets `MEDIA_CLEANUP_ENABLED=false` before the schema push.
 2. `schema-push` pushes functions and schema to the local backend.
 3. `cleanup-flag-verify` reads the flag back and refuses anything but `false`.
+
+Cold checkouts (no `.convex/local/default/config.json`, as on a fresh CI
+runner) cannot run env commands yet: the wrapper fails with `Local backend
+startup failed` and the run stops at `cleanup-flag` (found by the Ubuntu
+rehearsal). The runner therefore runs `schema-push-cold` first there. A new
+backend has no environment variables, and only the exact value `true` enables
+cleanup, so it is off; `cleanup-flag` and `cleanup-flag-verify` follow before
+any fixture or browser runs.
 4. `fixture-env-*` sets local-only fixture credentials.
 5. `seed` creates synthetic Projects, sessions and Tickets. Its output holds
    session tokens and is never logged.
@@ -127,6 +135,11 @@ pixelmatch (threshold 0.1, 0 differing pixels allowed).
 - `pnpm test:visual --probe` adds a 4 px left padding to `main` and must report
   a diff in every state; it exits 1 if the comparison misses it.
 
+Measured 2026-11-19: 12/12 macOS repeats and 6/6 Linux container repeats
+matched at 0 px after waiting for the lazily loaded filter controls (the first
+attempt caught a 544 px "Syncing" fallback, which the wait fixes); the probe
+produced 29092, 26175 and 8801 differing pixels.
+
 Decision: **go** for local before/after review and for the CI stability step
 (advisory, captures uploaded for review); **no-go** for a blocking CI gate until
 a Linux x64 baseline has matched across 10 hosted runs and a maintainer has
@@ -154,6 +167,13 @@ Controls: `EXPLORE_SEEDS` (default `1,2,3`), `EXPLORE_ACTIONS` (20),
 `EXPLORE_PROBE=leak` (a synthetic fault: `URL.revokeObjectURL` becomes a no-op).
 A failing seed writes `public/explore/seed-<n>.json`; replay it exactly with
 `EXPLORE_REPLAY=<file> pnpm test:explore` (add the same `EXPLORE_PROBE`).
+
+Measured 2026-11-19: seeds 1, 2 and 3 hold every property (20 actions each,
+4-9 s). The first seed 3 run failed at step 13 because a new pin click landed on
+an existing marker; the retained call log and screenshot showed the harness
+fault, fixed by placing pins on a grid. With `EXPLORE_PROBE=leak`, seed 3 fails
+at step 5 (`preview-release: 2 live preview URLs for 1 files`) and
+`EXPLORE_REPLAY` of its JSON reproduces the same step and message.
 
 Before proposing a fix for a discovery, reproduce it as a deterministic test in
 `workflows.test.ts` and have a person review it. Exploration is not part of
@@ -194,3 +214,9 @@ with the repository maintainer that it is safe.
 | Date | Where | Commit | Result | Duration | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-11-19 | macOS arm64, warm | 55cc64d (main) | 33/33 workflows + Explorer pass | 148 s tests | baseline before this change |
+| 2026-11-19 | macOS arm64, warm | this branch | 40/40 + Explorer pass, twice | 138 s, 139 s end to end | after fixing a confirm-dialog race in the new archive journey |
+| 2026-11-19 | macOS arm64 | this branch | deliberate failures in the archive journey and Explorer: exit 1, both entry points failed and captured, 2 screenshots, 2 local traces (47 and 229 files), `verify` passed | 202 s | probe edits reverted |
+| 2026-11-19 | macOS arm64 | this branch | port 4170 held by another process: exit 1 at `cleanup-flag`, `runner.log` and manifest name the stage, no checks run | 32 s | bootstrap probe |
+| 2026-11-19 | Ubuntu 24.04 arm64 container (colima), cold | this branch | first attempt: exit 1 at `cleanup-flag` (cold backend); fixed with `schema-push-cold` | 82 s | real cold-path finding |
+| 2026-11-19 | Ubuntu 24.04 arm64 container, cold, `CI=true` | this branch | 40/40 + Explorer pass; 4 allowlisted files; visual repeats 0 px | 256 s incl. install | traces off |
+| 2026-11-19 | Ubuntu 24.04 arm64 container, `CI=true` | this branch | deliberate archive failure: exit 1, screenshot + logs + manifest, no trace, `verify` passed | — | hosted x64 runner still pending |
