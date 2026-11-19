@@ -46,6 +46,13 @@ export const pilotReleaseManifest = z.object({
   privacyNotices: pilotPrivacyNotices,
   identityRetention: approvedIdentityRetention,
   inboxRetention: approvedInboxRetention,
+  ticketDisposal: z.object({
+    // Unix milliseconds, UTC. The controller supplies the approved end date.
+    deadline: z.number().int().positive().max(8_640_000_000_000_000),
+    controllerDecision: evidence,
+    operatorProcedure: evidence,
+    syntheticRehearsal: evidence,
+  }).strict(),
   rollback: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("maintenance") }).strict(),
     z.object({ mode: z.literal("compatible-build"), build, schemaCompatibility: evidence }).strict(),

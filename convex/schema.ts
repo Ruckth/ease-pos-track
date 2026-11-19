@@ -267,6 +267,7 @@ export default defineSchema({
   }).index("by_user", ["userId"])
     .index("by_username", ["username"]),
   pilotRelease: defineTable({
+    ticketDisposalDeadline: v.optional(v.number()),
     // Written by earlier builds; expiry now requires the approved periods in `retention`.
     identityRetentionApproved: v.optional(v.boolean()),
     retention: v.optional(v.object({

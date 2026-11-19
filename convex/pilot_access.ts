@@ -40,6 +40,7 @@ export async function requirePilotAdmission(ctx: DatabaseCtx, capability: PilotC
   const installed = await installedPilot(ctx);
   if (!installed || installed.epoch !== settings.epoch || installed.manifestDigest !== settings.manifestDigest
     || installed.previousEpoch !== settings.previousEpoch || installed.deploymentOrigin !== process.env.CONVEX_CLOUD_URL) throw new Error("PILOT_UNAVAILABLE");
+  if (!installed.ticketDisposalDeadline || installed.ticketDisposalDeadline <= Date.now()) throw new Error("PILOT_UNAVAILABLE");
   return { epoch: settings.epoch, projectIds: installed.projectIds };
 }
 

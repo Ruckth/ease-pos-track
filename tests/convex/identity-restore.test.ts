@@ -117,7 +117,7 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
     audit: [{ action: "customer_restore.verified" }, { action: "customer_restore.approved" }, { action: "customer_restore.replaced" }],
   });
 
-  await t.run(ctx => ctx.db.patch(snapshot.releaseId, { epoch, previousEpoch: previous }));
+  await t.run(ctx => ctx.db.patch(snapshot.releaseId, { epoch, previousEpoch: previous, ticketDisposalDeadline: Date.now() + 86_400_000 }));
   await expect(verify()).rejects.toThrow("IDENTITY_RESTORE_QUARANTINE_REQUIRED");
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
   await expect(verify()).rejects.toThrow("PILOT_MAINTENANCE_REQUIRED");

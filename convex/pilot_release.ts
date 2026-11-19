@@ -17,6 +17,7 @@ export const install = internalJobMutation({
     const parsed = pilotReleaseManifest.safeParse(json);
     if (!parsed.success) throw new Error("PILOT_MANIFEST_INVALID");
     const manifest = parsed.data;
+    if (manifest.ticketDisposal.deadline <= Date.now()) throw new Error("PILOT_MANIFEST_INVALID");
     if (manifest.epoch !== settings.epoch || manifest.deploymentOrigin !== process.env.CONVEX_CLOUD_URL
       || manifest.recovery?.plan.previousEpoch !== settings.previousEpoch) {
       throw new Error("PILOT_MANIFEST_MISMATCH");
@@ -45,7 +46,7 @@ export const install = internalJobMutation({
       projectIds.push(row._id);
     }
     const retention = { ...manifest.identityRetention, inboxDays: manifest.inboxRetention.itemDays };
-    const release = { retention, epoch: manifest.epoch, previousEpoch: settings.previousEpoch, manifestDigest: digest, deploymentOrigin: manifest.deploymentOrigin, projectIds };
+    const release = { retention, ticketDisposalDeadline: manifest.ticketDisposal.deadline, epoch: manifest.epoch, previousEpoch: settings.previousEpoch, manifestDigest: digest, deploymentOrigin: manifest.deploymentOrigin, projectIds };
     if (installed) await ctx.db.replace(installed._id, release);
     else await ctx.db.insert("pilotRelease", release);
     return { epoch: release.epoch, manifestDigest: digest };

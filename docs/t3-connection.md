@@ -2,7 +2,7 @@
 
 Connections are limited to the read-only doctor for one active Project. A successful doctor response confirms the named staff account, Project, expiry and approved compatibility for the Mac running the command. The Settings list shows key availability. A signed or installed kit alone gives no connection status.
 
-Phase 2 ships in the Phases 1–3 change as a separately activated capability. The first two customers use the manual workflow with both doctor switches off. A team can keep using that workflow indefinitely. Enable the kit only when staff need to verify their T3 connection and the installed host passes the checks below. CI runs the signing and Keychain fixtures on macOS.
+Phase 2 ships in the Phases 1–3 change as a separately activated capability. Pilot staff handle customer Tickets manually with both doctor switches off. A team can keep using that workflow indefinitely. Enable the kit only when staff need to verify their T3 connection and the installed host passes the checks below. CI runs the signing and Keychain fixtures on macOS.
 
 ## Named identity and Settings route
 

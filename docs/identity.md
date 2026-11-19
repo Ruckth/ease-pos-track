@@ -3,8 +3,7 @@
 Staff sign in with Google and are admitted only by invitation. Customers join a
 Project with a single-use invitation, choose a username and password, and keep a
 saved recovery code. The shared staff password, public email signup and raw
-session tokens are gone. Plan: `docs/architecture/t3code-phase1/01-staff-accounts.html`
-and `02-customer-accounts.html` (audited at `021de5b`).
+session tokens are gone. The [staff plan](architecture/t3code-phase1/01-staff-accounts.html), [customer plan](architecture/t3code-phase1/02-customer-accounts.html) and [design audit](architecture/t3code-phase1/audit.html) record the decisions.
 
 ## Pinned versions
 

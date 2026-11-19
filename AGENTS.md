@@ -57,8 +57,8 @@ holds, staff-reviewed local rules, and in-app assignment and intake alerts.
 Reuse the routing domain's Project and named-staff checks and its shared manual
 assignment operation. Roster membership grants no Project access.
 
-Keep external T3 routing paused. Broker, promotion and evaluation work is parked
-in commit `f57ff5c`. Revisit it after an approved dataset meets the criteria
+Keep external T3 routing paused. The deferred broker, promotion and evaluation design is documented
+in [the routing plan](docs/architecture/t3code-phase1/04-responsibilities-and-delegation.html). Revisit it after an approved dataset meets the criteria
 in [docs/ticket-routing.md](docs/ticket-routing.md). The active app has no routing
 provider transport or promotion path.
 

@@ -10,6 +10,10 @@ export const releaseEvidence = (id: string, epoch = firstEpoch) => ({
   privacyNotices: { th: "https://privacy.example.test/th", en: "https://privacy.example.test/en" },
   identityRetention: { challengeHours: 24, invitationDays: 30, attemptDays: 30, auditDays: 90 },
   inboxRetention: { itemDays: 30 },
+  ticketDisposal: {
+    deadline: Date.UTC(2090, 0, 1), controllerDecision: "synthetic/decision",
+    operatorProcedure: "synthetic/disposal", syntheticRehearsal: "synthetic/rehearsal",
+  },
   rollback: { mode: "maintenance" },
   gates: {
     operatorAndBackup: "synthetic/operator-and-backup",

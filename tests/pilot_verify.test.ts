@@ -64,6 +64,18 @@ test("opening requires complete release evidence and independent invitation and 
   observed.convex.TICKET_PILOT_IDENTITY_SENDER = "true";
   observed.externalEgress = "identity-only";
   assert.equal((await verifyPilotEvidence("open", raw, observed)).stage, "open");
+  for (const ticketDisposal of [
+    undefined, { ...release.ticketDisposal, syntheticRehearsal: undefined },
+    { ...release.ticketDisposal, deadline: Date.now() - 1 },
+  ]) {
+    const reviewed = JSON.stringify({ ...release, ticketDisposal });
+    const digest = await pilotManifestDigest(reviewed);
+    await assert.rejects(verifyPilotEvidence("open", reviewed, {
+      ...observed,
+      convex: { ...observed.convex, TICKET_PILOT_MANIFEST_SHA256: digest },
+      uploadRuntime: { ...observed.uploadRuntime, TICKET_PILOT_MANIFEST_SHA256: digest },
+    }));
+  }
   const incomplete = JSON.stringify({ ...release, gates: { ...release.gates, privacyAndRightsApproval: undefined } });
   await assert.rejects(verifyPilotEvidence("open", incomplete, observed));
 });

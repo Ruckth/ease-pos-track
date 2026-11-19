@@ -38,6 +38,9 @@ export async function verifyPilotEvidence(stage: Stage, raw: string, observed: u
   const evidence: unknown = JSON.parse(raw);
   const target = stage === "restore-preflight" ? pilotRestorePlan.parse(evidence) : pilotReleaseManifest.parse(evidence);
   const previousEpoch = "previousEpoch" in target ? target.previousEpoch : target.recovery?.plan.previousEpoch;
+  if ("ticketDisposal" in target && target.ticketDisposal.deadline <= Date.now()) {
+    throw new Error("The approved Ticket disposal date has passed");
+  }
   const observation = observationSchema.parse(observed);
   if (target.deploymentOrigin !== observation.deploymentOrigin || target.deploymentOrigin !== observation.uploadBackendOrigin) {
     throw new Error("Deployment origin mismatch");

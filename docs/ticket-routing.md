@@ -14,7 +14,7 @@ Changing the mapping advances the rule revision and policy generation. Roster an
 
 ## External routing is paused
 
-On 19 November 2026 the team confirmed it had no approved routing evaluation dataset. The launch has no broker, provider egress, promotion path, evaluation screen or evaluation API. The signed T3 connection check is independent. Commit `f57ff5c` preserves the experiments and the research notes retain the future design. [Routing research](research/t3code-phase1/04-responsibilities-and-delegation.md)
+On 19 November 2026 the team confirmed it had no approved routing evaluation dataset. The launch has no broker, provider egress, promotion path, evaluation screen or evaluation API. The signed T3 connection check is independent. The research notes record the proposed broker and the evidence required to revisit it. [Routing research](research/t3code-phase1/04-responsibilities-and-delegation.md)
 
 ## Criteria for future measurement
 

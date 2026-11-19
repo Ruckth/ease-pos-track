@@ -532,3 +532,23 @@ test("inbox and identity expiry need the matching approved release, open traffic
     ids.stale, ids.fresh, ids.attempt, ids.invite].map(id => ctx.db.get(id))));
   expect(rows.map(row => row !== null)).toEqual([false, false, true, false, true, false, true, false, false]);
 });
+
+test("pilot admission ends at the controller's Ticket disposal deadline", async () => {
+  const f = await fixture();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = Date.now();
+  const evidence = releaseEvidence(f.projectId);
+  const install = async (ticketDisposal: unknown) => {
+    const manifest = JSON.stringify({ ...evidence, ticketDisposal });
+    await configure(manifest, firstEpoch);
+    return f.t.mutation(internal.pilot_release.install, { manifest });
+  };
+  await expect(install(undefined)).rejects.toThrow("PILOT_MANIFEST_INVALID");
+  await expect(install({ ...evidence.ticketDisposal, deadline: now })).rejects.toThrow("PILOT_MANIFEST_INVALID");
+  await install({ ...evidence.ticketDisposal, deadline: now + 60_000 });
+  vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
+  const admit = () => f.t.query(internal.pilot_release.checkAdmission, { capability: "browser" });
+  expect(await admit()).toEqual({ epoch: firstEpoch });
+  vi.setSystemTime(now + 60_000);
+  await expect(admit()).rejects.toThrow("PILOT_UNAVAILABLE");
+});
