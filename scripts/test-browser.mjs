@@ -1,26 +1,91 @@
 // All backend CLI operations pass through the local safety wrapper, sequentially.
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+// Each stage is labelled, timed and logged (sanitized) under the evidence
+// directory so a bootstrap failure before any page opens is still diagnosable.
+// Run with tsx: it imports the TypeScript evidence helpers.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-function local(args, capture = false) {
-  const result = spawnSync("pnpm", ["convex:local", ...args], { stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit", encoding: "utf8", env: process.env });
-  if (result.status !== 0) throw new Error(`Local browser command failed (${result.status ?? 1})`, { cause: result.error });
-  return result.stdout;
+import { spawn } from "node:child_process";
+import { EVIDENCE_DIR, log, reset, sanitize, updateManifest } from "./browser-evidence.ts";
+
+const SUITES = ["workflows", "explore"];
+const argv = process.argv.slice(2);
+const suiteIndex = argv.indexOf("--suite");
+const suite = suiteIndex >= 0 ? argv[suiteIndex + 1] : "workflows";
+if (!SUITES.includes(suite)) { console.error(`Unknown --suite ${suite}; expected ${SUITES.join(" or ")}.`); process.exit(2); }
+if (argv.includes("--help")) {
+  console.log(`Usage: pnpm test:browser [--suite workflows|explore] [--grep <test name pattern>]
+  --grep skips the Explorer check and runs only matching workflow/accessibility tests.
+Environment: BROWSER_EVIDENCE_DIR (default test-results/browser), BROWSER_TRACE=on|off (default on locally, off in CI).
+Exploration: EXPLORE_SEEDS, EXPLORE_ACTIONS, EXPLORE_BUDGET_MS, EXPLORE_REPLAY=<sequence.json>, EXPLORE_PROBE=leak. See docs/browser-verification.md.`);
+  process.exit(0);
 }
-local(["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
-local([]);
-for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", APP_PASSWORD: "LocalStaff123!", CUSTOMER_PASSWORD_PEPPER: "local-only-fixture-pepper", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) local(["env", "set", key, value]);
-const seed = JSON.parse(local(["run", "seed:run", '{"largeDataset":true}'], true));
-process.env.BROWSER_FIXTURE = JSON.stringify(seed);
+const grepIndex = argv.indexOf("--grep");
+if (grepIndex >= 0) process.env.BROWSER_GREP = argv[grepIndex + 1];
+// A replayed sequence usually lives in the evidence directory that is reset below.
+const replayCopy = process.env.EXPLORE_REPLAY ? readFileSync(process.env.EXPLORE_REPLAY, "utf8") : undefined;
+if (!process.env.BROWSER_EVIDENCE_KEEP) reset();
+process.env.BROWSER_EVIDENCE_DIR = EVIDENCE_DIR;
+process.env.BROWSER_SUITE = suite;
+// Provider credentials never reach browser children, whatever the caller's shell holds.
+for (const key of ["UPLOADTHING_TOKEN", "UPLOADTHING_SECRET", "UPLOADTHING_APP_ID"]) delete process.env[key];
+
+class StageError extends Error {}
+/** Runs one wrapper command as a named stage; output is teed line by line, sanitized. */
+async function stage(name, args, { capture = false } = {}) {
+  const started = Date.now();
+  log("runner", `\n### stage ${name}: pnpm convex:local ${args.join(" ")}\n`);
+  const child = spawn("pnpm", ["convex:local", ...args], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+  let stdout = "";
+  const tee = (stream, sink, keep) => {
+    let pending = "";
+    stream.setEncoding("utf8");
+    stream.on("data", chunk => {
+      if (keep) { stdout += chunk; return; }
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop();
+      for (const line of lines) { sink.write(line + "\n"); log("runner", line + "\n"); }
+    });
+    stream.on("end", () => { if (pending) { sink.write(pending + "\n"); log("runner", pending + "\n"); } });
+  };
+  tee(child.stdout, process.stdout, capture);
+  tee(child.stderr, process.stderr, false);
+  const code = await new Promise(resolve => { child.on("error", () => resolve(127)); child.on("close", status => resolve(status ?? 1)); });
+  if (capture) log("runner", `[stdout withheld: ${stdout.length} bytes of fixture output]\n`);
+  updateManifest(manifest => { manifest.stages.push({ name, exitCode: code, durationMs: Date.now() - started }); });
+  if (code !== 0) throw new StageError(`stage ${name} failed with exit ${code}`);
+  return stdout;
+}
+
 const directory = mkdtempSync(path.join(tmpdir(), "ticket-browser-"));
 process.env.BROWSER_RESULT_FILE = path.join(directory, "result.json");
+if (replayCopy) { process.env.EXPLORE_REPLAY = path.join(directory, "replay.json"); writeFileSync(process.env.EXPLORE_REPLAY, replayCopy); }
 try {
-  local(["dev", "--once", "--typecheck", "disable", "--start", "pnpm exec tsx scripts/browser-tests.ts"]);
+  // Cleanup is disabled before the schema push and verified before seeding: fail closed.
+  await stage("cleanup-flag", ["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
+  await stage("schema-push", []);
+  const flag = (await stage("cleanup-flag-verify", ["env", "get", "MEDIA_CLEANUP_ENABLED"], { capture: true })).trim();
+  if (flag !== "false") throw new StageError(`MEDIA_CLEANUP_ENABLED must be "false" on the local backend, found "${flag}"`);
+  for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", APP_PASSWORD: "LocalStaff123!", CUSTOMER_PASSWORD_PEPPER: "local-only-fixture-pepper", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) {
+    await stage(`fixture-env-${key.toLowerCase().replaceAll("_", "-")}`, ["env", "set", key, value]);
+  }
+  process.env.BROWSER_FIXTURE = JSON.stringify(JSON.parse(await stage("seed", ["run", "seed:run", '{"largeDataset":true}'], { capture: true })));
+  await stage(`suite-${suite}`, ["dev", "--once", "--typecheck", "disable", "--start", "pnpm exec tsx scripts/browser-tests.ts"]);
   // Convex logs a failed --start command but may itself exit zero.
-  const result = JSON.parse(readFileSync(process.env.BROWSER_RESULT_FILE, "utf8"));
+  let result;
+  try { result = JSON.parse(readFileSync(process.env.BROWSER_RESULT_FILE, "utf8")); }
+  catch { throw new StageError(`suite-${suite} ended without a result file`); }
+  // The --start stage above reports Convex's status; record the suite's own.
+  updateManifest(manifest => { manifest.stages.push({ name: `suite-${suite}-result`, exitCode: result.exitCode, durationMs: 0 }); });
   process.exitCode = result.exitCode;
 } catch (error) {
-  console.error("Browser checks did not complete:", error.message);
+  const message = sanitize(error instanceof Error ? error.message : String(error));
+  console.error(`Browser checks did not complete: ${message}`);
+  log("runner", `\n!!! ${message}\n`);
+  updateManifest(manifest => { manifest.failure = message; });
   process.exitCode = 1;
-} finally { rmSync(directory, { recursive: true, force: true }); }
+} finally {
+  rmSync(directory, { recursive: true, force: true });
+  console.log(`Browser evidence: ${path.relative(process.cwd(), EVIDENCE_DIR) || EVIDENCE_DIR} (public/ is uploadable, local/ holds traces and stays on this machine).`);
+}

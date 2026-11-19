@@ -1,0 +1,76 @@
+# Ticket browser workflows on a fresh Ubuntu runner. Advisory: this check is
+# not required by branch rules yet (see docs/browser-verification.md for the
+# promotion gate). It uses no repository secrets, only synthetic fixtures on a
+# disposable loopback backend, with media cleanup disabled and provider
+# traffic blocked. On failure it uploads allowlisted, sanitized evidence only;
+# Playwright traces stay on the runner and are never uploaded.
+name: browser
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  browser-workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BROWSER_EVIDENCE_DIR: ${{ github.workspace }}/test-results/browser
+      BROWSER_TRACE: "off"
+      MEDIA_CLEANUP_ENABLED: "false"
+      UPLOADTHING_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for the locked Playwright version
+        run: pnpm exec playwright install --with-deps chromium
+      # Runs every workflow and accessibility check, then the Explorer check.
+      # The exit status is the suite's; evidence is written either way.
+      - name: Browser workflows
+        run: pnpm test:browser
+      # Stability only (no baseline in CI yet): three captures must match.
+      - name: Visual pilot stability (advisory)
+        if: always()
+        continue-on-error: true
+        run: pnpm test:visual --repeat 3 --out test-results/visual
+      - name: Summarize evidence
+        if: failure()
+        run: pnpm browser:evidence summary
+      # Uploads nothing unless every public file is allowlisted and sanitized.
+      - name: Verify evidence is safe to publish
+        id: verify
+        if: failure()
+        run: pnpm browser:evidence verify
+      - name: Upload sanitized evidence
+        if: failure() && steps.verify.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/browser/public/
+          retention-days: 7
+          if-no-files-found: ignore
+      # Synthetic Explorer harness renders, for manual review of Linux repeatability.
+      - name: Upload visual pilot captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/visual/
+          retention-days: 7
+          if-no-files-found: ignore
