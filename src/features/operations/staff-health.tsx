@@ -9,9 +9,9 @@ const states = { pending: "healthPending", running: "healthRunning", completed: 
 const outcomes = { deleted: "healthDeleted", absent_verified: "healthDeleted", failed_retryable: "healthRetry", failed_permanent: "healthPermanent",
   unknown: "healthUnknown", not_configured: "healthNotConfigured", ownership_unverified: "healthUnverified", ownership_conflict: "healthConflict" } as const;
 
-export function StaffHealth({ token }: { token: string }) {
+export function StaffHealth() {
   const { t, formatDate } = useI18n();
-  const health = useHealth(token);
+  const health = useHealth();
   const [view, setView] = useState<"failed" | "pending" | "expired">("failed");
   if (!health) return <p role="status">{t("syncing")}</p>;
   return <section className="space-y-4">
@@ -29,20 +29,20 @@ export function StaffHealth({ token }: { token: string }) {
     </table></div>
     <div className="flex flex-wrap gap-2">{(["failed", "pending", "expired"] as const).map(mode => <Button key={mode} variant={view === mode ? "default" : "outline"}
       aria-pressed={view === mode} onClick={() => setView(mode)}>{t(mode === "expired" ? "healthExpired" : states[mode])}</Button>)}</div>
-    <JobDiagnostics key={view} token={token} view={view} />
+    <JobDiagnostics key={view} view={view} />
   </section>;
 }
 
-function JobDiagnostics({ token, view }: { token: string; view: "failed" | "pending" | "expired" }) {
+function JobDiagnostics({ view }: { view: "failed" | "pending" | "expired" }) {
   const { t, formatDate } = useI18n();
-  const jobs = useJobDiagnostics(token, view);
+  const jobs = useJobDiagnostics(view);
   const [busy, setBusy] = useState<string | null>(null);
   async function requeue(job: typeof jobs.results[number]) {
     if (job.kind === "ticket_purge" && !window.confirm(t("healthPurgeConfirm"))) return;
     const jobId = job.jobId;
     setBusy(jobId);
     try {
-      if (await jobs.requeue({ token, jobId })) toast.success(t("healthRequeued"));
+      if (await jobs.requeue({ jobId })) toast.success(t("healthRequeued"));
       else toast.error(t("healthRepairRequired"));
     }
     catch (error) { toast.error(localizeError(error, t)); }

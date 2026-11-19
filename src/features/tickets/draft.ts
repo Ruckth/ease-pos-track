@@ -22,7 +22,7 @@ export class DisposableTicketDraft {
     this.state = this.empty();
   }
   private empty(): DraftSnapshot {
-    return { title: "", description: "", items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null };
+    return { title: "", description: "", routingClassification: undefined, items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -33,6 +33,9 @@ export class DisposableTicketDraft {
   }
   setTitle = (title: string) => { if (!this.controller) this.change({ title }); };
   setDescription = (description: string) => { if (!this.controller) this.change({ description }); };
+  setRoutingClassification = (routingClassification: TicketDraft["routingClassification"]) => {
+    if (!this.controller) this.change({ routingClassification });
+  };
   setError = (error: unknown) => this.change({ error });
   addFiles = (files: File[]) => {
     if (this.disposed || this.controller) return;

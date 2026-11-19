@@ -17,7 +17,7 @@ export type TicketCommandDefinition = {
   name: string;
   summary: string;
   authentication: "none" | "staff";
-  interactive: false | "hidden-password";
+  interactive: false | "browser-sign-in";
   arguments: readonly CommandArgument[];
   options: readonly CommandOption[];
 };
@@ -62,9 +62,9 @@ export const COMMAND_REGISTRY = [
   },
   {
     name: "login",
-    summary: "Sign in as staff and save the session in macOS Keychain.",
+    summary: "Sign in as a named staff member with Google and save the rotating session in macOS Keychain.",
     authentication: "none",
-    interactive: "hidden-password",
+    interactive: "browser-sign-in",
     arguments: [],
     options: [
       { name: "--url", value: "deployment-url", description: "Save and use this Convex deployment URL." },

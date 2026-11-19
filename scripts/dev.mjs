@@ -9,7 +9,7 @@ const ports = loadPorts();
 const cloud = `http://127.0.0.1:${ports.CONVEX_CLOUD_PORT}`;
 console.log(`Ports: web ${ports.VITE_PORT}, api ${ports.UPLOAD_API_PORT}, convex ${ports.CONVEX_CLOUD_PORT}/${ports.CONVEX_SITE_PORT}`);
 
-const env = { ...process.env, VITE_CONVEX_URL: cloud, VITE_CONVEX_SITE_URL: `http://127.0.0.1:${ports.CONVEX_SITE_PORT}`, CONVEX_URL: cloud };
+const env = { TICKET_DEPLOYMENT_MODE: "legacy", ...process.env, VITE_CONVEX_URL: cloud, VITE_CONVEX_SITE_URL: `http://127.0.0.1:${ports.CONVEX_SITE_PORT}`, CONVEX_URL: cloud };
 const child = spawn("concurrently", ["-k", "-n", "vite,api,convex", "vite", "tsx server/index.ts", "pnpm run dev:convex"], { stdio: "inherit", env });
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => child.kill(signal));
 child.on("error", (error) => {

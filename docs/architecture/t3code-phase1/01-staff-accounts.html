@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Staff accounts and Google sign-in · Track Ease</title>
+  <style>
+    :root { color-scheme: light dark; --fg:var(--foreground,CanvasText); --mut:var(--muted-foreground,GrayText); --line:var(--border,color-mix(in srgb,CanvasText 16%,transparent)); --panel:var(--card,color-mix(in srgb,CanvasText 4%,Canvas)); --accent:var(--chart-2,#24bba6); --link:var(--primary,#447dee); --warm:var(--chart-4,#bf8928); --r:var(--radius,10px); --sans:var(--font-sans,system-ui,sans-serif); --mono:var(--font-mono,ui-monospace,monospace); }
+    * { box-sizing:border-box; }
+    html,body { margin:0; padding:0; background:transparent; }
+    body { color:var(--fg); font:15px/1.65 var(--sans); }
+    main { max-width:900px; margin:0 auto; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:clamp(30px,6vw,46px); line-height:1.12; letter-spacing:-1.4px; max-width:760px; margin:16px 0; }
+    h2 { font-size:22px; line-height:1.3; letter-spacing:-.4px; margin-bottom:12px; }
+    h3 { font-size:16px; line-height:1.4; }
+    p+p { margin-top:10px; }
+    a { color:var(--link); text-underline-offset:3px; overflow-wrap:anywhere; }
+    a:hover { text-decoration-thickness:2px; }
+    a:focus-visible,summary:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
+    code { font:12px/1.6 var(--mono); overflow-wrap:anywhere; }
+    .eyebrow { font:11px/1.6 var(--mono); letter-spacing:1.3px; text-transform:uppercase; color:var(--accent); }
+    .lead { font-size:18px; max-width:750px; }
+    .meta,.note { color:var(--mut); font-size:12px; }
+    .meta { margin-top:15px; }
+    .decision { margin:22px 0; padding:16px; border-left:3px solid var(--accent); border-radius:0 var(--r) var(--r) 0; background:var(--panel); }
+    nav { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:13px; margin:18px 0 24px; }
+    section { padding:27px 0; border-top:1px solid var(--line); }
+    .topic { display:grid; grid-template-columns:32px 1fr; gap:13px; padding:19px 0; border-top:1px solid var(--line); }
+    .topic:first-of-type { border-top:0; }
+    .number { color:var(--accent); font:12px/1.7 var(--mono); padding-top:2px; }
+    .topic p { margin-top:7px; }
+    .topic .links { font-size:13px; display:flex; flex-wrap:wrap; gap:10px 20px; }
+    .tag { display:inline-block; color:var(--mut); font:11px/1.5 var(--mono); border:1px solid var(--line); border-radius:4px; padding:2px 6px; margin-left:7px; vertical-align:middle; }
+    .flow { list-style:none; padding:0; margin:18px 0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .flow li { padding:12px; background:var(--panel); border-radius:var(--r); border-top:2px solid var(--accent); font-size:13px; }
+    .flow strong { display:block; margin-bottom:5px; }
+    .flow small { display:block; color:var(--mut); font-size:12px; margin-top:7px; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    caption { text-align:left; color:var(--mut); font-size:12px; margin-bottom:9px; }
+    th,td { text-align:left; vertical-align:top; padding:11px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--mut); font-weight:550; }
+    td:first-child { font-weight:600; }
+    details { border-top:1px solid var(--line); margin-top:16px; padding-top:16px; }
+    summary { cursor:pointer; font-weight:600; }
+    details p { margin-top:12px; }
+    ol.build { padding-left:23px; }
+    .build li { padding:7px 0 7px 4px; }
+    .choices { padding-left:20px; margin-bottom:0; }
+    .choices li { padding:5px 0; }
+    footer { border-top:1px solid var(--line); padding:20px 0 8px; }
+    @media(max-width:600px) { .flow { grid-template-columns:1fr 1fr; } .topic { grid-template-columns:24px 1fr; gap:8px; } .lead { font-size:16px; } th,td { padding:9px 5px; } .tag { display:table; margin:6px 0 0; } }
+    @media(max-width:360px) { .flow { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main><nav aria-label="Plan collection"><a href="index.html">All five plans</a><a href="../../research/t3code-phase1/01-staff-accounts.md">Research notes</a></nav><section><h1>Staff accounts and Google sign-in</h1>
+<p>Use Convex Auth v2 for all browser sessions. Staff choose Continue with Google. Track Ease admits an invited person to the team and grants Owner or Staff access. The Product Owner (accountable role) confirmed that there are no current users. Account migration can be omitted. First check for CLI callers, Tickets, media reservations and pending callbacks before retiring the shared password.</p>
+</section><section aria-label="Adopted launch scope"><h2>Adopted launch scope</h2><p>Use Convex Auth v2. The first Owner signs in with Google as a pending identity before the operator binds the independently verified subject. Staff have global Project access in this single-team pilot. Configure the separate identity sender before invitations. Require fresh, single-use proof for sensitive operations.</p><p><a href="launch-contracts.html#decisions">Decision register</a> · <a href="launch-contracts.html#identity">Recent proof for sensitive actions</a> · <a href="launch-contracts.html#endpoints">Authentication endpoints and repository policies</a> · <a href="launch-contracts.html#cutover">One cutover decision for both inventory outcomes</a></p></section>
+<section><h2>What a staff member does</h2>
+<p>The operator provisions one Owner against an independently verified Google subject. The Owner invites a colleague by email, selects their role and explains that staff can see all Projects in this first release. The colleague opens the invitation, signs in with Google, confirms the invited mailbox and sees the team workspace. Existing invitations can be revoked or reissued. On a shared device, signing out clears protected subscriptions, cached Ticket data and the active account label. Cover invitation expiry, wrong Google account, switching accounts and provider outages in both English and Thai.</p>
+</section>
+<section><h2>One core, two account types</h2>
+<p>Mount one v2 core with Google, username and password components. Use one React ConvexAuthProvider and an app users table. Map a verified auth user ID uniquely to either a staffId or customerId. Google registration creates a pending identity with zero workspace access. Username signup creates a customer through the Project enrollment flow. Keep the types exclusive in this release. Staff can use a separate customer account to test the customer experience. Neither an email match nor a browser-supplied role can join the two records. Each protected handler calls getAuthUserId for the live session and checks the sign-in admission row, current generation, active principal and current role. Refresh and first use cannot create admission. Record stable domain IDs for ownership, and separate non-secret credential references for audit. The v2 JWT subject identifies the session. <a href="https://docs.convex.dev/convex-auth-api/server/">Core API</a> · <a href="https://docs.convex.dev/auth/convex-auth/methods/oauth">Google integration</a>.</p>
+</section>
+<section><h2>Bootstrap, invitations and recovery</h2>
+<p>Bootstrap uses an internal, audited one-use transaction restricted to the configured deployment and exact Google subject. Require zero active Owners, bind the authenticated pending identity and consume the grant atomically. The team should enroll a second Owner with independent recovery before general rollout. Concurrent demotion or deactivation must preserve at least one active Owner. A sole-Owner lockout goes through the named deployment operator and out-of-band identity verification. Record the replacement binding, revoke old access and preserve staffId.</p>
+<p>Use the Google component&#x27;s validated profile.id and emailVerified fields at enrollment. Require an exact invited address and a fresh, expiring code to that mailbox bound to the pending user and invitation. Deliver staff invitation proof through the identity flow with its own sender configuration. Use the separate Resend identity sender before invitations. Use a random, hashed invitation secret and redeem only after sign-in and confirmation. Atomically reject expired, revoked, reused or role-edited invitations. Recheck the binding on retries. Returning staff resolve by their bound identity. Sign-in recovery uses Google account recovery. Moving a staff binding to a different Google account requires independent Owner/operator verification, revocation and an audit record. <a href="https://developers.google.com/identity/gsi/web/guides/verify-google-id-token">Google verification</a>.</p>
+</section>
+<section><h2>Permissions and deactivation</h2>
+<p>Owner administers the team, Projects, membership, routing policies and Operations repair. Staff work Tickets and manage their own approved connections and notification preferences. Area membership determines assignment eligibility. The proposed global staff visibility assumes a single internal team. Adopt global staff visibility for this single-team pilot. Require Project-level staff authorization on lists, direct reads, queries, uploads, counters and writes before onboarding staff who need isolation.</p>
+<p>On disable, atomically deny the principal, advance the credential generation, invalidate sponsored automation and revoke access to prior sessions and keys. Enabling again requires fresh authentication under a new generation. Old keys stay revoked. At dispatch, compare the sponsor and generation on outstanding work. Retain the durable staff identity for audit. Sign-out revokes the current session. A confirmed account replacement or security incident revokes all sessions and keys. Capture a local test where an already-open subscription loses access and a previously issued token fails the next mutation.</p>
+</section>
+<section id="spike"><h2>Prove the auth adapter first</h2><p>Start implementation in a disposable worktree with the Convex upgrade and the Auth 2.0.0 admission spike. Complete Google and username sign-in, component session lookup, guarded issuance, rollback and disable/re-enable races through actual registered wrappers. Hold public enrollment if the issued session and its admission cannot commit together. The release lead records pinned versions and local evidence before implementing the rest of the account rollout.</p><p>Replace the raw token-argument contract on the 36 protected registrations in this baseline: 18 in tickets.ts, six in annotations.ts, five in projects.ts, four in retention.ts and three in uploads.ts. Move actorQuery, actorMutation, staffQuery, staffMutation, customerQuery and customerMutation to live-JWT admission policies. Update browser subscriptions, per-request uploads and the named operator CLI. Inventory the legacy public auth, special callback and internal registrations separately. Extend the architecture manifest and tests to enumerate each moved export and HTTP route. Compare the inventory to the candidate commit and fail on extra or missing entries. Exercise raw-token denial, cross-role and cross-Project negatives, callback exclusivity, revocation and preserved retry ownership for each operation family.</p></section><section><h2>Package and repository integration</h2>
+<p>The checkout locks convex at 1.45.0. The published @convex-dev/auth 2.0.0 peer requirement is ^1.48.0. Pin Auth 2.0.0 and a tested compatible 1.x SDK and lockfile in the implementation worktree. Check local backend JWT signing, redirects, callback routing, codegen and React provider compatibility. The Vite application can use the Google and username methods without adding Next.js. Configure exact callback/origin and separate local versus hosted credentials. Keep secrets server-side. <a href="https://registry.npmjs.org/@convex-dev/auth/2.0.0">Published package</a> · <a href="https://docs.convex.dev/auth/convex-auth/getting-started">Getting started</a>.</p>
+<p>Adapt all application-facing v2 registrations, HTTP routes, callbacks and auth read/refresh/logout methods through named, narrowly scoped repository policy constructors. Extend the registration manifest and its architecture tests for the specific approved purposes. Inventory the actual functions exported by mounted components and expose only reviewed application endpoints. Authenticate browser reads by the live v2 session. A personal key enters only through the dedicated Convex HTTP action described in the credential matrix. Reject mixed credentials. Forward a browser JWT for uploads using a per-request authenticated Convex client. The server callback has its own credential. Compare the acquiring actor and credential at recording and retry. Carry staffId through create/attach receipts, intent ownership, events, upload reacquisition and purge tombstones. <a href="https://github.com/Ruckth/ease-pos-track/blob/f74576308213563648934d1058ed5f079a27936f/convex/functions.ts">Registration policies</a> · <a href="https://github.com/Ruckth/ease-pos-track/blob/f74576308213563648934d1058ed5f079a27936f/server/uploadthing.ts">Upload middleware</a> · <a href="https://github.com/Ruckth/ease-pos-track/blob/f74576308213563648934d1058ed5f079a27936f/convex/domain/requests.ts">Receipts</a> · <a href="https://github.com/Ruckth/ease-pos-track/blob/f74576308213563648934d1058ed5f079a27936f/convex/session_auth.ts">Existing sessions</a>.</p>
+</section>
+<section><h2>Release evidence</h2>
+<p>The implementation owner records pinned versions and a successful disposable-local push. In two independent browser profiles, exercise Owner bootstrap, invitation acceptance, Google callback replay, ordinary Staff administrative denial, live disable, account recovery and customer isolation. Run concurrency tests for last-Owner protection, separate staff retry ownership and failed upload authorization. Inspect Ticket activity as staff and customer to verify attribution and privacy. If inventory finds a required existing caller, prove its named compatibility workflow before retirement. Hold public onboarding until both account plans pass their tests.</p>
+<p>Before cutover, inventory non-user state and pending writes read-only. Keep unresolved legacy operations and media reservations under their original scope. Retire the old public password and raw session entry points before opening enrollment. A rollback pauses enrollment and automation, preserves event history and allows maintenance mode or the last compatible named-identity build. Any destructive shared reset or deployment is a separate operator decision. Run pnpm convex:local, pnpm check and the repository&#x27;s local browser workflow with fake media providers. Record the Google callback test separately from fixture-based checks. <a href="../../ticket-cli.md">Local workflow</a> · <a href="../../dev-reset.md">Reset procedure</a>.</p></section></main></body></html>

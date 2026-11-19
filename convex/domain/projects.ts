@@ -1,6 +1,7 @@
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { canUseProject, type Actor } from "../authz";
+import { hasLegacyAccess, projectInDeployment, requirePilotAdmission } from "../pilot_access";
 import { normalizeProjectKey } from "../../shared/ticket-numbers";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -19,14 +20,17 @@ export async function isMember(ctx: Ctx, projectId: Id<"projects">, actor: Actor
 }
 
 /**
- * Loads a Project the actor may use. A Project the actor cannot use is reported
- * as missing, so customers cannot probe for other Projects.
+ * Denied and missing Projects are indistinguishable.
+ * Optional reactive reads can clear their data after access is withdrawn.
  */
-export async function requireUsableProject(ctx: Ctx, actor: Actor<Id<"customers">>, projectId: Id<"projects">) {
+export async function findUsableProject(ctx: Ctx, actor: Actor<Id<"customers">>, projectId: Id<"projects">) {
   const project = await ctx.db.get(projectId);
-  if (!project || !canUseProject(actor, project, await isMember(ctx, project._id, actor))) {
-    throw new Error("PROJECT_NOT_FOUND");
-  }
+  return project && await projectInDeployment(ctx, projectId) && canUseProject(actor, project, await isMember(ctx, project._id, actor)) ? project : null;
+}
+
+export async function requireUsableProject(ctx: Ctx, actor: Actor<Id<"customers">>, projectId: Id<"projects">) {
+  const project = await findUsableProject(ctx, actor, projectId);
+  if (!project) throw new Error("PROJECT_NOT_FOUND");
   return project;
 }
 
@@ -38,8 +42,13 @@ export async function projectByKey(ctx: Ctx, key: string) {
 }
 
 export async function activeProjects(ctx: Ctx) {
-  const projects = await ctx.db.query("projects").collect();
-  return projects.filter((project) => project.archivedAt === undefined);
+  if (await hasLegacyAccess(ctx)) {
+    const projects = await ctx.db.query("projects").collect();
+    return projects.filter(project => project.archivedAt === undefined);
+  }
+  const { projectIds } = await requirePilotAdmission(ctx);
+  const projects = await Promise.all(projectIds.map(id => ctx.db.get(id)));
+  return projects.filter((project): project is Doc<"projects"> => !!project && project.archivedAt === undefined);
 }
 
 /**
@@ -49,7 +58,7 @@ export async function activeProjects(ctx: Ctx) {
 export async function resolveStaffProject(ctx: Ctx, key: string | undefined) {
   if (key !== undefined) {
     const project = await projectByKey(ctx, normalizeProjectKey(key));
-    if (!project || project.archivedAt !== undefined) throw new Error("PROJECT_NOT_FOUND");
+    if (!project || project.archivedAt !== undefined || !await projectInDeployment(ctx, project._id)) throw new Error("PROJECT_NOT_FOUND");
     return project;
   }
   const projects = await activeProjects(ctx);

@@ -5,7 +5,6 @@ import { TicketDetailPanel, type DetailNavigation, type StaffDetailActions } fro
 export function StaffTicketDialog(props: DetailNavigation & StaffDetailActions & {
   ticket: Ticket | null | undefined;
   ticketId: Id<"tickets"> | null;
-  token: string;
 }) {
   return <TicketDetailPanel {...props} role="staff" />;
 }

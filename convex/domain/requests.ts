@@ -7,7 +7,7 @@ import { MAX_MEDIA_FILES } from "../../shared/media-policy";
 export type RequestScope = {
   operation: "ticket.create" | "ticket.attach_media";
   requestId: string;
-  actor: Actor<Id<"customers">>;
+  actor: Actor<Id<"customers">, Id<"staff">>;
   projectId: Id<"projects">;
   digestVersion: number;
   inputDigest: string;
@@ -18,14 +18,16 @@ export async function replayTicketRequest(ctx: MutationCtx, input: RequestScope)
   const receipt = await ctx.db.query("ticketRequests").withIndex("by_operation_request", q =>
     q.eq("operation", input.operation).eq("requestId", input.requestId)).unique();
   if (!receipt) return null;
-  // Even global staff may not adopt a customer's request identity. No content
+  // Neither global staff nor another staff member may adopt a request identity. No content
   // comparison or result is exposed until the durable scope is authorized.
   if (receipt.actorRole !== input.actor.role || receipt.actorCustomerId !== input.actor.customerId
+    || receipt.actorStaffId !== input.actor.staffId
     || (input.actor.role === "customer" && !await isMember(ctx, receipt.projectId, input.actor))) {
     throw new Error("TICKET_UNAVAILABLE");
   }
   const ticket = receipt.outcome === "committed" && receipt.ticketId ? await ctx.db.get(receipt.ticketId) : null;
-  if (receipt.outcome === "committed" && (!ticket || ticket.lifecycle === "purging" || !canReadTicket(input.actor, ticket))) {
+  if (receipt.outcome === "committed" && (!ticket || ticket.lifecycle === "purging"
+    || (input.actor.role === "customer" && ticket.lifecycle !== "active") || !canReadTicket(input.actor, ticket))) {
     throw new Error("TICKET_UNAVAILABLE");
   }
   if (receipt.projectId !== input.projectId || receipt.digestVersion !== input.digestVersion

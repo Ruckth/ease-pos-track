@@ -16,12 +16,12 @@ import type { ProjectSummary } from "@/lib/types";
  * The Projects this account can use and the one currently open. The open
  * Project lives in the URL, so a refresh or a shared link keeps it.
  */
-export function useCurrentProject(token: string) {
-  const projects = useProjects(token);
+export function useCurrentProject() {
+  const projects = useProjects();
   const [requestedKey, setRequestedKey] = useState(() => readProjectParam(window.location.search));
   const current = projects ? pickProject(projects, requestedKey) : undefined;
   // An Undo closure belongs to the Project and session that produced it.
-  useEffect(() => () => { toast.dismiss(); }, [current?.key, token]);
+  useEffect(() => () => { toast.dismiss(); }, [current?.key]);
 
   useEffect(() => {
     const sync = () => setRequestedKey(readProjectParam(window.location.search));
@@ -102,12 +102,10 @@ export function NoProjects({ action }: { action?: ReactNode }) {
 }
 
 export function NewProjectDialog({
-  token,
   open,
   onOpenChange,
   onCreated,
 }: {
-  token: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (key: string) => void;
@@ -130,7 +128,7 @@ export function NewProjectDialog({
     event.preventDefault();
     setBusy(true);
     try {
-      const project = await createProject({ token, name, key });
+      const project = await createProject({ name, key });
       toast.success(t("projectCreated", { key: project.key }));
       onCreated(project.key);
       onOpenChange(false);
@@ -182,64 +180,65 @@ export function NewProjectDialog({
 }
 
 export function ProjectMembersDialog({
-  token,
   project,
+  owner,
   open,
   onOpenChange,
 }: {
-  token: string;
   project: ProjectSummary;
+  owner: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const { members, addMember, removeMember } = useProjectMembers(token, project._id, open);
-  const [email, setEmail] = useState("");
+  const { members, invitations, createInvitation, revokeInvitation, removeMember, setAccess } = useProjectMembers(project._id, open, owner);
+  const [eligible, setEligible] = useState(false);
+  const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function onAdd(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function run(work: () => Promise<void>) {
     setBusy(true);
-    try {
-      const member = await addMember({ token, projectId: project._id, email });
-      toast.success(t("memberAdded", { email: member.email }));
-      setEmail("");
-    } catch (error) {
-      toast.error(localizeError(error, t));
-    } finally {
-      setBusy(false);
-    }
+    try { await work(); } catch (error) { toast.error(localizeError(error, t)); } finally { setBusy(false); }
   }
-
-  async function onRemove(member: { customerId: Id<"customers">; email: string }) {
-    try {
-      await removeMember({ token, projectId: project._id, customerId: member.customerId });
-      toast.success(t("memberRemoved", { email: member.email }));
-    } catch (error) {
-      toast.error(localizeError(error, t));
-    }
-  }
+  const onInvite = () => run(async () => {
+    if (!eligible) return;
+    const created = await createInvitation({ projectId: project._id, eligibilityConfirmed: true });
+    setEligible(false);
+    setLink(`${window.location.origin}/customer/join#invite=${encodeURIComponent(created.secret)}`);
+  });
+  const onRemove = (member: { customerId: Id<"customers">; displayName: string }) => run(async () => {
+    await removeMember({ projectId: project._id, customerId: member.customerId });
+    toast.success(t("memberRemoved", { name: member.displayName }));
+  });
 
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={next => { if (!next) { setEligible(false); setLink(""); } onOpenChange(next); }}
       title={t("projectMembersTitle", { name: project.name })}
       description={t("projectMembersDescription")}
     >
-      <form className="flex gap-2" onSubmit={(event) => void onAdd(event)}>
-        <Input
-          type="email"
-          placeholder={t("customerEmail")}
-          aria-label={t("customerEmail")}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <Button type="submit" disabled={busy || !email.trim()}>
-          {busy ? <Loader2 className="animate-spin" /> : <Plus />}
-          {t("addMember")}
+      {owner ? <section className="space-y-2" aria-labelledby="customer-invite-heading">
+        <p id="customer-invite-heading" className="text-sm text-muted-foreground">{t("customerInviteDescription")}</p>
+        <label className="flex min-h-11 items-start gap-2 py-2 text-sm">
+          <input type="checkbox" checked={eligible} disabled={busy} onChange={event => setEligible(event.target.checked)} className="mt-1" />
+          {t("confirmCustomerEligibility")}
+        </label>
+        <Button type="button" className="min-h-11" disabled={busy || !eligible} onClick={() => void onInvite()}>
+          {busy ? <Loader2 className="animate-spin" /> : <Plus />}{t("createInviteLink")}
         </Button>
-      </form>
+        {link ? <div className="space-y-2 rounded-md border p-3" role="status">
+          <output className="block break-all rounded bg-muted p-2 font-mono text-xs">{link}</output>
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => void navigator.clipboard.writeText(link).then(() => toast.success(t("linkCopied")), () => undefined)}>{t("copyLink")}</Button>
+        </div> : null}
+        {invitations?.length ? <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span>{t("invitationsPending", { count: String(invitations.length) })}</span>
+          {invitations.map(invite => <Button key={invite.invitationId} type="button" size="sm" variant="ghost" className="min-h-11" disabled={busy}
+            onClick={() => void run(async () => { await revokeInvitation({ invitationId: invite.invitationId }); })}>
+            {t("revoke")}{invite.expired ? ` (${t("expired")})` : ""}
+          </Button>)}
+        </div> : null}
+      </section> : null}
       <div className="mt-4">
         {members === undefined ? (
           <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
@@ -249,16 +248,24 @@ export function ProjectMembersDialog({
           <ul className="divide-y rounded-md border">
             {members.map((member) => (
               <li key={member.customerId} className="flex items-center justify-between gap-3 px-3 py-2">
-                <span className="truncate text-sm">{member.email}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("removeMember", { email: member.email })}
-                  onClick={() => void onRemove(member)}
-                >
-                  <Trash2 />
-                </Button>
+                <span className="min-w-0 truncate text-sm">
+                  {member.displayName} <span className="text-muted-foreground">{member.username}</span>
+                  {member.status === "disabled" ? <span className="ml-2 text-xs">{t("statusDisabled")}</span> : null}
+                </span>
+                {owner ? <span className="flex shrink-0 gap-1">
+                  <Button type="button" variant="ghost" size="sm" className="min-h-11" disabled={busy}
+                    onClick={() => void run(async () => {
+                      await setAccess({ customerId: member.customerId, status: member.status === "active" ? "disabled" : "active" });
+                      toast.success(t("accessUpdated"));
+                    })}>
+                    {t(member.status === "active" ? "disableAccess" : "enableAccess")}
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="min-h-11 min-w-11" disabled={busy}
+                    aria-label={t("removeMember", { name: member.displayName })}
+                    onClick={() => void onRemove(member)}>
+                    <Trash2 />
+                  </Button>
+                </span> : null}
               </li>
             ))}
           </ul>
@@ -270,13 +277,11 @@ export function ProjectMembersDialog({
 
 /** Staff header controls: switch Project, add one, manage its customers. */
 export function StaffProjectControls({
-  token,
   projects,
   current,
   onSelect,
   onCreate,
 }: {
-  token: string;
   projects: ProjectSummary[];
   current: ProjectSummary | null;
   onSelect: (key: string) => void;
@@ -295,7 +300,7 @@ export function StaffProjectControls({
           <Button type="button" variant="outline" size="icon" aria-label={t("projectMembers")} title={t("projectMembers")} onClick={() => setMembersOpen(true)}>
             <Users />
           </Button>
-          <ProjectMembersDialog token={token} project={current} open={membersOpen} onOpenChange={setMembersOpen} />
+          <ProjectMembersDialog project={current} owner open={membersOpen} onOpenChange={setMembersOpen} />
         </>
       ) : null}
     </div>

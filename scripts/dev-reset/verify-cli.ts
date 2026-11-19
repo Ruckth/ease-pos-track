@@ -6,15 +6,18 @@ import type { TicketConfig } from "../ticket/config";
 import type { StoredCredential } from "../ticket/keychain";
 
 /** Read the seeded installation through the real CLI adapter, without Keychain or provider access. */
-export async function verifyResetCli(url: string, password: string) {
+export async function verifyResetCli(url: string, ownerRefreshToken: string) {
+  const remote = new ConvexTicketRemote();
   let config: TicketConfig = { version: 1, clientId: randomUUID(), deployments: { dev: { url } } };
   let credential: StoredCredential | null = null;
   const deps: TicketCliDeps = {
-    remote: new ConvexTicketRemote(),
+    remote,
     config: { load: async () => config, save: async value => { config = value; } },
     credentials: { get: async () => credential, set: async (_target, value) => { credential = value; }, delete: async () => { credential = null; } },
     images: { prepare: async () => { throw new Error("RESET_CLI_UPLOAD_FORBIDDEN"); }, upload: async () => { throw new Error("RESET_CLI_UPLOAD_FORBIDDEN"); } },
-    env: {}, now: Date.now, newRequestId: randomUUID, readPassword: async () => password,
+    // The operator's named Owner session; the CLI rotates it like a saved login.
+    env: {}, now: Date.now, newRequestId: randomUUID,
+    signIn: async target => await remote.refresh(target, ownerRefreshToken),
   };
   async function command(args: string[]) {
     const result = await runTicketCli(args, deps);

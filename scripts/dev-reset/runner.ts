@@ -1,3 +1,4 @@
+import { checkNewPassword } from "../../convex/identity_rules";
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -96,8 +97,12 @@ export function parseEnvironment(output: string): Record<string, string> {
 }
 
 export function validatePasswords(passwords: string[]) {
-  if (passwords.some(value => value.length < 24 || !/[a-z]/i.test(value) || !/[0-9]/.test(value))) {
-    throw new Error("RESET_CREDENTIALS_REQUIRE_24_CHARACTERS_LETTER_AND_DIGIT");
+  for (const candidate of passwords) {
+    const checked = checkNewPassword(candidate);
+    if ("problem" in checked && checked.problem !== "PASSWORD_TOO_SHORT") throw new Error(`RESET_${checked.problem}`);
+    if ("problem" in checked || [...checked.password].length < 24 || !/[a-z]/i.test(checked.password) || !/[0-9]/.test(checked.password)) {
+      throw new Error("RESET_CREDENTIALS_REQUIRE_24_CHARACTERS_LETTER_AND_DIGIT");
+    }
   }
 }
 

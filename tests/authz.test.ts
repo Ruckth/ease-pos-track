@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   actorFields,
-  actorFromSession,
   assertCanWriteTicket,
+  assertOwnerActor,
   assertCustomerActor,
   assertStaffActor,
   canReadTicket,
@@ -13,24 +13,50 @@ import {
   newTicketOwnership,
   ownsTicket,
 } from "../convex/authz";
+import { actorFromAdmission, googleFlowAdmissible } from "../convex/identity_rules";
 
-const staff = actorFromSession({ role: "staff" });
-const alice = actorFromSession({ role: "customer", customerId: "customer_alice" });
-const bob = actorFromSession({ role: "customer", customerId: "customer_bob" });
+const live = { status: "active" as const, generation: 2 };
+function admitted(principal: "staff" | "customer", id: string) {
+  return actorFromAdmission({
+    sessionUserId: "user_1",
+    admission: { principal, userId: "user_1", generation: 2, ...(principal === "staff" ? { staffId: id } : { customerId: id }) },
+    staff: { ...live, userId: "user_1", role: "staff" },
+    customer: { ...live, userId: "user_1" },
+  });
+}
+const staff = admitted("staff", "staff_1");
+const alice = admitted("customer", "customer_alice");
+const bob = admitted("customer", "customer_bob");
 
 const staffTicket = {};
 const aliceTicket = { ownerCustomerId: "customer_alice" };
 const bobTicket = { ownerCustomerId: "customer_bob" };
 
-test("a session requires an explicit role and a customer identity", () => {
-  assert.throws(() => actorFromSession({}), /SESSION_EXPIRED/);
-  assert.deepEqual(actorFromSession({ role: "staff" }), { role: "staff" });
-  assert.deepEqual(actorFromSession({ role: "customer", customerId: "customer_alice" }), {
-    role: "customer",
-    customerId: "customer_alice",
-  });
-  // A customer session missing its customer link is unusable, never staff.
-  assert.throws(() => actorFromSession({ role: "customer" }), /SESSION_EXPIRED/);
+test("admission maps a live session to exactly one active principal at its generation", () => {
+  assert.deepEqual(staff, { role: "staff", staffId: "staff_1", staffRole: "staff" });
+  assert.deepEqual(alice, { role: "customer", customerId: "customer_alice" });
+  const base = { sessionUserId: "user_1", admission: { principal: "customer" as const, userId: "user_1", customerId: "c", generation: 2 }, customer: { ...live, userId: "user_1" } };
+  assert.throws(() => actorFromAdmission({ ...base, sessionUserId: null }), /SESSION_EXPIRED/);
+  assert.throws(() => actorFromAdmission({ ...base, admission: null }), /SESSION_EXPIRED/);
+  assert.throws(() => actorFromAdmission({ ...base, sessionUserId: "user_2" }), /SESSION_EXPIRED/);
+  assert.throws(() => actorFromAdmission({ ...base, admission: { ...base.admission, revokedAt: 1 } }), /SESSION_EXPIRED/);
+  assert.throws(() => actorFromAdmission({ ...base, customer: { ...base.customer, generation: 3 } }), /SESSION_EXPIRED/);
+  assert.throws(() => actorFromAdmission({ ...base, customer: { ...base.customer, status: "disabled" } }), /SESSION_EXPIRED/);
+  // A customer admission never yields staff, and a pending identity yields nothing.
+  assert.throws(() => actorFromAdmission({ ...base, admission: { ...base.admission, principal: "staff" } }), /SESSION_EXPIRED/);
+  assert.throws(() => actorFromAdmission({ ...base, admission: { principal: "pending", userId: "user_1", generation: 0 } }), /IDENTITY_PENDING/);
+});
+
+test("a Google flow admits a known principal only after its last transition", () => {
+  assert.equal(googleFlowAdmissible(11, { status: "active", validAfter: 10 }), true);
+  assert.equal(googleFlowAdmissible(10, { status: "active", validAfter: 10 }), false);
+  assert.equal(googleFlowAdmissible(11, { status: "disabled", validAfter: 10 }), false);
+});
+
+test("Owner administration requires the Owner role, not only staff", () => {
+  assert.doesNotThrow(() => assertOwnerActor({ role: "staff", staffRole: "owner" }));
+  assert.throws(() => assertOwnerActor(staff), /OWNER_ONLY/);
+  assert.throws(() => assertOwnerActor(alice), /STAFF_ONLY/);
 });
 
 test("staff read and write every ticket, including staff-created ones without owners", () => {
@@ -79,7 +105,8 @@ test("ownership and actor columns are derived from the actor alone", () => {
   });
   assert.deepEqual(newTicketOwnership(staff), { origin: "staff" });
   assert.deepEqual(actorFields(alice), { actorRole: "customer", actorCustomerId: "customer_alice" });
-  assert.deepEqual(actorFields(staff), { actorRole: "staff" });
+  assert.deepEqual(actorFields(staff), { actorRole: "staff", actorStaffId: "staff_1" });
+  assert.deepEqual(actorFields({ role: "staff" }), { actorRole: "staff" });
 });
 
 /**
@@ -96,8 +123,7 @@ test("no customer path grants access to a ticket they do not own", () => {
 });
 
 test("staff use every active Project; customers only ones they were added to", () => {
-  const staff = actorFromSession({ role: "staff" });
-  const customer = actorFromSession({ role: "customer", customerId: "c1" });
+  const customer = admitted("customer", "c1");
   const active = {};
   const archived = { archivedAt: 1 };
   assert.equal(canUseProject(staff, active, false), true);

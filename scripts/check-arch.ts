@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
 import { pathToFileURL } from "node:url";
-import { registrationPolicy } from "../convex/functions";
+import { httpRouteManifest, registrationPolicy } from "../convex/functions";
 
 export function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(item => item.name === "_generated" ? [] : item.isDirectory()
@@ -131,14 +131,114 @@ export function checkArchitecture(root: string) {
   return architectureErrors(root, new Map(Array.from(sources).filter(([file]) => !file.includes("/_generated/") || file.endsWith(".d.ts"))), config.compilerOptions.paths);
 }
 
-const exceptions: Record<string, string> = {
-  "auth.ts:login": "publicAuthAction:staff-login",
-  "auth.ts:logout": "publicAuthMutation:logout",
-  "auth.ts:currentSession": "publicAuthQuery:current-session",
-  "customers.ts:login": "publicAuthAction:customer-login",
-  "customers.ts:register": "publicAuthAction:customer-register",
+/**
+ * Every public Convex registration and its policy. Browser RPC is live-JWT
+ * admission only; sign-in, refresh, recovery and callback entry points carry a
+ * named purpose. The policy test fails on an extra, missing or relabelled
+ * export. Component-owned routes (the Google callback under /oauth/google and
+ * the deployment JWKS) are mounted by Convex from convex.config.ts, not here.
+ */
+export const PUBLIC_REGISTRATIONS: Record<string, string> = {
+  "annotations.ts:addAnnotation": "actorMutation",
+  "annotations.ts:listAnnotationActivity": "actorQuery",
+  "annotations.ts:removeAnnotation": "actorMutation",
+  "annotations.ts:restoreAnnotation": "actorMutation",
+  "annotations.ts:undoAnnotationUpdate": "actorMutation",
+  "annotations.ts:updateAnnotation": "actorMutation",
+  "auth.ts:changePassword": "authMethod:customer-change-password",
+  "auth.ts:completeSignInWithGoogle": "authMethod:google-complete",
+  "auth.ts:isAuthenticated": "authCore:is-authenticated",
+  "auth.ts:recoverWithCode": "publicIdentityMutation:customer-recover",
+  "auth.ts:refreshSession": "authPackage:refresh-session",
+  "auth.ts:signInLocalFixture": "authMethod:local-fixture",
+  "auth.ts:signInWithPassword": "authMethod:customer-sign-in",
+  "auth.ts:signOut": "authCore:sign-out",
+  "auth.ts:signUpWithInvitation": "authMethod:customer-sign-up",
+  "auth.ts:startSignInWithGoogle": "authPackage:google-start",
+  "conversations.ts:page": "actorQuery",
+  "conversations.ts:send": "actorMutation",
+  "identity.ts:acceptStaffInvitation": "pendingIdentityMutation",
+  "identity.ts:createCustomerInvitation": "ownerMutation",
+  "identity.ts:confirmRecoveryEnrollment": "customerRecoveryMutation",
+  "identity.ts:createRecoveryCode": "customerRecoveryMutation",
+  "identity.ts:inviteStaff": "ownerMutation",
+  "identity.ts:joinWithInvitation": "customerMutation",
+  "identity.ts:listCustomerInvitations": "ownerQuery",
+  "identity.ts:listStaffDirectory": "staffQuery",
+  "identity.ts:listTeam": "ownerQuery",
+  "identity.ts:previewCustomerInvitation": "publicIdentityQuery:invite-preview",
+  "identity.ts:previewStaffInvitation": "pendingIdentityQuery",
+  "identity.ts:reissueStaffInvitation": "ownerMutation",
+  "identity.ts:revokeCustomerInvitation": "ownerMutation",
+  "identity.ts:revokeStaffInvitation": "ownerMutation",
+  "identity.ts:sendChallengeCode": "identityAction:send-challenge",
+  "identity.ts:setCustomerAccess": "ownerMutation",
+  "identity.ts:setStaffAccess": "ownerMutation",
+  "identity.ts:setStaffRole": "ownerMutation",
+  "identity.ts:viewer": "publicIdentityQuery:viewer",
+  "inbox.ts:markRead": "customerMutation",
+  "inbox.ts:page": "customerQuery",
+  "inbox.ts:preference": "customerQuery",
+  "inbox.ts:setPreference": "customerMutation",
+  "pilot_release.ts:ticketCapabilities": "actorQuery",
+  "identity_staff_recovery.ts:changeBinding": "ownerMutation",
+  "projects.ts:createProject": "ownerMutation",
+  "projects.ts:listProjectMembers": "staffQuery",
+  "projects.ts:listProjects": "actorQuery",
+  "projects.ts:removeProjectMember": "ownerMutation",
+  "retention.ts:diagnostics": "staffQuery",
+  "retention.ts:health": "staffQuery",
+  "retention.ts:progress": "actorQuery",
+  "retention.ts:requeueFailed": "ownerMutation",
+  "staff_inbox.ts:markRead": "staffMutation",
+  "staff_inbox.ts:page": "staffQuery",
+  "staff_inbox.ts:setPreference": "staffMutation",
+  "staff_inbox.ts:settings": "staffQuery",
+  "t3_doctor.ts:verify": "internalGatewayQuery",
+  "t3_keys.ts:change": "namedStaffMutation",
+  "t3_keys.ts:keys": "namedStaffQuery",
+  "t3_keys.ts:settings": "namedStaffQuery",
+  "ticket_routing.ts:assign": "staffMutation",
+  "ticket_routing.ts:checkRule": "staffMutation",
+  "ticket_routing.ts:classify": "staffMutation",
+  "ticket_routing.ts:getAssignment": "staffQuery",
+  "ticket_routing.ts:getSettings": "staffQuery",
+  "ticket_routing.ts:getVocabulary": "actorQuery",
+  "ticket_routing.ts:listSuggestions": "staffQuery",
+  "ticket_routing.ts:reviewSuggestion": "staffMutation",
+  "ticket_routing.ts:saveConfiguration": "staffMutation",
+  "ticket_routing.ts:setAvailability": "staffMutation",
+  "tickets.ts:archiveTicket": "actorMutation",
+  "tickets.ts:attachTicketMedia": "staffMutation",
+  "tickets.ts:createTextTicket": "actorMutation",
+  "tickets.ts:createTicket": "actorMutation",
+  "tickets.ts:createTicketTag": "staffMutation",
+  "tickets.ts:editTicket": "actorMutation",
+  "tickets.ts:getTicket": "actorQuery",
+  "tickets.ts:getTicketByTicketNumber": "staffQuery",
+  "tickets.ts:getWorkspaceTicket": "actorQuery",
+  "tickets.ts:laneTotals": "staffQuery",
+  "tickets.ts:listTicketActivity": "actorQuery",
+  "tickets.ts:listTicketTags": "staffQuery",
+  "tickets.ts:pageTicketDetails": "staffQuery",
+  "tickets.ts:pageTickets": "actorQuery",
+  "tickets.ts:restoreTicket": "staffMutation",
+  "tickets.ts:searchTickets": "actorQuery",
+  "tickets.ts:setTicketTags": "staffMutation",
+  "tickets.ts:undoTicketEdit": "actorMutation",
+  "tickets.ts:undoTicketStatus": "staffMutation",
+  "tickets.ts:undoUrgencyScore": "staffMutation",
+  "tickets.ts:updateTicketStatus": "staffMutation",
+  "tickets.ts:updateUrgencyScore": "staffMutation",
+  "uploads.ts:cancelUploadIntent": "actorMutation",
+  "uploads.ts:createUploadIntent": "actorMutation",
+  "uploads.ts:legacyTransportAvailable": "legacyUploadTransportQuery",
   "uploads.ts:recordUploadedFile": "trustedCallbackMutation",
+  "uploads.ts:validateUploadIntent": "actorQuery",
 };
+
+/** Purpose-labelled policies may appear only where the manifest pins them. */
+const PURPOSE_POLICY = /^(publicIdentity|authCore|authMethod|authPackage|identityAction|pendingIdentity|customerRecoveryMutation|trustedCallbackMutation|legacyUploadTransportQuery|internalGatewayQuery|namedStaff)/;
 
 export function violations(module: string, exports: Record<string, unknown>) {
   return Object.entries(exports).flatMap(([name, value]) => {
@@ -147,17 +247,30 @@ export function violations(module: string, exports: Record<string, unknown>) {
     const policy = registrationPolicy(value);
     const pair = `${module}:${name}`;
     if (!policy) return [`${pair}: untagged registration`];
-    if ((policy.startsWith("publicAuth") || policy === "trustedCallbackMutation" || pair in exceptions)
-      && exceptions[pair] !== policy) return [`${pair}: unexpected policy ${policy}`];
+    // During the zero-user launch, the manifest also caps the Ticket routing RPC surface.
+    if ((module === "ticket_routing.ts" || PURPOSE_POLICY.test(policy) || pair in PUBLIC_REGISTRATIONS) && PUBLIC_REGISTRATIONS[pair] !== policy) {
+      return [`${pair}: unexpected policy ${policy}`];
+    }
     return [];
   });
 }
 
 
 export function routeViolations(module: string, router: { getRoutes(): (readonly [string, string, object])[] }) {
-  return router.getRoutes().flatMap(([path, method, handler]) => registrationPolicy(handler)
-    ? [] : [`${module}:${method} ${path}: untagged HTTP route`]);
+  const expected = new Map<string, string>(httpRouteManifest.map(({ path, method, credentialClass, operation }) =>
+    [`${method} ${path}`, `http:${credentialClass}:${operation}`]));
+  const errors = router.getRoutes().flatMap(([path, method, handler]) => {
+    const route = `${method} ${path}`;
+    const policy = registrationPolicy(handler);
+    const allowed = expected.get(route);
+    expected.delete(route);
+    if (!policy) return [`${module}:${route}: untagged HTTP route`];
+    return policy === allowed ? [] : [`${module}:${route}: unexpected HTTP policy ${policy}`];
+  });
+  return [...errors, ...Array.from(expected.keys(), route => `${module}:${route}: missing manifest route`)];
 }
+
+const CONFIG_MODULES = new Set(["convex.config.ts", "auth.config.ts"]);
 
 // Tests own dynamic module loading; application scripts follow the literal-import rule too.
 export async function checkPolicies(root: string, loadModule: (url: string) => Promise<Record<string, unknown>>) {
@@ -165,6 +278,8 @@ export async function checkPolicies(root: string, loadModule: (url: string) => P
   const seen = new Set<string>();
   for (const file of sourceFiles(root)) {
     const module = relative(root, file);
+    // Deployment configuration, not registrations (convex.config.ts only loads in Convex).
+    if (CONFIG_MODULES.has(module)) continue;
     const exports = await loadModule(pathToFileURL(file).href);
     errors.push(...violations(module, exports));
     if (/^http\.[cm]?[jt]sx?$/.test(module)) {
@@ -172,8 +287,12 @@ export async function checkPolicies(root: string, loadModule: (url: string) => P
       if (!router || typeof router.getRoutes !== "function") errors.push(`${module}: missing HTTP router`);
       else errors.push(...routeViolations(module, router));
     }
-    for (const name of Object.keys(exports)) seen.add(`${module}:${name}`);
+    for (const [name, value] of Object.entries(exports)) {
+      seen.add(`${module}:${name}`);
+      const registration = value as { isPublic?: boolean } | null;
+      if (registration?.isPublic && !(`${module}:${name}` in PUBLIC_REGISTRATIONS)) errors.push(`${module}:${name}: public registration missing from manifest`);
+    }
   }
-  for (const pair of Object.keys(exceptions)) if (!seen.has(pair)) errors.push(`missing manifest export ${pair}`);
+  for (const pair of Object.keys(PUBLIC_REGISTRATIONS)) if (!seen.has(pair)) errors.push(`missing manifest export ${pair}`);
   return errors;
 }

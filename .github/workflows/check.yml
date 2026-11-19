@@ -20,15 +20,27 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      # Frozen install, disposable schema push and local-only Google test settings.
+      - run: pnpm agent:setup
       # pnpm check runs architecture and registration tests once, plus types, tests and build.
       - run: pnpm check
       # tsgo is a TypeScript 7 preview; keep the stable checker as a guard.
       - run: pnpm run typecheck:tsc
-      # Schema and functions must push to a fresh local backend.
-      - run: pnpm convex:local
       # Generated bindings must be committed alongside the change that needs them.
       - name: Generated bindings are committed
         run: |
           git status --porcelain -- convex/_generated
           test -z "$(git status --porcelain -- convex/_generated)"
+
+  macos-t3-kit:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:one tests/t3_kit.test.ts

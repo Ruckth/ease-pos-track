@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { fixtures, identityTest, whoami } from "./identity-harness";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
@@ -16,10 +16,8 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 async function fixture() {
-  const t = convexTest(schema, modules);
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest(modules);
+  const seed = await t.mutation(internal.seed.install, {});
   const [staff, alice, bob] = seed.sessions;
   const file = { key: "fake-key", name: "fixture.png", size: 1, type: "image/png", url: "https://fixture.invalid/image.png" };
   async function intent(requestId = "original-media-request", token = alice, files = [file]) {
@@ -52,8 +50,8 @@ test("first recording rejects forged calls, customer credentials and staff crede
     await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, ...credentials })).rejects.toThrow();
   }
   const staffIntent = await intent("staff-media-request", staff);
-  await t.run(ctx => ctx.db.insert("sessions", { token: "other-staff", role: "staff", createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
-  await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, intentId: staffIntent.intentId, secret: staffIntent.secret, token: "other-staff" })).rejects.toThrow("UPLOAD_INTENT_NOT_FOUND");
+  const otherStaff = (await t.mutation(fixtures.staff, { email: "other@fixture.test", role: "staff" })).session;
+  await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, intentId: staffIntent.intentId, secret: staffIntent.secret, token: otherStaff })).rejects.toThrow("UPLOAD_INTENT_NOT_FOUND");
   expect((await snapshot()).assets).toEqual(before.assets);
   expect((await snapshot()).jobs).toEqual([]);
   expect(await t.mutation(api.uploads.recordUploadedFile, { ...input, intentId: staffIntent.intentId, secret: staffIntent.secret, token: staff })).toEqual({ state: "recorded" });
@@ -167,14 +165,14 @@ test("durable actor intents resume after re-login and a cancelled rejected reque
   const { t, alice, intent, file, record, create, snapshot } = await fixture();
   const handle = await intent();
   await record(handle);
-  const session = (await t.query(api.auth.currentSession, { token: alice }))!;
-  await t.run(ctx => ctx.db.insert("sessions", { role: "customer", customerId: session.customerId!, token: "fresh-session", createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
-  const resumed = await intent("original-media-request", "fresh-session");
+  const session = (await whoami(t, alice));
+  const freshSession = await t.mutation(fixtures.session, { customerId: session.customerId! });
+  const resumed = await intent("original-media-request", freshSession);
   expect(resumed.intentId).toBe(handle.intentId);
   expect(resumed.uploadedFiles).toEqual([file]);
-  expect(await t.query(api.uploads.validateUploadIntent, { callbackToken: "fake-callback-secret", token: "fresh-session", intentId: handle.intentId, secret: handle.secret, files: [file].map(({ name, size, type }) => ({ name, size, type })) })).toBe(false);
-  const id = await create(handle, "fresh-session");
-  expect((await intent("original-media-request", "fresh-session")).ticketId).toBe(id);
+  expect(await t.query(api.uploads.validateUploadIntent, { callbackToken: "fake-callback-secret", token: freshSession, intentId: handle.intentId, secret: handle.secret, files: [file].map(({ name, size, type }) => ({ name, size, type })) })).toBe(false);
+  const id = await create(handle, freshSession);
+  expect((await intent("original-media-request", freshSession)).ticketId).toBe(id);
   const rejected = await intent("rejected-media-request");
   await t.mutation(api.uploads.cancelUploadIntent, { token: alice, intentId: rejected.intentId, secret: rejected.secret });
   const corrected = await intent("rejected-media-request", alice, [{ ...file, name: "corrected.png" }]);
@@ -210,12 +208,12 @@ test("another Ticket cannot attach an already owned key and a late extra receipt
 test("staff re-login resumes the durable intent and binds recording to the acquiring session", async () => {
   const { t, staff, intent, file } = await fixture();
   const original = await intent("staff-media-request", staff);
-  await t.run(ctx => ctx.db.insert("sessions", { role: "staff", token: "fresh-staff", createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
-  const resumed = await intent("staff-media-request", "fresh-staff");
+  const freshStaff = await t.mutation(fixtures.session, { staffId: (await whoami(t, staff)).staffId });
+  const resumed = await intent("staff-media-request", freshStaff);
   expect(resumed.intentId).toBe(original.intentId);
   const receipt = { intentId: resumed.intentId, secret: resumed.secret, file };
   await expect(t.mutation(api.uploads.recordUploadedFile, { ...receipt, token: staff })).rejects.toThrow("UPLOAD_INTENT_NOT_FOUND");
-  expect(await t.mutation(api.uploads.recordUploadedFile, { ...receipt, token: "fresh-staff" })).toEqual({ state: "recorded" });
+  expect(await t.mutation(api.uploads.recordUploadedFile, { ...receipt, token: freshStaff })).toEqual({ state: "recorded" });
 });
 
 test("staff-recorded assets retain staff source on callback replay", async () => {

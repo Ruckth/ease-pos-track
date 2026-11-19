@@ -1,0 +1,335 @@
+diff --git a/dist/components/password/_generated/component.d.ts b/dist/components/password/_generated/component.d.ts
+index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511fbc5f6aba 100644
+--- a/dist/components/password/_generated/component.d.ts
++++ b/dist/components/password/_generated/component.d.ts
+@@ -23,6 +23,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+         _internal_dangerous_setPassword: FunctionReference<"mutation", "internal", {
+             minimumLength: number;
+             password: string;
++            rateLimitKey?: string;
++            requireDifferent?: boolean;
+             userId: string;
+         }, {
+             success: true;
+@@ -37,12 +39,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+             } | {
+                 error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
+             } | {
+-                error: "PASSWORD_TOO_COMMON";
++                error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE";
+             };
+         }, Name>;
+         verifyPassword: FunctionReference<"mutation", "internal", {
+             password: string;
+-            userId: string;
++            rateLimitKey?: string;
++            userId?: string;
+         }, {
+             success: true;
+         } | {
+diff --git a/dist/components/password/public.d.ts b/dist/components/password/public.d.ts
+index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..c629b7163bd83391bcdfb6e661fdfcf9451063b9 100644
+--- a/dist/components/password/public.d.ts
++++ b/dist/components/password/public.d.ts
+@@ -20,6 +20,8 @@
+ export declare const _internal_dangerous_setPassword: import("convex/server").RegisteredMutation<"public", {
+     userId: string;
+     password: string;
++    requireDifferent?: boolean;
++    rateLimitKey?: string;
+     minimumLength: number;
+ }, Promise<{
+     success: true;
+@@ -33,7 +35,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+     } | {
+         error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
+     } | {
+-        error: "PASSWORD_TOO_COMMON";
++        error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE";
+     };
+     success: false;
+ }>>;
+@@ -46,7 +48,8 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+  * that do not match the latest security recommendations.
+  */
+ export declare const verifyPassword: import("convex/server").RegisteredMutation<"public", {
+-    userId: string;
++    userId?: string;
++    rateLimitKey?: string;
+     password: string;
+ }, Promise<{
+     success: true;
+diff --git a/dist/components/password/public.js b/dist/components/password/public.js
+index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..1ca6840c7686da580463c9a8f254f4682e1c27a3 100644
+--- a/dist/components/password/public.js
++++ b/dist/components/password/public.js
+@@ -27,7 +27,9 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
+         capacity: 5,
+     },
+ });
+-const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.object({ success: v.literal(false), userError: setPasswordUserError }));
++// Produced by hashPassword with the same Argon2id parameters as stored passwords.
++const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=16384,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$Em0gfwPguve1viHkkKgULo+VVYwDJ0zBfjeyfRc8+kE";
++const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.object({ success: v.literal(false), userError: v.union(setPasswordUserError, v.object({ error: v.literal("PASSWORD_REUSE") })) }));
+ /**
+  * Set (or replace) a user's password.
+  *
+@@ -48,21 +50,28 @@ const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.obje
+  * of this package do, for a user they just created or verified.
+  */
+ export const _internal_dangerous_setPassword = mutation({
+-    args: { userId: v.string(), password: v.string(), minimumLength: v.number() },
++    args: { userId: v.string(), password: v.string(), minimumLength: v.number(), requireDifferent: v.optional(v.boolean()), rateLimitKey: v.optional(v.string()) },
+     returns: setPasswordResult,
+-    handler: async (ctx, { userId, password, minimumLength }) => {
++    handler: async (ctx, { userId, password, minimumLength, requireDifferent, rateLimitKey }) => {
+         const userError = validateNewPassword(password, minimumLength);
+         if (userError !== null) {
+             return { success: false, userError };
+         }
+-        const passwordHashPHC = await hashPassword(normalizePassword(password));
+         const existing = await passwordByUserId(ctx, userId);
++        const normalized = normalizePassword(password);
++        if (requireDifferent && existing && await verifyPasswordHash(normalized, existing.passwordHashPHC)) {
++            return { success: false, userError: { error: "PASSWORD_REUSE" } };
++        }
++        const passwordHashPHC = await hashPassword(normalized);
+         if (existing !== null) {
+             await ctx.db.patch("passwords", existing._id, { passwordHashPHC });
+         }
+         else {
+             await ctx.db.insert("passwords", { userId, passwordHashPHC });
+         }
++        await rateLimiter.reset(ctx, "verifyPassword", { key: userId });
++        if (rateLimitKey !== undefined)
++            await rateLimiter.reset(ctx, "verifyPassword", { key: rateLimitKey });
+         return { success: true };
+     },
+ });
+@@ -76,11 +85,15 @@ const verifyPasswordResult = v.union(v.object({ success: v.literal(true) }), v.o
+  * that do not match the latest security recommendations.
+  */
+ export const verifyPassword = mutation({
+-    args: { userId: v.string(), password: v.string() },
++    args: { userId: v.optional(v.string()), password: v.string(), rateLimitKey: v.optional(v.string()) },
+     returns: verifyPasswordResult,
+-    handler: async (ctx, { userId, password }) => {
++    handler: async (ctx, { userId, password, rateLimitKey }) => {
++        // The app supplies the same normalized selector whether or not it finds a user.
++        const key = rateLimitKey ?? userId;
++        if (key === undefined)
++            throw new Error("Password verification requires a rate limit key.");
+         const status = await rateLimiter.limit(ctx, "verifyPassword", {
+-            key: userId,
++            key,
+         });
+         if (!status.ok) {
+             return {
+@@ -103,16 +116,13 @@ export const verifyPassword = mutation({
+         if (userError !== null) {
+             return { success: false, userError };
+         }
+-        const row = await passwordByUserId(ctx, userId);
+-        if (row === null) {
+-            // The app owns the user ↔ userId mapping, so an unknown userId is an
+-            // unrecoverable programming error rather than a user-facing condition.
+-            throw new Error(`No password stored for userId ${userId}.`);
+-        }
+-        const matches = await verifyPasswordHash(normalizePassword(password), row.passwordHashPHC);
+-        if (!matches) {
++        const row = await passwordByUserId(ctx, userId ?? "");
++        const matches = await verifyPasswordHash(normalizePassword(password), row?.passwordHashPHC ?? DUMMY_PASSWORD_HASH);
++        if (userId === undefined || row === null || !matches) {
+             return { success: false, userError: { error: "INVALID_CREDENTIALS" } };
+         }
++        if (rateLimitKey !== undefined)
++            await rateLimiter.reset(ctx, "verifyPassword", { key });
+         return { success: true };
+     },
+ });
+diff --git a/dist/internal-types/components/password/_generated/component.d.ts b/dist/internal-types/components/password/_generated/component.d.ts
+index 803786467e1a758891a595e10a1a0187cd255625..a28966296c281f2ce591b3fd222f511fbc5f6aba 100644
+--- a/dist/internal-types/components/password/_generated/component.d.ts
++++ b/dist/internal-types/components/password/_generated/component.d.ts
+@@ -23,6 +23,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+         _internal_dangerous_setPassword: FunctionReference<"mutation", "internal", {
+             minimumLength: number;
+             password: string;
++            rateLimitKey?: string;
++            requireDifferent?: boolean;
+             userId: string;
+         }, {
+             success: true;
+@@ -37,12 +39,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+             } | {
+                 error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
+             } | {
+-                error: "PASSWORD_TOO_COMMON";
++                error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE";
+             };
+         }, Name>;
+         verifyPassword: FunctionReference<"mutation", "internal", {
+             password: string;
+-            userId: string;
++            rateLimitKey?: string;
++            userId?: string;
+         }, {
+             success: true;
+         } | {
+diff --git a/dist/internal-types/components/password/public.d.ts b/dist/internal-types/components/password/public.d.ts
+index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..c629b7163bd83391bcdfb6e661fdfcf9451063b9 100644
+--- a/dist/internal-types/components/password/public.d.ts
++++ b/dist/internal-types/components/password/public.d.ts
+@@ -20,6 +20,8 @@
+ export declare const _internal_dangerous_setPassword: import("convex/server").RegisteredMutation<"public", {
+     userId: string;
+     password: string;
++    requireDifferent?: boolean;
++    rateLimitKey?: string;
+     minimumLength: number;
+ }, Promise<{
+     success: true;
+@@ -33,7 +35,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+     } | {
+         error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
+     } | {
+-        error: "PASSWORD_TOO_COMMON";
++        error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE";
+     };
+     success: false;
+ }>>;
+@@ -46,7 +48,8 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+  * that do not match the latest security recommendations.
+  */
+ export declare const verifyPassword: import("convex/server").RegisteredMutation<"public", {
+-    userId: string;
++    userId?: string;
++    rateLimitKey?: string;
+     password: string;
+ }, Promise<{
+     success: true;
+diff --git a/src/components/password/_generated/component.ts b/src/components/password/_generated/component.ts
+index 7676907be53be9e5623a66fe051cc505ac4dcfff..8c785d8eee8a5125820a7f7b7455da21619decf0 100644
+--- a/src/components/password/_generated/component.ts
++++ b/src/components/password/_generated/component.ts
+@@ -27,7 +27,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+       _internal_dangerous_setPassword: FunctionReference<
+         "mutation",
+         "internal",
+-        { minimumLength: number; password: string; userId: string },
++        { minimumLength: number; password: string; rateLimitKey?: string; requireDifferent?: boolean; userId: string },
+         | { success: true }
+         | {
+             success: false;
+@@ -35,14 +35,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+               | { error: "PASSWORD_TOO_SHORT"; minimumLength: number }
+               | { error: "PASSWORD_TOO_LONG"; maximumLength: number }
+               | { error: "PASSWORD_HAS_SURROUNDING_WHITESPACE" }
+-              | { error: "PASSWORD_TOO_COMMON" };
++              | { error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE" };
+           },
+         Name
+       >;
+       verifyPassword: FunctionReference<
+         "mutation",
+         "internal",
+-        { password: string; userId: string },
++        { password: string; rateLimitKey?: string; userId?: string },
+         | { success: true }
+         | {
+             success: false;
+diff --git a/src/components/password/public.ts b/src/components/password/public.ts
+index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..7a743b1d8a669a42f26ea512dcfe674ddb80c948 100644
+--- a/src/components/password/public.ts
++++ b/src/components/password/public.ts
+@@ -40,9 +40,12 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
+   },
+ });
+
++// Produced by hashPassword with the same Argon2id parameters as stored passwords.
++const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=16384,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$Em0gfwPguve1viHkkKgULo+VVYwDJ0zBfjeyfRc8+kE";
++
+ const setPasswordResult = v.union(
+   v.object({ success: v.literal(true) }),
+-  v.object({ success: v.literal(false), userError: setPasswordUserError }),
++  v.object({ success: v.literal(false), userError: v.union(setPasswordUserError, v.object({ error: v.literal("PASSWORD_REUSE") })) }),
+ );
+ type SetPasswordResult = Infer<typeof setPasswordResult>;
+
+@@ -66,25 +69,31 @@ type SetPasswordResult = Infer<typeof setPasswordResult>;
+  * of this package do, for a user they just created or verified.
+  */
+ export const _internal_dangerous_setPassword = mutation({
+-  args: { userId: v.string(), password: v.string(), minimumLength: v.number() },
++  args: { userId: v.string(), password: v.string(), minimumLength: v.number(), requireDifferent: v.optional(v.boolean()), rateLimitKey: v.optional(v.string()) },
+   returns: setPasswordResult,
+   handler: async (
+     ctx,
+-    { userId, password, minimumLength },
++    { userId, password, minimumLength, requireDifferent, rateLimitKey },
+   ): Promise<SetPasswordResult> => {
+     const userError = validateNewPassword(password, minimumLength);
+     if (userError !== null) {
+       return { success: false, userError };
+     }
+
+-    const passwordHashPHC = await hashPassword(normalizePassword(password));
+     const existing = await passwordByUserId(ctx, userId);
++    const normalized = normalizePassword(password);
++    if (requireDifferent && existing && await verifyPasswordHash(normalized, existing.passwordHashPHC)) {
++      return { success: false, userError: { error: "PASSWORD_REUSE" } };
++    }
++    const passwordHashPHC = await hashPassword(normalized);
+     if (existing !== null) {
+       await ctx.db.patch("passwords", existing._id, { passwordHashPHC });
+     } else {
+       await ctx.db.insert("passwords", { userId, passwordHashPHC });
+     }
+
++    await rateLimiter.reset(ctx, "verifyPassword", { key: userId });
++    if (rateLimitKey !== undefined) await rateLimiter.reset(ctx, "verifyPassword", { key: rateLimitKey });
+     return { success: true };
+   },
+ });
+@@ -104,11 +113,14 @@ type VerifyPasswordResult = Infer<typeof verifyPasswordResult>;
+  * that do not match the latest security recommendations.
+  */
+ export const verifyPassword = mutation({
+-  args: { userId: v.string(), password: v.string() },
++  args: { userId: v.optional(v.string()), password: v.string(), rateLimitKey: v.optional(v.string()) },
+   returns: verifyPasswordResult,
+-  handler: async (ctx, { userId, password }): Promise<VerifyPasswordResult> => {
++  handler: async (ctx, { userId, password, rateLimitKey }): Promise<VerifyPasswordResult> => {
++    // The app supplies the same normalized selector whether or not it finds a user.
++    const key = rateLimitKey ?? userId;
++    if (key === undefined) throw new Error("Password verification requires a rate limit key.");
+     const status = await rateLimiter.limit(ctx, "verifyPassword", {
+-      key: userId,
++      key,
+     });
+     if (!status.ok) {
+       return {
+@@ -136,19 +148,15 @@ export const verifyPassword = mutation({
+       return { success: false, userError };
+     }
+
+-    const row = await passwordByUserId(ctx, userId);
+-    if (row === null) {
+-      // The app owns the user ↔ userId mapping, so an unknown userId is an
+-      // unrecoverable programming error rather than a user-facing condition.
+-      throw new Error(`No password stored for userId ${userId}.`);
+-    }
++    const row = await passwordByUserId(ctx, userId ?? "");
+     const matches = await verifyPasswordHash(
+       normalizePassword(password),
+-      row.passwordHashPHC,
++      row?.passwordHashPHC ?? DUMMY_PASSWORD_HASH,
+     );
+-    if (!matches) {
++    if (userId === undefined || row === null || !matches) {
+       return { success: false, userError: { error: "INVALID_CREDENTIALS" } };
+     }
++    if (rateLimitKey !== undefined) await rateLimiter.reset(ctx, "verifyPassword", { key });
+     return { success: true };
+   },
+ });

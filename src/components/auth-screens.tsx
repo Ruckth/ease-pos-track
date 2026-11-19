@@ -1,15 +1,22 @@
-import { FormEvent, useState, type ComponentProps } from "react";
-import { useStaffLogin, useCustomerAuth } from "@/app/adapter";
+import { FormEvent, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import {
+  useCustomerInvitation, useGoogleSignIn, useInvitationSignUp, useLocalFixtureSignIn, usePasswordSignIn, useRecovery,
+  useStaffInvitation,
+} from "@/app/adapter";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { PrivacyNoticeLink } from "@/components/privacy-notice-link";
 import { ProductWordmark } from "@/components/product-wordmark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { APP_PATHS } from "@/lib/app-routes";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { getClientId } from "@/lib/session";
+import { readFragmentSecret } from "@/lib/session";
 
-type AuthPageKind = "staff-login" | "customer-login" | "customer-register";
+/** Errors returned as data (not thrown) use the same localized codes. */
+function userErrorMessage(error: string, t: ReturnType<typeof useI18n>["t"]) {
+  return localizeError({ data: { code: error } }, t);
+}
 
 export function LanguageSelector({
   language,
@@ -27,20 +34,8 @@ export function LanguageSelector({
   );
 }
 
-/** A route-specific auth page. Role choice is made by the URL, not by UI state. */
-export function AuthPage({
-  page,
-  onSignedIn,
-  onNavigate,
-}: {
-  page: AuthPageKind;
-  onSignedIn: (token: string) => void;
-  onNavigate: (path: string) => void;
-}) {
-  const { language, setLanguage, t } = useI18n();
-  const isStaff = page === "staff-login";
-  const isRegistering = page === "customer-register";
-
+function AuthLayout({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  const { language, setLanguage } = useI18n();
   return (
     <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)),transparent_32rem)] px-4 py-8 sm:py-12">
       <Card className="w-full max-w-md overflow-hidden rounded-2xl border-primary/10 bg-card/95 shadow-xl shadow-primary/5">
@@ -50,39 +45,37 @@ export function AuthPage({
             <LanguageSelector language={language} onChange={setLanguage} />
           </div>
           <div>
-            <CardTitle className="text-xl leading-7">
-              {isStaff ? t("staffSignIn") : isRegistering ? t("customerSignUp") : t("customerSignIn")}
-            </CardTitle>
-            <CardDescription className="mt-1.5 leading-5">
-              {isStaff
-                ? t("staffSignInDescription")
-                : isRegistering
-                  ? t("customerSignUpDescription")
-                  : t("customerSignInDescription")}
-            </CardDescription>
+            <CardTitle className="text-xl leading-7">{title}</CardTitle>
+            {description ? <CardDescription className="mt-1.5 leading-5">{description}</CardDescription> : null}
           </div>
         </CardHeader>
-        <CardContent className="p-5 sm:p-6">
-          {isStaff ? (
-            <StaffSignInForm onSignedIn={onSignedIn} />
-          ) : (
-            <CustomerSignInForm
-              mode={isRegistering ? "register" : "login"}
-              onSignedIn={onSignedIn}
-              onNavigate={onNavigate}
-            />
-          )}
-          <a className="mt-3 flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4"
-            href={isStaff ? APP_PATHS.customerLogin : APP_PATHS.staffLogin}>
-            {t(isStaff ? "customerSignIn" : "staffSignIn")}
-          </a>
+        <CardContent className="space-y-4 p-5 sm:p-6">
+          <PrivacyNoticeLink />
+          {children}
         </CardContent>
       </Card>
     </main>
   );
 }
 
-function PasswordInput(props: ComponentProps<typeof Input>) {
+function Alert({ children, tone = "error", focus = false }: { children: ReactNode; tone?: "error" | "info"; focus?: boolean }) {
+  return <p role={tone === "error" ? "alert" : "status"} tabIndex={focus ? -1 : undefined}
+    ref={focus ? focusMessage : undefined} className={tone === "error"
+    ? "rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    : "rounded-md bg-muted px-3 py-2 text-sm"}>{children}</p>;
+}
+
+function focusMessage(node: HTMLElement | null) { node?.focus(); }
+
+function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: ReactNode }) {
+  return <div className="space-y-2">
+    <label className="text-sm font-medium" htmlFor={id}>{label}</label>
+    {children}
+    {hint ? <p id={`${id}-hint`} className="text-sm leading-5 text-muted-foreground">{hint}</p> : null}
+  </div>;
+}
+
+export function PasswordInput(props: ComponentProps<typeof Input>) {
   const { t } = useI18n();
   const [shown, setShown] = useState(false);
   return <div className="relative">
@@ -94,142 +87,332 @@ function PasswordInput(props: ComponentProps<typeof Input>) {
   </div>;
 }
 
-function StaffSignInForm({ onSignedIn }: { onSignedIn: (token: string) => void }) {
-  const { t } = useI18n();
-  const login = useStaffLogin();
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [isSubmitting, setSubmitting] = useState(false);
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    try {
-      const result = await login({ password, clientId: getClientId() });
-      onSignedIn(result.token);
-    } catch (err) {
-      setError(localizeError(err, t));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form className="space-y-4" onSubmit={onSubmit}>
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="staff-password">{t("password")}</label>
-        <PasswordInput
-          id="staff-password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          autoFocus
-        />
-      </div>
-      {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <Button className="h-11 w-full rounded-xl" disabled={isSubmitting || !password}>
-        {isSubmitting ? <Loader2 className="animate-spin" /> : null}{isSubmitting ? t("signingIn") : t("enter")}
-      </Button>
-    </form>
-  );
+function SubmitButton({ busy, disabled, idle, working }: { busy: boolean; disabled?: boolean; idle: string; working: string }) {
+  return <Button className="h-11 w-full rounded-xl" disabled={busy || disabled}>
+    {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{busy ? working : idle}
+  </Button>;
 }
 
-/** Self-serve customer sign-in and sign-up. */
-function CustomerSignInForm({
-  mode,
-  onSignedIn,
-  onNavigate,
-}: {
-  mode: "login" | "register";
-  onSignedIn: (token: string) => void;
-  onNavigate: (path: string) => void;
+function previewUsername(value: string) {
+  return value.trim().toLowerCase();
+}
+
+const LOCAL_FIXTURE_SIGN_IN = import.meta.env.VITE_LOCAL_FIXTURE_SIGN_IN === "true";
+
+/** Staff sign in only with Google; the invitation decides who joins the team. */
+function GoogleSignIn({ redirectTo }: { redirectTo?: string }) {
+  const { t } = useI18n();
+  const { signIn, flowError } = useGoogleSignIn();
+  const fixture = useLocalFixtureSignIn();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function start() {
+    setBusy(true);
+    setError("");
+    try { await signIn(redirectTo ? { redirectTo } : undefined); }
+    catch (err) { setError(localizeError(err, t)); setBusy(false); }
+  }
+  async function local(email: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await fixture(email);
+      if (result.status === "error") setError(userErrorMessage(result.userError.error, t));
+    } catch (err) { setError(localizeError(err, t)); }
+    finally { setBusy(false); }
+  }
+  return <div className="space-y-3">
+    {flowError ? <Alert>{t("googleFlowFailed")}</Alert> : null}
+    {error ? <Alert>{error}</Alert> : null}
+    <Button type="button" className="h-11 w-full rounded-xl" disabled={busy} onClick={() => void start()}>
+      {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("continueWithGoogle")}
+    </Button>
+    <p className="text-sm text-muted-foreground">{t("googleRedirectHint")}</p>
+    {LOCAL_FIXTURE_SIGN_IN ? <div className="space-y-2 rounded-md border border-dashed p-3">
+      <p className="text-sm font-medium">{t("localFixtureSignIn")}</p>
+      <p className="text-xs text-muted-foreground">{t("localFixtureHint")}</p>
+      {["owner@local.test", "staff@local.test"].map(email => <Button key={email} type="button" variant="outline" className="h-11 w-full" disabled={busy} onClick={() => void local(email)}>{email}</Button>)}
+    </div> : null}
+  </div>;
+}
+
+export function StaffSignInPage() {
+  const { t } = useI18n();
+  return <AuthLayout title={t("staffSignIn")} description={t("staffSignInDescription")}>
+    <GoogleSignIn />
+    <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4" href={APP_PATHS.customerLogin}>{t("customerSignIn")}</a>
+  </AuthLayout>;
+}
+
+function followAuthLink(event: MouseEvent<HTMLAnchorElement>, navigate: () => void) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  navigate();
+}
+
+export function CustomerSignInPage({ onForgotPassword, onReturnToJoin }: {
+  onForgotPassword: () => void; onReturnToJoin?: () => void;
 }) {
   const { t } = useI18n();
-  const { register, login } = useCustomerAuth();
-  const [email, setEmail] = useState("");
+  const signIn = usePasswordSignIn();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await signIn(username, password);
+      if (result.status === "error") setError(userErrorMessage(result.userError.error, t));
+    } catch (err) { setError(localizeError(err, t)); }
+    finally { setBusy(false); }
+  }
+  return <AuthLayout title={t("customerSignIn")} description={t("customerSignInDescription")}>
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <Field id="customer-username" label={t("username")}>
+        <Input id="customer-username" className="h-11" autoComplete="username" autoCapitalize="none" spellCheck={false}
+          value={username} onChange={event => setUsername(event.target.value)} autoFocus />
+      </Field>
+      <Field id="customer-password" label={t("password")}>
+        <PasswordInput id="customer-password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} />
+      </Field>
+      {error ? <Alert focus>{error}</Alert> : null}
+      <SubmitButton busy={busy} disabled={!username || !password} idle={t("signIn")} working={t("signingIn")} />
+    </form>
+    {onReturnToJoin ? <Button variant="ghost" className="min-h-11 w-full text-primary underline underline-offset-4" onClick={onReturnToJoin}>{t("backToInvitation")}</Button> : null}
+    <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4"
+      href={APP_PATHS.customerRecover} onClick={event => followAuthLink(event, onForgotPassword)}>{t("forgotPassword")}</a>
+    <p className="text-center text-sm text-muted-foreground">{t("customerSignUpDescription")}</p>
+    <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4" href={APP_PATHS.staffLogin}>{t("staffSignIn")}</a>
+  </AuthLayout>;
+}
+
+function NewPasswordFields({ password, confirmation, onPassword, onConfirmation, label }: {
+  password: string; confirmation: string; onPassword: (value: string) => void; onConfirmation: (value: string) => void; label: string;
+}) {
+  const { t } = useI18n();
+  return <>
+    <Field id="new-password" label={label} hint={t("passwordRules")}>
+      <PasswordInput id="new-password" autoComplete="new-password" aria-describedby="new-password-hint" value={password} onChange={event => onPassword(event.target.value)} />
+    </Field>
+    <Field id="new-password-confirm" label={t("confirmPassword")}>
+      <PasswordInput id="new-password-confirm" autoComplete="new-password" value={confirmation} onChange={event => onConfirmation(event.target.value)} />
+    </Field>
+  </>;
+}
+
+/** Invitation-bound signup, or adding the Project to the signed-in customer. */
+export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExistingAccount, onDone }: {
+  invitation: string; signedInAs: "staff" | "pending" | "customer" | null;
+  onSignOut: () => Promise<void>; onExistingAccount: () => void; onDone: () => void;
+}) {
+  const { t } = useI18n();
+  const { preview, join } = useCustomerInvitation(invitation);
+  const signUp = useInvitationSignUp();
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
-  const [isSubmitting, setSubmitting] = useState(false);
-  const isRegistering = mode === "register";
+  const [busy, setBusy] = useState(false);
+
+  if (!invitation) return <AuthLayout title={t("customerSignUp")}><Alert tone="info">{t("joinNeedsInvite")}</Alert></AuthLayout>;
+  if (preview === undefined) return <AuthLayout title={t("customerSignUp")}><Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} /></AuthLayout>;
+  if (preview.status !== "ready") return <AuthLayout title={t("customerSignUp")}><Alert focus>{userErrorMessage(preview.status, t)}</Alert></AuthLayout>;
+  const project = preview.projectName;
+
+  if (signedInAs === "staff" || signedInAs === "pending") {
+    return <AuthLayout title={t("joinTitle", { project })}>
+      <Alert tone="info">{t("joinSwitchAccount")}</Alert>
+      {error ? <Alert focus>{error}</Alert> : null}
+      <Button className="h-11 w-full" variant="outline" onClick={() => void switchAccount()}>{t("signOut")}</Button>
+    </AuthLayout>;
+  }
+  async function switchAccount() {
+    setError("");
+    try { await onSignOut(); }
+    catch (err) { setError(localizeError(err, t)); }
+  }
+  if (signedInAs === "customer") {
+    if (preview.viewer?.kind !== "customer") return <AuthLayout title={t("joinTitle", { project })}>
+      <Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} />
+    </AuthLayout>;
+    const viewer = preview.viewer;
+    async function onJoin() {
+      setBusy(true);
+      setError("");
+      try { await join({ invitation }); onDone(); }
+      catch (err) { setError(localizeError(err, t)); }
+      finally { setBusy(false); }
+    }
+    return <AuthLayout title={t("joinTitle", { project })}>
+      {viewer.alreadyMember ? <Alert tone="info">{t("joinAlreadyMember", { project })}</Alert> : <p className="text-sm">{t("joinAsCustomer", { project, username: viewer.username })}</p>}
+      {error ? <Alert focus>{error}</Alert> : null}
+      {viewer.alreadyMember
+        ? <Button className="h-11 w-full" autoFocus onClick={onDone}>{t("openWorkspace")}</Button>
+        : <Button className="h-11 w-full" autoFocus disabled={busy} onClick={() => void onJoin()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("joinAction")}</Button>}
+      <Button className="h-11 w-full" variant="ghost" onClick={() => void switchAccount()}>{t("signOut")}</Button>
+    </AuthLayout>;
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    if (isRegistering && password !== confirmation) {
-      setError(t("passwordMismatch"));
-      return;
-    }
-    setSubmitting(true);
+    if (password !== confirmation) { setError(t("passwordMismatch")); return; }
+    setBusy(true);
     try {
-      const clientId = getClientId();
-      const result = isRegistering
-        ? await register({ email, password, clientId })
-        : await login({ email, password, clientId });
-      onSignedIn(result.token);
-    } catch (err) {
-      setError(localizeError(err, t));
-    } finally {
-      setSubmitting(false);
-    }
+      const result = await signUp({ invitation, username, displayName, password });
+      if (result.status === "error") setError(userErrorMessage(result.userError.error, t));
+      else onDone();
+    } catch (err) { setError(localizeError(err, t)); }
+    finally { setBusy(false); }
   }
-
-  return (
+  const shown = previewUsername(username);
+  return <AuthLayout title={t("joinTitle", { project })} description={t("joinDescription")}>
     <form className="space-y-4" onSubmit={onSubmit}>
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="customer-email">{t("email")}</label>
-        <Input
-          id="customer-email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          autoFocus
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="customer-password">{t(isRegistering ? "newPassword" : "password")}</label>
-        <PasswordInput
-          id="customer-password"
-          autoComplete={isRegistering ? "new-password" : "current-password"}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        {isRegistering ? <p className="text-sm leading-5 text-muted-foreground">{t("passwordRules")}</p> : null}
-      </div>
-      {isRegistering ? (
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="customer-password-confirm">{t("confirmPassword")}</label>
-          <PasswordInput
-            id="customer-password-confirm"
-            autoComplete="new-password"
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
-          />
-        </div>
-      ) : null}
-      {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <Button className="h-11 w-full rounded-xl" disabled={isSubmitting || !email || !password}>
-        {isSubmitting ? <Loader2 className="animate-spin" /> : null}
-        {isSubmitting
-          ? (isRegistering ? t("creatingAccount") : t("signingIn"))
-          : (isRegistering ? t("createAccount") : t("signIn"))}
-      </Button>
-      <div className="text-center">
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-full"
-          onClick={() => {
-            setError("");
-            setConfirmation("");
-            onNavigate(isRegistering ? APP_PATHS.customerLogin : APP_PATHS.customerRegister);
-          }}
-        >
-          {isRegistering ? t("haveAccountQuestion") : t("noAccountQuestion")}
-        </Button>
-      </div>
+      <Field id="join-username" label={t("username")} hint={t("usernameRules")}>
+        <Input id="join-username" className="h-11" autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={shown ? "join-username-hint join-username-preview" : "join-username-hint"}
+          value={username} onChange={event => setUsername(event.target.value)} autoFocus />
+      </Field>
+      {shown ? <p id="join-username-preview" className="text-sm" aria-live="polite">{t("usernamePreview", { username: shown })}</p> : null}
+      <Field id="join-display-name" label={t("displayName")}>
+        <Input id="join-display-name" className="h-11" autoComplete="name" value={displayName} onChange={event => setDisplayName(event.target.value)} />
+      </Field>
+      <NewPasswordFields label={t("newPassword")} password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
+      <p className="text-sm text-muted-foreground">{t("recoverLostBoth")}</p>
+      {error ? <Alert focus>{error}</Alert> : null}
+      <SubmitButton busy={busy} disabled={!username || !displayName || !password} idle={t("createAccount")} working={t("creatingAccount")} />
     </form>
-  );
+    <Button type="button" variant="ghost" className="min-h-11 w-full text-primary underline underline-offset-4" onClick={onExistingAccount}>{t("haveAccountQuestion")}</Button>
+  </AuthLayout>;
+}
+
+export function CustomerRecoverPage({ onSignIn }: { onSignIn: () => void }) {
+  const { t } = useI18n();
+  const recover = useRecovery();
+  const [username, setUsername] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (password !== confirmation) { setError(t("passwordMismatch")); return; }
+    setBusy(true);
+    try {
+      const result = await recover({ username, recoveryCode: code, newPassword: password });
+      if (result.success) { setDone(true); setCode(""); setPassword(""); setConfirmation(""); }
+      else setError(userErrorMessage(result.error, t));
+    } catch (err) { setError(localizeError(err, t)); }
+    finally { setBusy(false); }
+  }
+  return <AuthLayout title={t("recoverTitle")} description={t("recoverDescription")}>
+    {done ? <>
+      <Alert tone="info" focus>{t("recoverSuccess")}</Alert>
+      <a className="flex min-h-11 items-center justify-center rounded-xl bg-primary text-sm font-medium text-primary-foreground"
+        href={APP_PATHS.customerLogin} onClick={event => followAuthLink(event, onSignIn)}>{t("signIn")}</a>
+    </> : <form className="space-y-4" onSubmit={onSubmit}>
+      <Field id="recover-username" label={t("username")}>
+        <Input id="recover-username" className="h-11" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={event => setUsername(event.target.value)} autoFocus />
+      </Field>
+      <Field id="recover-code" label={t("recoveryCode")}>
+        <Input id="recover-code" className="h-11 font-mono uppercase" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} />
+      </Field>
+      <NewPasswordFields label={t("newPassword")} password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
+      {error ? <Alert focus>{error}</Alert> : null}
+      <SubmitButton busy={busy} disabled={!username || !code || !password} idle={t("recoverAction")} working={t("signingIn")} />
+    </form>}
+    <p className="text-sm text-muted-foreground">{t("recoverLostBoth")}</p>
+    {done ? null : <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4"
+      href={APP_PATHS.customerLogin} onClick={event => followAuthLink(event, onSignIn)}>{t("customerSignIn")}</a>}
+  </AuthLayout>;
+}
+
+/** Sign in with Google, confirm the invited mailbox with a code, then sign in again. */
+export function StaffInvitePage({ pending, onSignOut }: { pending: boolean; onSignOut: () => Promise<void> }) {
+  const { t } = useI18n();
+  const [invitation] = useState(readFragmentSecret);
+  if (!invitation) return <AuthLayout title={t("staffInviteTitle")}><Alert>{t("inviteNotFound")}</Alert></AuthLayout>;
+  if (!pending) {
+    return <AuthLayout title={t("staffInviteTitle")} description={t("staffInviteDescription")}>
+      <GoogleSignIn redirectTo={window.location.href} />
+    </AuthLayout>;
+  }
+  return <PendingInvitation invitation={invitation} onSignOut={onSignOut} />;
+}
+
+function PendingInvitation({ invitation, onSignOut }: { invitation: string; onSignOut: () => Promise<void> }) {
+  const { t } = useI18n();
+  const { preview, sendCode, accept } = useStaffInvitation(invitation);
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (preview === undefined) return <AuthLayout title={t("staffInviteTitle")}><Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} /></AuthLayout>;
+  if (accepted) {
+    return <AuthLayout title={t("staffInviteTitle")}>
+      <Alert tone="info">{t("inviteAccepted")}</Alert>
+      <Button className="h-11 w-full" onClick={() => void onSignOut()}>{t("continueWithGoogle")}</Button>
+    </AuthLayout>;
+  }
+  if (preview.status === "WRONG_GOOGLE_ACCOUNT") {
+    return <AuthLayout title={t("staffInviteTitle")}>
+      <Alert>{t("staffInviteWrongAccount", { invited: preview.invitedEmail, email: preview.signedInEmail ?? "" })}</Alert>
+      <Button className="h-11 w-full" variant="outline" onClick={() => void onSignOut()}>{t("signOut")}</Button>
+    </AuthLayout>;
+  }
+  if (preview.status !== "ready") return <AuthLayout title={t("staffInviteTitle")}><Alert>{userErrorMessage(preview.status, t)}</Alert></AuthLayout>;
+  const ready = preview;
+  async function onSend() {
+    setBusy(true);
+    setError("");
+    try { await sendCode({ purpose: "staff-invite", invitation }); setSent(true); }
+    catch (err) { setError(localizeError(err, t)); }
+    finally { setBusy(false); }
+  }
+  async function onAccept(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await accept({ invitation, code });
+      if (result.ok) setAccepted(true);
+      else setError(userErrorMessage(result.error, t));
+    } catch (err) { setError(localizeError(err, t)); }
+    finally { setBusy(false); }
+  }
+  return <AuthLayout title={t("staffInviteTitle")} description={t("staffInviteRole", { role: t(ready.role === "owner" ? "roleOwner" : "roleStaff") })}>
+    {error ? <Alert>{error}</Alert> : null}
+    {sent ? <form className="space-y-4" onSubmit={onAccept}>
+      <Alert tone="info">{t("codeSent", { email: ready.invitedEmail })}</Alert>
+      <Field id="invite-code" label={t("verificationCode")}>
+        <Input id="invite-code" className="h-11 font-mono" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} autoFocus />
+      </Field>
+      <SubmitButton busy={busy} disabled={code.trim().length < 8} idle={t("acceptInvite")} working={t("signingIn")} />
+    </form> : <Button className="h-11 w-full" disabled={busy} onClick={() => void onSend()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("sendCode")}</Button>}
+    <Button className="h-11 w-full" variant="ghost" onClick={() => void onSignOut()}>{t("signOut")}</Button>
+  </AuthLayout>;
+}
+
+export function PendingIdentityPage({ email, googleSubject, onSignOut }: {
+  email: string | null; googleSubject: string | null; onSignOut: () => Promise<void>;
+}) {
+  const { t } = useI18n();
+  return <AuthLayout title={t("pendingTitle")}>
+    <p className="text-sm">{t("pendingDescription", { email: email ?? "" })}</p>
+    {googleSubject ? <div className="space-y-2">
+      <p className="text-sm">{t("pendingGoogleAccount")}</p>
+      <dl className="grid gap-1 rounded-md border p-3 text-sm">
+        <dt className="font-medium">{t("googleVerifiedEmail")}</dt><dd className="break-all">{email}</dd>
+        <dt className="font-medium">{t("googleSubject")}</dt><dd className="break-all font-mono">{googleSubject}</dd>
+      </dl>
+    </div> : null}
+    <Button className="h-11 w-full" variant="outline" onClick={() => void onSignOut()}>{t("signOut")}</Button>
+  </AuthLayout>;
 }

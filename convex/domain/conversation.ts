@@ -7,7 +7,7 @@ import { requireUsableProject } from "./projects";
 import { mutationOperation, queryOperation } from "./operation";
 
 export const pageMessages = queryOperation({
-  args: { token: v.string(), id: v.id("tickets"), paginationOpts: paginationOptsValidator },
+  args: { id: v.id("tickets"), paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     const ticket = await readableTicket(ctx, ctx.actor, args.id);
     const project = ticket && await ctx.db.get(ticket.projectId);
@@ -24,7 +24,7 @@ export const pageMessages = queryOperation({
 
 export const sendMessage = mutationOperation({
   args: {
-    token: v.string(), id: v.id("tickets"), body: v.string(), requestId: v.string(),
+    id: v.id("tickets"), body: v.string(), requestId: v.string(),
     expectedVersion: v.number(), inReplyTo: v.optional(v.id("ticketMessages")),
   },
   handler: async (ctx, args) => {
@@ -47,10 +47,10 @@ export const sendMessage = mutationOperation({
       if (ticket.status !== "waiting" || latest?.role !== "staff" || latest._id !== args.inReplyTo) throw new Error("VERSION_CONFLICT");
     } else {
       if (args.inReplyTo || ticket.status === "done") throw new Error("INVALID_INPUT");
-      await updateTicketStatus.handler(ctx, { token: args.token, id: args.id, status: "waiting", expectedVersion: args.expectedVersion });
+      await updateTicketStatus.handler(ctx, { id: args.id, status: "waiting", expectedVersion: args.expectedVersion });
     }
     return await ctx.db.insert("ticketMessages", {
-      ticketId: args.id, role: ctx.actor.role, authorSessionId: ctx.session._id, customerId: ctx.actor.customerId,
+      ticketId: args.id, role: ctx.actor.role, authorSessionId: ctx.session._id, customerId: ctx.actor.customerId, staffId: ctx.actor.staffId,
       body, requestId, inReplyTo: args.inReplyTo,
     });
   },

@@ -33,7 +33,7 @@ export const MEDIA_POLICY = {
 } as const;
 
 type CreateArgs = FunctionArgs<typeof api.tickets.createTicket>;
-export type TicketRequestInput = Pick<CreateArgs, "title" | "description" | "annotations" | "projectId"> & {
+export type TicketRequestInput = Pick<CreateArgs, "title" | "description" | "annotations" | "projectId" | "routingClassification"> & {
   actor: { role: "staff" } | { role: "customer"; customerId: Id<"customers"> };
   // Trusted immutable key references, in display order (annotations use indexes).
   mediaKeys?: readonly string[];
@@ -65,6 +65,10 @@ export function normalizeTicketRequest(input: TicketRequestInput) {
       time: annotation.kind === "time" ? annotation.time : undefined,
       text: annotation.text.trim(),
     })),
+    ...(input.routingClassification === undefined ? {} : { routingClassification: {
+      product: input.routingClassification.product, symptom: input.routingClassification.symptom,
+      restricted: input.routingClassification.restricted,
+    } }),
   };
 }
 

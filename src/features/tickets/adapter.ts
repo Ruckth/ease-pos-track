@@ -1,3 +1,4 @@
+import type { TicketAssignmentFilter } from "../../../shared/ticket-routing";
 import { useMemo } from "react";
 import { mergeQueueLanes } from "@/lib/staff-ticket-queue";
 import { BOARD_COLUMNS } from "@/lib/kanban-board";
@@ -26,6 +27,10 @@ export function useTicketAdapter() {
   };
 }
 
+export function useTicketCapabilities() {
+  return useQuery(api.pilot_release.ticketCapabilities, {});
+}
+
 export function useDraftAdapter() {
   return {
     createTicket: useMutation(api.tickets.createTicket),
@@ -33,28 +38,29 @@ export function useDraftAdapter() {
   };
 }
 
-export function useWorkspaceTicket(token: string, ticket: string | null, projectId: Id<"projects"> | undefined) {
-  return useQuery(api.tickets.getWorkspaceTicket, ticket && projectId ? { token, ticket, projectId } : "skip");
+export function useWorkspaceTicket(ticket: string | null, projectId: Id<"projects"> | undefined) {
+  return useQuery(api.tickets.getWorkspaceTicket, ticket && projectId ? { ticket, projectId } : "skip");
 }
 
-export function useSelectedTicket(token: string, id: Id<"tickets"> | null) {
-  return useQuery(api.tickets.getTicket, id ? { token, id } : "skip");
+export function useSelectedTicket(id: Id<"tickets"> | null) {
+  return useQuery(api.tickets.getTicket, id ? { id } : "skip");
 }
 
-export function useTicketActivity(token: string, id: Id<"tickets"> | null) {
-  const args = id ? { token, id } : "skip";
+export function useTicketActivity(id: Id<"tickets"> | null) {
+  const args = id ? { id } : "skip";
+  const mediaEnabled = useTicketCapabilities()?.mediaEnabled === true;
   return {
-    activity: useQuery(api.annotations.listAnnotationActivity, args),
+    activity: useQuery(api.annotations.listAnnotationActivity, mediaEnabled ? args : "skip") ?? (mediaEnabled ? undefined : []),
     ticketActivity: useQuery(api.tickets.listTicketActivity, args),
   };
 }
 
-export function useCustomerTickets(token: string, projectId: Id<"projects"> | undefined) {
-  return usePaginatedQuery(api.tickets.pageTickets, projectId ? { token, projectId, lifecycle: "active" } : "skip", { initialNumItems: 20 });
+export function useCustomerTickets(projectId: Id<"projects"> | undefined) {
+  return usePaginatedQuery(api.tickets.pageTickets, projectId ? { projectId, lifecycle: "active" } : "skip", { initialNumItems: 20 });
 }
 
 
-export function useStaffTickets(token: string, projectId: Id<"projects"> | undefined, view: string, filter: string, query: string) {
+export function useStaffTickets(projectId: Id<"projects"> | undefined, view: string, filter: string, query: string, assignmentFilter?: TicketAssignmentFilter) {
   const invalidSearch = !isTicketSearchWithinLimits(query);
   const archived = filter === "archive";
   const status = BOARD_COLUMNS.find(value => value === filter);
@@ -66,13 +72,13 @@ export function useStaffTickets(token: string, projectId: Id<"projects"> | undef
     status ? lane === status : filter !== "active" || lane !== "done"
   ), [status, filter]);
   const enabledLanes = useLanes ? visibleStatuses : [];
-  const lanes = useStaffLanes(token, projectId, enabledLanes);
+  const lanes = useStaffLanes(projectId, enabledLanes, assignmentFilter);
   const page = usePaginatedQuery(api.tickets.pageTickets, projectId && !query && !useLanes ? {
-    token, projectId, lifecycle, status,
+    projectId, lifecycle, status, assignmentFilter,
   } : "skip", { initialNumItems: 20 });
-  const totals = useQuery(api.tickets.laneTotals, projectId && view === "board" && !query && !archived ? { token, projectId } : "skip");
+  const totals = useQuery(api.tickets.laneTotals, projectId && view === "board" && !query && !archived && !assignmentFilter ? { projectId } : "skip");
   const matches = useQuery(api.tickets.searchTickets, projectId && query && !invalidSearch ? {
-    token, projectId, lifecycle, search: query, status, activeOnly: filter === "active" || undefined,
+    projectId, lifecycle, search: query, status, assignmentFilter, activeOnly: filter === "active" || undefined,
   } : "skip");
   const pages = useLanes ? enabledLanes.map(lane => lanes[lane]) : query ? [] : [page];
   const { new: { results: newRows }, acknowledged: { results: acknowledged },
@@ -94,8 +100,8 @@ export function useStaffTickets(token: string, projectId: Id<"projects"> | undef
   };
 }
 
-export function useTicketTags(token: string, enabled = true) {
-  return useQuery(api.tickets.listTicketTags, enabled ? { token } : "skip");
+export function useTicketTags(enabled = true) {
+  return useQuery(api.tickets.listTicketTags, enabled ? {} : "skip");
 }
 
 export function useTagAdapter() {

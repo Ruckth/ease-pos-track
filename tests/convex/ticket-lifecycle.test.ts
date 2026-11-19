@@ -1,24 +1,22 @@
-import { convexTest } from "convex-test";
+import { fixtures, identityTest } from "./identity-harness";
+import { accessTokenSessionId } from "../../convex/identity_rules";
 import fc from "fast-check";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { derivePasswordHash } from "../../convex/password";
 import schema from "../../convex/schema";
 import { recordUploadHandler } from "../../server/handlers/record-upload";
 import { modules } from "./modules";
 
 const FIXTURE_DATE = new Date("2026-11-14T00:00:00Z");
-const EMAIL = "alice@fixture.test";
-const PASSWORD = "Synthetic-Password-123!";
-const PEPPER = "fixture-pepper";
+const USERNAME = "alice";
+const PASSWORD = "Synthetic passphrase 123";
 const DESCRIPTION = "Original description";
 const requestId = (slot: number) => `generated-create-${slot}`;
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(FIXTURE_DATE);
-  vi.stubEnv("CUSTOMER_PASSWORD_PEPPER", PEPPER);
   vi.stubEnv("MEDIA_CLEANUP_ENABLED", "false");
 });
 afterEach(() => {
@@ -27,27 +25,30 @@ afterEach(() => {
 });
 
 async function fixture() {
-  const t = convexTest(schema, modules);
-  const salt = "0123456789abcdef0123456789abcdef";
-  const hash = await derivePasswordHash(PASSWORD, salt, 1_000, PEPPER);
-  const staff = "synthetic-staff-session";
-  const { customerId, projectId } = await t.run(async ({ db }) => {
-    const now = Date.now();
-    const customerId = await db.insert("customers", {
-      email: EMAIL, createdAt: now, updatedAt: now,
-      passwordAlgorithm: "pbkdf2-sha256", passwordSalt: salt, passwordHash: hash, passwordIterations: 1_000,
-    });
-    const projectId = await db.insert("projects", { key: "POS", name: "Point of Sale", createdAt: now, updatedAt: now });
-    await db.insert("sessions", { token: staff, role: "staff", createdAt: now, expiresAt: now + 60_000 });
-    return { customerId, projectId };
-  });
+  const t = identityTest(modules);
+  const { session: staff } = await t.mutation(fixtures.staff, { email: "owner@fixture.test", role: "owner" });
+  const { customerId } = await t.mutation(fixtures.customer, { username: USERNAME, password: PASSWORD });
+  const projectId = await t.run(({ db }) => db.insert("projects", { key: "POS", name: "Point of Sale", createdAt: Date.now(), updatedAt: Date.now() }));
 
-  const login = () => t.action(api.customers.login, { email: EMAIL, password: PASSWORD, clientId: "synthetic-lifecycle-client" });
-  const setAccess = (allowed: boolean) => allowed
-    ? t.mutation(api.projects.addProjectMember, { token: staff, projectId, email: EMAIL })
-    : t.mutation(api.projects.removeProjectMember, { token: staff, projectId, customerId });
+  let refreshToken = "";
+  const login = async () => {
+    // The pinned password component allows five verifications per minute per account.
+    vi.setSystemTime(Date.now() + 60_000);
+    const result = await t.mutation(api.auth.signInWithPassword, { username: USERNAME, password: PASSWORD });
+    if (result.status !== "complete") throw new Error("SIGN_IN_FAILED");
+    refreshToken = result.tokens.refreshToken;
+    return { token: accessTokenSessionId(result.tokens.accessToken) };
+  };
+  const tokens = { alice: (await login()).token, staff };
+  const logout = () => t.mutation(api.auth.signOut, { refreshToken });
+  // Membership is granted through the Owner's Project invitation and the
+  // customer's own join, and removed by the Owner.
+  const setAccess = async (allowed: boolean) => {
+    if (!allowed) return await t.mutation(api.projects.removeProjectMember, { token: staff, projectId, customerId });
+    const invitation = await t.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: staff, projectId });
+    await t.mutation(api.identity.joinWithInvitation, { token: tokens.alice, invitation: invitation.secret });
+  };
   await setAccess(true);
-  const { token: alice } = await login();
 
   const snapshot = () => t.run(async ({ db }) => ({
     tickets: await db.query("tickets").collect(),
@@ -57,7 +58,7 @@ async function fixture() {
     receipts: await db.query("ticketRequests").collect(),
     jobs: await db.query("mediaJobs").collect(),
   }));
-  return { t, customerId, projectId, login, setAccess, tokens: { alice, staff }, snapshot };
+  return { t, customerId, projectId, login, logout, setAccess, tokens, snapshot };
 }
 
 type Real = Awaited<ReturnType<typeof fixture>>;
@@ -197,10 +198,10 @@ const histories = fc.commands([
   fc.constant(step("relogin", async (_model, real) => {
     const before = await real.snapshot();
     const oldToken = real.tokens.alice;
-    await real.t.mutation(api.auth.logout, { token: oldToken });
+    await real.logout();
     real.tokens.alice = (await real.login()).token;
-    expect(await real.t.query(api.auth.currentSession, { token: oldToken })).toBeNull();
-    expect(await real.t.query(api.auth.currentSession, { token: real.tokens.alice })).toMatchObject({ customerId: real.customerId });
+    expect(await real.t.query(api.identity.viewer, { token: oldToken })).toBeNull();
+    expect(await real.t.query(api.identity.viewer, { token: real.tokens.alice })).toMatchObject({ customerId: real.customerId });
     expect(await real.snapshot()).toEqual(before);
   })),
 ], { maxCommands: 20, size: "large", replayPath: process.env.TICKET_LIFECYCLE_COMMAND_PATH });

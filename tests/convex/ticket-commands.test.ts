@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { fixtures, identityTest, whoami } from "./identity-harness";
 import { makeFunctionReference } from "convex/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
@@ -15,10 +15,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 async function fixture() {
-  const t = convexTest(schema, { ...modules, "../../convex/receiptFixture.ts": () => import("./fixtures/receipts") });
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest({ ...modules, "../../convex/receiptFixture.ts": () => import("./fixtures/receipts") });
+  const seed = await t.mutation(internal.seed.install, {});
   const [staff, alice, bob] = seed.sessions;
   const create = { token: alice, projectKey: "POS", requestId: "original-create", title: "  Original Ticket  ", description: "  Original description  " };
   async function snapshot() {
@@ -76,16 +74,16 @@ test("create → edit → original retry uses an immutable SHA-256 receipt acros
   const { t, create, alice, seed, snapshot } = await fixture();
   const first = await t.mutation(api.tickets.createTextTicket, create);
   const receipt = (await snapshot()).receipts.find(r => r.requestId === create.requestId)!;
-  const actor = (await t.query(api.auth.currentSession, { token: alice }))!;
+  const actor = (await whoami(t, alice));
   const canonical = ticketRequestFingerprintInput({ ...create, actor: { role: "customer", customerId: actor.customerId! }, projectId: seed.projects[0].id });
   const expected = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   expect(receipt).toMatchObject({ operation: "ticket.create", digestVersion: 1, outcome: "committed", ticketId: first.ticket._id, version: 0 });
   expect(receipt.inputDigest).toBe(Array.from(new Uint8Array(expected), b => b.toString(16).padStart(2, "0")).join(""));
   expect(JSON.stringify(receipt)).not.toMatch(/Original|sessionId|token|title|description/);
   await t.mutation(api.tickets.editTicket, { token: alice, id: first.ticket._id, title: "Edited", description: "Changed", expectedVersion: 0 });
-  await t.run(ctx => ctx.db.insert("sessions", { token: "new-alice-session", role: "customer", customerId: actor.customerId!, createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
+  const newAliceSession = await t.mutation(fixtures.session, { customerId: actor.customerId! });
   const before = await snapshot();
-  const replay = await t.mutation(api.tickets.createTextTicket, { ...create, token: "new-alice-session", title: "Original Ticket", description: "Original description" });
+  const replay = await t.mutation(api.tickets.createTextTicket, { ...create, token: newAliceSession, title: "Original Ticket", description: "Original description" });
   expect(replay).toMatchObject({ created: false, ticket: { _id: first.ticket._id, title: "Edited", version: 1 } });
   expect(await snapshot()).toEqual(before);
   expect(before.receipts.find(r => r._id === receipt._id)).toEqual(receipt);
@@ -161,7 +159,7 @@ test("rejected requests reserve no receipt and corrected input or newly granted 
   await expect(t.mutation(api.tickets.createTextTicket, { ...create, title: " " })).rejects.toThrow("REQUIRED_TICKET");
   await expect(t.mutation(api.tickets.createTextTicket, { ...create, projectKey: "APP" })).rejects.toThrow("PROJECT_NOT_FOUND");
   expect(await snapshot()).toEqual(before);
-  const session = (await t.query(api.auth.currentSession, { token: alice }))!;
+  const session = (await whoami(t, alice));
   await t.run(ctx => ctx.db.insert("projectMembers", { projectId: seed.projects[1].id, customerId: session.customerId!, createdAt: Date.now() }));
   expect(await t.mutation(api.tickets.createTextTicket, { ...create, projectKey: "APP" })).toMatchObject({ created: true, ticket: { ticketNumber: 1, projectKey: "APP" } });
 });
@@ -171,10 +169,10 @@ test("browser create replay checks original annotations and media after editing,
   const input = { ...await mediaInput(), annotations: [{ mediaIndex: 0, kind: "point" as const, x: 0.2, y: 0.3, text: "  Here  " }] };
   const id = await t.mutation(api.tickets.createTicket, input);
   await t.mutation(api.tickets.editTicket, { token: alice, id, title: "Edited later", description: "", expectedVersion: 0 });
-  const session = (await t.query(api.auth.currentSession, { token: alice }))!;
-  await t.run(ctx => ctx.db.insert("sessions", { token: "fresh-browser-session", role: "customer", customerId: session.customerId!, createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
+  const session = (await whoami(t, alice));
+  const freshBrowserSession = await t.mutation(fixtures.session, { customerId: session.customerId! });
   const before = await snapshot();
-  expect(await t.mutation(api.tickets.createTicket, { ...input, token: "fresh-browser-session" })).toBe(id);
+  expect(await t.mutation(api.tickets.createTicket, { ...input, token: freshBrowserSession })).toBe(id);
   for (const changed of [
     { annotations: [{ ...input.annotations[0], text: "Different note" }] },
     { media: [{ ...input.media[0], key: "different-key" }] },
@@ -270,9 +268,9 @@ test("media attachment receipts replay the committed version and event after edi
   expect(results[0]).toEqual(results[1]);
   expect(results[0].version).toBe(1);
   await t.mutation(api.tickets.editTicket, { token: staff, id: input.id, title: "Later edit", description: "", expectedVersion: 1 });
-  await t.run(ctx => ctx.db.insert("sessions", { token: "fresh-staff-session", role: "staff", createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
+  const freshStaffSession = await t.mutation(fixtures.session, { staffId: (await whoami(t, staff)).staffId });
   const before = await snapshot();
-  expect(await t.mutation(api.tickets.attachTicketMedia, { ...input, token: "fresh-staff-session" })).toEqual(results[0]);
+  expect(await t.mutation(api.tickets.attachTicketMedia, { ...input, token: freshStaffSession })).toEqual(results[0]);
   for (const changed of [{ id: seed.tickets[0] }, { media: [{ ...media.media[0], key: "different-key" }] }]) {
     await expect(t.mutation(api.tickets.attachTicketMedia, { ...input, ...changed })).rejects.toThrow("REQUEST_ID_CONFLICT");
   }
@@ -340,8 +338,8 @@ test("purge leaves an unavailable content-free tombstone and never decrements ar
   await t.mutation(api.tickets.attachTicketMedia, attachment);
   await t.mutation(api.tickets.archiveTicket, { token: staff, id, expectedVersion: 1 });
   const before = await snapshot();
-  const staffSession = await t.run(ctx => ctx.db.query("sessions").withIndex("by_token", q => q.eq("token", staff)).unique());
-  const purge = makeFunctionReference<"mutation", { id: Id<"tickets">; sessionId: Id<"sessions"> }>("receiptFixture:purge");
+  const staffSession = await t.run(ctx => ctx.db.query("sessionAdmissions").withIndex("by_auth_session", q => q.eq("authSessionId", staff)).unique());
+  const purge = makeFunctionReference<"mutation", { id: Id<"tickets">; sessionId: Id<"sessionAdmissions"> }>("receiptFixture:purge");
   await t.mutation(purge, { id, sessionId: staffSession!._id });
   const after = await snapshot();
   expect(after.tickets.some(row => row._id === id)).toBe(false);
@@ -356,4 +354,15 @@ test("purge leaves an unavailable content-free tombstone and never decrements ar
   await expect(t.mutation(api.tickets.createTextTicket, { ...input, title: "Different after purge" })).rejects.toMatchObject({ data: { code: "REQUEST_ID_CONFLICT" } });
   await expect(t.mutation(api.tickets.attachTicketMedia, attachment)).rejects.toMatchObject({ data: { code: "TICKET_UNAVAILABLE" } });
   expect(await snapshot()).toEqual(after);
+});
+
+test("customer create retries follow current archived Ticket visibility", async () => {
+  const { t, create, staff } = await fixture();
+  const result = await t.mutation(api.tickets.createTextTicket, create);
+  const id = result.ticket._id;
+  await t.mutation(api.tickets.archiveTicket, { token: staff, id, expectedVersion: result.ticket.version });
+  await expect(t.mutation(api.tickets.createTextTicket, create)).rejects.toThrow("TICKET_UNAVAILABLE");
+  const archived = await t.run(ctx => ctx.db.get(id));
+  await t.mutation(api.tickets.restoreTicket, { token: staff, id, expectedVersion: archived!.version });
+  expect(await t.mutation(api.tickets.createTextTicket, create)).toMatchObject({ created: false, ticket: { _id: id } });
 });

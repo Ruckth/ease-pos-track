@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { identityTest } from "./identity-harness";
 import { afterEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
@@ -9,10 +9,8 @@ afterEach(() => vi.unstubAllEnvs());
 test("active search finds and ranks eligible Tickets before applying the result limit", async () => {
   vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true");
   vi.stubEnv("CONVEX_CLOUD_URL", "http://127.0.0.1:3212");
-  const t = convexTest(schema, modules);
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest(modules);
+  const seed = await t.mutation(internal.seed.install, {});
   const scope = { token: seed.sessions[0], projectId: seed.projects[0].id, lifecycle: "active" as const };
   const search = "lanefixture";
   const row = {

@@ -2,6 +2,7 @@
 // Each stage is labelled, timed and logged (sanitized) under the evidence
 // directory so a bootstrap failure before any page opens is still diagnosable.
 // Run with tsx: it imports the TypeScript evidence helpers.
+import { LOCAL_IDENTITY_PLACEHOLDERS } from "./local-identity-env.mjs";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -75,19 +76,28 @@ try {
   // a backend. Its first push creates a backend with no environment variables,
   // where cleanup is off (only the exact value "true" enables it); the flag is
   // then set and verified before any fixture or browser runs.
+  // The required Google settings get inert local placeholders (Google sign-in
+  // stays unusable locally); a cold push creates the backend first.
+  const identityPlaceholders = async () => {
+    for (const [key, value] of Object.entries(LOCAL_IDENTITY_PLACEHOLDERS)) await stage(`identity-env-${key.toLowerCase().replaceAll("_", "-")}`, ["env", "set", key, value]);
+  };
   if (localDeploymentName()) {
     await stage("cleanup-flag", ["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
+    await identityPlaceholders();
     await stage("schema-push", []);
   } else {
-    await stage("schema-push-cold", []);
+    try { await stage("schema-push-cold", []); }
+    catch { await identityPlaceholders(); await stage("schema-push-cold-retry", []); }
     await stage("cleanup-flag", ["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
   }
   const flag = (await stage("cleanup-flag-verify", ["env", "get", "MEDIA_CLEANUP_ENABLED"], { capture: true })).trim();
   if (flag !== "false") throw new StageError(`MEDIA_CLEANUP_ENABLED must be "false" on the local backend, found "${flag}"`);
-  for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", APP_PASSWORD: "LocalStaff123!", CUSTOMER_PASSWORD_PEPPER: "local-only-fixture-pepper", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) {
+  // Local-only identity: the test provider stands in for Google, and the local
+  // identity sender records codes instead of sending them.
+  for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", IDENTITY_SENDER: "local", IDENTITY_CODE_KEY: "local-only-identity-code-key-0123456789abcdef", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) {
     await stage(`fixture-env-${key.toLowerCase().replaceAll("_", "-")}`, ["env", "set", key, value]);
   }
-  process.env.BROWSER_FIXTURE = JSON.stringify(JSON.parse(await stage("seed", ["run", "seed:run", '{"largeDataset":true}'], { capture: true })));
+  process.env.BROWSER_FIXTURE = JSON.stringify(JSON.parse(await stage("seed", ["run", "seed:run", JSON.stringify({ largeDataset: true })], { capture: true })));
   await stage(`suite-${suite}`, ["dev", "--once", "--typecheck", "disable", "--start", "pnpm exec tsx scripts/browser-tests.ts"]);
   // Convex logs a failed --start command but may itself exit zero.
   let result;
