@@ -1,3 +1,4 @@
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
 import { after, test as nodeTest } from "node:test";
 import type { BrowserContext, Page } from "playwright";
@@ -512,18 +513,20 @@ test("a status check finishing in another Project is shown once on return", asyn
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     const title = `Deferred status ${crypto.randomUUID()}`;
-    await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title, description: "", requestId: crypto.randomUUID() });
+    const { ticket } = await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title, description: "", requestId: crypto.randomUUID() });
+    const number = formatTicketNumber(ticket.ticketNumber, "POS");
     await page.getByPlaceholder(copy("en", "search"), { exact: true }).fill(title);
-    const request = page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket");
-    await page.getByRole("button", { name: /^Acknowledge · POS-/ }).click();
-    await request;
+    await Promise.all([
+      page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket"),
+      page.getByRole("button", { name: `Acknowledge · ${number}`, exact: true }).click(),
+    ]);
     const switcher = page.getByRole("combobox", { name: "Choose Project" });
     await switcher.selectOption("APP");
     const finished = page.waitForEvent("requestfinished", req => req.url().endsWith("/api/query"));
     release();
     await finished;
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    const notice = page.getByText(/POS-\d+ · Latest saved version · New/);
+    const notice = page.getByText(`${number} · Latest saved version · New`, { exact: true });
     assert.equal(await notice.count(), 0);
     await switcher.selectOption("POS");
     await notice.waitFor();
