@@ -1,5 +1,8 @@
 # Ticket verification
 
+See the [browser verification guide](browser-verification.md) for the browser
+CI job, accessibility scans, visual comparisons, and draft exploration.
+
 | Check | Command | Maintainer | Use |
 | --- | --- | --- | --- |
 | Architecture and Convex registration | `pnpm check:arch` | Backend | Included in `pnpm check` |
@@ -24,7 +27,7 @@ The existing 12 guard checks passed, including forbidden imports through aliases
 
 The pins are ESLint 9.39.5, TypeScript ESLint parser 8.73.0 and React Hooks plugin 7.1.1. ESLint checks `rules-of-hooks` and `exhaustive-deps` as errors on application TypeScript. The scope skips declarations and imported component bases in `src/components/ui` and `src/components/reui`. [Config](../eslint.config.js) · [React rules](https://react.dev/reference/eslint-plugin-react-hooks)
 
-The initial run identified camera preview teardown and the composer's StrictMode generation check. Camera cleanup releases the node that received the stream. Composer cleanup compares setup generations through a captured lifetime object and reads its current draft after the replay microtask. The four camera teardown and four draft-preservation workflows passed on both combined Chromium runs. The first run passed all 33 workflows, then the separate Explorer check timed out at the `Unset` filter option. Explorer passed in isolation. The second combined run passed 32 workflows and timed out waiting for the English keyboard pin move to commit at 59%. [Browser workflows](../tests/browser/workflows.test.ts)
+The initial lint run identified camera preview teardown and the composer's StrictMode generation check. Camera cleanup releases the node that received the stream. Composer cleanup compares setup generations through a captured lifetime object and reads its current draft after the replay microtask. The browser suite checks both camera teardown and draft preservation. [Browser workflows](../tests/browser/workflows.test.ts)
 
 Repeat the deliberate lint failures from the repository root. Each input exits 1 and identifies its rule.
 

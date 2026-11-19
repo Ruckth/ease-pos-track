@@ -156,7 +156,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
     let loseResponses = true;
     const requests: Array<{ requestId: string; title: string; description: string; annotations: unknown[] }> = [];
     const { context, page, title, token, errors, uploads } = await open(role, language, async context => {
-      await context.routeWebSocket(/\/sync$/, socket => {
+      await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
         const server = socket.connectToServer();
         const mutations = new Map<number, { udfPath: string; args: Array<{ files?: Array<{ name: string; size: number; type: string }> }> }>();
         socket.onMessage(raw => {
@@ -471,7 +471,7 @@ test("a status check finishing in another Project is shown once on return", asyn
   const held = new Promise<void>(resolve => { release = resolve; });
   let writes = 0;
   const { page, context, token } = await open("staff", "en", async context => {
-    await context.routeWebSocket(/\/sync$/, socket => {
+    await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
       const server = socket.connectToServer();
       socket.onMessage(raw => {
         const message = JSON.parse(String(raw));

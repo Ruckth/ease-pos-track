@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { redact, sanitize, slug, verifyPublic } from "../scripts/browser-evidence";
+import { resultDirectory } from "../scripts/browser-result-paths";
 
 test("sanitize redacts fixture secrets, session tokens, query strings and key/value secrets", () => {
   const token = "a".repeat(48);
@@ -37,8 +38,18 @@ test("verifyPublic accepts only allowlisted, sanitized files", () => {
     writeFileSync(path.join(dir, "trace.zip"), "zip");
     writeFileSync(path.join(dir, "logs", "leak.log"), "password=LocalStaff123!\n");
     writeFileSync(path.join(dir, "screenshots", "fake.png"), "not a png");
-    assert.deepEqual(verifyPublic(dir).problems.sort(), ["not a PNG: screenshots/fake.png", "not allowlisted: trace.zip", "unsanitized content: logs/leak.log"]);
+    symlinkSync(path.join(dir, "logs", "runner.log"), path.join(dir, "logs", "linked.log"));
+    assert.deepEqual(verifyPublic(dir).problems.sort(), [
+      "not a PNG: screenshots/fake.png", "not a regular file: logs/linked.log",
+      "not allowlisted: trace.zip", "unsanitized content: logs/leak.log",
+    ]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("browser evidence replaces only directories within test-results", () => {
+  assert.throws(() => resultDirectory("."), /subdirectory of test-results/);
+  assert.throws(() => resultDirectory("test-results"), /subdirectory of test-results/);
+  assert.equal(resultDirectory("test-results/browser"), path.resolve("test-results/browser"));
 });
 
 test("slug keeps evidence file names inside the allowlist", () => {

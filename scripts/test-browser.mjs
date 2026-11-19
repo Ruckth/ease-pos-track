@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { localDeploymentName } from "./dev-reset-target.mjs";
-import { EVIDENCE_DIR, log, reset, sanitize, updateManifest } from "./browser-evidence.ts";
+import { EVIDENCE_DIR, log, readManifest, reset, sanitize, updateManifest } from "./browser-evidence.ts";
 
 const SUITES = ["workflows", "explore"];
 const argv = process.argv.slice(2);
@@ -22,10 +22,17 @@ Exploration: EXPLORE_SEEDS, EXPLORE_ACTIONS, EXPLORE_BUDGET_MS, EXPLORE_REPLAY=<
   process.exit(0);
 }
 const grepIndex = argv.indexOf("--grep");
-if (grepIndex >= 0) process.env.BROWSER_GREP = argv[grepIndex + 1];
+if (grepIndex >= 0) {
+  const pattern = argv[grepIndex + 1];
+  if (suite !== "workflows" || !pattern || pattern.startsWith("--")) {
+    console.error("--grep requires a test name pattern and the workflows suite.");
+    process.exit(2);
+  }
+  process.env.BROWSER_GREP = pattern;
+} else delete process.env.BROWSER_GREP;
 // A replayed sequence usually lives in the evidence directory that is reset below.
 const replayCopy = process.env.EXPLORE_REPLAY ? readFileSync(process.env.EXPLORE_REPLAY, "utf8") : undefined;
-if (!process.env.BROWSER_EVIDENCE_KEEP) reset();
+reset();
 process.env.BROWSER_EVIDENCE_DIR = EVIDENCE_DIR;
 process.env.BROWSER_SUITE = suite;
 // Provider credentials never reach browser children, whatever the caller's shell holds.
@@ -46,9 +53,9 @@ async function stage(name, args, { capture = false } = {}) {
       pending += chunk;
       const lines = pending.split("\n");
       pending = lines.pop();
-      for (const line of lines) { sink.write(line + "\n"); log("runner", line + "\n"); }
+      for (const line of lines) { sink.write(sanitize(line) + "\n"); log("runner", line + "\n"); }
     });
-    stream.on("end", () => { if (pending) { sink.write(pending + "\n"); log("runner", pending + "\n"); } });
+    stream.on("end", () => { if (pending) { sink.write(sanitize(pending) + "\n"); log("runner", pending + "\n"); } });
   };
   tee(child.stdout, process.stdout, capture);
   tee(child.stderr, process.stderr, false);
@@ -86,6 +93,9 @@ try {
   let result;
   try { result = JSON.parse(readFileSync(process.env.BROWSER_RESULT_FILE, "utf8")); }
   catch { throw new StageError(`suite-${suite} ended without a result file`); }
+  if (grepIndex >= 0 && result.exitCode === 0 && readManifest().tests.length === 0) {
+    throw new StageError("No browser checks matched --grep");
+  }
   // The --start stage above reports Convex's status; record the suite's own.
   updateManifest(manifest => { manifest.stages.push({ name: `suite-${suite}-result`, exitCode: result.exitCode, durationMs: 0 }); });
   process.exitCode = result.exitCode;

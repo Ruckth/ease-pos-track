@@ -4,11 +4,12 @@
 // storage values and are written only under `local/`, which CI never uploads.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Browser, BrowserContext, BrowserContextOptions } from "playwright";
+import { resultDirectory } from "./browser-result-paths";
 
-export const EVIDENCE_DIR = path.resolve(process.env.BROWSER_EVIDENCE_DIR ?? "test-results/browser");
+export const EVIDENCE_DIR = resultDirectory(process.env.BROWSER_EVIDENCE_DIR ?? "test-results/browser");
 /** Files allowed in the uploadable tree. Anything else fails verification. */
 export const PUBLIC_FILES = [/^manifest\.json$/, /^logs\/[a-z0-9-]+\.log$/, /^screenshots\/[a-z0-9-]+\.png$/, /^explore\/[a-z0-9-]+\.json$/];
 // Local-only fixture values from scripts/test-browser.mjs plus provider names.
@@ -67,6 +68,9 @@ const traceEnabled = () => !["0", "off", "false"].includes(process.env.BROWSER_T
 type Scope = { suite: string; test: string; contexts: BrowserContext[]; closers: Map<BrowserContext, () => Promise<void>> };
 const scopes = new AsyncLocalStorage<Scope>();
 const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])$/;
+function recordBlockedHost(host: string) {
+  updateManifest(manifest => { if (!manifest.blockedHosts.includes(host)) manifest.blockedHosts.push(host); });
+}
 
 /**
  * Creates a context that blocks non-loopback traffic, records a trace when
@@ -74,11 +78,14 @@ const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])$/;
  * failing test's pages still exist when evidence is taken.
  */
 export async function newContext(browser: Browser, options?: BrowserContextOptions) {
-  const context = await browser.newContext(options);
+  const context = await browser.newContext({ ...options, serviceWorkers: "block" });
   await context.route(url => !LOOPBACK.test(url.hostname) && !["data:", "blob:"].includes(url.protocol), async route => {
-    const host = new URL(route.request().url()).hostname;
-    updateManifest(manifest => { if (!manifest.blockedHosts.includes(host)) manifest.blockedHosts.push(host); });
+    recordBlockedHost(new URL(route.request().url()).hostname);
     await route.abort("blockedbyclient");
+  });
+  await context.routeWebSocket(url => !LOOPBACK.test(url.hostname), async socket => {
+    recordBlockedHost(new URL(socket.url()).hostname);
+    await socket.close();
   });
   if (traceEnabled()) await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
   const scope = scopes.getStore();
@@ -94,15 +101,16 @@ export async function newContext(browser: Browser, options?: BrowserContextOptio
 export async function capture(suite: string, test: string, run: () => Promise<void>) {
   const scope: Scope = { suite, test, contexts: [], closers: new Map() };
   const started = Date.now();
+  let failed = false;
   let failure: unknown;
-  try { await scopes.run(scope, run); } catch (error) { failure = error; }
-  const entry: Entry = { suite, test, status: failure ? "failed" : "passed", durationMs: Date.now() - started, screenshots: [], traces: 0 };
+  try { await scopes.run(scope, run); } catch (error) { failed = true; failure = error; }
+  const entry: Entry = { suite, test, status: failed ? "failed" : "passed", durationMs: Date.now() - started, screenshots: [], traces: 0 };
   // Evidence capture must never replace the original failure.
   try {
     const name = slug(`${suite}-${test}`);
     for (let index = 0; index < scope.contexts.length; index++) {
       const context = scope.contexts[index];
-      if (failure) for (let pageIndex = 0; pageIndex < context.pages().length; pageIndex++) {
+      if (failed) for (let pageIndex = 0; pageIndex < context.pages().length; pageIndex++) {
         const page = context.pages()[pageIndex];
         if (page.isClosed()) continue;
         const file = `screenshots/${name}-${index}-${pageIndex}.png`;
@@ -112,7 +120,7 @@ export async function capture(suite: string, test: string, run: () => Promise<vo
         entry.locale ??= await page.evaluate(() => localStorage.getItem("ease-pos-tracking-language") ?? navigator.language).catch(() => undefined);
       }
       if (traceEnabled()) {
-        const trace = failure ? path.join(EVIDENCE_DIR, "local", "traces", `${name}-${index}.zip`) : undefined;
+        const trace = failed ? path.join(EVIDENCE_DIR, "local", "traces", `${name}-${index}.zip`) : undefined;
         await context.tracing.stop(trace ? { path: trace } : undefined).then(() => { if (trace) entry.traces++; }, () => undefined);
       }
     }
@@ -120,12 +128,17 @@ export async function capture(suite: string, test: string, run: () => Promise<vo
   finally {
     for (const context of scope.contexts) await (scope.closers.get(context) ?? (() => context.close()))().catch(() => undefined);
   }
-  if (failure) {
-    entry.error = sanitize(failure instanceof Error ? `${failure.name}: ${failure.message}` : String(failure)).slice(0, 4000);
-    log(`${suite}-failures`, `## ${test}\n${entry.error}\n${sanitize(failure instanceof Error ? failure.stack ?? "" : "")}\n\n`);
+  try {
+    if (failed) {
+      entry.error = sanitize(failure instanceof Error ? `${failure.name}: ${failure.message}` : String(failure)).slice(0, 4000);
+      log(`${suite}-failures`, `## ${test}\n${entry.error}\n${sanitize(failure instanceof Error ? failure.stack ?? "" : "")}\n\n`);
+    }
+    updateManifest(manifest => { manifest.tests.push(entry); });
+  } catch (error) {
+    if (!failed) throw error;
+    console.error("Evidence write failed:", sanitize(String(error)));
   }
-  updateManifest(manifest => { manifest.tests.push(entry); });
-  if (failure) throw failure;
+  if (failed) throw failure;
 }
 
 export function recordChromium(version: string) { updateManifest(manifest => { manifest.chromium = version; }); }
@@ -133,11 +146,19 @@ export function recordChromium(version: string) { updateManifest(manifest => { m
 /** Lists public files and refuses any outside the allowlist or containing secret material. */
 export function verifyPublic(dir = path.join(EVIDENCE_DIR, "public")) {
   const problems: string[] = [];
-  const walk = (current: string): string[] => existsSync(current) ? readdirSync(current).flatMap(name => {
-    const full = path.join(current, name);
-    return statSync(full).isDirectory() ? walk(full) : [path.relative(dir, full).split(path.sep).join("/")];
-  }) : [];
-  const files = walk(dir);
+  const files: string[] = [];
+  function walk(current: string) {
+    const entry = lstatSync(current, { throwIfNoEntry: false });
+    if (!entry) return;
+    if (entry.isDirectory()) {
+      for (const name of readdirSync(current)) walk(path.join(current, name));
+      return;
+    }
+    const file = path.relative(dir, current).split(path.sep).join("/") || ".";
+    if (entry.isFile()) files.push(file);
+    else problems.push(`not a regular file: ${file}`);
+  }
+  walk(dir);
   for (const file of files) {
     if (!PUBLIC_FILES.some(pattern => pattern.test(file))) { problems.push(`not allowlisted: ${file}`); continue; }
     if (file.endsWith(".png")) {

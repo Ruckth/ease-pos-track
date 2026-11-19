@@ -14,17 +14,24 @@ import { createServer } from "node:net";
 import path from "node:path";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
+import { resultDirectory } from "./browser-result-paths";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(name);
 const option = (name: string, fallback: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : fallback; };
 const platform = `${process.platform}-${process.arch}`;
-const outDir = path.resolve(option("--out", "test-results/visual"));
-const baselineDir = path.resolve(option("--baseline", path.join("test-results/visual-baseline", platform)));
+const outDir = resultDirectory(option("--out", "test-results/visual"));
+const baselineDir = resultDirectory(option("--baseline", path.join("test-results/visual-baseline", platform)));
+if (outDir === baselineDir || baselineDir.startsWith(outDir + path.sep) || outDir.startsWith(baselineDir + path.sep)) {
+  throw new Error("Visual output and baseline must use separate directories");
+}
 const repeat = Number(option("--repeat", "1"));
 /** Pixels allowed to differ per state; 0 keeps the pilot honest about stability. */
 const THRESHOLD = Number(option("--max-diff-pixels", "0"));
+if (!Number.isSafeInteger(repeat) || repeat < 1 || !Number.isSafeInteger(THRESHOLD) || THRESHOLD < 0) {
+  throw new Error("Use a positive integer for --repeat and a nonnegative integer for --max-diff-pixels");
+}
 const FROZEN_TIME = new Date("2026-11-01T09:00:00Z");
 
 type State = { name: string; viewport: { width: number; height: number }; act: (page: Page) => Promise<void> };
@@ -72,18 +79,20 @@ function compare(expectedFile: string, actualFile: string, diffFile: string) {
 }
 
 async function main() {
+  rmSync(outDir, { recursive: true, force: true });
   const port = await freePort();
   const vite = spawn("pnpm", ["exec", "vite", "--host", "127.0.0.1", "--port", String(port), "--strictPort"], { stdio: "ignore", detached: true });
-  const browser = await chromium.launch({ headless: true, args: ["--font-render-hinting=none", "--disable-lcd-text", "--force-color-profile=srgb", "--hide-scrollbars"] });
-  rmSync(outDir, { recursive: true, force: true });
+  let browser: Browser | undefined;
   const report: { platform: string; chromium: string; repeat: number; probe: boolean; states: Array<{ name: string; run: number; against: string; pixels: number; size?: string }> } =
-    { platform, chromium: browser.version(), repeat, probe: flag("--probe"), states: [] };
+    { platform, chromium: "", repeat, probe: flag("--probe"), states: [] };
   let failed = false;
   try {
+    browser = await chromium.launch({ headless: true, args: ["--font-render-hinting=none", "--disable-lcd-text", "--force-color-profile=srgb", "--hide-scrollbars"] });
+    report.chromium = browser.version();
     const url = `http://127.0.0.1:${port}/tests/browser/explorer.html`;
     await waitFor(url);
     for (let run = 1; run <= repeat; run++) for (const state of STATES) {
-      const context = await browser.newContext({ viewport: state.viewport, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce" });
+      const context = await browser.newContext({ viewport: state.viewport, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce", serviceWorkers: "block" });
       await context.route(request => !/^(127\.0\.0\.1|localhost)$/.test(request.hostname), route => route.abort());
       await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
       const page = await context.newPage();
@@ -107,8 +116,8 @@ async function main() {
       report.states.push({ name: state.name, run, against: run > 1 ? "run-1" : "baseline", ...result });
     }
   } finally {
-    await browser.close();
-    if (vite.pid) try { process.kill(-vite.pid, "SIGTERM"); } catch { /* Exited. */ }
+    try { await browser?.close(); }
+    finally { if (vite.pid) try { process.kill(-vite.pid, "SIGTERM"); } catch { /* Exited. */ } }
   }
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, "report.json"), JSON.stringify(report, null, 2) + "\n");
@@ -119,7 +128,7 @@ async function main() {
   if (flag("--probe")) {
     // The probe passes only if every compared state reports the deliberate change.
     const compared = report.states.filter(state => state.pixels >= 0 && state.run === 1);
-    failed = compared.length === 0 || compared.some(state => state.pixels <= THRESHOLD);
+    failed = compared.length !== STATES.length || compared.some(state => state.pixels <= THRESHOLD);
     console.log(failed ? "Probe NOT detected: the comparison is insensitive." : `Probe detected in ${compared.length} state(s); diffs in ${path.join(outDir, "diff")}.`);
   } else failed = diffs.length > 0;
   console.log(`Report: ${path.join(outDir, "report.json")}`);

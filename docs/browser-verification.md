@@ -52,7 +52,8 @@ manifest's `blockedHosts` (for example `fixture.invalid`, the fake media URL).
 
 ## Evidence layout
 
-`test-results/browser/` (override with `BROWSER_EVIDENCE_DIR`; ignored by git):
+`test-results/browser/` is ignored by git. Set `BROWSER_EVIDENCE_DIR` to a
+different subdirectory of `test-results` to retain separate runs.
 
 | Path | Content | Uploaded by CI |
 | --- | --- | --- |
@@ -69,12 +70,12 @@ one with the command `pnpm browser:evidence summary` prints:
 
 Sanitizing redacts the local fixture passwords and secrets, any environment
 value whose name contains TOKEN, SECRET, PASSWORD, PEPPER or ADMIN/DEPLOY_KEY,
-every session token issued during the run, 40+ character hex strings, bearer
+session tokens registered by the test harness, hex strings of 44 or more characters, bearer
 values, JWTs, URL query strings and `token=`/`secret:`-style pairs.
 `verify` re-sanitizes every text file and refuses any change, any file outside
-the allowlist and any `.png` without a PNG header.
+the allowlist, symlinks, and any `.png` without a PNG header.
 
-Clean up with `pnpm browser:evidence clean` (or `rm -rf test-results`).
+Clean up with `pnpm browser:evidence clean`.
 
 ## Verification map
 
