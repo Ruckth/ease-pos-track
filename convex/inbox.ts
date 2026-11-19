@@ -1,3 +1,4 @@
+import { internal } from "./_generated/api";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { assertCustomerActor } from "./authz";
@@ -60,7 +61,7 @@ export const markRead = customerMutation({
 /** Bounded, indexed deletion under the installed release's approved inbox period only. */
 export const expire = internalJobMutation({
   name: "inbox:expire", args: {},
-  handler: async ctx => {
+  handler: async (ctx): Promise<number> => {
     const retention = await approvedRetention(ctx);
     if (!retention) return 0;
     const cutoff = Date.now() - retention.inboxDays * DAY;
@@ -70,6 +71,9 @@ export const expire = internalJobMutation({
     ]);
     const expired = rows.flat();
     await Promise.all(expired.map(row => ctx.db.delete(row._id)));
+    if (rows.some(batch => batch.length === BATCH)) {
+      await ctx.scheduler.runAfter(0, internal.inbox.expire, {});
+    }
     return expired.length;
   },
 });

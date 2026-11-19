@@ -1,4 +1,4 @@
-import { components } from "./_generated/api";
+import { components, internal } from "./_generated/api";
 import { internalJobMutation } from "./functions";
 import { approvedRetention } from "./pilot_access";
 
@@ -10,7 +10,7 @@ const BATCH = 64;
 export const expire = internalJobMutation({
   name: "identity_retention:expire",
   args: {},
-  handler: async ctx => {
+  handler: async (ctx): Promise<number> => {
     const retention = await approvedRetention(ctx);
     if (!retention) return 0;
     const now = Date.now();
@@ -26,8 +26,12 @@ export const expire = internalJobMutation({
         await ctx.runMutation(components.authPassword.public.forgetVerification, { key: row.key });
       }
     }
-    const expired = [...challenges, ...staffInvites, ...projectInvites, ...attempts, ...audits];
+    const batches = [challenges, staffInvites, projectInvites, attempts, audits];
+    const expired = batches.flat();
     await Promise.all(expired.map(row => ctx.db.delete(row._id)));
+    if (batches.some(batch => batch.length === BATCH)) {
+      await ctx.scheduler.runAfter(0, internal.identity_retention.expire, {});
+    }
     return expired.length;
   },
 });

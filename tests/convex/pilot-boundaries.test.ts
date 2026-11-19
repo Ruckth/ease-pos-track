@@ -533,6 +533,47 @@ test("inbox and identity expiry need the matching approved release, open traffic
   expect(rows.map(row => row !== null)).toEqual([false, false, true, false, true, false, true, false, false]);
 });
 
+test("full retention batches continue until drained and recheck the operator hold between passes", async () => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  const day = 86_400_000;
+  const start = Date.now();
+  await f.t.run(async ctx => {
+    for (let i = 0; i < 132; i++) {
+      await ctx.db.insert("identityAttempts", { key: `backlog-${i}`, attempts: 1, firstAttemptAt: start, updatedAt: start });
+    }
+    for (let i = 0; i < 514; i++) {
+      await ctx.db.insert("staffInbox", { staffId: String(f.principals.owner._id), projectId: f.projectId,
+        ticketId: f.id, category: "intake", visibilityVersion: 0 });
+    }
+  });
+  vi.setSystemTime(start + 31 * day);
+  const raw = JSON.stringify(releaseEvidence(f.projectId));
+  await configure(raw, firstEpoch);
+  await f.t.mutation(internal.pilot_release.install, { manifest: raw });
+  vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
+  const counts = () => f.t.run(async ctx => ({
+    attempts: (await ctx.db.query("identityAttempts").collect()).filter(row => row.key.startsWith("backlog-")).length,
+    inbox: (await ctx.db.query("staffInbox").collect()).length,
+  }));
+  const runJobs = async () => {
+    await f.t.mutation(internal.identity_retention.expire, {});
+    await f.t.mutation(internal.inbox.expire, {});
+  };
+  await runJobs();
+  const afterFirst = await counts();
+  expect(afterFirst.attempts).toBeGreaterThanOrEqual(68);
+  expect(afterFirst.attempts).toBeLessThan(132);
+  expect(afterFirst.inbox).toBe(258);
+  vi.stubEnv("TICKET_RETENTION_HOLD", "true");
+  await f.t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(await counts()).toEqual(afterFirst);
+  vi.stubEnv("TICKET_RETENTION_HOLD", "false");
+  await runJobs();
+  await f.t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(await counts()).toEqual({ attempts: 0, inbox: 0 });
+});
+
 test("pilot admission ends at the controller's Ticket disposal deadline", async () => {
   const f = await fixture();
   vi.useFakeTimers({ toFake: ["Date"] });
