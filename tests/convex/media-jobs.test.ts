@@ -327,13 +327,19 @@ test("disabling cleanup defers a new job while allowing an admitted provider cal
   });
 
   const running = f.t.action(internal.media_job_actions.run, { jobId: firstId });
-  await started.promise;
-  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "false");
-  await f.t.action(internal.media_job_actions.run, { jobId: nextId });
-  expect(await f.job(nextId)).toMatchObject({ state: "pending", attempt: 0, completedKeys: [] });
+  try {
+    await Promise.race([
+      started.promise,
+      running.then(() => { throw new Error("Cleanup finished before starting the fake provider"); }),
+    ]);
+    vi.stubEnv("MEDIA_CLEANUP_ENABLED", "false");
+    await f.t.action(internal.media_job_actions.run, { jobId: nextId });
+    expect(await f.job(nextId)).toMatchObject({ state: "pending", attempt: 0, completedKeys: [] });
+  } finally {
+    result.resolve({ outcome: "deleted" });
+    await running;
+  }
 
-  result.resolve({ outcome: "deleted" });
-  await running;
   await f.drain();
   expect(await f.job(firstId)).toMatchObject({ state: "completed", attempt: 1, completedKeys: [first.files[0].key] });
   expect(f.storage.deleteFiles).toHaveBeenCalledExactlyOnceWith([first.files[0].key]);
