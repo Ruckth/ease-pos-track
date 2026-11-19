@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { localDeploymentName } from "./dev-reset-target.mjs";
 import { EVIDENCE_DIR, log, reset, sanitize, updateManifest } from "./browser-evidence.ts";
 
 const SUITES = ["workflows", "explore"];
@@ -63,8 +64,17 @@ process.env.BROWSER_RESULT_FILE = path.join(directory, "result.json");
 if (replayCopy) { process.env.EXPLORE_REPLAY = path.join(directory, "replay.json"); writeFileSync(process.env.EXPLORE_REPLAY, replayCopy); }
 try {
   // Cleanup is disabled before the schema push and verified before seeding: fail closed.
-  await stage("cleanup-flag", ["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
-  await stage("schema-push", []);
+  // A cold checkout has no local deployment yet, so env commands cannot start
+  // a backend. Its first push creates a backend with no environment variables,
+  // where cleanup is off (only the exact value "true" enables it); the flag is
+  // then set and verified before any fixture or browser runs.
+  if (localDeploymentName()) {
+    await stage("cleanup-flag", ["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
+    await stage("schema-push", []);
+  } else {
+    await stage("schema-push-cold", []);
+    await stage("cleanup-flag", ["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
+  }
   const flag = (await stage("cleanup-flag-verify", ["env", "get", "MEDIA_CLEANUP_ENABLED"], { capture: true })).trim();
   if (flag !== "false") throw new StageError(`MEDIA_CLEANUP_ENABLED must be "false" on the local backend, found "${flag}"`);
   for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", APP_PASSWORD: "LocalStaff123!", CUSTOMER_PASSWORD_PEPPER: "local-only-fixture-pepper", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) {

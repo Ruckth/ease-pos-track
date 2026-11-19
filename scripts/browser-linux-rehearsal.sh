@@ -13,7 +13,8 @@ context="${1:-${DOCKER_CONTEXT:-default}}"; shift || true
 root="$(git rev-parse --show-toplevel)"
 out="$root/test-results/linux-rehearsal"
 rm -rf "$out"; mkdir -p "$out"
-cid="$(docker --context "$context" create --shm-size=1g -e GITHUB_SHA="$(git rev-parse HEAD)" -e CI=true -e BROWSER_TRACE=off -e MEDIA_CLEANUP_ENABLED=false -e UPLOADTHING_TOKEN= \
+args="$(printf '%q ' "$@")"
+cid="$(docker --context "$context" create --shm-size=1g -e REHEARSAL_ARGS="$args" -e GITHUB_SHA="$(git rev-parse HEAD)" -e CI=true -e BROWSER_TRACE=off -e MEDIA_CLEANUP_ENABLED=false -e UPLOADTHING_TOKEN= \
   -w /work ubuntu:24.04 bash -lc '
 set -euo pipefail
 stage() { echo "::stage $1 $(date -u +%H:%M:%S)"; }
@@ -33,7 +34,7 @@ pnpm install --frozen-lockfile
 stage chromium
 pnpm exec playwright install --with-deps chromium >/dev/null
 stage browser
-status=0; pnpm test:browser '"$*"' || status=$?
+status=0; eval "pnpm test:browser $REHEARSAL_ARGS" || status=$?
 stage evidence
 pnpm browser:evidence summary || true
 pnpm browser:evidence verify || status=$((status ? status : 9))
@@ -42,7 +43,7 @@ exit $status
 ')"
 trap 'docker --context "$context" rm -f "$cid" >/dev/null 2>&1 || true' EXIT
 # BSD and GNU tar spell the path prefix differently.
-if tar --version 2>/dev/null | grep -q GNU; then prefix=(--transform 's,^,work/,'); else prefix=(-s ',^,work/,'); fi
+if tar --version 2>/dev/null | grep -q GNU; then prefix=(--transform 's,^,work/,'); else prefix=(-s ',^,work/,' --no-xattrs --no-mac-metadata); export COPYFILE_DISABLE=1; fi
 (cd "$root" && git ls-files -co --exclude-standard -z | tar --null -T - "${prefix[@]}" -cf -) | docker --context "$context" cp - "$cid:/"
 status=0
 docker --context "$context" start -a "$cid" || status=$?
