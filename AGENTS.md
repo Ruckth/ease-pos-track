@@ -129,5 +129,7 @@ Chromium with fake camera devices using the installed Playwright package. Browse
 tests block provider upload traffic and use fake files/recorded metadata for draft
 lifecycle checks; they never upload or delete provider files. Install Chromium
 with `pnpm exec playwright install chromium` if it is not already available.
-`pnpm test` remains browser-independent. Do not run another local Convex wrapper
+`pnpm test` remains browser-independent. Failure evidence, accessibility
+scans, the visual pilot, seeded draft exploration (`pnpm test:explore`) and the
+advisory browser CI rollout are in [docs/browser-verification.md](docs/browser-verification.md). Do not run another local Convex wrapper
 while the browser check owns its local backend.
