@@ -212,7 +212,7 @@ export function RoutingSettingsForm({ projectId, settings }: {
     event.preventDefault();
     const { policyGeneration, areas, products, symptoms, rules, intake, backup } = draft;
     await run(async () => {
-      const result = await actions.saveConfiguration({ projectId, expectedGeneration: policyGeneration,
+      const result = await actions.saveConfiguration({ projectId, expectedGeneration: policyGeneration, expectedEpoch: draft.epoch,
         areas, products, symptoms, rules, intake, backup: backup ?? "" });
       setDraft(current => ({ ...current, ...result }));
     });

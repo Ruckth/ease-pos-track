@@ -1,3 +1,4 @@
+import { namedIdentityEpoch } from "../pilot_access";
 import { replaceIntakeTeam } from "./staff_inbox";
 import { v } from "convex/values";
 import { evaluateTicketRule, ROUTING_LIMITS } from "../../shared/ticket-routing";
@@ -122,6 +123,7 @@ export const getSettings = queryOperation({
       staffId: staff.staffId, owner: staff.role === "owner", people, directoryOverflow: directory.length > ROUTING_LIMITS.staff,
       availability: { available: own?.available ?? true, awayUntil: own?.awayUntil },
       policy: {
+        epoch: await namedIdentityEpoch(ctx) ?? null,
         policyGeneration: policy.policyGeneration, ruleRevision: policy.ruleRevision,
         areas: policy.areas, products: policy.products, symptoms: policy.symptoms,
         rules: policy.rules, intake: policy.intake, backup: policy.backup,
@@ -132,15 +134,15 @@ export const getSettings = queryOperation({
 
 export const saveConfiguration = mutationOperation({
   args: {
-    projectId: v.id("projects"), expectedGeneration: v.number(),
+    projectId: v.id("projects"), expectedGeneration: v.number(), expectedEpoch: v.optional(v.union(v.string(), v.null())),
     areas: v.array(area), products: v.array(vocabularyEntry), symptoms: v.array(vocabularyEntry),
     rules: v.array(rule), intake: v.array(v.string()), backup: v.string(),
   },
-  handler: async (ctx, { projectId, expectedGeneration, ...configuration }) => {
+  handler: async (ctx, { projectId, expectedGeneration, expectedEpoch, ...configuration }) => {
     const owner = await requireRoutingStaff(ctx, ctx.session, true);
     await requireUsableProject(ctx, ctx.actor, projectId);
     const policy = await currentRoutingPolicy(ctx, projectId);
-    if (expectedGeneration !== policy.policyGeneration) throw new Error("STALE_ROUTING_POLICY");
+    if ((expectedEpoch ?? null) !== (await namedIdentityEpoch(ctx) ?? null) || expectedGeneration !== policy.policyGeneration) throw new Error("STALE_ROUTING_POLICY");
     const next = { ...policy, ...configuration };
     validateLabels(next.areas, ROUTING_LIMITS.areas);
     validateLabels(next.products, ROUTING_LIMITS.vocabulary);

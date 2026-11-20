@@ -45,6 +45,17 @@ test("status updates stay with the owner and old entries cannot return after res
   expect(await page(alice)).toMatchObject([{ status: "done" }]);
 });
 
+test("updates created during suspension stay out of the customer inbox", async () => {
+  const { t, alice, id, change, page } = await setup();
+  const owner = await t.run(async ctx => (await ctx.db.get(id))!.ownerCustomerId!);
+  await t.run(ctx => ctx.db.patch(owner, { status: "disabled" }));
+  await change(0, "acknowledged");
+  await t.run(ctx => ctx.db.patch(owner, { status: "active" }));
+  expect(await page(alice)).toEqual([]);
+  await change(1, "done");
+  expect(await page(alice)).toMatchObject([{ status: "done" }]);
+});
+
 test("inbox preferences apply at the status change and opting in never backfills", async () => {
   const { t, alice, projectId, page, change } = await setup();
   await t.mutation(api.inbox.setPreference, { token: alice, projectId, enabled: false });

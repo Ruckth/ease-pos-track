@@ -95,6 +95,8 @@ the credential version, account binding, status, generation and pilot epoch
 before creating the session and its admission together. Saved-code recovery
 uses a separate proof and can proceed when password attempts are exhausted.
 
+The staff invitation stays in the originating browser tab during the Google redirect. The server accepts only the clean staff login, invitation, and root return paths on approved origins.
+
 The Google callback (`/oauth/google/callback`) and the deployment JWKS are
 component- and platform-owned routes mounted from `convex/convex.config.ts`.
 The legacy `auth:login`, `auth:currentSession`, `auth:logout`,

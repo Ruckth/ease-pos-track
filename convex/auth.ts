@@ -92,6 +92,9 @@ export const startSignInWithGoogle = wrapPackageMutation("google-start", google.
   name: "auth:startSignInWithGoogle",
   args: { redirectTo: v.string() },
   handler: async (ctx, args) => {
+    const target = new URL(args.redirectTo);
+    if (!["/", "/staff/login", "/staff/invite"].includes(target.pathname)
+      || args.redirectTo !== target.origin + target.pathname) throw new Error("INVALID_INPUT");
     const started = await ctx.runInner(args) as { redirect: string; state: string };
     await recordGoogleFlow(ctx, started.state);
     return started;

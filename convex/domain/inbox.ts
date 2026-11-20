@@ -21,8 +21,10 @@ export const inboxEpoch = (ctx: Reader) => namedIdentityEpoch(ctx);
 export async function recordCustomerUpdate(ctx: MutationCtx, ticket: Doc<"tickets">, eventId: Id<"ticketEvents">,
   status: Doc<"tickets">["status"], visibilityVersion: number, restored: boolean) {
   if (!ticket.ownerCustomerId) return;
-  const member = await inboxMembership(ctx, ticket.projectId, ticket.ownerCustomerId);
-  if (!member || member.statusInboxEnabled === false) return;
+  const [owner, member] = await Promise.all([
+    ctx.db.get(ticket.ownerCustomerId), inboxMembership(ctx, ticket.projectId, ticket.ownerCustomerId),
+  ]);
+  if (owner?.status !== "active" || !member || member.statusInboxEnabled === false) return;
   const project = await activeDeploymentProject(ctx, member.projectId);
   await ctx.db.insert("customerInbox", {
     memberId: member._id, customerId: member.customerId, projectId: member.projectId, ticketId: ticket._id,

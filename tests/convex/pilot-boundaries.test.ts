@@ -404,6 +404,14 @@ test("rehearses an older installed snapshot behind a rotated external epoch with
   await expect(f.signIn.customer("alice")).rejects.toThrow("INVALID_CREDENTIALS");
   expect(await f.t.mutation(api.ticket_routing.checkRule, { token: owner, ...ruleInput })).toMatchObject({ status: "stale" });
   expect(await f.t.mutation(api.ticket_routing.reviewSuggestion, { token: owner, suggestionId, decision: "accept" })).toEqual({ status: "stale" });
+  const restoredSettings = await f.t.query(api.ticket_routing.getSettings, { token: owner, projectId: f.projectId });
+  const policy = restoredSettings!.policy;
+  const save = (expectedEpoch: string) => f.t.mutation(api.ticket_routing.saveConfiguration, {
+    token: owner, projectId: f.projectId, expectedGeneration: policy.policyGeneration, expectedEpoch,
+    areas: policy.areas, products: policy.products, symptoms: policy.symptoms, rules: policy.rules,
+    intake: policy.intake, backup: policy.backup ?? "",
+  });
+  await expect(save(firstEpoch)).rejects.toThrow("STALE_ROUTING_POLICY");
   const fresh = await f.t.mutation(api.ticket_routing.checkRule, { token: owner, ...ruleInput, requestId: "after-restore" });
   expect(fresh.status).toBe("pending");
   expect(fresh.id).not.toBe(suggestionId);

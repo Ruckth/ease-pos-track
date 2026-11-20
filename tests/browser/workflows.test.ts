@@ -425,6 +425,35 @@ test("customer sign-in masks a wrong password, then admits the named customer th
   } finally { await context.close(); }
 });
 
+test("staff invitation survives a same-tab Google redirect without entering its return URL", async () => {
+  const context = await newContext(await browsers.get());
+  const secret = "synthetic-invitation-return-fixture";
+  try {
+    let observe!: (url: string) => void;
+    const started = new Promise<string>(resolve => { observe = resolve; });
+    await context.routeWebSocket(url => url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const message = JSON.parse(String(raw));
+        if (message.udfPath === "auth:startSignInWithGoogle") {
+          observe(message.args[0].redirectTo);
+          return;
+        }
+        server.send(raw);
+      });
+      server.onMessage(raw => socket.send(raw));
+    });
+    const page = await context.newPage();
+    await page.goto(baseURL + "/staff/invite#invite=" + secret);
+    const google = page.getByRole("button", { name: /Google/ }).first();
+    const [returnURL] = await Promise.all([started, google.click()]);
+    assert.equal(returnURL, new URL("/staff/invite", baseURL).href);
+    await page.goto(returnURL);
+    await google.waitFor();
+    assert.equal(new URL(page.url()).hash, "");
+  } finally { await context.close(); }
+});
+
 test("staff sign-in offers Google, and the local test provider admits a seeded Owner", async () => {
   const context = await newContext(await browsers.get());
   try {

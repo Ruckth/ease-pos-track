@@ -1,4 +1,4 @@
-import { FormEvent, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import { FormEvent, useEffect, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import {
   useCustomerInvitation, useGoogleSignIn, useInvitationSignUp, useLocalFixtureSignIn, usePasswordSignIn, useRecovery,
   useStaffInvitation,
@@ -100,7 +100,7 @@ function previewUsername(value: string) {
 const LOCAL_FIXTURE_SIGN_IN = import.meta.env.VITE_LOCAL_FIXTURE_SIGN_IN === "true";
 
 /** Staff sign in only with Google; the invitation decides who joins the team. */
-function GoogleSignIn({ redirectTo }: { redirectTo?: string }) {
+function GoogleSignIn({ invitation }: { invitation?: string }) {
   const { t } = useI18n();
   const { signIn, flowError } = useGoogleSignIn();
   const fixture = useLocalFixtureSignIn();
@@ -109,7 +109,11 @@ function GoogleSignIn({ redirectTo }: { redirectTo?: string }) {
   async function start() {
     setBusy(true);
     setError("");
-    try { await signIn(redirectTo ? { redirectTo } : undefined); }
+    try {
+      if (invitation) sessionStorage.setItem(staffInviteStorageKey, invitation);
+      const path = invitation ? APP_PATHS.staffInvite : APP_PATHS.staffLogin;
+      await signIn({ redirectTo: new URL(path, window.location.origin).href });
+    }
     catch (err) { setError(localizeError(err, t)); setBusy(false); }
   }
   async function local(email: string) {
@@ -333,14 +337,17 @@ export function CustomerRecoverPage({ onSignIn }: { onSignIn: () => void }) {
   </AuthLayout>;
 }
 
+const staffInviteStorageKey = "track-ease.staff-invite-return";
+
 /** Sign in with Google, confirm the invited mailbox with a code, then sign in again. */
 export function StaffInvitePage({ pending, onSignOut }: { pending: boolean; onSignOut: () => Promise<void> }) {
   const { t } = useI18n();
-  const [invitation] = useState(readFragmentSecret);
+  const [invitation] = useState(() => readFragmentSecret() || sessionStorage.getItem(staffInviteStorageKey) || "");
+  useEffect(() => { if (pending) sessionStorage.removeItem(staffInviteStorageKey); }, [pending]);
   if (!invitation) return <AuthLayout title={t("staffInviteTitle")}><Alert>{t("inviteNotFound")}</Alert></AuthLayout>;
   if (!pending) {
     return <AuthLayout title={t("staffInviteTitle")} description={t("staffInviteDescription")}>
-      <GoogleSignIn redirectTo={window.location.href} />
+      <GoogleSignIn invitation={invitation} />
     </AuthLayout>;
   }
   return <PendingInvitation invitation={invitation} onSignOut={onSignOut} />;
