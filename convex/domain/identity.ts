@@ -526,7 +526,7 @@ export async function createChallenge(ctx: MutationCtx, admission: Doc<"sessionA
     admissionId: admission._id, purpose, intentDigest: await intentDigest(purpose, intent),
     codeDigest: "", failedAttempts: 0, expiresAt: now + CHALLENGE_TTL_MS, createdAt: now,
   });
-  // Deletion belongs only to the approved retention job (identity_retention:expire).
+  // Deletion belongs only to the approved retention job (pilot_retention:expire).
   await ctx.db.patch(challengeId, { codeDigest: await challengeCodeDigest(key, challengeId, code) });
   return challengeId;
 }

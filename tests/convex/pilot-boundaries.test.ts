@@ -477,7 +477,7 @@ test("inbox and identity expiry need the matching approved release, open traffic
   const f = await fixture();
   const raw = JSON.stringify(releaseEvidence(f.projectId));
   const hour = 3_600_000, day = 24 * hour;
-  const expireAll = async () => [await f.t.mutation(internal.inbox.expire, {}), await f.t.mutation(internal.identity_retention.expire, {})];
+  const expireAll = () => f.t.mutation(internal.pilot_retention.expire, {});
   const start = Date.now();
   const staffRow = (ticketId: Id<"tickets">) => ({ projectId: f.projectId, staffId: String(f.principals.owner._id), ticketId, category: "intake" as const, visibilityVersion: 0 });
   // Creation times only move forward, so age the inbox rows by advancing the clock.
@@ -526,33 +526,32 @@ test("inbox and identity expiry need the matching approved release, open traffic
   expect(await f.t.run(ctx => ctx.db.get(ids.oldChallenge))).not.toBeNull();
 
   // Disposable/legacy deployments have no approval.
-  expect(await expireAll()).toEqual([0, 0]);
+  expect(await expireAll()).toBe(0);
   await configure(raw, firstEpoch);
   await f.t.mutation(internal.pilot_release.install, { manifest: raw });
-  expect(await expireAll()).toEqual([0, 0]);
+  expect(await expireAll()).toBe(0);
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
   for (const hold of ["true", "incident-2026-11"]) {
     vi.stubEnv("TICKET_RETENTION_HOLD", hold);
-    expect(await expireAll()).toEqual([0, 0]);
+    expect(await expireAll()).toBe(0);
   }
   vi.stubEnv("TICKET_RETENTION_HOLD", "false");
   // A release row without approved periods (an earlier build) stays closed.
   const release = (await f.t.run(ctx => ctx.db.query("pilotRelease").unique()))!;
   expect(release.retention).toEqual({ challengeHours: 24, invitationDays: 30, attemptDays: 30, auditDays: 90, inboxDays: 30 });
   await f.t.run(ctx => ctx.db.patch(release._id, { retention: undefined, identityRetentionApproved: true }));
-  expect(await expireAll()).toEqual([0, 0]);
+  expect(await expireAll()).toBe(0);
   await f.t.run(ctx => ctx.db.patch(release._id, { retention: release.retention }));
   // Restore quarantine: outside settings rotated before the reviewed release is installed.
   await configure(raw, nextEpoch, firstEpoch);
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
-  expect(await expireAll()).toEqual([0, 0]);
+  expect(await expireAll()).toBe(0);
   await configure(raw, firstEpoch);
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
 
   expect(await reserveSelector()).toBeNull();
-  const [inboxExpired] = await expireAll();
+  await expireAll();
   expect(await reserveSelector()).toEqual({});
-  expect(inboxExpired).toBe(2);
   const rows = await f.t.run(ctx => Promise.all([inbox.customer, inbox.staff, recentInbox, ids.oldChallenge, ids.expiredChallenge,
     ids.stale, ids.fresh, ids.attempt, ids.invite].map(id => ctx.db.get(id))));
   expect(rows.map(row => row !== null)).toEqual([false, false, true, false, true, false, true, false, false]);
@@ -581,20 +580,17 @@ test("full retention batches continue until drained and recheck the operator hol
     attempts: (await ctx.db.query("identityAttempts").collect()).filter(row => row.key.startsWith("backlog-")).length,
     inbox: (await ctx.db.query("staffInbox").collect()).length,
   }));
-  const runJobs = async () => {
-    await f.t.mutation(internal.identity_retention.expire, {});
-    await f.t.mutation(internal.inbox.expire, {});
-  };
-  await runJobs();
+  const runExpiry = () => f.t.mutation(internal.pilot_retention.expire, {});
+  await runExpiry();
   const afterFirst = await counts();
   expect(afterFirst.attempts).toBeGreaterThanOrEqual(68);
   expect(afterFirst.attempts).toBeLessThan(132);
-  expect(afterFirst.inbox).toBe(258);
+  expect(afterFirst.inbox).toBe(450);
   vi.stubEnv("TICKET_RETENTION_HOLD", "true");
   await f.t.finishAllScheduledFunctions(vi.runAllTimers);
   expect(await counts()).toEqual(afterFirst);
   vi.stubEnv("TICKET_RETENTION_HOLD", "false");
-  await runJobs();
+  await runExpiry();
   await f.t.finishAllScheduledFunctions(vi.runAllTimers);
   expect(await counts()).toEqual({ attempts: 0, inbox: 0 });
 });

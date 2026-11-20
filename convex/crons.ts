@@ -9,8 +9,6 @@ crons.interval("recover media jobs", { minutes: 1 }, internal.retention.recover)
 crons.interval("expire abandoned uploads", { minutes: 5 }, internal.retention.expireIntents);
 crons.interval("claim archived Tickets", { hours: 1 }, internal.retention.claimPurges);
 
-crons.interval("expire inbox updates", { minutes: 5 }, internal.inbox.expire);
-
-crons.interval("expire approved identity records", { hours: 1 }, internal.identity_retention.expire);
+crons.interval("expire approved pilot records", { hours: 1 }, internal.pilot_retention.expire);
 
 export default crons;
