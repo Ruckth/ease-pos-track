@@ -151,7 +151,7 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "auth.ts:recoverWithCode": "publicIdentityMutation:customer-recover",
   "auth.ts:refreshSession": "authPackage:refresh-session",
   "auth.ts:signInLocalFixture": "authMethod:local-fixture",
-  "auth.ts:signInWithPassword": "authMethod:customer-sign-in",
+  "auth.ts:signInWithPassword": "identityAction:customer-sign-in",
   "auth.ts:signOut": "authCore:sign-out",
   "auth.ts:signUpWithInvitation": "authMethod:customer-sign-up",
   "auth.ts:startSignInWithGoogle": "authPackage:google-start",

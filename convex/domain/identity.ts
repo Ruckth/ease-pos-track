@@ -169,30 +169,34 @@ export async function clearAttempts(ctx: MutationCtx, key: string) {
   if (existing) await ctx.db.delete(existing._id);
 }
 
-// The component owns per-selector throttling. This index lets the approved
-// retention job remove the component bucket and its last-activity record together.
-export async function verifyCustomerPassword(ctx: MutationCtx, input: {
-  userId?: string; password: string; rateLimitKey: string;
+/** Spend both limits in a cheap transaction before the caller runs dummy Argon2. */
+export async function reserveUnrecognizedPasswordVerification(ctx: MutationCtx, input: {
+  password: string; rateLimitKey: string;
 }) {
   const unknownBudget = "signin:unrecognized";
-  if (input.userId === undefined) {
-    if (await budgetExhausted(ctx, unknownBudget)) {
-      return { success: false as const, userError: { error: "INVALID_CREDENTIALS" as const } };
-    }
-    await recordAttemptFailure(ctx, unknownBudget, CREDENTIAL_INGRESS_GUARD);
-  }
+  if (await budgetExhausted(ctx, unknownBudget)) return false;
+  await recordAttemptFailure(ctx, unknownBudget, CREDENTIAL_INGRESS_GUARD);
+  const allowed = await ctx.runMutation(components.authPassword.public.reserveDummyVerification, input);
+  await recordPasswordAttempt(ctx, input.rateLimitKey);
+  return allowed;
+}
+
+export async function verifyCustomerPassword(ctx: MutationCtx, input: {
+  userId: string; password: string; rateLimitKey: string;
+}) {
   const result = await ctx.runMutation(components.authPassword.public.verifyPassword, input);
-  if (result.success) {
-    await clearAttempts(ctx, input.rateLimitKey);
-  } else {
-    const previous = await attemptRow(ctx, input.rateLimitKey);
-    const now = Date.now();
-    if (previous) await ctx.db.patch(previous._id, { updatedAt: now, attempts: previous.attempts + 1 });
-    else await ctx.db.insert("identityAttempts", {
-      key: input.rateLimitKey, updatedAt: now, attempts: 1, firstAttemptAt: now,
-    });
-  }
+  if (result.success) await clearAttempts(ctx, input.rateLimitKey);
+  else await recordPasswordAttempt(ctx, input.rateLimitKey);
   return result;
+}
+
+// The component owns selector throttling. This index lets the approved
+// retention job remove the component bucket and its last-activity record together.
+async function recordPasswordAttempt(ctx: MutationCtx, key: string) {
+  const previous = await attemptRow(ctx, key);
+  const now = Date.now();
+  if (previous) await ctx.db.patch(previous._id, { updatedAt: now, attempts: previous.attempts + 1 });
+  else await ctx.db.insert("identityAttempts", { key, updatedAt: now, attempts: 1, firstAttemptAt: now });
 }
 
 // ---------------------------------------------------------------- principals

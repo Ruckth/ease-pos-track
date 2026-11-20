@@ -47,7 +47,7 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
   }));
   quarantine();
 
-  const oldPasswordRpc = () => t.mutation(api.auth.signInWithPassword, { username: "alice", password });
+  const oldPasswordRpc = () => t.action(api.auth.signInWithPassword, { username: "alice", password });
   const oldSavedCodeRpc = () => t.mutation(api.auth.recoverWithCode, { username: "alice", recoveryCode: oldCode.code, newPassword });
   const refresh = (refreshToken: string) => t.mutation(api.auth.refreshSession, { refreshToken });
   const read = (token: string, id = ticket._id) => t.query(api.tickets.getTicket, { token, id });
@@ -126,9 +126,9 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
   expect(await refresh(alice.refreshToken)).toEqual({ kind: "noSession" });
   expect(await refresh(bob.refreshToken)).toEqual({ kind: "noSession" });
   await expect(read(alice.session)).rejects.toThrow("SESSION_EXPIRED");
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "bob", password })).toMatchObject({ status: "error" });
+  expect(await t.action(api.auth.signInWithPassword, { username: "bob", password })).toMatchObject({ status: "error" });
 
-  const signedIn = await t.mutation(api.auth.signInWithPassword, { username: "alice", password: newPassword });
+  const signedIn = await t.action(api.auth.signInWithPassword, { username: "alice", password: newPassword });
   if (signedIn.status !== "complete") throw new Error("fresh sign-in did not complete");
   const token = accessTokenSessionId(signedIn.tokens.accessToken);
   expect(await t.query(api.identity.viewer, { token })).toMatchObject({ customerId: alice.customerId, recoveryEnrollmentRequired: true, needsRecoveryCode: true });

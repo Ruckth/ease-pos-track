@@ -29,9 +29,9 @@ function useSessionResult() {
 }
 
 export function usePasswordSignIn() {
-  const signIn = useMutation(api.auth.signInWithPassword);
+  const signIn = useAction(api.auth.signInWithPassword);
   const store = useSessionResult();
-  return async (username: string, password: string) => await store(await signIn({ username, password }) as TokenResult);
+  return async (username: string, password: string) => await store(await signIn({ username, password }));
 }
 
 export function useInvitationSignUp() {

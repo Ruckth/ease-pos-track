@@ -86,7 +86,7 @@ export async function seedDevelopment(clients: SeedClients, credentials: { custo
     await anonymous.mutation(api.auth.signOut, { refreshToken: customer.refreshToken });
   }
   // Prove the stored credential works, rather than only the enrollment session.
-  const signIn = await anonymous.mutation(api.auth.signInWithPassword, { username: seedCustomers[0], password: credentials.customer });
+  const signIn = await anonymous.action(api.auth.signInWithPassword, { username: seedCustomers[0], password: credentials.customer });
   assert.equal(signIn.status, "complete");
   if (signIn.status === "complete") await anonymous.mutation(api.auth.signOut, { refreshToken: signIn.tokens.refreshToken });
   return { ok: true, checks: ["named Owner session", "invitation enrollment and password sign-in", "Projects and memberships", "six numbered Tickets", "workflow totals", "owner isolation", "reference search", "customer edit/undo", "archive/restore", "session revocation"] };

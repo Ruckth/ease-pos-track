@@ -41,7 +41,7 @@ test("registered sign-in creates explicit roles from named staff identity or dur
   const t = identityTest(modules);
   await t.action(internal.seed.run, {});
   const staff = await t.mutation(api.auth.signInLocalFixture, { email: "owner@local.test" });
-  const customer = await t.mutation(api.auth.signInWithPassword, { username: "Alice", password: "local customer passphrase" });
+  const customer = await t.action(api.auth.signInWithPassword, { username: "Alice", password: "local customer passphrase" });
   expect(staff.status).toBe("complete");
   expect(customer.status).toBe("complete");
   const subject = (bundle: typeof staff) => JSON.parse(atob(bundle.status === "complete" ? bundle.tokens.accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/") : "")).sub as string;
@@ -49,9 +49,9 @@ test("registered sign-in creates explicit roles from named staff identity or dur
   const account = await t.query(api.identity.viewer, { token: subject(customer) });
   expect(account).toMatchObject({ kind: "customer", username: "alice" });
   expect(account?.kind === "customer" && account.customerId).toBeTruthy();
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: "wrong customer passphrase" }))
+  expect(await t.action(api.auth.signInWithPassword, { username: "alice", password: "wrong customer passphrase" }))
     .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "nobody", password: "local customer passphrase" }))
+  expect(await t.action(api.auth.signInWithPassword, { username: "nobody", password: "local customer passphrase" }))
     .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
   await expect(t.mutation(api.auth.signInLocalFixture, { email: "alice@local.test" })).resolves.toMatchObject({ status: "error" });
 }, 30_000);

@@ -55,19 +55,6 @@ function as(ctx: ActionCtx) {
   };
 }
 
-/** Real guarded username/password sign-in on the disposable backend. */
-export const signInAs = internalJobMutation({
-  name: "local_smoke:signInAs",
-  args: { username: v.string(), password: v.string() },
-  handler: async (ctx, args) => {
-    requireLocalFixtures();
-    const result = await registration("auth:signInWithPassword")(ctx, args) as { status: string; tokens?: { accessToken: string } };
-    return result.status === "complete" && result.tokens
-      ? { status: "complete" as const, session: accessTokenSessionId(result.tokens.accessToken) }
-      : { status: "error" as const, session: null };
-  },
-});
-
 /** Stock Google start through the wrapper, then a completion with an unknown ticket. */
 export const googleStartAndInvalidCompletion = internalJobMutation({
   name: "local_smoke:googleStartAndInvalidCompletion",
@@ -149,17 +136,19 @@ export const run = internalJobAction({
       check((await call.query(seeded.sessions[index], api.identity.viewer, {}))?.kind === (index === 0 ? "staff" : "customer"), "fixture session admission and explicit role");
     }
     const staff = seeded.sessions[0];
-    // Real username/password sign-in through the guarded adapter.
+    const attemptSignIn = (username: string, password: string) => ctx.runAction(api.auth.signInWithPassword, { username, password });
     const signIn = async (username: string) => {
-      const result = await ctx.runMutation(internal.local_smoke.signInAs, { username, password: LOCAL_CUSTOMER_PASSWORD });
-      check(result.status === "complete", `${username} password sign-in with admission`);
-      return result.session!;
+      const result = await attemptSignIn(username, LOCAL_CUSTOMER_PASSWORD);
+      if (result.status !== "complete") throw new Error("Local smoke failed: customer password sign-in");
+      return accessTokenSessionId(result.tokens.accessToken);
     };
     const alice = await signIn("alice");
     const bob = await signIn("bob");
     check((await call.query(staff, api.identity.viewer, {}))?.kind === "staff", "staff credential and explicit role");
     check((await call.query(alice, api.identity.viewer, {}))?.kind === "customer", "customer credential and explicit role");
-    check((await ctx.runMutation(internal.local_smoke.signInAs, { username: "alice", password: "wrong customer passphrase" })).status === "error", "wrong password issues no session");
+    check((await attemptSignIn("alice", "wrong customer passphrase")).status === "error", "wrong password issues no session");
+    check((await attemptSignIn(`unused-${crypto.randomUUID().slice(0, 8)}`, LOCAL_CUSTOMER_PASSWORD)).status === "error",
+      "unknown account issues no session");
     // Real OCC contention: the action starts separate concurrent mutation
     // transactions, rather than simulating duplicates in a single mutation.
     const before = await call.query(staff, api.tickets.laneTotals, { projectId: seeded.projects[0].id });

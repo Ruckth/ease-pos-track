@@ -144,8 +144,8 @@ export function publicIdentityMutation(purpose: PublicIdentityWrite) {
   };
 }
 
-/** Delivers a one-time code; the internal mutation it calls checks the live session. */
-type IdentityAction = "send-challenge";
+/** Identity workflows backed by internal mutations that perform the relevant checks. */
+type IdentityAction = "send-challenge" | "customer-sign-in";
 export function identityAction(purpose: IdentityAction) {
   return <A extends PropertyValidators, R>(definition: Definition<ActionCtx, A, R>) => {
     refuseRawToken(definition.name, definition.args);
@@ -206,20 +206,35 @@ async function assertAdmitted(ctx: MutationCtx, result: unknown) {
  * Application sign-in adapters on a method bound to the pinned core. The core
  * helpers run in the caller transaction; success requires admission.
  */
-type AuthMethodPurpose = "google-complete" | "customer-sign-in" | "customer-sign-up"
+type AuthMethodPurpose = "google-complete" | "customer-sign-up"
   | "customer-change-password" | "local-fixture";
+function bindAuthMethod<A extends PropertyValidators, R>(builders: MethodBuilders, definition: Definition<AuthMethodCtx, A, R>) {
+  refuseRawToken(definition.name, definition.args);
+  return builders.authMutation({
+    args: definition.args,
+    handler: (ctx: AuthMethodCtx, args: ObjectType<A>) => guarded(definition.name, async () => {
+      const result = await definition.handler(ctx, args);
+      await assertAdmitted(ctx, result);
+      return result;
+    }),
+  });
+}
+
 export function authMethodMutation(builders: MethodBuilders, purpose: AuthMethodPurpose) {
-  return <A extends PropertyValidators, R>(definition: Definition<AuthMethodCtx, A, R>) => {
-    refuseRawToken(definition.name, definition.args);
-    return tagged(builders.authMutation({
-      args: definition.args,
-      handler: (ctx: AuthMethodCtx, args: ObjectType<A>) => guarded(definition.name, async () => {
-        const result = await definition.handler(ctx, args);
-        await assertAdmitted(ctx, result);
-        return result;
-      }),
-    }), `authMethod:${purpose}`) as RegisteredMutation<"public", ObjectType<A>, Promise<Awaited<R>>>;
-  };
+  return <A extends PropertyValidators, R>(definition: Definition<AuthMethodCtx, A, R>) =>
+    tagged(bindAuthMethod(builders, definition), `authMethod:${purpose}`) as RegisteredMutation<"public", ObjectType<A>, Promise<Awaited<R>>>;
+}
+
+/** The password action calls this mutation to reserve work or admit a session. */
+export function internalPasswordSignInMutation<A extends PropertyValidators, R>(
+  builders: MethodBuilders, definition: Definition<AuthMethodCtx, A, R>,
+) {
+  const { _handler } = bindAuthMethod(builders, definition) as { _handler: (ctx: MutationCtx, args: ObjectType<A>) => Promise<Awaited<R>> };
+  if (typeof _handler !== "function") throw new Error("Password sign-in requires the pinned auth method handler");
+  return tagged(internalMutation({
+    args: v.object(definition.args),
+    handler: _handler,
+  }), "internalPasswordSignInMutation");
 }
 
 /**

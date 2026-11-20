@@ -59,7 +59,7 @@ test("invitation signup commits credential, customer, membership, admission and 
   const issued = await t.mutation(api.identity.createRecoveryCode, { token: alice });
   if (!issued.ok) throw new Error(issued.error);
   await expect(t.query(api.projects.listProjects, { token: alice })).rejects.toThrow("RECOVERY_ENROLLMENT_REQUIRED");
-  const reopened = session(await t.mutation(api.auth.signInWithPassword, { username: "Alice_1", password: PASSWORD }));
+  const reopened = session(await t.action(api.auth.signInWithPassword, { username: "Alice_1", password: PASSWORD }));
   await expect(t.mutation(api.tickets.createTextTicket, {
     token: reopened, projectKey: "POS", requestId: "blocked", title: "Mine", description: "",
   })).rejects.toThrow("RECOVERY_ENROLLMENT_REQUIRED");
@@ -81,7 +81,7 @@ test("invitation signup commits credential, customer, membership, admission and 
   expect(await t.mutation(api.identity.joinWithInvitation, { token: alice, invitation: again })).toMatchObject({ status: "already_member" });
   expect(await t.query(api.identity.previewCustomerInvitation, { invitation: again })).toMatchObject({ status: "ready" });
   // A lost signup response is recovered by signing in with the chosen credentials.
-  expect(session(await t.mutation(api.auth.signInWithPassword, { username: "Alice_1", password: PASSWORD }))).toBeTruthy();
+  expect(session(await t.action(api.auth.signInWithPassword, { username: "Alice_1", password: PASSWORD }))).toBeTruthy();
 });
 
 test("one password policy: NFC, 15–100 code points, no surrounding whitespace, common passwords refused with full rollback", async () => {
@@ -98,7 +98,7 @@ test("one password policy: NFC, 15–100 code points, no surrounding whitespace,
   const decomposed = "cafe\u0301 ไทย 🙂 pass";
   expect([...decomposed.normalize("NFC")].length).toBe(15);
   session(await enroll("unicode", decomposed));
-  session(await t.mutation(api.auth.signInWithPassword, { username: "unicode", password: decomposed.normalize("NFC") }));
+  session(await t.action(api.auth.signInWithPassword, { username: "unicode", password: decomposed.normalize("NFC") }));
   session(await enroll("hundred", "x".repeat(99) + "y"));
 });
 
@@ -108,43 +108,71 @@ test("sign-in gives normalized known and unknown usernames the same verification
   const alice = session(await enroll("alice"));
   session(await enroll("bob"));
   const generic = { status: "error", userError: { error: "INVALID_CREDENTIALS" } };
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "x", password: PASSWORD })).toEqual(generic);
+  expect(await t.action(api.auth.signInWithPassword, { username: "x", password: PASSWORD })).toEqual(generic);
   const verify = vi.spyOn(argon2, "verifyPassword");
   for (let attempt = 0; attempt < 5; attempt++) {
     for (const name of ["alice", "nobody"]) {
       const username = attempt % 2 === 0 ? name : `  ${name.toUpperCase()} `;
-      expect(await t.mutation(api.auth.signInWithPassword, { username, password: "wrong wrong wrong" })).toEqual(generic);
+      expect(await t.action(api.auth.signInWithPassword, { username, password: "wrong wrong wrong" })).toEqual(generic);
     }
   }
   expect(verify).toHaveBeenCalledTimes(10);
   for (const username of [" ALICE ", " NOBODY "]) {
-    expect(await t.mutation(api.auth.signInWithPassword, { username, password: PASSWORD })).toEqual(generic);
+    expect(await t.action(api.auth.signInWithPassword, { username, password: PASSWORD })).toEqual(generic);
   }
   expect(verify).toHaveBeenCalledTimes(10);
-  session(await t.mutation(api.auth.signInWithPassword, { username: "bob", password: PASSWORD }));
+  session(await t.action(api.auth.signInWithPassword, { username: "bob", password: PASSWORD }));
   vi.advanceTimersByTime(61_000);
-  session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
-  session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+  session(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+  session(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
   const { customerId } = await whoami(t, alice);
   await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: customerId!, status: "disabled" });
   vi.advanceTimersByTime(60_000);
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD })).toEqual(generic);
+  expect(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD })).toEqual(generic);
 });
 
-test("the unknown-account ingress budget covers distinct usernames and leaves enrolled customers independent", async () => {
+test("simultaneous unknown selectors spend the last committed slot on one verification", async () => {
   const { t, enroll } = await world();
   session(await enroll("alice"));
   const now = Date.now();
-  await t.run(ctx => ctx.db.insert("identityAttempts", {
+  const budgetId = await t.run(ctx => ctx.db.insert("identityAttempts", {
     key: "signin:unrecognized", attempts: 199, firstAttemptAt: now, updatedAt: now,
   }));
-  const verify = vi.spyOn(argon2, "verifyPassword");
-  for (const username of ["firstunused", "secondunused"]) {
-    expect(await t.mutation(api.auth.signInWithPassword, { username, password: PASSWORD }))
-      .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
+  let begin!: () => void;
+  const verifying = new Promise<void>(resolve => { begin = resolve; });
+  let release!: () => void;
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  const verifyPassword = argon2.verifyPassword;
+  const verify = vi.spyOn(argon2, "verifyPassword").mockImplementationOnce(async (...args) => {
+    begin();
+    await resume;
+    return await verifyPassword(...args);
+  });
+  const signIn = (username: string) => t.action(api.auth.signInWithPassword, { username, password: PASSWORD });
+  const generic = { status: "error", userError: { error: "INVALID_CREDENTIALS" } };
+  const concurrent = [signIn("firstunused"), signIn("secondunused")];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("The second attempt must finish while verification is pending")), 5_000);
+    });
+    const [, denied] = await Promise.race([
+      Promise.all([verifying, Promise.race(concurrent)]),
+      timeout,
+    ]);
+    expect(denied).toEqual(generic);
+    expect(await t.run(ctx => ctx.db.get(budgetId))).toMatchObject({ attempts: 200, lockedUntil: expect.any(Number) });
+    expect(verify).toHaveBeenCalledTimes(1);
+  } finally {
+    clearTimeout(timer);
+    release();
+    await Promise.allSettled(concurrent);
   }
+  expect(await Promise.all(concurrent)).toEqual([generic, generic]);
+  expect(await signIn("thirdunused")).toEqual(generic);
   expect(verify).toHaveBeenCalledTimes(1);
-  session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+  session(await signIn("alice"));
+  expect(verify).toHaveBeenCalledTimes(2);
 });
 
 test("live disable denies the open session and its refresh; re-enable needs a fresh sign-in", async () => {
@@ -162,7 +190,7 @@ test("live disable denies the open session and its refresh; re-enable needs a fr
   expect(await sessionCount(t, userId)).toBe(0);
   await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: customerId!, status: "active" });
   await expect(t.query(api.tickets.getTicket, { token: alice, id: created.ticket._id })).rejects.toThrow("SESSION_EXPIRED");
-  const fresh = session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+  const fresh = session(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
   expect(await t.query(api.tickets.getTicket, { token: fresh, id: created.ticket._id })).toMatchObject({ _id: created.ticket._id });
   // Staff remain global; a stale generation admission is refused even if its core session lived.
   await t.run(async ctx => {
@@ -209,8 +237,8 @@ test("saved-code recovery resets once, revokes every session and keeps ownership
   expect(outcomes.filter(Boolean)).toHaveLength(1);
   await expect(t.query(api.tickets.getTicket, { token: alice, id: ticket.ticket._id })).rejects.toThrow("SESSION_EXPIRED");
   const winner = outcomes[0] ? "a brand new passphrase" : "another new passphrase";
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD })).toMatchObject({ status: "error" });
-  const fresh = session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: winner }));
+  expect(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD })).toMatchObject({ status: "error" });
+  const fresh = session(await t.action(api.auth.signInWithPassword, { username: "alice", password: winner }));
   expect(await t.query(api.identity.viewer, { token: fresh })).toMatchObject({ needsRecoveryCode: true, recoveryEnrollmentRequired: true });
   await expect(t.query(api.tickets.getTicket, { token: fresh, id: ticket.ticket._id })).rejects.toThrow("RECOVERY_ENROLLMENT_REQUIRED");
   // The consumed code never works again.
@@ -251,9 +279,9 @@ test("saved-code proof can recover a customer through exhausted recovery and sig
     expect(row).toMatchObject({ attempts: 10, lockedUntil: row.updatedAt + 60 * 60 * 1000 });
   }
   for (let attempt = 0; attempt < 5; attempt++) {
-    await t.mutation(api.auth.signInWithPassword, { username: "alice", password: "incorrect customer password" });
+    await t.action(api.auth.signInWithPassword, { username: "alice", password: "incorrect customer password" });
   }
-  expect(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }))
+  expect(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }))
     .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
   const ingress = (await attemptRow("recover:invalid-rpc"))!;
   const lockedUntil = Date.now() + 60_000;
@@ -261,12 +289,12 @@ test("saved-code proof can recover a customer through exhausted recovery and sig
     await ctx.db.patch(ingress._id, { lockedUntil });
   });
   for (const username of ["alice", "bob", "nobody", "unknown"]) expect(await recover(username, "invalid")).toEqual(rejected);
-  session(await t.mutation(api.auth.signInWithPassword, { username: "bob", password: PASSWORD }));
+  session(await t.action(api.auth.signInWithPassword, { username: "bob", password: PASSWORD }));
   expect(await recover(" ALICE ", issued.code)).toEqual({ success: true });
   expect(await attemptRow(aliceKey)).toBeNull();
   expect(await attemptRow(unknownKey)).toMatchObject({ attempts: 10 });
   expect(await attemptRow("recover:invalid-rpc")).toMatchObject({ lockedUntil });
-  session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: newPassword }));
+  session(await t.action(api.auth.signInWithPassword, { username: "alice", password: newPassword }));
   expect(await recover("bob", bob.code)).toEqual({ success: true });
 });
 
@@ -274,7 +302,7 @@ test("password change verifies the old password and revokes only other sessions"
   const { t, enroll } = await world();
   const first = session(await enroll("alice"));
   await saveRecoveryCode(t, first);
-  const second = session(await t.mutation(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+  const second = session(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
   expect(await t.mutation(api.auth.changePassword, { token: second, currentPassword: "wrong wrong wrong", newPassword: "a brand new passphrase" }))
     .toEqual({ success: false, error: "INVALID_CREDENTIALS" });
   expect(await t.mutation(api.auth.changePassword, { token: second, currentPassword: PASSWORD, newPassword: "a brand new passphrase" })).toEqual({ success: true });

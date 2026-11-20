@@ -78,7 +78,7 @@ relabelled export. Purpose-labelled entry points:
 | `auth:refreshSession`, `auth:signOut`, `auth:isAuthenticated` | pinned core, by purpose |
 | `auth:startSignInWithGoogle` | stock start + one-use flow record |
 | `auth:completeSignInWithGoogle` | stock ticket redemption + flow check + admission |
-| `auth:signInWithPassword` | one invalid-credentials response, isolated throttles, admission |
+| `auth:signInWithPassword` | action with one invalid-credentials response and transactional session admission |
 | `auth:signUpWithInvitation` | invite, username, password, customer, membership and recovery-enrollment admission in one mutation |
 | `auth:changePassword` | live customer session + current password; revokes other sessions |
 | `auth:recoverWithCode` | saved code; resets password, consumes code, advances generation, revokes all sessions |
@@ -87,6 +87,12 @@ relabelled export. Purpose-labelled entry points:
 | `identity:previewStaffInvitation`, `identity:acceptStaffInvitation` | pending Google identity only |
 | `identity:sendChallengeCode` | identity sender; the internal mutation checks the live session and caps issuance across purposes and sessions for the principal and mailbox |
 | `uploads:recordUploadedFile` | staff JWT **or** callback credential; mixed credentials refused |
+
+For an unrecognized account, the sign-in action waits for a private mutation to
+commit the shared attempt budget and the normalized selector's throttle before
+running dummy Argon2. Recognized accounts verify and admit sessions in the same
+mutation, using their selector's throttle. Valid saved-code recovery has its own
+proof and can proceed independently of either password throttle.
 
 The Google callback (`/oauth/google/callback`) and the deployment JWKS are
 component- and platform-owned routes mounted from `convex/convex.config.ts`.

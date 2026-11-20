@@ -34,7 +34,7 @@ async function fixture() {
   const login = async () => {
     // The pinned password component allows five verifications per minute per account.
     vi.setSystemTime(Date.now() + 60_000);
-    const result = await t.mutation(api.auth.signInWithPassword, { username: USERNAME, password: PASSWORD });
+    const result = await t.action(api.auth.signInWithPassword, { username: USERNAME, password: PASSWORD });
     if (result.status !== "complete") throw new Error("SIGN_IN_FAILED");
     refreshToken = result.tokens.refreshToken;
     return { token: accessTokenSessionId(result.tokens.accessToken) };

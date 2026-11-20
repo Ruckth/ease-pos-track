@@ -4,7 +4,7 @@ import { api, components, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { requireCurrentPilotEpoch, requirePilotAdmission, activeDeploymentProject } from "../../convex/pilot_access";
 import { customerInboxReader, inboxMembership } from "../../convex/domain/inbox";
-import { createChallenge, customerCredentialSelector, verifyCustomerPassword } from "../../convex/domain/identity";
+import { createChallenge, customerCredentialSelector } from "../../convex/domain/identity";
 import { ARCHIVE_RETENTION_MS, createMediaJob } from "../../convex/domain/media_jobs";
 import { accessTokenSessionId } from "../../convex/identity_rules";
 import { LOCAL_CUSTOMER_PASSWORD } from "../../convex/local_identity";
@@ -85,7 +85,7 @@ async function fixture() {
   let flows = 0;
   const signIn = {
     customer: async (username: "alice" | "bob") => {
-      const result = await t.mutation(api.auth.signInWithPassword, { username, password: LOCAL_CUSTOMER_PASSWORD });
+      const result = await t.action(api.auth.signInWithPassword, { username, password: LOCAL_CUSTOMER_PASSWORD });
       if (result.status !== "complete") throw new Error(`sign-in failed: ${JSON.stringify(result)}`);
       return accessTokenSessionId(result.tokens.accessToken);
     },
@@ -121,7 +121,7 @@ test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cr
   }
   // Closed traffic refuses every named entry point before any credential work.
   await expect(f.t.query(api.tickets.getTicket, { token: f.customer, id: f.id })).rejects.toThrow("PILOT_UNAVAILABLE");
-  await expect(f.t.mutation(api.auth.signInWithPassword, { username: "alice", password: LOCAL_CUSTOMER_PASSWORD }))
+  await expect(f.t.action(api.auth.signInWithPassword, { username: "alice", password: LOCAL_CUSTOMER_PASSWORD }))
     .rejects.toThrow("PILOT_UNAVAILABLE");
   expect(await f.t.query(api.identity.viewer, { token: f.staff })).toBeNull();
   const callback = { intentId: f.handle.intentId, secret: f.handle.secret, file: { ...file, key: "synthetic-late" } };
@@ -488,13 +488,13 @@ test("inbox and identity expiry need the matching approved release, open traffic
   });
   const selector = await customerCredentialSelector("retentionfixture");
   const input = { rateLimitKey: selector, password: "fixture password guess" };
-  for (let i = 0; i < 5; i++) await f.t.run(ctx => verifyCustomerPassword(ctx, input));
+  for (let i = 0; i < 5; i++) await f.t.action(api.auth.signInWithPassword, { username: "retentionfixture", password: input.password });
   // Freeze the component bucket at exhaustion and age only its last-activity index.
   await f.t.run(async ctx => {
     const marker = await ctx.db.query("identityAttempts").withIndex("by_key", q => q.eq("key", selector)).unique();
     await ctx.db.patch(marker!._id, { updatedAt: Date.now() - 31 * day });
   });
-  const componentVerification = () => f.t.run(ctx => ctx.runMutation(components.authPassword.public.verifyPassword, input));
+  const reserveSelector = () => f.t.run(ctx => ctx.runMutation(components.authPassword.public.reserveDummyVerification, input));
   // Issuing a new challenge never deletes earlier records outside the approved job.
   vi.stubEnv("IDENTITY_CODE_KEY", "pilot-only-identity-code-key-0123456789abcdef");
   await f.t.run(async ctx => createChallenge(ctx, (await ctx.db.get(ids.admission))!, "staff-disable", "synthetic", "123456"));
@@ -524,9 +524,9 @@ test("inbox and identity expiry need the matching approved release, open traffic
   await configure(raw, firstEpoch);
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
 
-  expect(await componentVerification()).toMatchObject({ userError: { error: "RATE_LIMITED" } });
+  expect(await reserveSelector()).toBe(false);
   const [inboxExpired] = await expireAll();
-  expect(await componentVerification()).toMatchObject({ userError: { error: "INVALID_CREDENTIALS" } });
+  expect(await reserveSelector()).toBe(true);
   expect(inboxExpired).toBe(2);
   const rows = await f.t.run(ctx => Promise.all([inbox.customer, inbox.staff, recentInbox, ids.oldChallenge, ids.expiredChallenge,
     ids.stale, ids.fresh, ids.attempt, ids.invite].map(id => ctx.db.get(id))));

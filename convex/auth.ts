@@ -10,12 +10,16 @@ import { setupGoogle } from "@convex-dev/auth/methods/google/server";
 import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { authCoreEndpoint, authMethodMutation, publicIdentityMutation, wrapPackageMutation, type MethodBuilders } from "./functions";
+import {
+  authCoreEndpoint, authMethodMutation, identityAction, internalPasswordSignInMutation, publicIdentityMutation,
+  wrapPackageMutation, type AuthMethodCtx, type MethodBuilders,
+} from "./functions";
 import { accessTokenSessionId, checkNewPassword, normalizeDisplayName, normalizeUsername, PASSWORD_MIN_CODE_POINTS } from "./identity_rules";
 import {
   admitGoogleCompletion, admitSession, audit, budgetExhausted, clearAttempts, INVITE_GUARD, recordAttemptFailure,
   recordGoogleFlow, recoveryCodeMatches, redeemProjectInvitation, requireRedeemableProjectInvitation, revokeUserSessions,
-  verifyCustomerPassword, customerCredentialSelector, recoveryAttemptKey, replaceCustomerPassword, RECOVERY_GUARD, CREDENTIAL_INGRESS_GUARD,
+  verifyCustomerPassword, reserveUnrecognizedPasswordVerification, customerCredentialSelector, recoveryAttemptKey,
+  replaceCustomerPassword, RECOVERY_GUARD, CREDENTIAL_INGRESS_GUARD,
 } from "./domain/identity";
 import { requireActor } from "./session_auth";
 import { requireLocalFixtures } from "./local_fixtures";
@@ -108,9 +112,28 @@ async function userIdForUsername(ctx: Pick<MutationCtx, "runQuery">, username: s
 }
 
 /** Generic failure for unknown, disabled and wrong-password attempts. */
-export const signInWithPassword = authMethodMutation(password, "customer-sign-in")({
+const passwordSignInArgs = { username: v.string(), password: v.string() };
+type PasswordSignInResult = ReturnType<typeof failure> | {
+  status: "complete";
+  tokens: Awaited<ReturnType<AuthMethodCtx["convexAuth"]["completeSignIn"]>>;
+};
+
+export const signInWithPassword = identityAction("customer-sign-in")({
   name: "auth:signInWithPassword",
-  args: { username: v.string(), password: v.string() },
+  args: passwordSignInArgs,
+  handler: async (ctx, args): Promise<PasswordSignInResult> => {
+    const result = await ctx.runMutation(internal.auth.attemptPasswordSignIn, args);
+    if (result.status !== "dummy") return result;
+    // Only the committed reservation authorizes expensive work. No submitted
+    // credentials are needed in the dummy action.
+    await ctx.runAction(components.authPassword.public.runDummyVerification, {});
+    return failure("INVALID_CREDENTIALS");
+  },
+});
+
+export const attemptPasswordSignIn = internalPasswordSignInMutation(password, {
+  name: "auth:attemptPasswordSignIn",
+  args: passwordSignInArgs,
   handler: async (ctx, args) => {
     const pilot = await identityRecoveryAdmission(ctx);
     let username: string;
@@ -120,11 +143,15 @@ export const signInWithPassword = authMethodMutation(password, "customer-sign-in
       ctx.db.query("customers").withIndex("by_username", (q) => q.eq("username", username)).unique(),
       customerCredentialSelector(username),
     ]);
-    const eligible = customer?.userId === userId && customer?.status === "active" && customerCredentialIsCurrent(customer, pilot);
+    const password = args.password.normalize("NFC");
+    if (!customer || customer.userId !== userId || customer.status !== "active" || !customerCredentialIsCurrent(customer, pilot)) {
+      return await reserveUnrecognizedPasswordVerification(ctx, { password, rateLimitKey })
+        ? { status: "dummy" as const } : failure("INVALID_CREDENTIALS");
+    }
     const verified = await verifyCustomerPassword(ctx, {
-      userId: eligible ? customer.userId : undefined, password: args.password.normalize("NFC"), rateLimitKey,
+      userId: customer.userId, password, rateLimitKey,
     });
-    if (!eligible || !verified.success) return failure("INVALID_CREDENTIALS");
+    if (!verified.success) return failure("INVALID_CREDENTIALS");
     const tokens = await ctx.convexAuth.completeSignIn({ userId: customer.userId, profile: { kind: "customer" }, authenticatedBy: components.authPassword });
     await admitSession(ctx, tokens, { principal: "customer", customer }, "password");
     return { status: "complete" as const, tokens };

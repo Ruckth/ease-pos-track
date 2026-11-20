@@ -4,7 +4,7 @@ import { setupConvexAuth } from "@convex-dev/auth/server";
 import { internalMutation } from "../../../convex/_generated/server";
 import { components } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { authMethodMutation, type MethodBuilders } from "../../../convex/functions";
+import { internalPasswordSignInMutation, type MethodBuilders } from "../../../convex/functions";
 import { admitGoogleCompletion, admitSession, recordGoogleFlow } from "../../../convex/domain/identity";
 import { accessTokenSessionId } from "../../../convex/identity_rules";
 import { ensureFixtureCustomer, ensureFixtureStaff, mintFixtureSession } from "../../../convex/local_identity";
@@ -87,7 +87,7 @@ const noAdmission: MethodBuilders = testCore.bindMethod({
   createUser: makeFunctionReference<"mutation", { method: { name: string; profile: unknown } }, Id<"users">>("identity:createCustomerUser") as never,
 });
 /** Completes a sign-in but never admits it: the adapter must roll everything back. */
-export const signInWithoutAdmission = authMethodMutation(noAdmission, "customer-sign-in")({
+export const signInWithoutAdmission = internalPasswordSignInMutation(noAdmission, {
   name: "identityFixture:signInWithoutAdmission",
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
