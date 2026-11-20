@@ -225,15 +225,23 @@ export function authMethodMutation(builders: MethodBuilders, purpose: AuthMethod
     tagged(bindAuthMethod(builders, definition), `authMethod:${purpose}`) as RegisteredMutation<"public", ObjectType<A>, Promise<Awaited<R>>>;
 }
 
+/** Convex Auth exposes the registration, while admission needs its handler in the current transaction. */
+function pinnedMutationHandler<A, R>(registration: object, name: string) {
+  const mutation = registration as { isMutation?: boolean; _handler?: (ctx: MutationCtx, args: A) => Promise<R> };
+  if (mutation.isMutation !== true || typeof mutation._handler !== "function") {
+    throw new Error(`${name}: incompatible pinned Auth mutation`);
+  }
+  return mutation._handler;
+}
+
 /** The password action calls this mutation to admit a verified session. */
 export function internalPasswordSignInMutation<A extends PropertyValidators, R>(
   builders: MethodBuilders, definition: Definition<AuthMethodCtx, A, R>,
 ) {
-  const { _handler } = bindAuthMethod(builders, definition) as { _handler: (ctx: MutationCtx, args: ObjectType<A>) => Promise<Awaited<R>> };
-  if (typeof _handler !== "function") throw new Error("Password sign-in requires the pinned auth method handler");
+  const handler = pinnedMutationHandler<ObjectType<A>, Awaited<R>>(bindAuthMethod(builders, definition), definition.name);
   return tagged(internalMutation({
     args: v.object(definition.args),
-    handler: _handler,
+    handler,
   }), "internalPasswordSignInMutation");
 }
 
@@ -241,12 +249,8 @@ export function internalPasswordSignInMutation<A extends PropertyValidators, R>(
  * Wraps a pinned package mutation whose handler must run inside an
  * application transaction (Google start records its one-use flow).
  */
-type PackageHandler = (ctx: MutationCtx, args: Record<string, unknown>) => Promise<unknown>;
 export function wrapPackageMutation<A extends PropertyValidators, R>(purpose: "google-start" | "refresh-session", inner: object, definition: Definition<MutationCtx & { runInner: (args: Record<string, unknown>) => Promise<unknown> }, A, R>) {
-  const handler = (inner as { _handler?: PackageHandler; isMutation?: boolean })._handler;
-  if (typeof handler !== "function" || !(inner as { isMutation?: boolean }).isMutation) {
-    throw new Error(`wrapPackageMutation:${purpose}: the pinned package registration exposes no handler`);
-  }
+  const handler = pinnedMutationHandler<Record<string, unknown>, unknown>(inner, definition.name);
   refuseRawToken(definition.name, definition.args);
   return tagged(mutation({
     args: v.object(definition.args),

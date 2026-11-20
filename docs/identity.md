@@ -16,7 +16,13 @@ session tokens are gone. The [staff plan](architecture/t3code-phase1/01-staff-ac
 
 `bindMethod` is an internal Auth 2.0.0 API. Type checking uses the package's
 `convex-auth-internal-types` export condition (see `customConditions` in the
-tsconfigs). Re-check both on every Auth upgrade.
+tsconfigs). The package registration adapter in `convex/functions.ts` checks the mutation kind and callable handler before binding password admission, Google start or refresh.
+
+On an Auth upgrade:
+
+1. Compare the [password patch](../patches/@convex-dev__auth@2.0.0.patch) with the new upstream password component. Check which upstream methods cover attempt reservation, one-time hash verification, version-checked admission, counter expiry and password replacement. The patch includes compiled JavaScript and both declaration exports alongside the TypeScript source.
+2. Run `pnpm test:convex tests/convex/identity.test.ts tests/convex/identity-restore.test.ts tests/convex/pilot-boundaries.test.ts` for admission rollback, concurrent password verification, recovery and expiry. Run both TypeScript checkers to exercise the package declarations.
+3. Run the [disposable seed and smoke](ticket-cli.md) and `pnpm test:browser` against the installed package. The smoke exercises real Argon2 and signed sessions; the browser covers invitation, recovery and sign-in. Keep the real Google round trip in the release evidence.
 
 ## How a session becomes access
 
