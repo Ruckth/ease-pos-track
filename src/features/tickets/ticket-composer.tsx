@@ -1,3 +1,4 @@
+import { TicketRoutingFields } from "@/features/routing/ticket-routing-fields";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -18,17 +19,16 @@ const MediaUploadField = lazy(() => import("@/components/media-upload").then(mod
 
 /** Presentation never owns files: closing, previewing, and remounting keep the
  * Project-bound draft and its retry identity in the existing draft controller. */
-export function TicketComposer({ token, draftOwner, active, role, onSubmitted }: {
-  token: string;
+export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
   draftOwner: DisposableTicketDraft;
   active: boolean;
   role: "staff" | "customer";
   onSubmitted: (id?: Id<"tickets">) => void;
 }) {
   const { t } = useI18n();
-  const { owner, title, description, items, annotations, error, progress, setTitle, setDescription,
-    setItems, setError, viewerMedia, viewerAnnotations, annotationCounts,
-    createPendingAnnotation, updatePendingAnnotation, deletePendingAnnotation, submit: submitDraft } = useTicketDraft(token, draftOwner);
+  const { owner, mediaEnabled, title, description, items, annotations, error, progress, setTitle, setDescription,
+    setItems, setError, routingClassification, viewerMedia, viewerAnnotations, annotationCounts,
+    createPendingAnnotation, updatePendingAnnotation, deletePendingAnnotation, submit: submitDraft } = useTicketDraft(draftOwner);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingMedia | null>(null);
   const [preview, setPreview] = useState(false);
@@ -57,6 +57,7 @@ export function TicketComposer({ token, draftOwner, active, role, onSubmitted }:
       return;
     }
     setTitleInvalid(false);
+    if (mediaEnabled === undefined) return;
     if (await submitDraft()) {
       setSelectedMediaId(null);
       setPendingRemoval(null);
@@ -95,31 +96,33 @@ export function TicketComposer({ token, draftOwner, active, role, onSubmitted }:
         <Textarea disabled={isUploading} id={descriptionId} rows={4} maxLength={DESCRIPTION_MAX_LENGTH} value={description}
           placeholder={t("descriptionPlaceholder")} onChange={event => setDescription(event.target.value)} />
       </div>
-      <div className="space-y-2">
+      <TicketRoutingFields projectId={owner.projectId} value={routingClassification}
+        onChange={owner.setRoutingClassification} disabled={isUploading} />
+      {mediaEnabled && <div className="space-y-2">
         <p className="text-sm font-medium">{t("media")}</p>
         <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>}><MediaUploadField items={items} onItemsChange={setItems} onFilesAdded={owner.addFiles}
           onPreviewItem={item => setSelectedMediaId(item.id)} onRequestRemove={requestPendingItemRemoval}
           annotationCounts={annotationCounts} disabled={!active || isUploading} /></Suspense>
         {items.length ? <p className="text-sm leading-5 text-muted-foreground">{annotations.length ? t("pinSummary", { count: annotations.length }) : t("pinHint")}</p> : null}
-      </div>
+      </div>}
       <Button type="button" className="min-h-11" variant="ghost" disabled={isUploading} aria-expanded={preview} aria-controls={`${titleId}-preview`}
         onClick={() => setPreview(value => !value)}>{t(preview ? "composerHidePreview" : "composerPreview")}</Button>
       {preview ? <section id={`${titleId}-preview`} aria-label={t("composerPreview")} className="space-y-2 rounded-lg border bg-muted/30 p-4">
         <h3 className="break-words font-semibold">{title.trim() || t("composerUntitled")}</h3>
         <p className="whitespace-pre-wrap break-words text-sm">{description.trim() || t("noDescription")}</p>
-        <p className="text-sm text-muted-foreground">{t("reviewMedia", { count: items.length })} · {t("reviewPins", { count: annotations.length })}</p>
+        {mediaEnabled && <p className="text-sm text-muted-foreground">{t("reviewMedia", { count: items.length })} · {t("reviewPins", { count: annotations.length })}</p>}
       </section> : null}
-      {progress !== null ? <div role="progressbar" aria-label={t("submitting")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-2 overflow-hidden rounded-full bg-muted">
+      {mediaEnabled && progress !== null ? <div role="progressbar" aria-label={t("submitting")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-2 overflow-hidden rounded-full bg-muted">
         <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
       </div> : null}
       {(title || description || items.length > 0) && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
       {error && !titleInvalid ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       <div className="sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:bg-transparent sm:px-0 sm:pb-0">
-        <Button className="min-h-11 flex-1" disabled={isUploading}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t(role === "staff" ? "submit" : "submitTicket")}</Button>
-        {isUploading ? <Button type="button" variant="outline" className="min-h-11" onClick={() => owner.cancel()}>{t("cancelUpload")}</Button> : null}
+        <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t(role === "staff" ? "submit" : "submitTicket")}</Button>
+        {mediaEnabled && isUploading ? <Button type="button" variant="outline" className="min-h-11" onClick={() => owner.cancel()}>{t("cancelUpload")}</Button> : null}
       </div>
     </form>
-    <Dialog open={active && selectedMediaId !== null} onOpenChange={open => !open && setSelectedMediaId(null)}
+    {mediaEnabled && <><Dialog open={active && selectedMediaId !== null} onOpenChange={open => !open && setSelectedMediaId(null)}
       title={items[selectedMediaIndex]?.file.name ?? t("annotateMedia")} description={t("annotateDescription")} mobileFullScreen>
       <Suspense fallback={<p role="status">{t("syncing")}</p>}><MediaViewer key={selectedMediaId ?? "pending-media"} media={viewerMedia} annotations={viewerAnnotations}
         initialIndex={selectedMediaIndex} disabled={isUploading} onCreateAnnotation={createPendingAnnotation}
@@ -127,6 +130,6 @@ export function TicketComposer({ token, draftOwner, active, role, onSubmitted }:
     </Dialog>
     <AlertDialog open={active && pendingRemoval !== null} onOpenChange={open => !open && setPendingRemoval(null)} title={t("removeMediaPins")}
       description={t("removeMediaDescription", { name: pendingRemoval?.file.name ?? t("media"), count: pendingRemoval ? annotationCounts[pendingRemoval.id] ?? 0 : 0 })}
-      confirmLabel={t("removeMedia")} onConfirm={() => { if (pendingRemoval) removePendingItem(pendingRemoval); }} />
+      confirmLabel={t("removeMedia")} onConfirm={() => { if (pendingRemoval) removePendingItem(pendingRemoval); }} /></>}
   </>;
 }

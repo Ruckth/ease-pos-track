@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { identityTest } from "./identity-harness";
 import { makeFunctionReference } from "convex/server";
 import { afterEach, expect, test, vi } from "vitest";
 import schema from "../../convex/schema";
@@ -19,7 +19,7 @@ test("completion helpers wait for a held provider action and its scheduled check
   vi.stubGlobal("fetch", provider);
 
   const fixtures = import.meta.glob("./fixtures/scheduler.ts");
-  const t = convexTest(schema, {
+  const t = identityTest({
     ...modules,
     "../../convex/fixture.ts": fixtures["./fixtures/scheduler.ts"],
   });

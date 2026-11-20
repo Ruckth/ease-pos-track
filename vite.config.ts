@@ -1,3 +1,4 @@
+import { validNoticeUrl } from "./shared/privacy-notice";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -8,7 +9,19 @@ const ports = loadPorts();
 const uploadApi = `http://localhost:${ports.UPLOAD_API_PORT}`;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "pilot-privacy-notices",
+      apply: "build",
+      configResolved({ env, mode }) {
+        if (mode !== "named-pilot" && process.env.TICKET_DEPLOYMENT_MODE !== "named-pilot" && process.env.VERCEL_ENV !== "production") return;
+        for (const name of ["VITE_PILOT_PRIVACY_NOTICE_TH", "VITE_PILOT_PRIVACY_NOTICE_EN"]) {
+          if (!validNoticeUrl(env[name])) throw new Error(`A named pilot build requires an approved HTTPS URL in ${name}`);
+        }
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

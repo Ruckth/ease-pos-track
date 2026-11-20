@@ -1,10 +1,11 @@
+import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
 import { after, test as nodeTest } from "node:test";
 import type { BrowserContext, Page } from "playwright";
-import { api } from "../../convex/_generated/api";
+import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { capture, newContext } from "../../scripts/browser-evidence";
-import { baseURL, convex, copy, files, suiteBrowser, open as openWith, seed, stats, type Language } from "./harness";
+import { capture, newContext, redact } from "../../scripts/browser-evidence";
+import { authStorageKeys, baseURL, convex, copy, files, localIdentityAdmin, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -15,7 +16,7 @@ const test = (name: string, run: () => Promise<void>) => nodeTest(name, () => ca
 
 for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
   test(`${role} ${language}: focus, pointer pin removal, camera teardown and unmount`, async () => {
-    const { context, page, title, errors, token, uploads } = await open(role, language);
+    const { context, page, title, errors, refreshToken, uploads } = await open(role, language);
     try {
       await title.fill("Browser draft");
       await files(page);
@@ -57,9 +58,10 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await page.waitForFunction(() => window.draftStats.streams.length === 2);
       // Expiry while a camera is open unmounts the whole role experience.
       // The document stays loaded so instrumentation observes React teardown.
-      await convex.mutation(api.auth.logout, { token });
+      // Server-side sign-out: the session watcher clears the local session.
+      await convex.mutation(api.auth.signOut, { refreshToken });
       await page.waitForFunction(() => window.draftStats.revoked.length === 2 && window.draftStats.stops.length === 2);
-      await page.locator(role === "staff" ? "#staff-password" : "#customer-password").waitFor({ state: "visible" });
+      await (role === "staff" ? page.getByRole("button", { name: copy(language, "continueWithGoogle"), exact: true }) : page.locator("#customer-password")).waitFor({ state: "visible" });
       const observed = await stats(page);
       assert.deepEqual(observed.revoked, observed.created);
       assert.equal(new Set(observed.stops).size, observed.stops.length);
@@ -254,7 +256,7 @@ test("losing captured Project access leaves the customer draft discardable", asy
   const { context, page, title } = await open("customer");
   const projectId = seed.projects.find(project => project.key === "POS")!.id;
   const members = await convex.query(api.projects.listProjectMembers, { token: seed.sessions[0], projectId });
-  const customerId = members.find(member => member.email === "alice@local.test")!.customerId;
+  const customerId = members.find(member => member.username === "alice")!.customerId;
   try {
     await title.fill("Captured POS draft");
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
@@ -270,7 +272,9 @@ test("losing captured Project access leaves the customer draft discardable", asy
     await page.getByRole("dialog").getByText("Customer App (APP)", { exact: true }).waitFor();
     assert.equal(await title.inputValue(), "");
   } finally {
-    await convex.mutation(api.projects.addProjectMember, { token: seed.sessions[0], projectId, email: "alice@local.test" });
+    // Access returns through the Owner's invitation and the customer's own join.
+    const invitation = await convex.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: seed.sessions[0], projectId });
+    await convex.mutation(api.identity.joinWithInvitation, { token: seed.sessions[1], invitation: invitation.secret });
     await context.close();
   }
 });
@@ -342,7 +346,12 @@ for (const language of ["en", "th"] as const) test(`${language}: staff question 
     await staff.page.getByText(copy(language, "questionSent"), { exact: true }).waitFor();
     assert.equal((await convex.query(api.tickets.getTicket, { token: staff.token, id }))?.status, "waiting");
 
-    await customer.page.getByRole("button", { name: copy(language, "ticketConversation"), exact: true }).click();
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customer.page.getByRole("button", { name: copy(language, "ticketInbox"), exact: true }).click();
+    const inbox = customer.page.getByRole("dialog", { name: copy(language, "ticketInbox") });
+    await inbox.getByRole("button").filter({ hasText: name }).click();
+    await customer.page.getByRole("heading", { name, exact: true }).waitFor();
+    // Opening a waiting Ticket from the inbox expands its conversation.
     await customer.page.getByText(question, { exact: true }).waitFor();
     await customer.page.getByLabel(copy(language, "replyLabel"), { exact: true }).fill(reply);
     const secondQuestion = question + " (2)";
@@ -391,7 +400,7 @@ for (const language of ["en", "th"] as const) {
       f.page.once("dialog", async prompt => { prompts.push(prompt.message()); await prompt.accept(); });
       await requeue.click();
       await f.page.getByText(copy(language, "healthRequeued"), { exact: true }).waitFor();
-      assert.deepEqual(await calls(), [{ token: f.token, jobId: "fake-purge" }]);
+      assert.deepEqual(await calls(), [{ jobId: "fake-purge" }]);
       assert.deepEqual(prompts, [copy(language, "healthPurgeConfirm"), copy(language, "healthPurgeConfirm")]);
       assert.deepEqual(f.errors, []);
       assert.equal(f.uploads(), 0);
@@ -399,19 +408,61 @@ for (const language of ["en", "th"] as const) {
   });
 }
 
-test("staff sign-in uses the committed rate-limit action through the real form", async () => {
+test("customer sign-in masks a wrong password, then admits the named customer through the real form", async () => {
+  const context = await newContext(await browsers.get());
+  try {
+    await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
+    const page = await context.newPage();
+    await page.goto(`${baseURL}/customer`);
+    await page.locator("#customer-username").fill("alice");
+    await page.locator("#customer-password").fill("wrong customer passphrase");
+    await page.getByRole("button", { name: copy("en", "signIn"), exact: true }).click();
+    await page.getByRole("alert").waitFor();
+    await page.locator("#customer-password").fill(LOCAL_CUSTOMER_PASSWORD);
+    await page.getByRole("button", { name: copy("en", "signIn"), exact: true }).click();
+    await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
+    assert.equal(await page.locator("#customer-password").count(), 0);
+  } finally { await context.close(); }
+});
+
+test("staff invitation survives a same-tab Google redirect without entering its return URL", async () => {
+  const context = await newContext(await browsers.get());
+  const secret = "synthetic-invitation-return-fixture";
+  try {
+    let observe!: (url: string) => void;
+    const started = new Promise<string>(resolve => { observe = resolve; });
+    await context.routeWebSocket(url => url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const message = JSON.parse(String(raw));
+        if (message.udfPath === "auth:startSignInWithGoogle") {
+          observe(message.args[0].redirectTo);
+          return;
+        }
+        server.send(raw);
+      });
+      server.onMessage(raw => socket.send(raw));
+    });
+    const page = await context.newPage();
+    await page.goto(baseURL + "/staff/invite#invite=" + secret);
+    const google = page.getByRole("button", { name: /Google/ }).first();
+    const [returnURL] = await Promise.all([started, google.click()]);
+    assert.equal(returnURL, new URL("/staff/invite", baseURL).href);
+    await page.goto(returnURL);
+    await google.waitFor();
+    assert.equal(new URL(page.url()).hash, "");
+  } finally { await context.close(); }
+});
+
+test("staff sign-in offers Google, and the local test provider admits a seeded Owner", async () => {
   const context = await newContext(await browsers.get());
   try {
     await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
     const page = await context.newPage();
     await page.goto(`${baseURL}/staff`);
-    await page.locator("#staff-password").fill("wrong-password");
-    await page.getByRole("button", { name: copy("en", "enter"), exact: true }).click();
-    await page.getByRole("alert").waitFor();
-    await page.locator("#staff-password").fill("LocalStaff123!");
-    await page.getByRole("button", { name: copy("en", "enter"), exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "continueWithGoogle"), exact: true }).waitFor();
+    await page.getByRole("button", { name: "owner@local.test", exact: true }).click();
     await page.getByRole("button", { name: "New Ticket", exact: true }).waitFor();
-    assert.equal(await page.locator("#staff-password").count(), 0);
   } finally { await context.close(); }
 });
 
@@ -491,18 +542,20 @@ test("a status check finishing in another Project is shown once on return", asyn
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     const title = `Deferred status ${crypto.randomUUID()}`;
-    await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title, description: "", requestId: crypto.randomUUID() });
+    const { ticket } = await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title, description: "", requestId: crypto.randomUUID() });
+    const number = formatTicketNumber(ticket.ticketNumber, "POS");
     await page.getByPlaceholder(copy("en", "search"), { exact: true }).fill(title);
-    const request = page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket");
-    await page.getByRole("button", { name: /^Acknowledge · POS-/ }).click();
-    await request;
+    await Promise.all([
+      page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket"),
+      page.getByRole("button", { name: `Acknowledge · ${number}`, exact: true }).click(),
+    ]);
     const switcher = page.getByRole("combobox", { name: "Choose Project" });
     await switcher.selectOption("APP");
     const finished = page.waitForEvent("requestfinished", req => req.url().endsWith("/api/query"));
     release();
     await finished;
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    const notice = page.getByText(/POS-\d+ · Latest saved version · New/);
+    const notice = page.getByText(`${number} · Latest saved version · New`, { exact: true });
     assert.equal(await notice.count(), 0);
     await switcher.selectOption("POS");
     await notice.waitFor();
@@ -695,3 +748,275 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
     } finally { await context.close(); }
   });
 }
+
+test("a customer joins from an invitation link, saves a recovery code, then recovers the account with it", async () => {
+  const projectId = seed.projects.find(project => project.key === "POS")!.id;
+  const invitation = await convex.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: seed.sessions[0], projectId });
+  redact(invitation.secret);
+  const username = `joiner${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const context = await newContext(await browsers.get());
+  let code = "";
+  try {
+    await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
+    const page = await context.newPage();
+    await page.goto(`${baseURL}/customer/join#invite=${encodeURIComponent(invitation.secret)}`);
+    await page.getByText(copy("en", "joinTitle", { project: "Point of Sale" }), { exact: true }).waitFor();
+    const notice = page.getByRole("link", { name: copy("en", "pilotPrivacyNotice"), exact: true });
+    assert.equal(await notice.getAttribute("href"), "https://privacy.example.test/en");
+    assert.equal(await notice.getAttribute("referrerpolicy"), "no-referrer");
+    await page.locator("#join-username").fill(` ${username.toUpperCase()} `);
+    await page.getByText(copy("en", "usernamePreview", { username }), { exact: true }).waitFor();
+    await page.locator("#join-display-name").fill("สมหญิง ใจดี");
+    await page.locator("#new-password").fill("browser join passphrase");
+    await page.locator("#new-password-confirm").fill("browser join passphrase");
+    await page.getByRole("button", { name: copy("en", "createAccount"), exact: true }).click();
+    const enrollment = page.getByRole("heading", { name: copy("en", "recoveryEnrollmentTitle"), exact: true });
+    await enrollment.waitFor();
+    assert.equal(await enrollment.evaluate(element => element === document.activeElement), true);
+    await page.getByText(copy("en", "recoveryCodeNeeded"), { exact: true }).waitFor();
+    await page.getByRole("button", { name: copy("en", "recoveryCodeCreate"), exact: true }).press("Enter");
+    code = (await page.locator("output").innerText()).trim();
+    redact(code);
+    assert.match(code, /^[0-9A-Z]{5}(-[0-9A-Z]{1,5}){5}$/);
+    assert.equal(await page.getByRole("button", { name: "New Ticket", exact: true }).count(), 0);
+    await page.getByRole("button", { name: copy("en", "recoveryCodeSaved"), exact: true }).press("Enter");
+    await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
+    await page.locator("summary").filter({ hasText: copy("en", "customerQueueMore") }).click();
+    await page.getByRole("button", { name: copy("en", "accountTitle"), exact: true }).click();
+    const account = page.getByRole("dialog", { name: copy("en", "accountTitle"), exact: true });
+    assert.equal(await account.getByRole("link", { name: copy("en", "pilotPrivacyNotice") }).getAttribute("href"), "https://privacy.example.test/en");
+    // The invitation is single use.
+    assert.deepEqual(await convex.query(api.identity.previewCustomerInvitation, { invitation: invitation.secret }), { status: "INVITE_USED" });
+  } finally { await context.close(); }
+  const fresh = await newContext(await browsers.get());
+  try {
+    await fresh.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
+    const page = await fresh.newPage();
+    await page.goto(`${baseURL}/customer/recover`);
+    await page.locator("#recover-username").fill(username);
+    await page.locator("#recover-code").fill("0".repeat(26));
+    await page.locator("#new-password").fill("recovered browser passphrase");
+    await page.locator("#new-password-confirm").fill("recovered browser passphrase");
+    await page.getByRole("button", { name: copy("en", "recoverAction"), exact: true }).click();
+    await page.getByRole("alert").getByText(copy("en", "recoverFailed"), { exact: true }).waitFor();
+    await page.locator("#recover-code").fill(code.toLowerCase());
+    await page.getByRole("button", { name: copy("en", "recoverAction"), exact: true }).click();
+    await page.getByText(copy("en", "recoverSuccess"), { exact: true }).waitFor();
+    await page.goto(`${baseURL}/customer/login`);
+    await page.locator("#customer-username").fill(username);
+    await page.locator("#customer-password").fill("recovered browser passphrase");
+    await page.getByRole("button", { name: copy("en", "signIn"), exact: true }).click();
+    await page.getByText(copy("en", "recoveryCodeNeeded"), { exact: true }).waitFor();
+    await page.getByRole("button", { name: copy("en", "recoveryCodeCreate"), exact: true }).press("Enter");
+    redact((await page.locator("output").innerText()).trim());
+    await page.getByRole("button", { name: copy("en", "recoveryCodeSaved"), exact: true }).press("Enter");
+    await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
+  } finally { await fresh.close(); }
+});
+
+test("Thai keyboard customer recovery returns to sign-in and resumes Join with the invitation held only in memory", async () => {
+  const owner = seed.sessions[0];
+  const [pos, app] = ["POS", "APP"].map(key => seed.projects.find(project => project.key === key)!.id);
+  const createInvitation = (projectId: Id<"projects">) =>
+    convex.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: owner, projectId });
+  const username = `returning${crypto.randomUUID().slice(0, 8)}`;
+  const password = "browser returning passphrase";
+  const newPassword = "รหัสผ่านใหม่สำหรับลูกค้าประจำ";
+  const first = await createInvitation(pos);
+  redact(first.secret);
+  const signup = await convex.mutation(api.auth.signUpWithInvitation, { invitation: first.secret, username, displayName: "ลูกค้าประจำ", password });
+  assert.equal(signup.status, "complete");
+  if (signup.status !== "complete") throw new Error("Customer fixture enrollment failed");
+  const token = signup.tokens.accessToken;
+  redact(token);
+  const saved = await convex.mutation(api.identity.createRecoveryCode, { token });
+  if (!saved.ok) throw new Error("Customer fixture recovery setup failed");
+  redact(saved.code);
+  assert.deepEqual(await convex.mutation(api.identity.confirmRecoveryEnrollment, { token, code: saved.code }), { ok: true });
+  const invitation = await createInvitation(app);
+  redact(invitation.secret);
+
+  const context = await newContext(await browsers.get(), { locale: "th-TH", viewport: { width: 390, height: 844 } });
+  try {
+    await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "th"));
+    const page = await context.newPage();
+    const requestLocations: string[] = [];
+    const documentRequests: string[] = [];
+    page.on("request", request => {
+      requestLocations.push(request.url(), request.headers().referer ?? "");
+      if (request.resourceType() === "document") documentRequests.push(request.url());
+    });
+    const checkInMemoryOnly = async () => {
+      assert.equal(requestLocations.some(value => value.includes(invitation.secret)), false);
+      assert.equal(await page.evaluate(secret => [history.state, location.href, ...Object.values(localStorage), ...Object.values(sessionStorage)]
+        .some(value => JSON.stringify(value)?.includes(secret)), invitation.secret), false);
+    };
+    await page.goto(`${baseURL}/customer/join#invite=${invitation.secret}`);
+    await page.getByRole("heading", { name: copy("th", "joinTitle", { project: "Customer App" }) }).waitFor();
+    const joinPath = `${baseURL}/customer/join`;
+    await page.waitForURL(joinPath);
+    const useExisting = page.getByRole("button", { name: copy("th", "haveAccountQuestion"), exact: true });
+    await useExisting.press("Enter");
+    await page.waitForURL(`${baseURL}/customer/login`);
+    await page.getByRole("button", { name: copy("th", "backToInvitation"), exact: true }).press("Enter");
+    await page.waitForURL(joinPath);
+    await useExisting.press("Enter");
+    const userField = page.getByRole("textbox", { name: copy("th", "username"), exact: true });
+    await userField.waitFor();
+    assert.equal(await userField.evaluate(element => element === document.activeElement), true);
+    await page.keyboard.insertText(username);
+    await page.keyboard.press("Tab");
+    await page.keyboard.insertText("ใส่รหัสผ่านผิด");
+    await page.keyboard.press("Enter");
+    const error = page.getByRole("alert").filter({ hasText: copy("th", "invalidCredentials") });
+    await error.waitFor();
+    assert.equal(await error.evaluate(element => element === document.activeElement), true);
+    const forgot = page.getByRole("link", { name: copy("th", "forgotPassword"), exact: true });
+    await forgot.press("Enter");
+    await page.waitForURL(`${baseURL}/customer/recover`);
+    await checkInMemoryOnly();
+    await page.getByRole("link", { name: copy("th", "customerSignIn"), exact: true }).press("Enter");
+    await page.getByRole("button", { name: copy("th", "backToInvitation"), exact: true }).waitFor();
+    await forgot.press("Enter");
+    const recoverUsername = page.locator("#recover-username");
+    await recoverUsername.waitFor();
+    assert.equal(await recoverUsername.evaluate(element => element === document.activeElement), true);
+    await page.keyboard.insertText(` ${username.toUpperCase()} `);
+    await page.keyboard.press("Tab");
+    await page.keyboard.insertText(saved.code.toLowerCase());
+    await page.keyboard.press("Tab");
+    await page.keyboard.insertText(newPassword);
+    await page.keyboard.press("Tab"); // Show password
+    await page.keyboard.press("Tab");
+    await page.keyboard.insertText(newPassword);
+    await page.keyboard.press("Enter");
+    const recovered = page.getByRole("status").filter({ hasText: copy("th", "recoverSuccess") });
+    await recovered.waitFor();
+    assert.equal(await recovered.evaluate(element => element === document.activeElement), true);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`${baseURL}/customer/login`);
+    await page.getByRole("button", { name: copy("th", "backToInvitation"), exact: true }).waitFor();
+    await checkInMemoryOnly();
+    assert.equal(await userField.evaluate(element => element === document.activeElement), true);
+    await page.keyboard.insertText(username);
+    await page.keyboard.press("Tab");
+    await page.keyboard.insertText(newPassword);
+    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: copy("th", "recoveryCodeCreate"), exact: true }).press("Enter");
+    redact((await page.locator("output").innerText()).trim());
+    await page.getByRole("button", { name: copy("th", "recoveryCodeSaved"), exact: true }).press("Enter");
+    await page.waitForURL(joinPath);
+    await page.getByText(copy("th", "joinAsCustomer", { project: "Customer App", username }), { exact: true }).waitFor();
+    const join = page.getByRole("button", { name: copy("th", "joinAction"), exact: true });
+    assert.equal(await join.evaluate(element => element === document.activeElement), true);
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`${baseURL}/customer`);
+    assert.deepEqual(await convex.query(api.identity.previewCustomerInvitation, { invitation: invitation.secret }), { status: "INVITE_USED" });
+    await checkInMemoryOnly();
+    assert.deepEqual(documentRequests, [joinPath]);
+  } finally { await context.close(); }
+});
+
+test("Owner verifies staff invitation creation and reissue, then replaces and revokes an exact Google account", async () => {
+  const admin = localIdentityAdmin();
+  const fixture = await admin(internal.seed.installBrowserStaffAccounts, {});
+  const owner = await convex.mutation(api.auth.signInLocalFixture, { email: fixture.ownerEmail });
+  const former = await convex.mutation(api.auth.signInLocalFixture, { email: fixture.memberEmail });
+  if (owner.status !== "complete" || former.status !== "complete") throw new Error("Staff fixtures failed to sign in");
+  for (const tokens of [owner.tokens, former.tokens, fixture.candidate]) {
+    redact(tokens.accessToken);
+    redact(tokens.refreshToken);
+  }
+  const browser = await browsers.get();
+  const keys = authStorageKeys();
+  async function openSession(tokens: { accessToken: string; refreshToken: string }, path: string) {
+    const context = await newContext(browser);
+    await context.addInitScript(({ keys: { jwt, refresh }, accessToken, refreshToken }) => {
+      sessionStorage.setItem(jwt, accessToken);
+      sessionStorage.setItem(refresh, refreshToken);
+      localStorage.setItem("ease-pos-tracking-language", "en");
+    }, { keys, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+    const page = await context.newPage();
+    await page.goto(baseURL + path);
+    return { context, page };
+  }
+  const candidate = await openSession(fixture.candidate, "/staff/login");
+  const authority = await openSession(owner.tokens, "/staff");
+  try {
+    await candidate.page.getByRole("heading", { name: copy("en", "pendingTitle"), exact: true }).waitFor();
+    await candidate.page.getByText(fixture.candidate.subject, { exact: true }).waitFor();
+    await candidate.page.getByText(fixture.candidate.email, { exact: true }).waitFor();
+    assert.equal(candidate.page.url().includes(fixture.candidate.subject), false);
+    const { page } = authority;
+    await page.locator("summary").filter({ hasText: copy("en", "queueMore") }).press("Enter");
+    await page.getByRole("button", { name: copy("en", "teamTitle"), exact: true }).press("Enter");
+    const team = page.getByRole("dialog", { name: copy("en", "teamTitle"), exact: true });
+    const codeField = team.getByRole("textbox", { name: copy("en", "verificationCode"), exact: true });
+    async function confirm(purpose: string, testError = false) {
+      await codeField.waitFor();
+      assert.equal(await codeField.evaluate(element => element === document.activeElement), true);
+      const delivery = await admin(internal.identity.readLocalDelivery, { to: fixture.ownerEmail });
+      if (!delivery) throw new Error("Local verification delivery missing");
+      assert.equal(delivery.purpose, purpose);
+      redact(delivery.code);
+      if (testError) {
+        await codeField.fill(delivery.code === "00000000" ? "11111111" : "00000000");
+        await codeField.press("Enter");
+        const error = team.getByRole("alert").filter({ hasText: copy("en", "invalidCode") });
+        await error.waitFor();
+        assert.equal(await error.evaluate(element => element === document.activeElement), true);
+      }
+      await codeField.fill(delivery.code);
+      await codeField.press("Enter");
+      await codeField.waitFor({ state: "hidden" });
+      assert.equal(page.url().includes(delivery.code), false);
+    }
+
+    const inviteEmail = `invite-${crypto.randomUUID()}@local.test`;
+    await team.getByRole("textbox", { name: copy("en", "inviteEmail"), exact: true }).fill(inviteEmail);
+    await team.locator("#invite-staff-role").selectOption("owner");
+    await team.getByRole("button", { name: copy("en", "inviteStaff"), exact: true }).press("Enter");
+    await team.getByRole("heading", { name: copy("en", "teamActionReview", { action: copy("en", "inviteStaff"), email: inviteEmail, role: "Owner" }) }).waitFor();
+    await confirm("staff-invite-create", true);
+    const link = team.locator("output");
+    const originalLink = await link.innerText();
+    redact(originalLink);
+    await team.getByRole("listitem").filter({ hasText: inviteEmail }).getByRole("button", { name: copy("en", "reissue"), exact: true }).press("Enter");
+    await confirm("staff-invite-reissue");
+    const reissuedLink = await link.innerText();
+    redact(reissuedLink);
+    assert.ok(reissuedLink !== originalLink);
+
+    const googleButton = (email: string) => team.getByRole("button", { name: copy("en", "staffGoogleAccountFor", { email }), exact: true });
+    await googleButton(fixture.memberEmail).press("Enter");
+    await team.getByRole("textbox", { name: copy("en", "googleVerifiedEmail"), exact: true }).fill(fixture.candidate.email);
+    await team.getByRole("textbox", { name: copy("en", "googleSubject"), exact: true }).fill(fixture.candidate.subject);
+    await team.getByRole("textbox", { name: copy("en", "googleEvidenceRef"), exact: true }).fill("fixture/staff-replacement");
+    await team.getByRole("button", { name: copy("en", "sendCode"), exact: true }).press("Enter");
+    await team.getByText(fixture.candidate.subject, { exact: true }).waitFor();
+    await team.getByText(fixture.candidate.email, { exact: true }).waitFor();
+    await confirm("staff-google-binding");
+    assert.equal(await convex.query(api.identity.viewer, { token: former.tokens.accessToken }), null);
+    assert.equal(await convex.query(api.identity.viewer, { token: fixture.candidate.accessToken }), null);
+    const replacement = await convex.mutation(api.auth.signInLocalFixture, { email: fixture.candidate.email });
+    if (replacement.status !== "complete") throw new Error("Staff replacement did not admit a fresh session");
+    redact(replacement.tokens.accessToken);
+    redact(replacement.tokens.refreshToken);
+    assert.partialDeepStrictEqual(await convex.query(api.identity.viewer, { token: replacement.tokens.accessToken }), {
+      staffId: fixture.memberId, email: fixture.candidate.email, role: "staff",
+    });
+
+    await googleButton(fixture.candidate.email).press("Enter");
+    await team.getByRole("combobox", { name: copy("en", "googleBindingAction"), exact: true }).selectOption("revoke");
+    await team.getByText(copy("en", "googleRevokeEffect"), { exact: true }).waitFor();
+    await team.getByRole("textbox", { name: copy("en", "googleEvidenceRef"), exact: true }).fill("fixture/staff-revocation");
+    await team.getByRole("button", { name: copy("en", "sendCode"), exact: true }).press("Enter");
+    await confirm("staff-google-binding");
+    await googleButton(fixture.candidate.email).filter({ hasText: copy("en", "googleBindingRevoked") }).waitFor();
+    assert.equal(await convex.query(api.identity.viewer, { token: replacement.tokens.accessToken }), null);
+  } finally {
+    await authority.context.close();
+    await candidate.context.close();
+  }
+});

@@ -6,7 +6,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import type { Ticket } from "@/lib/types";
 import { useConversation } from "./adapters/conversation";
 
-type Props = { ticket: Ticket; token: string; role: "staff" | "customer" };
+type Props = { ticket: Ticket; role: "staff" | "customer" };
 
 export function TicketConversation(props: Props) {
   if (props.ticket.origin !== "customer" || props.ticket.lifecycle !== "active") return null;
@@ -27,9 +27,9 @@ function ConversationDisclosure(props: Props) {
   </section>;
 }
 
-function ConversationThread({ ticket, role, token }: Props) {
+function ConversationThread({ ticket, role }: Props) {
   const { t, formatDate } = useI18n();
-  const { messages, send } = useConversation(token, ticket._id);
+  const { messages, send } = useConversation(ticket._id);
   const [body, setBody] = useState("");
   const [draftQuestion, setDraftQuestion] = useState<Id<"ticketMessages">>();
   const [error, setError] = useState("");
@@ -53,7 +53,7 @@ function ConversationThread({ ticket, role, token }: Props) {
       attempt.current = { requestId: crypto.randomUUID(), body, replyTo };
     }
     try {
-      await send({ token, id: ticket._id, expectedVersion: ticket.version, body, requestId: attempt.current.requestId, inReplyTo: draftQuestion });
+      await send({ id: ticket._id, expectedVersion: ticket.version, body, requestId: attempt.current.requestId, inReplyTo: draftQuestion });
       setBody("");
       setDraftQuestion(undefined);
       setSent(true);

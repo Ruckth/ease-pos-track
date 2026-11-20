@@ -11,6 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "customConditions": ["convex-auth-internal-types"],
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,

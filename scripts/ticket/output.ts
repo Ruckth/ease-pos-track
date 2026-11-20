@@ -113,11 +113,13 @@ export function loginOutput(deployment: Deployment, session: { url: string; expi
   };
 }
 
-export function whoamiOutput(deployment: Deployment, url: string, session: CurrentSession) {
+export function whoamiOutput(deployment: Deployment, url: string, session: CurrentSession & { expiresAt: number }) {
   return {
     ok: true as const,
     authenticated: true as const,
     role: session.role,
+    name: session.name,
+    email: session.email,
     deployment,
     url,
     expiresAt: session.expiresAt,

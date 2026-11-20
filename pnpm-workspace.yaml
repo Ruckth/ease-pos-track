@@ -7,3 +7,5 @@ overrides:
 allowBuilds:
   esbuild: true
   msgpackr-extract: true
+patchedDependencies:
+  '@convex-dev/auth@2.0.0': patches/@convex-dev__auth@2.0.0.patch

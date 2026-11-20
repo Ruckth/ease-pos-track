@@ -16,6 +16,7 @@ import { staffTicketActions } from "@/lib/staff-ticket-queue";
 import { type Annotation, isActiveAnnotation, type Ticket, type TicketStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "../../../shared/ticket-numbers";
+import { TicketAssignment } from "@/features/routing/ticket-assignment";
 import { TicketConversation } from "./ticket-conversation";
 import { DetailEdit } from "./ticket-detail-edit";
 import { TicketHistory } from "./ticket-history";
@@ -46,7 +47,7 @@ export type StaffDetailActions = {
 };
 type RoleActions = ({ role: "staff" } & StaffDetailActions) | { role: "customer" };
 type PanelProps = DetailNavigation & RoleActions & {
-  ticket: Ticket | null | undefined; ticketId: Id<"tickets"> | null; token: string;
+  ticket: Ticket | null | undefined; ticketId: Id<"tickets"> | null;
 };
 
 export function TicketDetailPanel(props: PanelProps) {
@@ -111,8 +112,8 @@ function Disclosure({ title, children, icon }: { title: string; children: ReactN
 
 function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) {
   const { t, formatDate } = useI18n();
-  const { ticket, token, initialSection, onClose } = props;
-  const operations = useTicketOperations(token);
+  const { ticket, initialSection, onClose } = props;
+  const operations = useTicketOperations();
   const staff = props.role === "staff";
   const archived = ticket.lifecycle === "archived";
   const number = formatTicketNumber(ticket.ticketNumber, ticket.projectKey);
@@ -192,8 +193,9 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
-      <TicketConversation ticket={ticket} token={token} role={props.role} />
+      <TicketConversation ticket={ticket} role={props.role} />
     </>}
+    {staff && <TicketAssignment ticket={ticket} />}
     <div>
       {ticket.media.length > 0 && <section className="border-t">
         <Button ref={mediaButton} type="button" variant="ghost" aria-expanded={mediaOpen} aria-controls={mediaId}
@@ -213,7 +215,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
             onDelete={id => operations.removeAnnotation(ticket, id)} onRestore={id => operations.restoreAnnotation(ticket, id)} />
         </Suspense>}</div>
       </section>}
-      <Disclosure title={t("detailHistory")}><TicketHistory id={ticket._id} token={token} staff={staff} /></Disclosure>
+      <Disclosure title={t("detailHistory")}><TicketHistory id={ticket._id} staff={staff} /></Disclosure>
       {!archived && <Disclosure title={t("detailActions")}>
         <div className="space-y-4">
           {props.role === "staff" && <>
@@ -228,7 +230,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
               <Button type="button" ref={urgencyButton} variant="outline" onClick={() => setEdit("urgency")}>{t("detailUrgency")}</Button>
             </div>
             {edit === "urgency" && <DetailEdit item={ticket} mode={edit} staff operations={operations} onClose={finishEdit} />}
-            <Disclosure title={t("ticketTags")}><TicketTagEditor item={ticket} token={token} /></Disclosure>
+            <Disclosure title={t("ticketTags")}><TicketTagEditor item={ticket} /></Disclosure>
           </>}
           <Button type="button" variant="outline" disabled={busy} className="text-destructive" onClick={() => setConfirming(true)}>{t(staff ? "archive" : "deleteTicket")}</Button>
         </div>

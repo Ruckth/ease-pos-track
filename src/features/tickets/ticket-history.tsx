@@ -5,11 +5,11 @@ import { useI18n } from "@/lib/i18n";
 import { useTicketActivity, useTicketTags } from "./adapter";
 
 /** Both streams are bounded and use the selected Ticket's read policy. */
-export function TicketHistory({ token, id, staff }: { token: string; id: Id<"tickets">; staff: boolean }) {
+export function TicketHistory({ id, staff }: { id: Id<"tickets">; staff: boolean }) {
   const { t, formatDate } = useI18n();
-  const { ticketActivity, activity } = useTicketActivity(token, id);
+  const { ticketActivity, activity } = useTicketActivity(id);
   const includeTags = staff && Boolean(ticketActivity?.some(event => event.action === "tags_changed"));
-  const tags = useTicketTags(token, includeTags);
+  const tags = useTicketTags(includeTags);
   if (!ticketActivity || !activity) return <p role="status">{t("syncing")}</p>;
 
   const events = [

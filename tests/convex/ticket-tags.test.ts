@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { identityTest } from "./identity-harness";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
@@ -11,10 +11,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 async function fixture() {
-  const t = convexTest(schema, modules);
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest(modules);
+  const seed = await t.mutation(internal.seed.install, {});
   return { t, seed, staff: seed.sessions[0], customer: seed.sessions[1], id: seed.tickets[0] };
 }
 

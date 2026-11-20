@@ -1,7 +1,10 @@
 // Shared browser fixtures: local-only sessions, instrumented draft resources
 // and blocked provider traffic. Used by the workflow suite and exploration.
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { readFileSync } from "node:fs";
 import { ConvexHttpClient } from "convex/browser";
+import { getFunctionName, type FunctionArgs, type FunctionReference, type FunctionReturnType } from "convex/server";
+import { convexToJson, jsonToConvex, type JSONValue } from "convex/values";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { loadPorts } from "../../scripts/worktree-ports.mjs";
@@ -9,9 +12,48 @@ import { translations, translate } from "../../src/lib/i18n";
 import { newContext, recordChromium, redact } from "../../scripts/browser-evidence";
 
 export const baseURL = process.env.BROWSER_BASE_URL!;
-export const seed = JSON.parse(process.env.BROWSER_FIXTURE!) as { sessions: string[]; projects: { id: Id<"projects">; key: string }[] };
+const fixture = JSON.parse(process.env.BROWSER_FIXTURE!) as { accessTokens: string[]; projects: { id: Id<"projects">; key: string }[] };
+// Seeded fixture sessions as access tokens (staff, Alice, Bob), for direct API checks.
+export const seed = { sessions: fixture.accessTokens, projects: fixture.projects };
 for (const session of seed.sessions) redact(session);
-export const convex = new ConvexHttpClient(`http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`);
+const convexUrl = `http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`;
+type WithToken<F extends FunctionReference<"query" | "mutation" | "action">> = FunctionArgs<F> & { token?: string };
+/** A per-call client: the `token` field is removed and sent as the Convex Auth JWT. */
+function client(token?: string) {
+  const result = new ConvexHttpClient(convexUrl);
+  if (token) result.setAuth(token);
+  return result;
+}
+export const convex = {
+  query: <F extends FunctionReference<"query">>(ref: F, { token, ...args }: WithToken<F>) => client(token).query(ref, args as FunctionArgs<F>),
+  mutation: <F extends FunctionReference<"mutation">>(ref: F, { token, ...args }: WithToken<F>) => client(token).mutation(ref, args as FunctionArgs<F>),
+  action: <F extends FunctionReference<"action">>(ref: F, { token, ...args }: WithToken<F>) => client(token).action(ref, args as FunctionArgs<F>),
+};
+/** Only the local evidence runner can read synthetic proof email and prepare Google fixtures. */
+export function localIdentityAdmin() {
+  const file = new URL("../../.convex/local/default/config.json", import.meta.url);
+  const config = JSON.parse(readFileSync(file, "utf8")) as { deploymentName: string; adminKey: string; ports: { cloud: number } };
+  if (!/^anonymous-[a-z0-9-]+$/.test(config.deploymentName)
+    || convexUrl !== `http://127.0.0.1:${config.ports.cloud}` || !config.adminKey) throw new Error("Local identity fixture required");
+  return async <F extends FunctionReference<"query" | "mutation", "internal">>(ref: F, args: FunctionArgs<F>) => {
+    const path = getFunctionName(ref);
+    const response = await fetch(`${convexUrl}/api/function`, {
+      method: "POST", redirect: "error",
+      headers: { "Content-Type": "application/json", Authorization: `Convex ${config.adminKey}` },
+      body: JSON.stringify({ path, args: convexToJson(args), format: "convex_encoded_json" }),
+    });
+    if (!response.ok) throw new Error(`Local fixture request failed for ${path}`);
+    const result = await response.json() as { status: string; value?: JSONValue };
+    if (result.status !== "success" || result.value === undefined) throw new Error(`Local fixture result failed for ${path}`);
+    return jsonToConvex(result.value) as FunctionReturnType<F>;
+  };
+}
+export const LOCAL_CUSTOMER_PASSWORD = "local customer passphrase";
+/** Convex Auth's browser storage keys, namespaced by the deployment URL. */
+export function authStorageKeys(url = convexUrl) {
+  const suffix = url.replace(/[^a-zA-Z0-9]/g, "");
+  return { jwt: `__convexAuthJWT_${suffix}`, refresh: `__convexAuthRefreshToken_${suffix}` };
+}
 export async function launch() {
   const browser = await chromium.launch({ headless: true, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
   recordChromium(browser.version());
@@ -35,15 +77,22 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
   const context = await newContext(browser, { permissions: ["camera"], viewport: { width: 1280, height: 900 } });
   let uploads = 0;
   await context.route(/\/api\/uploadthing|https:\/\/[^/]*(?:uploadthing|ufs\.sh)/, async route => { uploads++; await route.abort(); });
-  const credentials = role === "staff"
-    ? await convex.action(api.auth.login, { password: "LocalStaff123!", clientId: crypto.randomUUID() })
-    : await convex.action(api.customers.login, { email: "alice@local.test", password: "LocalCustomer123!", clientId: crypto.randomUUID() });
+  const signedIn = role === "staff"
+    ? await convex.mutation(api.auth.signInLocalFixture, { email: "owner@local.test" })
+    // Password-free fixture session: the pinned component allows five password
+    // verifications per minute per account, which a whole suite would exceed.
+    : await convex.mutation(api.auth.signInLocalFixture, { username: "alice" });
+  if (signedIn.status !== "complete") throw new Error(`fixture sign-in failed: ${JSON.stringify(signedIn)}`);
+  const credentials = { token: signedIn.tokens.accessToken, refreshToken: signedIn.tokens.refreshToken };
   redact(credentials.token);
+  redact(credentials.refreshToken);
+  const keys = authStorageKeys();
   // tsx preserves nested function names with this helper when Playwright
   // serializes an evaluate callback; it exists only in the isolated test page.
   await context.addInitScript("globalThis.__name = (fn) => fn;");
-  await context.addInitScript(({ token, language }) => {
-    sessionStorage.setItem("ease-pos-tracking-session", token);
+  await context.addInitScript(({ token, refreshToken, keys, language }) => {
+    sessionStorage.setItem(keys.jwt, token);
+    sessionStorage.setItem(keys.refresh, refreshToken);
     localStorage.setItem("ease-pos-tracking-language", language);
     const stats = { created: [] as string[], revoked: [] as string[], stops: [] as string[], streams: [] as string[], aborts: 0 };
     Object.assign(window, { draftStats: stats });
@@ -62,7 +111,7 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
     };
     const abort = AbortController.prototype.abort;
     AbortController.prototype.abort = function (reason) { stats.aborts++; abort.call(this, reason); };
-  }, { token: credentials.token, language });
+  }, { token: credentials.token, refreshToken: credentials.refreshToken, keys, language });
   await configure?.(context);
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -83,7 +132,7 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
     console.error("Focus failure", (await page.locator("body").innerText()).slice(-3000), await page.evaluate(() => document.activeElement?.outerHTML), errors);
     await context.close(); throw error;
   }
-  return { context, page, title, errors, token: credentials.token, uploads: () => uploads };
+  return { context, page, title, errors, token: credentials.token, refreshToken: credentials.refreshToken, uploads: () => uploads };
 }
 export async function stats(page: Page) { return page.evaluate(() => window.draftStats); }
 export async function files(page: Page, name = "draft.png") {

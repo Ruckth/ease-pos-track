@@ -1,3 +1,4 @@
+import { TicketInbox } from "./ticket-inbox";
 import { errorCode } from "../../../shared/errors";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
 import { ProductWordmark } from "@/components/product-wordmark";
@@ -14,7 +15,7 @@ import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { Images, Loader2, LogOut, MapPin, Plus } from "lucide-react";
+import { Images, Loader2, LogOut, MapPin, Plus, UserRound } from "lucide-react";
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast, Toaster } from "sonner";
 import type { TicketSummary } from "../../../shared/ticket-contracts";
@@ -23,13 +24,15 @@ import { CustomerTicketDialog } from "./customer-ticket-dialog";
 import { customerQueue, customerQueueCounts } from "./customer-queue";
 import { useComposer } from "./use-composer";
 import { useWorkspaceMenu } from "./use-workspace-menu";
+import { CustomerAccountDialog } from "@/components/account-dialogs";
 import { useWorkspaceNavigation } from "./use-workspace-navigation";
 
-export function CustomerPortal({ token, email, onLogout }: {
-  token: string; email: string | null; onLogout: () => Promise<void>;
+export function CustomerPortal({ viewer, onLogout }: {
+  viewer: { username: string; displayName: string; needsRecoveryCode: boolean }; onLogout: () => Promise<void>;
 }) {
+  const [accountOpen, setAccountOpen] = useState(false);
   const { language, setLanguage, t } = useI18n();
-  const { projects, current: project, select: selectProject } = useCurrentProject(token);
+  const { projects, current: project, select: selectProject } = useCurrentProject();
   const navigation = useWorkspaceNavigation("customer", project?.key);
   const composer = useComposer(project);
   const toolsMenu = useWorkspaceMenu();
@@ -84,10 +87,12 @@ export function CustomerPortal({ token, email, onLogout }: {
         <ProductWordmark />
         <div className="flex flex-wrap items-center gap-2 [&>select]:min-h-11 [&>span]:min-h-11">
           {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
+          {project && <TicketInbox role="customer" key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
           <details {...toolsMenu.props} className="relative">
             <summary className="flex min-h-11 cursor-pointer items-center rounded-md border px-3 text-sm font-medium">{t("customerQueueMore")}</summary>
             <div className="absolute right-0 z-30 mt-1 grid min-w-56 gap-3 rounded-lg border bg-popover p-3 shadow-lg">
-              {email ? <p className="break-all text-xs text-muted-foreground">{email}</p> : null}
+              <p className="break-all text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
+              <Button variant="outline" className="min-h-11" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
               <div className="[&_button]:min-h-11"><LanguageSelector language={language} onChange={setLanguage} /></div>
               <Button variant="outline" className="min-h-11" onClick={() => void onLogout()}><LogOut />{t("signOut")}</Button>
             </div>
@@ -95,7 +100,12 @@ export function CustomerPortal({ token, email, onLogout }: {
         </div>
       </div>
     </header>
+    <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} hasRecoveryCode={!viewer.needsRecoveryCode} />
     <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
+      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+        <span>{t("recoveryCodeNeeded")}</span>
+        <Button className="min-h-11" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
+      </div> : null}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", navigation.ticketId && "hidden lg:flex")}>
         <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" tabIndex={-1} className="text-2xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
         <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
@@ -106,11 +116,11 @@ export function CustomerPortal({ token, email, onLogout }: {
       {foreignDraft ? <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
       <div className={cn("grid items-start gap-4", navigation.ticketId && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
-          <CustomerTickets token={token} project={project} onNewTicket={composer.show} onSelect={openTicket}
+          <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
             selectedId={navigation.ticketId} filter={navigation.filter} query={navigation.query}
             onFilter={navigation.setFilter} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
         </ProjectTicketsBoundary>
-        {project ? <CustomerTicketDialog token={token} projectId={project._id} ticketId={navigation.ticketId} onClose={navigation.closeTicket}
+        {project ? <CustomerTicketDialog projectId={project._id} ticketId={navigation.ticketId} onClose={navigation.closeTicket}
           inResults={navigation.ticketId && visible.projectId === projectId ? visibleIds.includes(navigation.ticketId) : undefined}
           inline initialSection={navigation.section} onPrevious={previousId ? () => navigation.changeTicket(previousId) : undefined}
           onNext={nextId ? () => navigation.changeTicket(nextId) : undefined} /> : null}
@@ -119,7 +129,7 @@ export function CustomerPortal({ token, email, onLogout }: {
     <Dialog open={composer.open} mobileFullScreen initialFocus={() => document.getElementById("customer-ticket-title")} onOpenChange={composer.setOpen}
       title={t("newTicket")} description={composer.project ? `${composer.project.name} (${composer.project.key})` : t("customerPortalSubtitle")}>
 
-      {composer.project ? <CustomerTicketWizard key={composer.project._id} token={token} draftOwner={composer.owner!}
+      {composer.project ? <CustomerTicketWizard key={composer.project._id} draftOwner={composer.owner!}
         active={composer.open} onSubmitted={id => {
           const createdProject = composer.project;
           composer.complete();
@@ -149,13 +159,13 @@ function ProjectUnavailable() {
   return <p role="alert" className="rounded-lg border p-4 text-sm">{t("projectMissing")}</p>;
 }
 
-function CustomerTickets({ token, project, onNewTicket, onSelect, selectedId, filter, query, onFilter, onQuery, onVisibleIds }: {
-  token: string; project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
+function CustomerTickets({ project, onNewTicket, onSelect, selectedId, filter, query, onFilter, onQuery, onVisibleIds }: {
+  project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
   selectedId: Id<"tickets"> | null; filter: string; query: string; onFilter: (filter: string) => void; onQuery: (query: string) => void;
   onVisibleIds: (ids: Id<"tickets">[]) => void;
 }) {
   const { t } = useI18n();
-  const page = useCustomerTickets(token, project?._id);
+  const page = useCustomerTickets(project?._id);
   const tickets = page.results;
   const counts = useMemo(() => customerQueueCounts(tickets), [tickets]);
   const visibleTickets = useMemo(() => customerQueue(tickets, filter, query), [tickets, filter, query]);

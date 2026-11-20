@@ -8,7 +8,8 @@ const ports = loadPorts();
 const cloud = `http://127.0.0.1:${ports.CONVEX_CLOUD_PORT}`;
 const baseURL = `http://127.0.0.1:${ports.VITE_PORT}`;
 const children: ChildProcess[] = [];
-const env = { ...process.env, VITE_CONVEX_URL: cloud, CONVEX_URL: cloud,
+const env = { ...process.env, TICKET_DEPLOYMENT_MODE: "legacy", VITE_CONVEX_URL: cloud, CONVEX_URL: cloud, VITE_LOCAL_FIXTURE_SIGN_IN: "true",
+  VITE_PILOT_PRIVACY_NOTICE_EN: "https://privacy.example.test/en", VITE_PILOT_PRIVACY_NOTICE_TH: "https://privacy.example.test/th",
   VITE_CONVEX_SITE_URL: `http://127.0.0.1:${ports.CONVEX_SITE_PORT}`,
   UPLOADTHING_TOKEN: "", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture", BROWSER_BASE_URL: baseURL };
 function start(args: string[]) {
@@ -57,7 +58,7 @@ async function main() {
       // Both entry points always run so one failure does not hide the other.
       const grep = process.env.BROWSER_GREP;
       const workflows = await run("workflows", ["tsx", "--tsconfig", "tsconfig.test.json", "--test", "--test-concurrency=1",
-        ...(grep ? [`--test-name-pattern=${grep}`] : []), "tests/browser/workflows.test.ts", "tests/browser/accessibility.test.ts"]);
+        ...(grep ? [`--test-name-pattern=${grep}`] : []), "tests/browser/workflows.test.ts", "tests/browser/accessibility.test.ts", "tests/browser/routing.test.ts"]);
       const explorer = grep ? 0 : await run("explorer", ["tsx", "tests/browser/explorer-check.mjs"]);
       process.exitCode = workflows || explorer;
     }

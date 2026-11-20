@@ -3,6 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { getFunctionName } from "convex/server";
 import * as ticketHandlers from "../convex/tickets";
 import * as authHandlers from "../convex/auth";
+import * as identityHandlers from "../convex/identity";
 import { ConvexTicketRemote } from "../scripts/ticket/remote";
 import * as uploadHandlers from "../convex/uploads";
 import type { ValidatorJSON } from "convex/values";
@@ -16,7 +17,7 @@ import { EXIT, TicketCliError, remoteError, internalError } from "../scripts/tic
 import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
 import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
 import type { TicketRef } from "../scripts/ticket/cli";
-import type { TicketAttachInput, TicketDocument, TicketRemote } from "../scripts/ticket/remote";
+import type { SessionTokens, TicketAttachInput, TicketDocument, TicketRemote } from "../scripts/ticket/remote";
 import { classifyRemoteError, runTicketCli, type TicketCliDeps } from "../scripts/ticket/run";
 import { toStoredTicketStatus, type TicketStatus } from "../scripts/ticket/status";
 
@@ -51,11 +52,19 @@ class MemoryConfig implements ConfigStore {
   async save(value: TicketConfig) { this.value = structuredClone(value); this.saves += 1; }
 }
 
+/** Fails credential access outside `exclusive` and nested calls, which would deadlock the real lock. */
 class MemoryCredentials implements CredentialStore {
   values: Partial<Record<"dev" | "prod", StoredCredential>> = {};
-  async get(target: "dev" | "prod") { return this.values[target] ?? null; }
-  async set(target: "dev" | "prod", value: StoredCredential) { this.values[target] = value; }
-  async delete(target: "dev" | "prod") { delete this.values[target]; }
+  held = false;
+  async get(target: "dev" | "prod") { this.locked(); return this.values[target] ?? null; }
+  async set(target: "dev" | "prod", value: StoredCredential) { this.locked(); this.values[target] = value; }
+  async delete(target: "dev" | "prod") { this.locked(); delete this.values[target]; }
+  async exclusive<T>(fn: () => Promise<T>) {
+    assert.equal(this.held, false, "exclusive must not nest");
+    this.held = true;
+    try { return await fn(); } finally { this.held = false; }
+  }
+  private locked() { assert.ok(this.held, "credential access outside exclusive"); }
 }
 
 // Validate transport shapes against the registered handlers, including extra fields.
@@ -85,16 +94,20 @@ function validateArgs(registration: object, args: unknown) {
 
 class FakeRemote implements TicketRemote {
   calls: Array<{ method: string; args: unknown[] }> = [];
-  session: Awaited<ReturnType<TicketRemote["currentSession"]>> = { role: "staff", expiresAt: 20_000, customerId: null, email: null };
+  session: Awaited<ReturnType<TicketRemote["currentSession"]>> = { role: "staff", name: "Fixture Staff", email: "staff@example.com" };
   rows = [ticket()];
-  loginResult = { token: "secret-token", expiresAt: 20_000 };
-  loginError: Error | null = null;
+  signInResult: SessionTokens | null = { accessToken: "signed-in-access", refreshToken: "secret-refresh", refreshTokenExpiresAt: 20_000 };
+  refreshes: Array<{ url: string; refreshToken: string }> = [];
+  revoked = false;
 
   private record(method: string, ...args: unknown[]) { this.calls.push({ method, args }); }
-  async login(url: string, password: string, clientId: string) {
-    this.record("login", url, password, clientId);
-    if (this.loginError) throw this.loginError;
-    return this.loginResult;
+  async startGoogle(): Promise<{ redirect: string; state: string }> { throw new Error("browser sign-in is injected through deps.signIn"); }
+  async completeGoogle(): Promise<SessionTokens | null> { throw new Error("browser sign-in is injected through deps.signIn"); }
+  async signInLocalFixture(): Promise<SessionTokens | null> { throw new Error("unused"); }
+  /** Rotation is recorded separately; the access token keeps the saved name so call logs stay readable. */
+  async refresh(url: string, refreshToken: string) {
+    this.refreshes.push({ url, refreshToken });
+    return this.revoked ? null : { accessToken: refreshToken, refreshToken: `${refreshToken}`, refreshTokenExpiresAt: 20_000 };
   }
   async currentSession(url: string, token: string) { this.record("currentSession", url, token); return this.session; }
   async logout(url: string, token: string) { this.record("logout", url, token); }
@@ -113,16 +126,17 @@ class FakeRemote implements TicketRemote {
     return { ticket: this.rows[0], created: true, requestId: input.requestId };
   }
   async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }): ReturnType<TicketRemote["createUploadIntent"]> {
-    validateArgs(uploadHandlers.createUploadIntent, { token, idempotencyKey: input.requestId, files: input.files });
+    validateArgs(uploadHandlers.createUploadIntent, { idempotencyKey: input.requestId, files: input.files });
     this.record("createUploadIntent", url, token, input);
     return { intentId: "intent-id" as never, secret: "s".repeat(48), uploadedFiles: [] };
   }
   async recordUploadedFile(url: string, input: { token: string; intentId: string; secret: string; file: TicketDocument["media"][number] }) {
-    validateArgs(uploadHandlers.recordUploadedFile, input);
+    const { token: _token, ...args } = input;
+    validateArgs(uploadHandlers.recordUploadedFile, args);
     this.record("recordUploadedFile", url, input);
   }
   async cancelUploadIntent(url: string, token: string, input: { intentId: string; secret: string }) {
-    validateArgs(uploadHandlers.cancelUploadIntent, { token, ...input });
+    validateArgs(uploadHandlers.cancelUploadIntent, input);
     this.record("cancelUploadIntent", url, token, input);
   }
   async attachImages(url: string, token: string, input: TicketAttachInput) {
@@ -164,7 +178,7 @@ function fixture() {
     remote,
     config,
     credentials,
-    readPassword: async () => "hidden-password",
+    signIn: async () => remote.signInResult,
     newRequestId: () => "generated-request-id",
     now: () => 10_000,
     env: {},
@@ -189,7 +203,7 @@ test("the registry is the source for machine discovery, parsing, and pnpm-only h
   assert.match(HELP, /pnpm ticket commands/);
   assert.doesNotMatch(HELP, /\bnpm\b|\bnpx\b/);
   assert.equal(discovery.commands.every((command) => command.usage.startsWith("pnpm ticket ")), true);
-  assert.equal(discovery.commands.find((command) => command.name === "login")?.interactive, "hidden-password");
+  assert.equal(discovery.commands.find((command) => command.name === "login")?.interactive, "browser-sign-in");
 });
 
 test("commands discovery is unauthenticated and prints one compact JSON object", async () => {
@@ -307,39 +321,57 @@ test("create supports JSON, validates locally, and dry-run touches no config, cr
   assert.equal(config.saves, 0);
 });
 
-test("login uses the hidden password dependency, persists URL/client id, and stores only the session credential", async () => {
+test("login runs the named sign-in, persists URL/client id, and stores only the rotating refresh credential", async () => {
   const { deps, remote, config, credentials } = fixture();
   config.value = null;
   credentials.values = {};
   deps.env.VITE_CONVEX_URL = "https://first.example.com";
   const outcome = await runTicketCli(["login"], deps);
-  assert.equal(outcome.exitCode, 0);
-  assert.equal(remote.calls[0].method, "login");
-  assert.equal(remote.calls[0].args[0], "https://first.example.com");
-  assert.equal(remote.calls[0].args[1], "hidden-password");
-  assert.equal(typeof remote.calls[0].args[2], "string");
+  assert.equal(outcome.exitCode, 0, outcome.stderr);
+  assert.deepEqual(remote.calls[0], { method: "currentSession", args: ["https://first.example.com", "signed-in-access"] });
   const savedConfig = await config.load();
   assert.equal(savedConfig?.deployments.dev?.url, "https://first.example.com");
   assert.equal(savedConfig?.clientId.length, 36);
-  assert.deepEqual(credentials.values.dev, { token: "secret-token", expiresAt: 20_000, url: "https://first.example.com" });
+  assert.deepEqual(credentials.values.dev, { token: "secret-refresh", expiresAt: 20_000, url: "https://first.example.com" });
   assert.equal(JSON.parse(outcome.stdout).authenticated, true);
-  assert.equal(JSON.stringify(config.value).includes("secret-token"), false);
+  assert.equal(JSON.stringify(config.value).includes("secret-refresh"), false);
+  assert.equal(outcome.stdout.includes("signed-in-access"), false);
 });
 
-test("login preserves server rate limiting and invalid-credential codes", async () => {
-  for (const [message, code] of [["INCORRECT_PASSWORD", "INVALID_CREDENTIALS"], ["AUTH_RATE_LIMITED", "AUTH_RATE_LIMITED"]]) {
-    const { deps, remote } = fixture();
-    remote.loginError = new Error(message);
-    const result = await runTicketCli(["login"], deps);
-    assert.equal(result.exitCode, EXIT.auth);
-    assert.equal(JSON.parse(result.stderr).code, code);
-  }
+test("a sign-in that does not complete, or is not staff, stores nothing", async () => {
+  const failed = fixture();
+  failed.credentials.values = {};
+  failed.remote.signInResult = null;
+  const result = await runTicketCli(["login"], failed.deps);
+  assert.equal(result.exitCode, EXIT.auth);
+  assert.equal(JSON.parse(result.stderr).code, "SIGN_IN_FAILED");
+  assert.equal(failed.credentials.values.dev, undefined);
+  const pending = fixture();
+  pending.credentials.values = {};
+  pending.remote.session = { role: "pending", name: null, email: "someone@example.com" };
+  const denied = await runTicketCli(["login"], pending.deps);
+  assert.equal(JSON.parse(denied.stderr).code, "NOT_AUTHORIZED");
+  assert.equal(pending.credentials.values.dev, undefined);
+  assert.equal(pending.remote.calls.at(-1)?.method, "logout");
+});
+
+test("every authenticated run rotates the saved refresh credential before use", async () => {
+  const { deps, remote, credentials } = fixture();
+  remote.refresh = async (url, refreshToken) => {
+    remote.refreshes.push({ url, refreshToken });
+    return { accessToken: "run-access", refreshToken: "rotated-refresh", refreshTokenExpiresAt: 30_000 };
+  };
+  const result = await runTicketCli(["list"], deps);
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(remote.refreshes, [{ url: "https://dev.example.com", refreshToken: "saved-dev-token" }]);
+  assert.deepEqual(credentials.values.dev, { token: "rotated-refresh", expiresAt: 30_000, url: "https://dev.example.com" });
+  assert.deepEqual(remote.calls.map(call => call.args[1]), ["run-access", "run-access"]);
 });
 
 test("whoami reuses a persisted session across runs and logout revokes then deletes it", async () => {
   const { deps, remote, credentials } = fixture();
   const whoami = await runTicketCli(["whoami"], deps);
-  assert.deepEqual(JSON.parse(whoami.stdout), { ok: true, authenticated: true, role: "staff", deployment: "dev", url: "https://dev.example.com", expiresAt: 20_000 });
+  assert.deepEqual(JSON.parse(whoami.stdout), { ok: true, authenticated: true, role: "staff", name: "Fixture Staff", email: "staff@example.com", deployment: "dev", url: "https://dev.example.com", expiresAt: 20_000 });
   assert.deepEqual(remote.calls[0], { method: "currentSession", args: ["https://dev.example.com", "saved-dev-token"] });
 
   const logout = await runTicketCli(["logout"], deps);
@@ -409,12 +441,17 @@ test("missing, expired, invalid, mismatched, and non-staff sessions have stable 
   invalid.remote.session = null;
   assert.equal(JSON.parse((await runTicketCli(["list"], invalid.deps)).stderr).code, "SESSION_INVALID");
 
+  const revoked = fixture();
+  revoked.remote.revoked = true;
+  assert.equal(JSON.parse((await runTicketCli(["list"], revoked.deps)).stderr).code, "SESSION_INVALID");
+  assert.equal(revoked.credentials.values.dev, undefined);
+
   const mismatch = fixture();
   mismatch.credentials.values.dev!.url = "https://other.example.com";
   assert.equal(JSON.parse((await runTicketCli(["list"], mismatch.deps)).stderr).code, "SESSION_DEPLOYMENT_MISMATCH");
 
   const customer = fixture();
-  customer.remote.session = { role: "customer", expiresAt: 20_000, customerId: "customer", email: "a@example.com" };
+  customer.remote.session = { role: "customer", name: "Alice", email: null };
   assert.equal(JSON.parse((await runTicketCli(["list"], customer.deps)).stderr).code, "NOT_AUTHORIZED");
 });
 
@@ -699,12 +736,13 @@ test("a Ticket re-read failure after committed CLI attachment never retries the 
   let attachments = 0;
   let cancellations = 0;
   ConvexHttpClient.prototype.query = async (reference, ..._args) => {
-    if (getFunctionName(reference) === "auth:currentSession") return { role: "staff", expiresAt: 20_000, customerId: null, email: null } as never;
+    if (getFunctionName(reference) === "identity:viewer") return { kind: "staff", staffId: "staff", role: "staff", name: "Staff", email: "staff@example.com" } as never;
     if (attachments) throw new ConvexError({ code: "TICKET_UNAVAILABLE" });
     return ticket() as never;
   };
   ConvexHttpClient.prototype.mutation = async (reference, ..._args) => {
     const name = getFunctionName(reference);
+    if (name === "auth:refreshSession") return { kind: "rotated", tokens: { accessToken: "access", refreshToken: "refresh", refreshTokenExpiresAt: 20_000, userId: "user" } } as never;
     if (name === "uploads:createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] } as never;
     if (name === "uploads:recordUploadedFile") return { state: "recorded" } as never;
     if (name === "tickets:attachTicketMedia") attachments++;
@@ -740,7 +778,7 @@ test("every CLI transport call satisfies the real registered argument validators
   const originalQuery = ConvexHttpClient.prototype.query;
   const originalMutation = ConvexHttpClient.prototype.mutation;
   const originalAction = ConvexHttpClient.prototype.action;
-  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
+  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, identity: identityHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
   const called = new Set<string>();
   const invoke = (reference: Parameters<typeof getFunctionName>[0], args: unknown) => {
     const name = getFunctionName(reference);
@@ -748,6 +786,10 @@ test("every CLI transport call satisfies the real registered argument validators
     validateArgs(handlers[module][method], args);
     called.add(name);
     if (method === "createTextTicket") return { ticket: ticket(), created: true, requestId: "request" };
+    if (method === "refreshSession") return { kind: "noSession" };
+    if (method === "viewer") return null;
+    if (method === "startSignInWithGoogle") return { redirect: "https://accounts.google.com/", state: "state" };
+    if (method === "completeSignInWithGoogle" || method === "signInLocalFixture") return { status: "error", userError: { error: "INVALID_CODE" } };
     if (method === "createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] };
     if (method === "recordUploadedFile") return { state: "recorded" };
     if (method === "listProjects") return [{ _id: ticket().projectId, key: "TKT" }];
@@ -763,9 +805,12 @@ test("every CLI transport call satisfies the real registered argument validators
     const token = "staff";
     const ref = { projectKey: "TKT", ticketNumber: 7 };
     const intent = { intentId: "intent-id" as never, secret: "secret", ticketId: undefined, uploadedFiles: [] };
-    await remote.login(url, "password", "client");
+    await remote.startGoogle(url, "http://127.0.0.1:4271/");
+    await remote.completeGoogle(url, "code", "state");
+    await remote.signInLocalFixture(url, "owner@local.test");
+    await remote.refresh(url, "refresh");
     await remote.currentSession(url, token);
-    await remote.logout(url, token);
+    await remote.logout(url, "refresh");
     await remote.list(url, token, "TKT", false);
     await remote.get(url, token, ref, false);
     await remote.create(url, token, { title: "Ticket", description: "", requestId: "request" });
@@ -777,7 +822,7 @@ test("every CLI transport call satisfies the real registered argument validators
     await remote.changeStatus(url, token, { ref, status: "acknowledged", expectedVersion: 0 });
     await remote.archive(url, token, ref, 0);
     await remote.restore(url, token, ref, 0);
-    assert.equal(called.size, 15);
+    assert.equal(called.size, 18);
   } finally {
     ConvexHttpClient.prototype.query = originalQuery;
     ConvexHttpClient.prototype.mutation = originalMutation;

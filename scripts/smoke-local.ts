@@ -10,8 +10,9 @@ import type { StoredCredential } from "./ticket/keychain";
 const url = `http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`;
 let configuration: TicketConfig = { version: 1, clientId: "local-cli-smoke-client", deployments: { dev: { url } } };
 let credential: StoredCredential | null = null;
+const remote = new ConvexTicketRemote();
 const deps: TicketCliDeps = {
-  remote: new ConvexTicketRemote(),
+  remote,
   config: {
     load: async () => configuration,
     save: async value => { configuration = value; },
@@ -20,13 +21,15 @@ const deps: TicketCliDeps = {
     get: async () => credential,
     set: async (_target, value) => { credential = value; },
     delete: async () => { credential = null; },
+    exclusive: fn => fn(),
   },
   images: {
     prepare: async () => { throw new Error("Text-only smoke cannot prepare uploads"); },
     upload: async () => { throw new Error("Text-only smoke cannot call a provider"); },
   },
   env: {}, now: Date.now, newRequestId: randomUUID,
-  readPassword: async () => "LocalStaff123!",
+  // The local test provider stands in for Google on the disposable backend.
+  signIn: async target => await remote.signInLocalFixture(target, "owner@local.test"),
 };
 
 async function command(args: string[], exitCode = 0) {

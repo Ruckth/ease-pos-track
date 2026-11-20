@@ -10,9 +10,9 @@ import { tagTones } from "@/components/ticket-tags";
 const colorKeys = { slate: "tagSlate", red: "tagRed", orange: "tagOrange", green: "tagGreen", blue: "tagBlue", violet: "tagViolet" } as const;
 
 /** Staff-only editor; assignments always use the latest observed Ticket version. */
-export function TicketTagEditor({ item, token }: { item: Ticket; token: string }) {
+export function TicketTagEditor({ item }: { item: Ticket }) {
   const { t } = useI18n();
-  const tags = useTicketTags(token);
+  const tags = useTicketTags();
   const { create, assign } = useTagAdapter();
   const [name, setName] = useState("");
   const [color, setColor] = useState<TicketTag["color"]>("blue");
@@ -43,7 +43,7 @@ export function TicketTagEditor({ item, token }: { item: Ticket; token: string }
         <Button key={tag._id} type="button" variant="outline" size="sm" disabled={busy || item.archivedAt !== undefined}
           aria-pressed={selected.includes(tag._id)}
           className={`${tagTones[tag.color]} h-auto min-h-9 max-w-full whitespace-normal break-words [overflow-wrap:anywhere] ${selected.includes(tag._id) ? "ring-2 ring-foreground ring-offset-1" : "opacity-70"}`}
-          onClick={() => void run(() => assign({ token, id: item._id, expectedVersion: item.version ?? 0,
+          onClick={() => void run(() => assign({ id: item._id, expectedVersion: item.version ?? 0,
             tagIds: selected.includes(tag._id) ? selected.filter((tagId) => tagId !== tag._id) : [...selected, tag._id],
           }), t("tagsUpdated"))}>
           {selected.includes(tag._id) ? "✓ " : "+ "}{tag.name}
@@ -51,7 +51,7 @@ export function TicketTagEditor({ item, token }: { item: Ticket; token: string }
       ))}</div>}
       <form className="space-y-2 border-t pt-3" onSubmit={(event) => {
         event.preventDefault();
-        void run(async () => { await create({ token, name, color }); setName(""); }, t("tagCreated"));
+        void run(async () => { await create({ name, color }); setName(""); }, t("tagCreated"));
       }}>
         <label htmlFor={`${id}-name`} className="text-sm font-medium">{t("tagName")}</label>
         <Input id={`${id}-name`} value={name} maxLength={MAX_TAG_NAME_LENGTH} disabled={busy} onChange={(event) => setName(event.target.value)} />

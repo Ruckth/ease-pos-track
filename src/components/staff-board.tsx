@@ -49,11 +49,10 @@ type LanePage = { status: string; loadMore: (count: number) => void };
  * applied locally first, then persisted with the ticket's expected version. A
  * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard, shownByLane, loadedByLane, chosenStatus, onChooseStatus, constrained, busy, visibleStatuses = BOARD_COLUMNS }: {
+export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCard, shownByLane, loadedByLane, chosenStatus, onChooseStatus, constrained, busy, visibleStatuses = BOARD_COLUMNS }: {
   items: TicketSummary[];
   visibleStatuses?: readonly TicketStatus[];
   projectId: Id<"projects">;
-  token: string;
   totals: Partial<Record<TicketStatus, number>>;
   pages?: Record<TicketStatus, LanePage>;
   shownByLane?: LaneCounts;
@@ -123,7 +122,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
         if (item && status) void move(item, status);
       }}
     >
-      {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} token={token} entry={entry} onObserve={observe} />)}
+      {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} entry={entry} onObserve={observe} />)}
       {!multiColumn && <label className="mb-2 flex min-w-0 items-center gap-2 text-sm font-medium">
         {t("boardStatusTabs")}
         <select className="min-h-11 min-w-0 flex-1 rounded-md border bg-background px-2" value={visibleStatus}
@@ -263,11 +262,11 @@ function BoardColumn({
   );
 }
 
-function MoveObservation({ token, entry, onObserve }: {
-  token: string; entry: PendingMoves<TicketSummary>[string];
+function MoveObservation({ entry, onObserve }: {
+  entry: PendingMoves<TicketSummary>[string];
   onObserve: (operationId: string, row: TicketSummary | null) => void;
 }) {
-  const row = useSelectedTicket(token, entry.ticket._id);
+  const row = useSelectedTicket(entry.ticket._id);
   useEffect(() => {
     if (row === undefined) return;
     if (!row) { onObserve(entry.operationId, null); return; }

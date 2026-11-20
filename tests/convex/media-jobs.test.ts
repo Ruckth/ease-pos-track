@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { fixtures, identityTest, whoami } from "./identity-harness";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
@@ -9,6 +9,7 @@ import type { Storage } from "../../shared/storage";
 import { StorageConfigurationError } from "../../shared/storage";
 import type { StorageDeletionOutcome } from "../../shared/ticket-contracts";
 import { cancelUploadHandler } from "../../server/handlers/cancel-upload";
+import { legacyMediaTransport } from "../../server/media-transport";
 import { createUploadApp } from "../../server/app";
 import { POST } from "../../api/uploads/cancel";
 import * as retention from "../../convex/retention";
@@ -18,8 +19,9 @@ import { MAX_MEDIA_FILES } from "../../shared/media-policy";
 
 const provider = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock("../../convex/adapters/storage", () => ({ createStorage: provider.factory }));
-const httpRuntime = vi.hoisted(() => ({ cancelUpload: vi.fn() }));
+const httpRuntime = vi.hoisted(() => ({ cancelUpload: vi.fn(), transportAvailable: vi.fn() }));
 vi.mock("../../server/runtime", () => ({ createServerRuntime: () => ({
+  convex: { query: () => httpRuntime.transportAvailable() },
   cancelUpload: (request: Request) => httpRuntime.cancelUpload(request),
 }) }));
 
@@ -42,10 +44,8 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 async function fixture(testModules = modules) {
-  const t = convexTest(schema, testModules);
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest(testModules);
+  const seed = await t.mutation(internal.seed.install, {});
   const [staff, alice, bob] = seed.sessions;
   const storage: Storage = { deleteFiles: vi.fn<Storage["deleteFiles"]>(async () => ({ outcome: "deleted" })), verifyAppKey: vi.fn(async () => true) };
   provider.factory.mockReturnValue(storage);
@@ -593,10 +593,10 @@ test("large audit histories renew leases and finish after lease expiry with an e
   const handle = await f.archived(0);
   await f.t.run(async ctx => {
     for (let index = 0; index < AUDIT_BATCH * 2 + 7; index++) {
-      await ctx.db.insert("ticketEvents", { ticketId: handle.ticketId, action: "edited", sessionId: (await ctx.db.query("sessions").first())!._id,
+      await ctx.db.insert("ticketEvents", { ticketId: handle.ticketId, action: "edited", sessionId: (await ctx.db.query("sessionAdmissions").first())!._id,
         actorRole: "staff", createdAt: Date.now() });
       await ctx.db.insert("annotationEvents", { ticketId: handle.ticketId, annotationId: `${index}`, action: "created",
-        sessionId: (await ctx.db.query("sessions").first())!._id, actorRole: "staff", createdAt: Date.now() });
+        sessionId: (await ctx.db.query("sessionAdmissions").first())!._id, actorRole: "staff", createdAt: Date.now() });
     }
   });
   const counts = () => f.t.run(async ctx => ({
@@ -643,7 +643,9 @@ test("both HTTP adapters share real authorization and malformed-input behavior a
   const handle = await f.upload();
   const handler = cancelUploadHandler({ cancel: args => f.t.mutation(api.uploads.cancelUploadIntent, args) });
   httpRuntime.cancelUpload.mockImplementation(handler);
-  const hono = createUploadApp({ cancelUpload: handler }, async () => new Response());
+  const checkBackend = () => f.t.query(api.uploads.legacyTransportAvailable, {});
+  httpRuntime.transportAvailable.mockImplementation(checkBackend);
+  const hono = createUploadApp({ cancelUpload: legacyMediaTransport(process.env, checkBackend, handler) }, async () => new Response());
   const request = (body: string, token = f.alice) => new Request("http://fake.invalid/api/uploads/cancel", {
     method: "POST", body, headers: { authorization: `Bearer ${token}` },
   });
@@ -674,7 +676,7 @@ test("both HTTP adapters share real authorization and malformed-input behavior a
 test("bounded expiry and recovery scans recover lost pending wakeups", async () => {
   const f = await fixture();
   await f.t.run(async ctx => {
-    const session = (await ctx.db.query("sessions").first())!;
+    const session = (await ctx.db.query("sessionAdmissions").first())!;
     for (let index = 0; index < SWEEP_LIMIT + 3; index++) await ctx.db.insert("uploadIntents", {
       sessionId: session._id, actorRole: "staff", secret: "fake", idempotencyKey: `expired-${index}`,
       expectedFiles: [], uploadedFiles: [], status: "pending", createdAt: Date.now(), updatedAt: Date.now(), expiresAt: Date.now() - 1,
@@ -953,11 +955,9 @@ test("archived purge requeue independently enforces the full 30-day window", asy
   expect((await f.job(job._id))!.state).toBe("failed");
   const archivedAt = (await f.t.run(ctx => ctx.db.get(handle.ticketId)))!.archivedAt!;
   vi.setSystemTime(archivedAt + ARCHIVE_RETENTION_MS);
-  await f.t.run(async ctx => {
-    const session = (await ctx.db.query("sessions").withIndex("by_token", q => q.eq("token", f.staff)).unique())!;
-    await ctx.db.patch(session._id, { expiresAt: Date.now() + 86_400_000 });
-  });
-  expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: job._id })).toBe(true);
+  // A fresh admitted session after the 30-day clock jump.
+  const owner = await f.t.mutation(fixtures.session, { staffId: (await whoami(f.t, f.staff)).staffId });
+  expect(await f.t.mutation(api.retention.requeueFailed, { token: owner, jobId: job._id })).toBe(true);
   await f.drain();
 });
 

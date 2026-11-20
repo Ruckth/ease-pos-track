@@ -11,13 +11,12 @@ import { TicketStatusMoves, type MoveSource } from "./status-moves";
 const phaseLabels = { moving: "statusWriting", checking: "statusChecking", retry: "statusNeedsConnection" } as const;
 
 export function useTicketStatusMoves(
-  token: string,
   projectId: Id<"projects"> | undefined,
   write: (item: MoveSource, status: TicketStatus) => Promise<{ version: number }>,
 ) {
   const [moves] = useState(() => new TicketStatusMoves());
   const entries = useSyncExternalStore(moves.subscribe, moves.snapshot);
-  const read = useFreshTicketStatus(token);
+  const read = useFreshTicketStatus();
   const { t } = useI18n();
 
   useEffect(() => {

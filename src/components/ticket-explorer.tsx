@@ -41,8 +41,8 @@ type Workspace = {
   busy: ReadonlySet<string>;
 };
 
-export function TicketExplorer({ projectId, token, items, archivedItems, tags, search, onSearch, showArchived, totals, pages, archive, loading, searchHasMore, archiveSearchHasMore, onSelect, onMove, onRestore, workspace }: {
-  projectId: Id<"projects">; token: string; items: TicketSummary[]; archivedItems: TicketSummary[];
+export function TicketExplorer({ projectId, items, archivedItems, tags, search, onSearch, showArchived, totals, pages, archive, loading, searchHasMore, archiveSearchHasMore, onSelect, onMove, onRestore, workspace }: {
+  projectId: Id<"projects">; items: TicketSummary[]; archivedItems: TicketSummary[];
   tags: ExplorerTag[]; search: string; onSearch: (search: string) => void; showArchived: boolean;
   totals: Partial<Record<TicketStatus, number>>; pages: Record<TicketStatus, Page>; archive?: Page;
   loading: boolean; searchHasMore?: boolean; archiveSearchHasMore?: boolean;
@@ -153,7 +153,7 @@ export function TicketExplorer({ projectId, token, items, archivedItems, tags, s
     {loading ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 aria-hidden className="size-6 animate-spin text-muted-foreground" /></div>
       : view === "table" ? <TicketTable items={ordered} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect}
           onMove={onMove} onRestore={onRestore} busy={workspace?.busy} emptyText={emptyText} />
-      : board ? <StaffBoard projectId={projectId} token={token} items={active} totals={totals} shownByLane={shownByLane} loadedByLane={filtering && !search ? loadedByLane : undefined}
+      : board ? <StaffBoard projectId={projectId} items={active} totals={totals} shownByLane={shownByLane} loadedByLane={filtering && !search ? loadedByLane : undefined}
           visibleStatuses={workspace?.visibleStatuses ?? BOARD_COLUMNS} pages={search ? undefined : pages} constrained={Boolean(search || filtering)}
           chosenStatus={preferredLane} onChooseStatus={chooseLane} busy={workspace?.busy}
           onSelect={onSelect} onMoveCard={onMove} />

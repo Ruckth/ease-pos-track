@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { localizeError, useI18n } from "@/lib/i18n";
 import { pendingAnnotationsForViewer, pendingMediaForViewer } from "@/lib/pending-annotations";
 import { toast } from "sonner";
-import { useDraftAdapter } from "./adapter";
+import { useDraftAdapter, useTicketCapabilities } from "./adapter";
+import { useAccessToken } from "@/app/adapter";
 import { DisposableTicketDraft, type DraftSnapshot } from "./draft";
 
 const idle: DraftSnapshot = { idempotencyKey: "", error: null, title: "", description: "", items: [], annotations: [], progress: null };
@@ -28,7 +29,7 @@ export function useComposer(project: ProjectSummary | null | undefined) {
   }, []);
   const state = useSyncExternalStore(entry?.owner.subscribe ?? subscribeIdle, entry?.owner.getSnapshot ?? getIdle);
   const busy = state.progress !== null;
-  const hasDraft = Boolean(state.title || state.description || state.items.length || state.annotations.length);
+  const hasDraft = Boolean(state.title || state.description || state.routingClassification || state.items.length || state.annotations.length);
   function replace(next: typeof entry) {
     lifetime.current.entry?.owner.dispose();
     lifetime.current.entry = next;
@@ -51,9 +52,12 @@ export function useComposer(project: ProjectSummary | null | undefined) {
 }
 
 /** A consumer can remount without taking ownership of the draft's lifetime. */
-export function useTicketDraft(token: string, owner: DisposableTicketDraft) {
+export function useTicketDraft(owner: DisposableTicketDraft) {
   const { t } = useI18n();
   const adapter = useDraftAdapter();
+  const mediaEnabled = useTicketCapabilities()?.mediaEnabled;
+  // The upload server forwards this access token on a per-request Convex client.
+  const accessToken = useAccessToken();
   const state = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const { items, annotations } = state;
   const viewerMedia = useMemo(() => pendingMediaForViewer(items), [items]);
@@ -62,7 +66,7 @@ export function useTicketDraft(token: string, owner: DisposableTicketDraft) {
     counts[annotation.mediaId] = (counts[annotation.mediaId] ?? 0) + 1;
     return counts;
   }, {}), [annotations]);
-  return { ...state, owner, viewerMedia, viewerAnnotations, annotationCounts,
+  return { ...state, owner, mediaEnabled, viewerMedia, viewerAnnotations, annotationCounts,
     error: state.error ? localizeError(state.error, t) : "",
     setTitle: owner.setTitle, setDescription: owner.setDescription, setItems: owner.reorder,
     setError: owner.setError,
@@ -70,6 +74,6 @@ export function useTicketDraft(token: string, owner: DisposableTicketDraft) {
       if (await owner.addAnnotation(input)) toast.success(t("pinAdded"));
     },
     updatePendingAnnotation: owner.updateAnnotation, deletePendingAnnotation: owner.deleteAnnotation,
-    submit: () => owner.submit({ ...adapter, token, onCleanupError: error => toast.error(localizeError(error, t)) }),
+    submit: () => owner.submit({ ...adapter, token: accessToken ?? "", mediaEnabled: mediaEnabled === true, onCleanupError: error => toast.error(localizeError(error, t)) }),
   };
 }
