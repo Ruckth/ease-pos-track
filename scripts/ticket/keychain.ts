@@ -31,17 +31,18 @@ export interface CredentialStore {
 }
 
 export type ProcessResult = { exitCode: number; stdout: string; stderr: string };
-type ProcessRunner = (command: string, args: string[], stdin?: string) => Promise<ProcessResult>;
+type ProcessRunner = (command: string, args: string[], stdin?: string, lockFd?: number) => Promise<ProcessResult>;
 
-const spawnProcess: ProcessRunner = (command, args, stdin) => new Promise((resolve) => {
-  const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], shell: false });
+const spawnProcess: ProcessRunner = (command, args, stdin, lockFd) => new Promise((resolve) => {
+  const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe", lockFd ?? "ignore"], shell: false });
   let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  // The fourth descriptor selects Node’s general spawn overload. The first three are pipes.
+  child.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
   child.on("error", (error) => resolve({ exitCode: 127, stdout, stderr: `${stderr}${error.message}` }));
   child.on("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
-  child.stdin.end(stdin);
+  child.stdin!.end(stdin);
 });
 
 const KEYCHAIN_SERVICE = "com.track-ease-pos.ticket-cli";
@@ -73,10 +74,13 @@ function decodeCredential(stored: string): StoredCredential | null {
 
 /** macOS Keychain adapter. Secret values are passed on stdin, never as arguments. */
 export class MacOsKeychainCredentialStore implements CredentialStore {
+  private lockFd?: number;
+
   constructor(
     private readonly run: ProcessRunner = spawnProcess,
     private readonly os = platform(),
     private readonly lockPath?: string,
+    private readonly securityBinary = SECURITY_BINARY,
   ) {}
 
   async get(target: Deployment) {
@@ -109,12 +113,15 @@ export class MacOsKeychainCredentialStore implements CredentialStore {
 
   async exclusive<T>(fn: () => Promise<T>) {
     this.requireMacOs();
-    return await withFileLock(this.lockPath ?? keychainLockPath(), fn);
+    return await withFileLock(this.lockPath ?? keychainLockPath(), async fd => {
+      this.lockFd = fd;
+      try { return await fn(); } finally { this.lockFd = undefined; }
+    });
   }
 
   private async security(args: string[], stdin?: string) {
     this.requireMacOs();
-    return await this.run(SECURITY_BINARY, args, stdin);
+    return await this.run(this.securityBinary, args, stdin, this.lockFd);
   }
 
   private requireMacOs() {

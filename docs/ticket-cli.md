@@ -232,7 +232,7 @@ the original error and exit status are retained with
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
 `SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`,
-`CREDENTIAL_LOCK_TIMEOUT`, and `NOT_AUTHORIZED`. Their hints use `pnpm ticket …`
+`CREDENTIAL_LOCK_TIMEOUT`, `CREDENTIAL_LOCK_ERROR`, and `NOT_AUTHORIZED`. Their hints use `pnpm ticket …`
 syntax.
 
 ## Security and platform limits
@@ -252,11 +252,13 @@ syntax.
 - Concurrent runs on the same macOS account take turns with the saved session.
   Each run's read, rotation and write of the refresh token, logout, and the
   config and Keychain steps of login hold an exclusive lock on
-  `~/.config/track-ease-pos/ticket.lock` in the OS account’s home directory, shared across all `XDG_CONFIG_HOME` profiles;
-  the browser sign-in itself does not. The kernel releases the lock when a run
-  exits or is killed, so there is nothing to clean up. A run that waits more than
-  60 seconds fails with `CREDENTIAL_LOCK_TIMEOUT` (exit 4) before touching the
-  session; retry the same command, with the same `--request-id` for writes.
+  `~/.config/track-ease-pos/ticket.lock` in the OS account’s home directory,
+  shared across all `XDG_CONFIG_HOME` profiles. Browser sign-in takes place
+  outside the lock. Each Keychain subprocess inherits the lock. If the CLI
+  is killed, the kernel releases the lock after the last holder exits.
+  A run that waits more than 60 seconds fails with `CREDENTIAL_LOCK_TIMEOUT`
+  (exit 4) before touching the session. Retry the same command with the
+  same `--request-id` for writes.
 
 ## Implementation map
 

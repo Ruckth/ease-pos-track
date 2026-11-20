@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { platform, tmpdir, userInfo } from "node:os";
@@ -192,6 +192,33 @@ test("a run killed while holding the session lock does not block the next run", 
     assert.ok(Date.now() - started < 15_000, "the kernel released the killed run's lock");
     assert.equal(deployment.reuses, 0);
     assert.equal(savedToken(dir), deployment.live);
+  });
+});
+
+test("a Keychain writer holds the lock through logout even if its CLI dies", { skip }, async () => {
+  await signedIn(async (deployment, dir) => {
+    const pause = join(dir, "pause-write");
+    await writeFile(pause, "");
+    const holder = cli(dir, ["whoami"]);
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!existsSync(join(dir, "writer-ready"))) {
+        assert.ok(Date.now() < deadline, "writer received the rotated credential");
+        await sleep(10);
+      }
+      holder.child.kill("SIGKILL");
+      assert.equal((await holder.done).code, null);
+      await assert.rejects(withFileLock(join(dir, "ticket.lock"), async () => {}, 100),
+        (error: unknown) => error instanceof TicketCliError && error.code === "CREDENTIAL_LOCK_TIMEOUT");
+      const logout = cli(dir, ["logout"]);
+      await rm(pause);
+      const result = await logout.done;
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(deployment.revoked, true);
+      assert.equal(savedToken(dir), null);
+    } finally {
+      await rm(pause, { force: true });
+    }
   });
 });
 

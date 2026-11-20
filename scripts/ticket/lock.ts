@@ -4,8 +4,8 @@
  * Each authenticated run rotates a single-use refresh token, so two CLI
  * processes must never read, rotate and write it at the same time. macOS
  * `open(2)` takes an exclusive flock(2)-style lock atomically with `O_EXLOCK`,
- * and the kernel drops it when the descriptor closes, including when the holder
- * crashes or is killed. There is no stale lock to detect or break; the lock file
+ * and the kernel drops it when the last holder closes its descriptor.
+ * Keychain subprocesses inherit the descriptor before receiving any input. There is no stale lock to detect or break; the lock file
  * carries no state and is never removed.
  */
 
@@ -25,7 +25,7 @@ const POLL_MS = 25;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Runs `fn` while holding the exclusive lock at `path`, waiting up to `timeoutMs` for it. */
-export async function withFileLock<T>(path: string, fn: () => Promise<T>, timeoutMs = DEFAULT_LOCK_TIMEOUT_MS): Promise<T> {
+export async function withFileLock<T>(path: string, fn: (fd: number) => Promise<T>, timeoutMs = DEFAULT_LOCK_TIMEOUT_MS): Promise<T> {
   try {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   } catch {
@@ -49,7 +49,7 @@ export async function withFileLock<T>(path: string, fn: () => Promise<T>, timeou
       continue;
     }
     try {
-      return await fn();
+      return await fn(handle.fd);
     } finally {
       await handle.close();
     }
