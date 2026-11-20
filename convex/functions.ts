@@ -225,7 +225,7 @@ export function authMethodMutation(builders: MethodBuilders, purpose: AuthMethod
     tagged(bindAuthMethod(builders, definition), `authMethod:${purpose}`) as RegisteredMutation<"public", ObjectType<A>, Promise<Awaited<R>>>;
 }
 
-/** The password action calls this mutation to reserve work or admit a session. */
+/** The password action calls this mutation to admit a verified session. */
 export function internalPasswordSignInMutation<A extends PropertyValidators, R>(
   builders: MethodBuilders, definition: Definition<AuthMethodCtx, A, R>,
 ) {

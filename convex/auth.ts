@@ -9,16 +9,16 @@ import { setupConvexAuth, type AuthCore } from "@convex-dev/auth/server";
 import { setupGoogle } from "@convex-dev/auth/methods/google/server";
 import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
 import {
-  authCoreEndpoint, authMethodMutation, identityAction, internalPasswordSignInMutation, publicIdentityMutation,
+  authCoreEndpoint, authMethodMutation, identityAction, internalJobMutation, internalPasswordSignInMutation, publicIdentityMutation,
   wrapPackageMutation, type AuthMethodCtx, type MethodBuilders,
 } from "./functions";
 import { accessTokenSessionId, checkNewPassword, normalizeDisplayName, normalizeUsername, PASSWORD_MIN_CODE_POINTS } from "./identity_rules";
 import {
   admitGoogleCompletion, admitSession, audit, budgetExhausted, clearAttempts, INVITE_GUARD, recordAttemptFailure,
   recordGoogleFlow, recoveryCodeMatches, redeemProjectInvitation, requireRedeemableProjectInvitation, revokeUserSessions,
-  verifyCustomerPassword, reserveUnrecognizedPasswordVerification, customerCredentialSelector, recoveryAttemptKey,
+  verifyCustomerPassword, reserveCustomerPasswordSignIn, verifiedCustomerForSignIn, userIdForUsername,
+  customerCredentialSelector, recoveryAttemptKey,
   replaceCustomerPassword, RECOVERY_GUARD, CREDENTIAL_INGRESS_GUARD,
 } from "./domain/identity";
 import { requireActor } from "./session_auth";
@@ -107,12 +107,7 @@ const password: MethodBuilders = core.bindMethod({
 
 const failure = (error: string, extra: Record<string, number> = {}) => ({ status: "error" as const, userError: { error, ...extra } });
 
-async function userIdForUsername(ctx: Pick<MutationCtx, "runQuery">, username: string) {
-  return await ctx.runQuery(components.authUsername.public.getUserIdByUsername, { username });
-}
-
 /** Generic failure for unknown, disabled and wrong-password attempts. */
-const passwordSignInArgs = { username: v.string(), password: v.string() };
 type PasswordSignInResult = ReturnType<typeof failure> | {
   status: "complete";
   tokens: Awaited<ReturnType<AuthMethodCtx["convexAuth"]["completeSignIn"]>>;
@@ -120,38 +115,37 @@ type PasswordSignInResult = ReturnType<typeof failure> | {
 
 export const signInWithPassword = identityAction("customer-sign-in")({
   name: "auth:signInWithPassword",
-  args: passwordSignInArgs,
+  args: { username: v.string(), password: v.string() },
   handler: async (ctx, args): Promise<PasswordSignInResult> => {
-    const result = await ctx.runMutation(internal.auth.attemptPasswordSignIn, args);
-    if (result.status !== "dummy") return result;
-    // Only the committed reservation authorizes expensive work. No submitted
-    // credentials are needed in the dummy action.
-    await ctx.runAction(components.authPassword.public.runDummyVerification, {});
-    return failure("INVALID_CREDENTIALS");
+    const reserved = await ctx.runMutation(internal.auth.reservePasswordSignIn, { username: args.username });
+    if (reserved.status === "denied") return failure("INVALID_CREDENTIALS");
+    const candidate = reserved.status === "ready" ? reserved.candidate : undefined;
+    const verified = await ctx.runAction(components.authPassword.public.verifyReservedPassword, {
+      password: args.password,
+      credential: candidate && { userId: candidate.userId, version: candidate.credentialVersion },
+    });
+    if (!verified || !candidate) return failure("INVALID_CREDENTIALS");
+    return await ctx.runMutation(internal.auth.completePasswordSignIn, candidate);
   },
 });
 
-export const attemptPasswordSignIn = internalPasswordSignInMutation(password, {
-  name: "auth:attemptPasswordSignIn",
-  args: passwordSignInArgs,
-  handler: async (ctx, args) => {
-    const pilot = await identityRecoveryAdmission(ctx);
-    let username: string;
-    try { username = normalizeUsername(args.username); } catch { return failure("INVALID_CREDENTIALS"); }
-    const [userId, customer, rateLimitKey] = await Promise.all([
-      userIdForUsername(ctx, username),
-      ctx.db.query("customers").withIndex("by_username", (q) => q.eq("username", username)).unique(),
-      customerCredentialSelector(username),
-    ]);
-    const password = args.password.normalize("NFC");
-    if (!customer || customer.userId !== userId || customer.status !== "active" || !customerCredentialIsCurrent(customer, pilot)) {
-      return await reserveUnrecognizedPasswordVerification(ctx, { password, rateLimitKey })
-        ? { status: "dummy" as const } : failure("INVALID_CREDENTIALS");
-    }
-    const verified = await verifyCustomerPassword(ctx, {
-      userId: customer.userId, password, rateLimitKey,
-    });
-    if (!verified.success) return failure("INVALID_CREDENTIALS");
+export const reservePasswordSignIn = internalJobMutation({
+  name: "auth:reservePasswordSignIn",
+  args: { username: v.string() },
+  handler: (ctx, { username }) => reserveCustomerPasswordSignIn(ctx, username),
+});
+
+/** Called by the server action only after the component verifies the reserved credential. */
+export const completePasswordSignIn = internalPasswordSignInMutation(password, {
+  name: "auth:completePasswordSignIn",
+  args: {
+    customerId: v.id("customers"), userId: v.id("users"), username: v.string(),
+    generation: v.number(), epoch: v.optional(v.string()), pilotEpoch: v.optional(v.string()),
+    credentialEpoch: v.optional(v.string()), credentialVersion: v.string(),
+  },
+  handler: async (ctx, candidate) => {
+    const customer = await verifiedCustomerForSignIn(ctx, candidate);
+    if (!customer) return failure("INVALID_CREDENTIALS");
     const tokens = await ctx.convexAuth.completeSignIn({ userId: customer.userId, profile: { kind: "customer" }, authenticatedBy: components.authPassword });
     await admitSession(ctx, tokens, { principal: "customer", customer }, "password");
     return { status: "complete" as const, tokens };

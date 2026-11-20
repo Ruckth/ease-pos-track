@@ -503,14 +503,15 @@ test("inbox and identity expiry need the matching approved release, open traffic
     };
   });
   const selector = await customerCredentialSelector("retentionfixture");
-  const input = { rateLimitKey: selector, password: "fixture password guess" };
-  for (let i = 0; i < 5; i++) await f.t.action(api.auth.signInWithPassword, { username: "retentionfixture", password: input.password });
+  for (let i = 0; i < 5; i++) {
+    await f.t.action(api.auth.signInWithPassword, { username: "retentionfixture", password: "fixture password guess" });
+  }
   // Freeze the component bucket at exhaustion and age only its last-activity index.
   await f.t.run(async ctx => {
     const marker = await ctx.db.query("identityAttempts").withIndex("by_key", q => q.eq("key", selector)).unique();
     await ctx.db.patch(marker!._id, { updatedAt: Date.now() - 31 * day });
   });
-  const reserveSelector = () => f.t.run(ctx => ctx.runMutation(components.authPassword.public.reserveDummyVerification, input));
+  const reserveSelector = () => f.t.run(ctx => ctx.runMutation(components.authPassword.public.reserveVerification, { rateLimitKey: selector }));
   // Issuing a new challenge never deletes earlier records outside the approved job.
   vi.stubEnv("IDENTITY_CODE_KEY", "pilot-only-identity-code-key-0123456789abcdef");
   await f.t.run(async ctx => createChallenge(ctx, (await ctx.db.get(ids.admission))!, "staff-disable", "synthetic", "123456"));
@@ -540,9 +541,9 @@ test("inbox and identity expiry need the matching approved release, open traffic
   await configure(raw, firstEpoch);
   vi.stubEnv("TICKET_PILOT_TRAFFIC", "open");
 
-  expect(await reserveSelector()).toBe(false);
+  expect(await reserveSelector()).toBeNull();
   const [inboxExpired] = await expireAll();
-  expect(await reserveSelector()).toBe(true);
+  expect(await reserveSelector()).toEqual({});
   expect(inboxExpired).toBe(2);
   const rows = await f.t.run(ctx => Promise.all([inbox.customer, inbox.staff, recentInbox, ids.oldChallenge, ids.expiredChallenge,
     ids.stale, ids.fresh, ids.attempt, ids.invite].map(id => ctx.db.get(id))));

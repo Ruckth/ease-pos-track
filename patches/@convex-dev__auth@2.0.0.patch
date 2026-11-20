@@ -1,5 +1,5 @@
 diff --git a/dist/components/password/_generated/component.d.ts b/dist/components/password/_generated/component.d.ts
-index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455cf32b50e7 100644
+index 803786467e1a758891a595e10a1a0187cd255625..5d5c5a87dd279b390e2f5a04d2c2e2de8755aa9e 100644
 --- a/dist/components/password/_generated/component.d.ts
 +++ b/dist/components/password/_generated/component.d.ts
 @@ -20,9 +20,12 @@ import type { FunctionReference } from "convex/server";
@@ -15,7 +15,7 @@ index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455c
              userId: string;
          }, {
              success: true;
-@@ -37,11 +40,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -37,11 +40,15 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
              } | {
                  error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
              } | {
@@ -23,8 +23,9 @@ index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455c
 +                error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE";
              };
          }, Name>;
-+        reserveDummyVerification: FunctionReference<"mutation", "internal", { password: string; rateLimitKey: string }, boolean, Name>;
-+        runDummyVerification: FunctionReference<"action", "internal", Record<string, never>, null, Name>;
++        reserveVerification: FunctionReference<"mutation", "internal", { rateLimitKey: string; userId?: string }, { credentialVersion?: string } | null, Name>;
++        verifyReservedPassword: FunctionReference<"action", "internal", { password: string; credential?: { userId: string; version: string } }, boolean, Name>;
++        finishReservedVerification: FunctionReference<"mutation", "internal", { rateLimitKey: string; userId: string; version: string }, boolean, Name>;
          verifyPassword: FunctionReference<"mutation", "internal", {
              password: string;
 +            rateLimitKey?: string;
@@ -32,21 +33,36 @@ index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455c
          }, {
              success: true;
 diff --git a/dist/components/password/public.d.ts b/dist/components/password/public.d.ts
-index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314832fcd47 100644
+index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..f9585384154bcf8f01da3761a6bc583854d293db 100644
 --- a/dist/components/password/public.d.ts
 +++ b/dist/components/password/public.d.ts
-@@ -1,3 +1,10 @@
-+/** Use the same selector bucket as real verification, without running Argon2. */
-+export declare const reserveDummyVerification: import("convex/server").RegisteredMutation<"public", {
+@@ -1,3 +1,25 @@
++/** Forget a verification counter after the app's approved inactivity period. */
++export declare const forgetVerification: import("convex/server").RegisteredMutation<"public", { key: string }, Promise<null>>;
++/** Spend a verification slot and snapshot the credential without running Argon2. */
++export declare const reserveVerification: import("convex/server").RegisteredMutation<"public", {
 +    rateLimitKey: string;
++    userId?: string;
++}, Promise<{ credentialVersion?: string } | null>>;
++export declare const passwordHashForVerification: import("convex/server").RegisteredQuery<"internal", {
++    userId: string;
++    version: string;
++}, Promise<string | null>>;
++/** Run once in an action after the parent app's reservation commits. */
++export declare const verifyReservedPassword: import("convex/server").RegisteredAction<"public", {
 +    password: string;
++    credential?: { userId: string; version: string };
 +}, Promise<boolean>>;
-+/** Called only from the parent app after its reservation mutation commits. */
-+export declare const runDummyVerification: import("convex/server").RegisteredAction<"public", Record<string, never>, Promise<null>>;
++/** Call only when verification succeeded, in the session admission transaction. */
++export declare const finishReservedVerification: import("convex/server").RegisteredMutation<"public", {
++    userId: string;
++    version: string;
++    rateLimitKey: string;
++}, Promise<boolean>>;
  /**
   * Set (or replace) a user's password.
   *
-@@ -20,6 +27,8 @@
+@@ -20,6 +42,8 @@
  export declare const _internal_dangerous_setPassword: import("convex/server").RegisteredMutation<"public", {
      userId: string;
      password: string;
@@ -55,7 +71,7 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314
      minimumLength: number;
  }, Promise<{
      success: true;
-@@ -33,7 +42,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+@@ -33,7 +57,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
      } | {
          error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
      } | {
@@ -64,7 +80,7 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314
      };
      success: false;
  }>>;
-@@ -47,6 +56,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+@@ -47,6 +71,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
   */
  export declare const verifyPassword: import("convex/server").RegisteredMutation<"public", {
      userId: string;
@@ -72,23 +88,19 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314
      password: string;
  }, Promise<{
      success: true;
-@@ -68,3 +78,4 @@ export declare const verifyPassword: import("convex/server").RegisteredMutation<
-     success: false;
- }>>;
- //# sourceMappingURL=public.d.ts.map
-+export declare const forgetVerification: import("convex/server").RegisteredMutation<"public", { key: string }, Promise<null>>;
-\ No newline at end of file
 diff --git a/dist/components/password/public.js b/dist/components/password/public.js
-index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..0fa0f597730fd1b2feb08e9789d5ef6ac7603c1a 100644
+index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..cb3dcfe9fcc10fab175685ce57065f512323402e 100644
 --- a/dist/components/password/public.js
 +++ b/dist/components/password/public.js
-@@ -1,4 +1,4 @@
+@@ -1,5 +1,5 @@
 -import { mutation } from "./_generated/server.js";
-+import { action, mutation } from "./_generated/server.js";
- import { components } from "./_generated/api.js";
+-import { components } from "./_generated/api.js";
++import { action, internalQuery, mutation } from "./_generated/server.js";
++import { components, internal } from "./_generated/api.js";
  import { v } from "convex/values";
  import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
-@@ -27,7 +27,37 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
+ import { hashPassword, verifyPassword as verifyPasswordHash, } from "password-hash-wasm/argon2id";
+@@ -27,7 +27,73 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
          capacity: 5,
      },
  });
@@ -105,29 +117,65 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..0fa0f597730fd1b2feb08e9789d5ef6a
 +  },
 +});
 +
-+/** Use the same selector bucket as real verification, without running Argon2. */
-+export const reserveDummyVerification = mutation({
-+    args: { rateLimitKey: v.string(), password: v.string() },
-+    returns: v.boolean(),
-+    handler: async (ctx, { rateLimitKey, password }) => {
++/** Spend a verification slot and snapshot the credential without running Argon2. */
++export const reserveVerification = mutation({
++    args: { rateLimitKey: v.string(), userId: v.optional(v.string()) },
++    returns: v.union(v.null(), v.object({ credentialVersion: v.optional(v.string()) })),
++    handler: async (ctx, { rateLimitKey, userId }) => {
 +        const status = await rateLimiter.limit(ctx, "verifyPassword", { key: rateLimitKey });
-+        return status.ok && validatePasswordInputFormat(password, MIN_PASSWORD_LENGTH) === null;
++        if (!status.ok)
++            return null;
++        const row = userId === undefined ? null : await passwordByUserId(ctx, userId);
++        return row ? { credentialVersion: await credentialVersion(row) } : {};
 +    },
 +});
-+/** Called only from the parent app after its reservation mutation commits. */
-+export const runDummyVerification = action({
-+    args: {},
-+    returns: v.null(),
-+    handler: async () => {
-+        await verifyPasswordHash("dummy verification input", DUMMY_PASSWORD_HASH);
-+        return null;
++const credentialArgs = { userId: v.string(), version: v.string() };
++export const passwordHashForVerification = internalQuery({
++    args: credentialArgs,
++    returns: v.union(v.null(), v.string()),
++    handler: async (ctx, { userId, version }) => {
++        const row = await passwordByUserId(ctx, userId);
++        return row && await credentialVersion(row) === version ? row.passwordHashPHC : null;
 +    },
 +});
++/** Run once in an action after the parent app's reservation commits. */
++export const verifyReservedPassword = action({
++    args: { password: v.string(), credential: v.optional(v.object(credentialArgs)) },
++    returns: v.boolean(),
++    handler: async (ctx, { password, credential }) => {
++        const normalized = normalizePassword(password);
++        if (validatePasswordInputFormat(normalized, MIN_PASSWORD_LENGTH) !== null)
++            return false;
++        if (!credential) {
++            await verifyPasswordHash("dummy verification input", DUMMY_PASSWORD_HASH);
++            return false;
++        }
++        const hash = await ctx.runQuery(internal.public.passwordHashForVerification, credential);
++        return hash !== null && await verifyPasswordHash(normalized, hash);
++    },
++});
++/** Call only when verification succeeded, in the session admission transaction. */
++export const finishReservedVerification = mutation({
++    args: { ...credentialArgs, rateLimitKey: v.string() },
++    returns: v.boolean(),
++    handler: async (ctx, { userId, version, rateLimitKey }) => {
++        const row = await passwordByUserId(ctx, userId);
++        if (!row || await credentialVersion(row) !== version)
++            return false;
++        await rateLimiter.reset(ctx, "verifyPassword", { key: rateLimitKey });
++        return true;
++    },
++});
++async function credentialVersion(row) {
++    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${row._id}:${row.passwordHashPHC}`));
++    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
++}
++
 +const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.object({ success: v.literal(false), userError: v.union(setPasswordUserError, v.object({ error: v.literal("PASSWORD_REUSE") })) }));
  /**
   * Set (or replace) a user's password.
   *
-@@ -48,21 +78,28 @@ const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.obje
+@@ -48,21 +114,28 @@ const setPasswordResult = v.union(v.object({ success: v.literal(true) }), v.obje
   * of this package do, for a user they just created or verified.
   */
  export const _internal_dangerous_setPassword = mutation({
@@ -159,7 +207,7 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..0fa0f597730fd1b2feb08e9789d5ef6a
          return { success: true };
      },
  });
-@@ -76,11 +113,12 @@ const verifyPasswordResult = v.union(v.object({ success: v.literal(true) }), v.o
+@@ -76,11 +149,12 @@ const verifyPasswordResult = v.union(v.object({ success: v.literal(true) }), v.o
   * that do not match the latest security recommendations.
   */
  export const verifyPassword = mutation({
@@ -175,7 +223,7 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..0fa0f597730fd1b2feb08e9789d5ef6a
          });
          if (!status.ok) {
              return {
-@@ -104,15 +142,11 @@ export const verifyPassword = mutation({
+@@ -104,15 +178,11 @@ export const verifyPassword = mutation({
              return { success: false, userError };
          }
          const row = await passwordByUserId(ctx, userId);
@@ -195,7 +243,7 @@ index 79a7cc5c03b35bb9d96e2f2194315783d1e7344c..0fa0f597730fd1b2feb08e9789d5ef6a
      },
  });
 diff --git a/dist/internal-types/components/password/_generated/component.d.ts b/dist/internal-types/components/password/_generated/component.d.ts
-index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455cf32b50e7 100644
+index 803786467e1a758891a595e10a1a0187cd255625..5d5c5a87dd279b390e2f5a04d2c2e2de8755aa9e 100644
 --- a/dist/internal-types/components/password/_generated/component.d.ts
 +++ b/dist/internal-types/components/password/_generated/component.d.ts
 @@ -20,9 +20,12 @@ import type { FunctionReference } from "convex/server";
@@ -211,7 +259,7 @@ index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455c
              userId: string;
          }, {
              success: true;
-@@ -37,11 +40,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -37,11 +40,15 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
              } | {
                  error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
              } | {
@@ -219,8 +267,9 @@ index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455c
 +                error: "PASSWORD_TOO_COMMON" | "PASSWORD_REUSE";
              };
          }, Name>;
-+        reserveDummyVerification: FunctionReference<"mutation", "internal", { password: string; rateLimitKey: string }, boolean, Name>;
-+        runDummyVerification: FunctionReference<"action", "internal", Record<string, never>, null, Name>;
++        reserveVerification: FunctionReference<"mutation", "internal", { rateLimitKey: string; userId?: string }, { credentialVersion?: string } | null, Name>;
++        verifyReservedPassword: FunctionReference<"action", "internal", { password: string; credential?: { userId: string; version: string } }, boolean, Name>;
++        finishReservedVerification: FunctionReference<"mutation", "internal", { rateLimitKey: string; userId: string; version: string }, boolean, Name>;
          verifyPassword: FunctionReference<"mutation", "internal", {
              password: string;
 +            rateLimitKey?: string;
@@ -228,21 +277,36 @@ index 803786467e1a758891a595e10a1a0187cd255625..061f5f8a26f1489eca51472dd7ca455c
          }, {
              success: true;
 diff --git a/dist/internal-types/components/password/public.d.ts b/dist/internal-types/components/password/public.d.ts
-index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314832fcd47 100644
+index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..f9585384154bcf8f01da3761a6bc583854d293db 100644
 --- a/dist/internal-types/components/password/public.d.ts
 +++ b/dist/internal-types/components/password/public.d.ts
-@@ -1,3 +1,10 @@
-+/** Use the same selector bucket as real verification, without running Argon2. */
-+export declare const reserveDummyVerification: import("convex/server").RegisteredMutation<"public", {
+@@ -1,3 +1,25 @@
++/** Forget a verification counter after the app's approved inactivity period. */
++export declare const forgetVerification: import("convex/server").RegisteredMutation<"public", { key: string }, Promise<null>>;
++/** Spend a verification slot and snapshot the credential without running Argon2. */
++export declare const reserveVerification: import("convex/server").RegisteredMutation<"public", {
 +    rateLimitKey: string;
++    userId?: string;
++}, Promise<{ credentialVersion?: string } | null>>;
++export declare const passwordHashForVerification: import("convex/server").RegisteredQuery<"internal", {
++    userId: string;
++    version: string;
++}, Promise<string | null>>;
++/** Run once in an action after the parent app's reservation commits. */
++export declare const verifyReservedPassword: import("convex/server").RegisteredAction<"public", {
 +    password: string;
++    credential?: { userId: string; version: string };
 +}, Promise<boolean>>;
-+/** Called only from the parent app after its reservation mutation commits. */
-+export declare const runDummyVerification: import("convex/server").RegisteredAction<"public", Record<string, never>, Promise<null>>;
++/** Call only when verification succeeded, in the session admission transaction. */
++export declare const finishReservedVerification: import("convex/server").RegisteredMutation<"public", {
++    userId: string;
++    version: string;
++    rateLimitKey: string;
++}, Promise<boolean>>;
  /**
   * Set (or replace) a user's password.
   *
-@@ -20,6 +27,8 @@
+@@ -20,6 +42,8 @@
  export declare const _internal_dangerous_setPassword: import("convex/server").RegisteredMutation<"public", {
      userId: string;
      password: string;
@@ -251,7 +315,7 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314
      minimumLength: number;
  }, Promise<{
      success: true;
-@@ -33,7 +42,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+@@ -33,7 +57,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
      } | {
          error: "PASSWORD_HAS_SURROUNDING_WHITESPACE";
      } | {
@@ -260,7 +324,7 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314
      };
      success: false;
  }>>;
-@@ -47,6 +56,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
+@@ -47,6 +71,7 @@ export declare const _internal_dangerous_setPassword: import("convex/server").Re
   */
  export declare const verifyPassword: import("convex/server").RegisteredMutation<"public", {
      userId: string;
@@ -268,14 +332,8 @@ index 39e5e269af3dfa1b2e417e62475efd7f9190a54e..6dd02e3d9f3093051439bfe5f317f314
      password: string;
  }, Promise<{
      success: true;
-@@ -68,3 +78,4 @@ export declare const verifyPassword: import("convex/server").RegisteredMutation<
-     success: false;
- }>>;
- //# sourceMappingURL=public.d.ts.map
-+export declare const forgetVerification: import("convex/server").RegisteredMutation<"public", { key: string }, Promise<null>>;
-\ No newline at end of file
 diff --git a/src/components/password/_generated/component.ts b/src/components/password/_generated/component.ts
-index 7676907be53be9e5623a66fe051cc505ac4dcfff..55de2e26fdcc3c20f41631a574132fcac1ff7e4a 100644
+index 7676907be53be9e5623a66fe051cc505ac4dcfff..86a8a32c7f6bef56c58721a3b0bcf5f8aeba67bb 100644
 --- a/src/components/password/_generated/component.ts
 +++ b/src/components/password/_generated/component.ts
 @@ -24,10 +24,11 @@ import type { FunctionReference } from "convex/server";
@@ -292,7 +350,7 @@ index 7676907be53be9e5623a66fe051cc505ac4dcfff..55de2e26fdcc3c20f41631a574132fca
          | { success: true }
          | {
              success: false;
-@@ -35,14 +36,18 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
+@@ -35,14 +36,23 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                | { error: "PASSWORD_TOO_SHORT"; minimumLength: number }
                | { error: "PASSWORD_TOO_LONG"; maximumLength: number }
                | { error: "PASSWORD_HAS_SURROUNDING_WHITESPACE" }
@@ -301,10 +359,15 @@ index 7676907be53be9e5623a66fe051cc505ac4dcfff..55de2e26fdcc3c20f41631a574132fca
            },
          Name
        >;
-+      reserveDummyVerification: FunctionReference<
-+        "mutation", "internal", { password: string; rateLimitKey: string }, boolean, Name
++      reserveVerification: FunctionReference<
++        "mutation", "internal", { rateLimitKey: string; userId?: string }, { credentialVersion?: string } | null, Name
 +      >;
-+      runDummyVerification: FunctionReference<"action", "internal", Record<string, never>, null, Name>;
++      verifyReservedPassword: FunctionReference<
++        "action", "internal", { password: string; credential?: { userId: string; version: string } }, boolean, Name
++      >;
++      finishReservedVerification: FunctionReference<
++        "mutation", "internal", { rateLimitKey: string; userId: string; version: string }, boolean, Name
++      >;
        verifyPassword: FunctionReference<
          "mutation",
          "internal",
@@ -314,16 +377,19 @@ index 7676907be53be9e5623a66fe051cc505ac4dcfff..55de2e26fdcc3c20f41631a574132fca
          | {
              success: false;
 diff --git a/src/components/password/public.ts b/src/components/password/public.ts
-index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..8cca700eb85d799dc46a0b8fd39106b5a6cb4735 100644
+index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..6a6679e4cda4e7af275b3b6f91d5e9f36a434362 100644
 --- a/src/components/password/public.ts
 +++ b/src/components/password/public.ts
-@@ -1,4 +1,4 @@
+@@ -1,6 +1,6 @@
 -import { mutation, QueryCtx } from "./_generated/server.ts";
-+import { action, mutation, QueryCtx } from "./_generated/server.ts";
++import { action, internalQuery, mutation, QueryCtx } from "./_generated/server.ts";
  import { Doc } from "./_generated/dataModel.ts";
- import { components } from "./_generated/api.ts";
+-import { components } from "./_generated/api.ts";
++import { components, internal } from "./_generated/api.ts";
  import { Infer, v } from "convex/values";
-@@ -40,9 +40,42 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
+ import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
+ import {
+@@ -40,9 +40,78 @@ const rateLimiter = new RateLimiter(components.rateLimiter, {
    },
  });
 
@@ -340,25 +406,61 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..8cca700eb85d799dc46a0b8fd39106b5
 +  },
 +});
 +
-+/** Use the same selector bucket as real verification, without running Argon2. */
-+export const reserveDummyVerification = mutation({
-+  args: { rateLimitKey: v.string(), password: v.string() },
-+  returns: v.boolean(),
-+  handler: async (ctx, { rateLimitKey, password }) => {
++/** Spend a verification slot and snapshot the credential without running Argon2. */
++export const reserveVerification = mutation({
++  args: { rateLimitKey: v.string(), userId: v.optional(v.string()) },
++  returns: v.union(v.null(), v.object({ credentialVersion: v.optional(v.string()) })),
++  handler: async (ctx, { rateLimitKey, userId }) => {
 +    const status = await rateLimiter.limit(ctx, "verifyPassword", { key: rateLimitKey });
-+    return status.ok && validatePasswordInputFormat(password, MIN_PASSWORD_LENGTH) === null;
++    if (!status.ok) return null;
++    const row = userId === undefined ? null : await passwordByUserId(ctx, userId);
++    return row ? { credentialVersion: await credentialVersion(row) } : {};
 +  },
 +});
 +
-+/** Called only from the parent app after its reservation mutation commits. */
-+export const runDummyVerification = action({
-+  args: {},
-+  returns: v.null(),
-+  handler: async () => {
-+    await verifyPasswordHash("dummy verification input", DUMMY_PASSWORD_HASH);
-+    return null;
++const credentialArgs = { userId: v.string(), version: v.string() };
++
++export const passwordHashForVerification = internalQuery({
++  args: credentialArgs,
++  returns: v.union(v.null(), v.string()),
++  handler: async (ctx, { userId, version }) => {
++    const row = await passwordByUserId(ctx, userId);
++    return row && await credentialVersion(row) === version ? row.passwordHashPHC : null;
 +  },
 +});
++
++/** Run once in an action after the parent app's reservation commits. */
++export const verifyReservedPassword = action({
++  args: { password: v.string(), credential: v.optional(v.object(credentialArgs)) },
++  returns: v.boolean(),
++  handler: async (ctx, { password, credential }): Promise<boolean> => {
++    const normalized = normalizePassword(password);
++    if (validatePasswordInputFormat(normalized, MIN_PASSWORD_LENGTH) !== null) return false;
++    if (!credential) {
++      await verifyPasswordHash("dummy verification input", DUMMY_PASSWORD_HASH);
++      return false;
++    }
++    const hash = await ctx.runQuery(internal.public.passwordHashForVerification, credential);
++    return hash !== null && await verifyPasswordHash(normalized, hash);
++  },
++});
++
++/** Call only when verification succeeded, in the session admission transaction. */
++export const finishReservedVerification = mutation({
++  args: { ...credentialArgs, rateLimitKey: v.string() },
++  returns: v.boolean(),
++  handler: async (ctx, { userId, version, rateLimitKey }) => {
++    const row = await passwordByUserId(ctx, userId);
++    if (!row || await credentialVersion(row) !== version) return false;
++    await rateLimiter.reset(ctx, "verifyPassword", { key: rateLimitKey });
++    return true;
++  },
++});
++
++async function credentialVersion(row: Doc<"passwords">) {
++  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${row._id}:${row.passwordHashPHC}`));
++  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
++}
 +
  const setPasswordResult = v.union(
    v.object({ success: v.literal(true) }),
@@ -367,7 +469,7 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..8cca700eb85d799dc46a0b8fd39106b5
  );
  type SetPasswordResult = Infer<typeof setPasswordResult>;
 
-@@ -66,25 +99,31 @@ type SetPasswordResult = Infer<typeof setPasswordResult>;
+@@ -66,25 +135,31 @@ type SetPasswordResult = Infer<typeof setPasswordResult>;
   * of this package do, for a user they just created or verified.
   */
  export const _internal_dangerous_setPassword = mutation({
@@ -402,7 +504,7 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..8cca700eb85d799dc46a0b8fd39106b5
      return { success: true };
    },
  });
-@@ -104,11 +143,12 @@ type VerifyPasswordResult = Infer<typeof verifyPasswordResult>;
+@@ -104,11 +179,12 @@ type VerifyPasswordResult = Infer<typeof verifyPasswordResult>;
   * that do not match the latest security recommendations.
   */
  export const verifyPassword = mutation({
@@ -418,7 +520,7 @@ index 618c1bca4f9b9ae3f3b9976d730ace04c5fe0a37..8cca700eb85d799dc46a0b8fd39106b5
      });
      if (!status.ok) {
        return {
-@@ -137,18 +177,10 @@ export const verifyPassword = mutation({
+@@ -137,18 +213,10 @@ export const verifyPassword = mutation({
      }
 
      const row = await passwordByUserId(ctx, userId);

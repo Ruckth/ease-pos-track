@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
 import { actorQuery, identityAction, namedStaffQuery, publicIdentityMutation, publicIdentityQuery, staffQuery, t3DoctorHttp, trustedCallbackMutation } from "../convex/functions";
-import { attemptPasswordSignIn, signInWithPassword } from "../convex/auth";
+import { completePasswordSignIn, reservePasswordSignIn, signInWithPassword } from "../convex/auth";
 import { assignment, classification, routingTables } from "../convex/routing_schema";
 import schema from "../convex/schema";
 import { v } from "convex/values";
@@ -15,11 +15,13 @@ test("every Convex export and HTTP route declares its policy across all source e
   assert.deepEqual(await checkPolicies(root, url => import(url)), []);
 });
 
-test("password sign-in exposes the action and keeps the reservation mutation private", () => {
+test("password sign-in exposes the action and keeps reservation and admission private", () => {
   assert.equal(signInWithPassword.isPublic, true);
   assert.equal(signInWithPassword.isAction, true);
-  assert.equal(attemptPasswordSignIn.isInternal, true);
-  assert.equal(attemptPasswordSignIn.isMutation, true);
+  for (const endpoint of [reservePasswordSignIn, completePasswordSignIn]) {
+    assert.equal(endpoint.isInternal, true);
+    assert.equal(endpoint.isMutation, true);
+  }
 });
 
 test("zero-user Ticket routing exposes only local operations and rule suggestions", () => {

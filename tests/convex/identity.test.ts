@@ -15,6 +15,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 const PASSWORD = "correct horse battery staple";
+const INVALID_CREDENTIALS = { status: "error", userError: { error: "INVALID_CREDENTIALS" } };
 const session = (result: { status: string; tokens?: { accessToken: string } }) => {
   if (result.status !== "complete" || !result.tokens) throw new Error(`expected a session: ${JSON.stringify(result)}`);
   return accessTokenSessionId(result.tokens.accessToken);
@@ -33,6 +34,32 @@ async function world() {
 
 async function sessionCount(t: IdentityTest, userId: string) {
   return (await t.run(ctx => ctx.runQuery(components.auth.public.listSessions, { userId }))).length;
+}
+
+function pauseNextPasswordVerification() {
+  let begin!: () => void;
+  const started = new Promise<void>(resolve => { begin = resolve; });
+  let release!: () => void;
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  const verifyPassword = argon2.verifyPassword;
+  const verify = vi.spyOn(argon2, "verifyPassword").mockImplementationOnce(async (...args) => {
+    begin();
+    await resume;
+    return await verifyPassword(...args);
+  });
+  return { started, release, verify };
+}
+
+async function beforeVerificationFinishes<T>(result: Promise<T>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("The other operation must finish while verification is pending")), 5_000);
+    });
+    return await Promise.race([result, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function saveRecoveryCode(t: IdentityTest, token: string) {
@@ -138,33 +165,16 @@ test("simultaneous unknown selectors spend the last committed slot on one verifi
   const budgetId = await t.run(ctx => ctx.db.insert("identityAttempts", {
     key: "signin:unrecognized", attempts: 199, firstAttemptAt: now, updatedAt: now,
   }));
-  let begin!: () => void;
-  const verifying = new Promise<void>(resolve => { begin = resolve; });
-  let release!: () => void;
-  const resume = new Promise<void>(resolve => { release = resolve; });
-  const verifyPassword = argon2.verifyPassword;
-  const verify = vi.spyOn(argon2, "verifyPassword").mockImplementationOnce(async (...args) => {
-    begin();
-    await resume;
-    return await verifyPassword(...args);
-  });
+  const { started, release, verify } = pauseNextPasswordVerification();
   const signIn = (username: string) => t.action(api.auth.signInWithPassword, { username, password: PASSWORD });
   const generic = { status: "error", userError: { error: "INVALID_CREDENTIALS" } };
   const concurrent = [signIn("firstunused"), signIn("secondunused")];
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("The second attempt must finish while verification is pending")), 5_000);
-    });
-    const [, denied] = await Promise.race([
-      Promise.all([verifying, Promise.race(concurrent)]),
-      timeout,
-    ]);
+    const [, denied] = await beforeVerificationFinishes(Promise.all([started, Promise.race(concurrent)]));
     expect(denied).toEqual(generic);
     expect(await t.run(ctx => ctx.db.get(budgetId))).toMatchObject({ attempts: 200, lockedUntil: expect.any(Number) });
     expect(verify).toHaveBeenCalledTimes(1);
   } finally {
-    clearTimeout(timer);
     release();
     await Promise.allSettled(concurrent);
   }
@@ -173,6 +183,79 @@ test("simultaneous unknown selectors spend the last committed slot on one verifi
   expect(verify).toHaveBeenCalledTimes(1);
   session(await signIn("alice"));
   expect(verify).toHaveBeenCalledTimes(2);
+});
+
+test("simultaneous recognized sign-ins spend the selector's last committed slot on one verification", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const { t, enroll } = await world();
+  const { userId } = await whoami(t, session(await enroll("alice")));
+  const signIn = (username: string, password = PASSWORD) => t.action(api.auth.signInWithPassword, { username, password });
+  for (let attempt = 0; attempt < 4; attempt++) {
+    expect(await signIn("alice", "wrong wrong wrong")).toEqual(INVALID_CREDENTIALS);
+  }
+  const { started, release, verify } = pauseNextPasswordVerification();
+  const concurrent = [signIn("alice"), signIn(" ALICE ")];
+  try {
+    const [, denied] = await beforeVerificationFinishes(Promise.all([started, Promise.race(concurrent)]));
+    expect(denied).toEqual(INVALID_CREDENTIALS);
+    expect(verify).toHaveBeenCalledExactlyOnceWith(PASSWORD, expect.any(String));
+    expect(await sessionCount(t, userId)).toBe(1);
+  } finally {
+    release();
+    await Promise.allSettled(concurrent);
+  }
+  const results = await Promise.all(concurrent);
+  expect(results.filter(result => result.status === "error")).toEqual([INVALID_CREDENTIALS]);
+  const admitted = results.find(result => result.status === "complete");
+  expect(admitted).toBeDefined();
+  expect(await t.query(api.identity.viewer, { token: session(admitted!) })).toMatchObject({ kind: "customer", username: "alice" });
+  expect(await sessionCount(t, userId)).toBe(2);
+  expect(verify).toHaveBeenCalledTimes(1);
+});
+
+test("changing the password while sign-in verifies the old hash prevents admission", async () => {
+  const { t, enroll } = await world();
+  const alice = session(await enroll("alice"));
+  await saveRecoveryCode(t, alice);
+  const { userId } = await whoami(t, alice);
+  const newPassword = "a brand new passphrase";
+  const { started, release, verify } = pauseNextPasswordVerification();
+  const pending = t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD });
+  try {
+    await beforeVerificationFinishes(started);
+    const changed = t.mutation(api.auth.changePassword, { token: alice, currentPassword: PASSWORD, newPassword });
+    expect(await beforeVerificationFinishes(changed)).toEqual({ success: true });
+  } finally {
+    release();
+    await Promise.allSettled([pending]);
+  }
+  await expect(verify.mock.results[0].value).resolves.toBe(true);
+  expect(await pending).toEqual(INVALID_CREDENTIALS);
+  expect(await sessionCount(t, userId)).toBe(1);
+  session(await t.action(api.auth.signInWithPassword, { username: "alice", password: newPassword }));
+});
+
+test.each([false, true])("disabling during sign-in prevents admission after verification (re-enabled: %s)", async reenable => {
+  const { t, owner, enroll } = await world();
+  const { customerId, userId } = await whoami(t, session(await enroll("alice")));
+  const { started, release, verify } = pauseNextPasswordVerification();
+  const signIn = () => t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD });
+  const pending = signIn();
+  try {
+    await beforeVerificationFinishes(started);
+    const setAccess = (status: "active" | "disabled") => t.mutation(api.identity.setCustomerAccess, {
+      token: owner.session, customerId: customerId!, status,
+    });
+    await beforeVerificationFinishes(setAccess("disabled"));
+    if (reenable) await beforeVerificationFinishes(setAccess("active"));
+  } finally {
+    release();
+    await Promise.allSettled([pending]);
+  }
+  await expect(verify.mock.results[0].value).resolves.toBe(true);
+  expect(await pending).toEqual(INVALID_CREDENTIALS);
+  expect(await sessionCount(t, userId)).toBe(0);
+  if (reenable) session(await signIn());
 });
 
 test("live disable denies the open session and its refresh; re-enable needs a fresh sign-in", async () => {

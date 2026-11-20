@@ -10,7 +10,7 @@ import {
   CHALLENGE_MAX_FAILURES, CHALLENGE_TTL_MS, GOOGLE_FLOW_TTL_MS, PROJECT_INVITE_TTL_MS, STAFF_INVITE_TTL_MS,
   canonicalRecoveryCode, challengeCodeDigest, constantTimeEquals, encodeRecoveryCode, formatRecoveryCode,
   accessTokenSessionId, googleFlowAdmissible, newInvitationSecret, randomBytes, recoveryCodeDigest, secretDigest, sha256Hex,
-  PASSWORD_MIN_CODE_POINTS,
+  normalizeUsername, PASSWORD_MIN_CODE_POINTS,
 } from "../identity_rules";
 import { isLockedOut, planFailure, type GuardConfig } from "../login_guard";
 import { activeDeploymentProject, epochStamp, namedIdentityEpoch, requireNamedEpoch } from "../pilot_access";
@@ -169,16 +169,79 @@ export async function clearAttempts(ctx: MutationCtx, key: string) {
   if (existing) await ctx.db.delete(existing._id);
 }
 
-/** Spend both limits in a cheap transaction before the caller runs dummy Argon2. */
-export async function reserveUnrecognizedPasswordVerification(ctx: MutationCtx, input: {
-  password: string; rateLimitKey: string;
-}) {
-  const unknownBudget = "signin:unrecognized";
-  if (await budgetExhausted(ctx, unknownBudget)) return false;
-  await recordAttemptFailure(ctx, unknownBudget, CREDENTIAL_INGRESS_GUARD);
-  const allowed = await ctx.runMutation(components.authPassword.public.reserveDummyVerification, input);
-  await recordPasswordAttempt(ctx, input.rateLimitKey);
-  return allowed;
+export async function userIdForUsername(ctx: Pick<QueryCtx, "runQuery">, username: string) {
+  return await ctx.runQuery(components.authUsername.public.getUserIdByUsername, { username });
+}
+
+type CredentialScope = Awaited<ReturnType<typeof identityRecoveryAdmission>>;
+type PasswordSignInCandidate = {
+  customerId: Id<"customers">;
+  userId: Id<"users">;
+  username: string;
+  generation: number;
+  epoch?: string;
+  pilotEpoch?: string;
+  credentialEpoch?: string;
+  credentialVersion: string;
+};
+
+async function activeCustomerPasswordAccount(ctx: MutationCtx, username: string, pilot: CredentialScope) {
+  const [userId, customer] = await Promise.all([
+    userIdForUsername(ctx, username),
+    ctx.db.query("customers").withIndex("by_username", q => q.eq("username", username)).unique(),
+  ]);
+  if (!customer || customer.userId !== userId || customer.status !== "active"
+    || !customerCredentialIsCurrent(customer, pilot)) return null;
+  const user = await ctx.db.get(customer.userId);
+  return user?.kind === "customer" && user.customerId === customer._id ? customer : null;
+}
+
+/** Commit the selector charge and snapshot the account before the action does password work. */
+export async function reserveCustomerPasswordSignIn(ctx: MutationCtx, rawUsername: string): Promise<
+  { status: "denied" } | { status: "dummy" } | { status: "ready"; candidate: PasswordSignInCandidate }
+> {
+  const pilot = await identityRecoveryAdmission(ctx);
+  let username: string;
+  try { username = normalizeUsername(rawUsername); } catch { return { status: "denied" }; }
+  const customer = await activeCustomerPasswordAccount(ctx, username, pilot);
+  if (!customer) {
+    const unknownBudget = "signin:unrecognized";
+    if (await budgetExhausted(ctx, unknownBudget)) return { status: "denied" };
+    await recordAttemptFailure(ctx, unknownBudget, CREDENTIAL_INGRESS_GUARD);
+  }
+  const rateLimitKey = await customerCredentialSelector(username);
+  const reserved = await ctx.runMutation(components.authPassword.public.reserveVerification, {
+    rateLimitKey, userId: customer?.userId,
+  });
+  await recordPasswordAttempt(ctx, rateLimitKey);
+  if (!reserved) return { status: "denied" };
+  if (!customer || !reserved.credentialVersion) return { status: "dummy" };
+  return {
+    status: "ready",
+    candidate: {
+      customerId: customer._id, userId: customer.userId, username,
+      generation: customer.generation, epoch: pilot?.epoch, pilotEpoch: customer.pilotEpoch,
+      credentialEpoch: customer.credentialEpoch, credentialVersion: reserved.credentialVersion,
+    },
+  };
+}
+
+/** Recheck the verified snapshot in the transaction that will issue the session. */
+export async function verifiedCustomerForSignIn(ctx: MutationCtx, candidate: PasswordSignInCandidate) {
+  const pilot = await identityRecoveryAdmission(ctx);
+  if (pilot?.epoch !== candidate.epoch) return null;
+  const customer = await activeCustomerPasswordAccount(ctx, candidate.username, pilot);
+  if (!customer || customer._id !== candidate.customerId || customer.userId !== candidate.userId
+    || customer.generation !== candidate.generation || customer.pilotEpoch !== candidate.pilotEpoch
+    || customer.credentialEpoch !== candidate.credentialEpoch) return null;
+
+  const rateLimitKey = await customerCredentialSelector(candidate.username);
+  const current = await ctx.runMutation(components.authPassword.public.finishReservedVerification, {
+    userId: customer.userId, version: candidate.credentialVersion, rateLimitKey,
+  });
+  if (!current) return null;
+  await clearAttempts(ctx, rateLimitKey);
+  return customer;
 }
 
 export async function verifyCustomerPassword(ctx: MutationCtx, input: {

@@ -87,11 +87,13 @@ relabelled export. Purpose-labelled entry points:
 | `identity:sendChallengeCode` | identity sender; the internal mutation checks the live session and caps issuance across purposes and sessions for the principal and mailbox |
 | `uploads:recordUploadedFile` | staff JWT **or** callback credential; mixed credentials refused |
 
-For an unrecognized account, the sign-in action waits for a private mutation to
-commit the shared attempt budget and the normalized selector's throttle before
-running dummy Argon2. Recognized accounts verify and admit sessions in the same
-mutation, using their selector's throttle. Valid saved-code recovery has its own
-proof and can proceed independently of either password throttle.
+The sign-in action reserves one verification attempt for the normalized username
+in a private mutation. Unrecognized accounts also spend a shared attempt.
+After the reservation commits, the password component performs the appropriate
+Argon2 check in an action. For a successful match, a final mutation rechecks
+the credential version, account binding, status, generation and pilot epoch
+before creating the session and its admission together. Saved-code recovery
+uses a separate proof and can proceed when password attempts are exhausted.
 
 The Google callback (`/oauth/google/callback`) and the deployment JWKS are
 component- and platform-owned routes mounted from `convex/convex.config.ts`.
