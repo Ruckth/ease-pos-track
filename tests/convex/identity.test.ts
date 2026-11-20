@@ -179,18 +179,24 @@ test("live disable denies the open session and its refresh; re-enable needs a fr
   const { t, owner, pos, enroll } = await world();
   const signedUp = await enroll("alice");
   const alice = session(signedUp);
-  await saveRecoveryCode(t, alice);
+  const { code } = await saveRecoveryCode(t, alice);
+  const recovery = { username: "alice", recoveryCode: code, newPassword: "replacement after re-enable" };
   const refreshToken = signedUp.status === "complete" ? signedUp.tokens.refreshToken : "";
   const created = await t.mutation(api.tickets.createTextTicket, { token: alice, projectKey: "POS", requestId: "r1", title: "Mine", description: "" });
   const { customerId, userId } = await whoami(t, alice);
+  // An already-issued code from before the issuance generation field also survives.
+  await t.run(ctx => ctx.db.patch(customerId!, { recoveryCodeGeneration: undefined }));
   await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: customerId!, status: "disabled" });
   await expect(t.query(api.tickets.getTicket, { token: alice, id: created.ticket._id })).rejects.toThrow("SESSION_EXPIRED");
   expect(await t.query(api.identity.viewer, { token: alice })).toBeNull();
   expect(await t.mutation(api.auth.refreshSession, { refreshToken })).toEqual({ kind: "noSession" });
   expect(await sessionCount(t, userId)).toBe(0);
+  expect(await t.mutation(api.auth.recoverWithCode, recovery)).toEqual({ success: false, error: "RECOVERY_FAILED" });
   await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: customerId!, status: "active" });
   await expect(t.query(api.tickets.getTicket, { token: alice, id: created.ticket._id })).rejects.toThrow("SESSION_EXPIRED");
-  const fresh = session(await t.action(api.auth.signInWithPassword, { username: "alice", password: PASSWORD }));
+  expect(await t.mutation(api.auth.recoverWithCode, recovery)).toEqual({ success: true });
+  const fresh = session(await t.action(api.auth.signInWithPassword, { username: "alice", password: recovery.newPassword }));
+  await saveRecoveryCode(t, fresh);
   expect(await t.query(api.tickets.getTicket, { token: fresh, id: created.ticket._id })).toMatchObject({ _id: created.ticket._id });
   // Staff remain global; a stale generation admission is refused even if its core session lived.
   await t.run(async ctx => {

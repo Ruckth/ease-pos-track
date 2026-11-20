@@ -101,6 +101,13 @@ async function fixture() {
   };
 }
 
+async function confirmNewRecoveryCode(f: Awaited<ReturnType<typeof fixture>>, token: string) {
+  const issued = await f.t.mutation(api.identity.createRecoveryCode, { token });
+  if (!issued.ok) throw new Error(issued.error);
+  expect(await f.t.mutation(api.identity.confirmRecoveryEnrollment, { token, code: issued.code })).toEqual({ ok: true });
+  return issued;
+}
+
 async function configure(raw: string, epoch: string, previousEpoch?: string) {
   for (const [key, value] of Object.entries(pilotSettings(epoch, await pilotManifestDigest(raw), previousEpoch))) {
     vi.stubEnv(key, value ?? undefined);
@@ -109,6 +116,7 @@ async function configure(raw: string, epoch: string, previousEpoch?: string) {
 
 test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cross pilot entry boundaries", async () => {
   const f = await fixture();
+  const originalCode = await confirmNewRecoveryCode(f, f.customer);
   const excludedInvitation = await f.t.mutation(api.identity.createCustomerInvitation, {
     eligibilityConfirmed: true, token: f.staff, projectId: f.otherProjectId,
   });
@@ -150,6 +158,12 @@ test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cr
   const alice = await f.signIn.customer("alice");
   expect(await f.t.query(api.identity.viewer, { token: owner })).toMatchObject({ kind: "staff", role: "owner" });
   expect(await f.t.query(api.identity.viewer, { token: alice })).toMatchObject({ kind: "customer", needsRecoveryCode: true });
+  await expect(f.t.query(api.tickets.getTicket, { token: alice, id: f.id })).rejects.toThrow("RECOVERY_ENROLLMENT_REQUIRED");
+  await expect(f.t.mutation(api.identity.joinWithInvitation, { token: alice, invitation: excludedInvitation.secret }))
+    .rejects.toThrow("RECOVERY_ENROLLMENT_REQUIRED");
+  expect(await f.t.mutation(api.identity.confirmRecoveryEnrollment, { token: alice, code: originalCode.code }))
+    .toEqual({ ok: false, error: "RECOVERY_FAILED" });
+  await confirmNewRecoveryCode(f, alice);
   for (const token of [alice, owner]) {
     await expect(f.t.mutation(api.uploads.createUploadIntent, { token, idempotencyKey: "synthetic-media-attempt", files: [pending] }))
       .rejects.toThrow("PILOT_MEDIA_DISABLED");
@@ -221,6 +235,8 @@ test("named Ticket operations redact old media and deny attachment writes for bo
   await f.t.mutation(internal.pilot_release.install, { manifest: raw });
   await f.reconcile(firstEpoch);
   const sessions = { staff: await f.signIn.owner(), customer: await f.signIn.customer("alice"), other: await f.signIn.customer("bob") };
+  await confirmNewRecoveryCode(f, sessions.customer);
+  await confirmNewRecoveryCode(f, sessions.other);
   const ticket = { id: f.id };
   const page = { projectId: f.projectId, lifecycle: "active" as const, paginationOpts: paging };
   for (const role of ["staff", "customer"] as const) {
@@ -309,7 +325,7 @@ test("rehearses an older installed snapshot behind a rotated external epoch with
   await f.reconcile(firstEpoch);
   const firstOwner = await f.signIn.owner();
   const firstAlice = await f.signIn.customer("alice");
-  const savedCode = await f.t.mutation(api.identity.createRecoveryCode, { token: firstAlice });
+  const savedCode = await confirmNewRecoveryCode(f, firstAlice);
   expect(savedCode).toMatchObject({ ok: true });
 
   const routingTicket = await f.t.mutation(api.tickets.createTextTicket, {

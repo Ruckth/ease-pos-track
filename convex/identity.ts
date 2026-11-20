@@ -135,7 +135,9 @@ export const reconcilePilotPrincipal = internalJobMutation({
     if (principal.pilotEpoch === settings.epoch) return { generation: principal.generation };
     const now = Date.now();
     const generation = principal.generation + 1;
-    const recovery = args.customerId ? { recoveryCodeDigest: undefined, recoveryCodeCreatedAt: undefined } : {};
+    const recovery = args.customerId ? {
+      recoveryCodeDigest: undefined, recoveryCodeGeneration: undefined, recoveryCodeCreatedAt: undefined, recoveryEnrollmentRequired: true,
+    } : {};
     await ctx.db.patch(principal._id, { pilotEpoch: settings.epoch, generation, validAfter: now, updatedAt: now, ...recovery });
     await revokeUserSessions(ctx, principal.userId);
     await audit(ctx, "principal.pilot_reconciled", args.staffId ? { staffId: args.staffId } : { customerId: args.customerId });

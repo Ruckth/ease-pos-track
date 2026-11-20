@@ -243,7 +243,10 @@ export async function setStaffRole(ctx: MutationCtx, staff: Doc<"staff">, role: 
 
 export async function transitionCustomer(ctx: MutationCtx, customer: Doc<"customers">, status: "active" | "disabled", actorStaffId: Id<"staff">) {
   const now = Date.now();
-  await ctx.db.patch(customer._id, { status, generation: customer.generation + 1, validAfter: now, updatedAt: now });
+  // Preserve the issuance generation for codes written before it was stored separately.
+  const recoveryCodeGeneration = customer.recoveryCodeDigest
+    ? customer.recoveryCodeGeneration ?? customer.generation : undefined;
+  await ctx.db.patch(customer._id, { status, recoveryCodeGeneration, generation: customer.generation + 1, validAfter: now, updatedAt: now });
   await revokeUserSessions(ctx, customer.userId);
   await audit(ctx, status === "disabled" ? "customer.disabled" : "customer.enabled", { actorStaffId, customerId: customer._id });
 }
@@ -382,7 +385,7 @@ export async function issueRecoveryCode(ctx: MutationCtx, customer: Doc<"custome
   const code = encodeRecoveryCode(randomBytes(16));
   await ctx.db.patch(customer._id, {
     recoveryCodeDigest: await recoveryCodeDigest(customer._id, customer.generation, code),
-    recoveryCodeCreatedAt: Date.now(), updatedAt: Date.now(),
+    recoveryCodeGeneration: customer.generation, recoveryCodeCreatedAt: Date.now(), updatedAt: Date.now(),
   });
   await audit(ctx, "recovery_code.issued", { customerId: customer._id });
   return formatRecoveryCode(code);
@@ -390,7 +393,7 @@ export async function issueRecoveryCode(ctx: MutationCtx, customer: Doc<"custome
 
 export async function recoveryCodeMatches(customer: Doc<"customers"> | null, input: string) {
   const canonical = canonicalRecoveryCode(input);
-  const digest = await recoveryCodeDigest(customer?._id ?? "", customer?.generation ?? 0, canonical ?? "0".repeat(26));
+  const digest = await recoveryCodeDigest(customer?._id ?? "", customer?.recoveryCodeGeneration ?? customer?.generation ?? 0, canonical ?? "0".repeat(26));
   const matches = constantTimeEquals(digest, customer?.recoveryCodeDigest ?? "0".repeat(64));
   return canonical !== null && customer?.recoveryCodeDigest !== undefined && matches;
 }
@@ -409,7 +412,7 @@ export async function replaceCustomerPassword(
   const now = Date.now();
   await ctx.db.patch(customer._id, {
     generation: customer.generation + 1, validAfter: now, updatedAt: now,
-    recoveryCodeDigest: undefined, recoveryCodeCreatedAt: undefined, recoveryEnrollmentRequired: true,
+    recoveryCodeDigest: undefined, recoveryCodeGeneration: undefined, recoveryCodeCreatedAt: undefined, recoveryEnrollmentRequired: true,
   });
   await revokeUserSessions(ctx, customer.userId);
   await clearAttempts(ctx, rateLimitKey);

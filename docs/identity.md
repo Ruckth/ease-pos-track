@@ -59,8 +59,7 @@ authorization.
   staff `{ staffId, name, role }`, sorted by name. Use `staffId` as the durable
   assignee/recipient key.
 - **Customers.** `tickets.ownerCustomerId`, `projectMembers.customerId` and
-  `customers` (`username`, `displayName`, `status`). A disabled customer keeps
-  their rows; their sessions are denied.
+  `customers` (`username`, `displayName`, `status`). Disabling a customer revokes their sessions and suspends saved-code recovery. Re-enabling permits a fresh sign-in or use of the previously saved code. Reconciliation into the first pilot epoch clears the previous code and requires confirmation of its replacement before Ticket access or Project joining.
 - **Attribution.** `actorFields(actor)` stamps `actorRole`, `actorCustomerId`
   and now `actorStaffId` on events, receipts and upload intents. Create and
   attach receipts and upload intents are scoped to the individual staff member,

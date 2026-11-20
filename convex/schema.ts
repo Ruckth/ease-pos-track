@@ -259,6 +259,7 @@ export default defineSchema({
     pilotEpoch: v.optional(v.string()),
     // Saved recovery code digest, bound to customerId and generation.
     recoveryCodeDigest: v.optional(v.string()),
+    recoveryCodeGeneration: v.optional(v.number()),
     recoveryCodeCreatedAt: v.optional(v.number()),
     credentialEpoch: v.optional(v.string()),
     recoveryEnrollmentRequired: v.optional(v.boolean()),
