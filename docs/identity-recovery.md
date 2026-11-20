@@ -4,6 +4,8 @@
 
 Use this procedure after the snapshot is in place and before installing the final release manifest. The named-pilot settings must describe closed traffic, a fresh recovery epoch and the independently recorded previous epoch. Keep public ingress and external egress closed. The process binds the existing customer ID, Auth user ID, username mapping and credential generation. Record the decision in the restricted evidence store using an opaque reference. Independent verification can be in person or use evidence established before the incident.
 
+Include suspended customers in credential reconciliation before installing the release. Replacement preserves suspension. The Owner can separately restore access after reopening. Then the customer signs in with the replacement password, confirms a new recovery code and can open their existing Tickets.
+
 Provision three independently generated 32-byte keys as lowercase hex through the restricted deployment settings. The verifier and reviewer each hold only their own attestation key. Give the private-entry key only to the controlled terminal operator. Deployment administrators and their secret store are trusted. Use individual administrator access and a terminal without session recording. Generate a fresh epoch and rotate these keys before each database replacement, including another attempt to restore an older snapshot.
 
 | Deployment setting | Custody |

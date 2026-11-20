@@ -276,9 +276,18 @@ test("live disable denies the open session and its refresh; re-enable needs a fr
   const refreshToken = signedUp.status === "complete" ? signedUp.tokens.refreshToken : "";
   const created = await t.mutation(api.tickets.createTextTicket, { token: alice, projectKey: "POS", requestId: "r1", title: "Mine", description: "" });
   const { customerId, userId } = await whoami(t, alice);
+  // Admissions for ended core sessions are durable Ticket attribution, outside the revocation write set.
+  const historical = await t.run(ctx => ctx.db.insert("sessionAdmissions", {
+    principal: "customer", customerId: customerId!, userId, authSessionId: "ended-session",
+    generation: 0, method: "password", createdAt: 1,
+  }));
   // An already-issued code from before the issuance generation field also survives.
   await t.run(ctx => ctx.db.patch(customerId!, { recoveryCodeGeneration: undefined }));
   await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: customerId!, status: "disabled" });
+  const retained = await t.run(ctx => ctx.db.get(historical));
+  expect(retained?.authSessionId).toBe("ended-session");
+  expect(retained?.revokedAt).toBeUndefined();
+  expect(await t.query(api.identity.viewer, { token: "ended-session" })).toBeNull();
   await expect(t.query(api.tickets.getTicket, { token: alice, id: created.ticket._id })).rejects.toThrow("SESSION_EXPIRED");
   expect(await t.query(api.identity.viewer, { token: alice })).toBeNull();
   expect(await t.mutation(api.auth.refreshSession, { refreshToken })).toEqual({ kind: "noSession" });

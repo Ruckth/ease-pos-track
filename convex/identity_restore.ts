@@ -33,7 +33,7 @@ async function requireAttestation(key: string, signature: string, values: readon
 async function reconciledCustomer(ctx: QueryCtx, input: Pick<Doc<"customerRestoreCases">, "customerId" | "userId" | "generation" | "epoch">) {
   const customer = await ctx.db.get(input.customerId);
   const user = await ctx.db.get(input.userId);
-  if (!customer || customer.status !== "active" || customer.userId !== input.userId || customer.generation !== input.generation
+  if (!customer || customer.userId !== input.userId || customer.generation !== input.generation
     || customer.credentialEpoch === input.epoch || user?.kind !== "customer" || user.customerId !== customer._id) {
     throw new Error("RESTORE_CUSTOMER_MISMATCH");
   }

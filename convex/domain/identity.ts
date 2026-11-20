@@ -58,17 +58,16 @@ export async function admitSession(ctx: MutationCtx, tokens: TokenBundle, princi
   }
 }
 
-/** Revoke every core session of the user and mark their admissions revoked. */
+/** Only live core sessions can authorize calls. Older admission IDs remain as Ticket attribution. */
 export async function revokeUserSessions(ctx: MutationCtx, userId: Id<"users">, exceptAuthSessionId?: string) {
   const sessions = await ctx.runQuery(components.auth.public.listSessions, { userId });
   const sessionIds = sessions.map((session) => session.sessionId).filter((id) => id !== exceptAuthSessionId);
   if (sessionIds.length) await ctx.runMutation(components.auth.public.revokeSessions, { sessionIds });
   const now = Date.now();
-  for await (const admission of ctx.db.query("sessionAdmissions").withIndex("by_user", (q) => q.eq("userId", userId))) {
-    if (admission.revokedAt === undefined && admission.authSessionId !== exceptAuthSessionId) {
-      await ctx.db.patch(admission._id, { revokedAt: now });
-    }
-  }
+  await Promise.all(sessionIds.map(async id => {
+    const admission = await ctx.db.query("sessionAdmissions").withIndex("by_auth_session", q => q.eq("authSessionId", id)).unique();
+    if (admission && admission.revokedAt === undefined) await ctx.db.patch(admission._id, { revokedAt: now });
+  }));
   return sessionIds.length;
 }
 

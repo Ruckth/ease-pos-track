@@ -33,7 +33,7 @@ tsconfigs). Re-check both on every Auth upgrade.
    Any mismatch is `SESSION_EXPIRED`. Refresh rotates tokens but never creates or
    changes an admission.
 3. Disable, re-enable and recovery advance the principal's `generation` and
-   `validAfter`, revoke every core session and mark admissions revoked.
+   `validAfter`, revoke the user's live core sessions and mark their corresponding admissions revoked. Ended sessions have no authority; their admission IDs remain available for historical Ticket attribution.
    Re-enabling restores nothing: a fresh sign-in is required. A Google flow that
    started before the last transition is refused (`ACCESS_UNAVAILABLE`).
 4. Google start records a one-use flow (state digest, start time); completion

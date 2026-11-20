@@ -31,7 +31,7 @@ function quarantine() {
   })) vi.stubEnv(name, value);
 }
 
-test("quarantine replaces only the verified customer, rolls back atomically, and gates Ticket access until recovery-code confirmation", async () => {
+test.each(["active", "disabled"] as const)("quarantine restores the %s customer without changing access or Ticket ownership", async status => {
   const t = identityTest();
   const owner = await t.mutation(fixtures.staff, {});
   const project = await t.mutation(api.projects.createProject, { token: owner.session, key: "POS", name: "Point of Sale" });
@@ -41,6 +41,9 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
   const other = await t.mutation(api.tickets.createTextTicket, { token: bob.session, projectKey: "POS", requestId: "bob", title: "Bob Ticket", description: "" });
   const oldCode = await t.mutation(api.identity.createRecoveryCode, { token: alice.session });
   if (!oldCode.ok) throw new Error("saved code fixture");
+  if (status === "disabled") {
+    await t.mutation(api.identity.setCustomerAccess, { token: owner.session, customerId: alice.customerId, status });
+  }
   const snapshot = await t.run(async ctx => ({
     customer: (await ctx.db.get(alice.customerId))!,
     releaseId: await ctx.db.insert("pilotRelease", { deploymentOrigin: origin, epoch: previous, manifestDigest, projectIds: [project._id] }),
@@ -98,7 +101,7 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
     oldPassword: await ctx.runMutation(components.authPassword.public.verifyPassword, { userId: alice.userId, password }),
   }));
   expect(unchanged.customer).toEqual(snapshot.customer);
-  expect(unchanged.sessions).toHaveLength(1);
+  expect(unchanged.sessions).toHaveLength(status === "active" ? 1 : 0);
   expect(unchanged.oldPassword).toEqual({ success: true });
   expect(unchanged.row?.completedAt).toBeUndefined();
 
@@ -111,7 +114,7 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
     case: await ctx.db.get(caseId),
     audit: (await ctx.db.query("identityAudit").collect()).filter(row => row.restoreCaseId === caseId),
   }))).toMatchObject({
-    customer: { userId: alice.userId, generation: snapshot.customer.generation + 1, credentialEpoch: epoch, recoveryEnrollmentRequired: true },
+    customer: { status, userId: alice.userId, generation: snapshot.customer.generation + 1, credentialEpoch: epoch, recoveryEnrollmentRequired: true },
     ticket: { ownerCustomerId: alice.customerId },
     case: { verifierId, reviewerId, completedAt: expect.any(Number) },
     audit: [{ action: "customer_restore.verified" }, { action: "customer_restore.approved" }, { action: "customer_restore.replaced" }],
@@ -128,6 +131,12 @@ test("quarantine replaces only the verified customer, rolls back atomically, and
   await expect(read(alice.session)).rejects.toThrow("SESSION_EXPIRED");
   expect(await t.action(api.auth.signInWithPassword, { username: "bob", password })).toMatchObject({ status: "error" });
 
+  if (status === "disabled") {
+    expect(await t.action(api.auth.signInWithPassword, { username: "alice", password: newPassword })).toMatchObject({ status: "error" });
+    await t.run(ctx => ctx.db.patch(owner.staffId, { pilotEpoch: epoch }));
+    const currentOwner = await t.mutation(fixtures.staff, {});
+    await t.mutation(api.identity.setCustomerAccess, { token: currentOwner.session, customerId: alice.customerId, status: "active" });
+  }
   const signedIn = await t.action(api.auth.signInWithPassword, { username: "alice", password: newPassword });
   if (signedIn.status !== "complete") throw new Error("fresh sign-in did not complete");
   const token = accessTokenSessionId(signedIn.tokens.accessToken);
