@@ -127,14 +127,14 @@ export default defineSchema({
     projectVisibilityVersion: v.optional(v.number()), visibilityVersion: v.number(),
     // Pilot epoch and preference generation at insertion; absent outside a pilot or before generations.
     pilotEpoch: v.optional(v.string()), preferenceGeneration: v.optional(v.number()),
-  }).index("by_recipient", ["projectId", "staffId"]),
+  }).index("by_recipient", ["projectId", "staffId"]).index("by_ticket", ["ticketId"]),
   customerInbox: defineTable({
     customerId: v.id("customers"), memberId: v.id("projectMembers"),
     projectId: v.id("projects"), ticketId: v.id("tickets"), eventId: v.id("ticketEvents"),
     projectVisibilityVersion: v.optional(v.number()), visibilityVersion: v.number(), status: ticketStatus,
     restored: v.boolean(), readAt: v.optional(v.number()),
     pilotEpoch: v.optional(v.string()), preferenceGeneration: v.optional(v.number()),
-  }).index("by_member", ["memberId"]),
+  }).index("by_member", ["memberId"]).index("by_ticket", ["ticketId"]),
   t3DoctorKeys: defineTable({
     selector: v.string(),
     digest: v.string(),

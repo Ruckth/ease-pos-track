@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
-import { api } from "../../convex/_generated/api";
+import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { ARCHIVE_RETENTION_MS, AUDIT_BATCH } from "../../convex/domain/media_jobs";
 import { config, NOW, routingFixture, setupRoutingTestClock, STAFF, TOKEN } from "./ticket-routing-fixture";
 
 setupRoutingTestClock();
@@ -100,6 +101,92 @@ test("rule request identities stay bound to the original revision, including abs
   expect(result.suggestions).toHaveLength(2);
   expect(result.events).toHaveLength(1);
   expect(result.tickets.find(row => row._id === ticketId)).toMatchObject({ version: 2, assigneeStaffId: STAFF.owner });
+});
+
+test("legacy purge drains Ticket inbox items and reduces routing requests to replay tombstones", async () => {
+  const f = await routingFixture();
+  const { t } = f;
+  const createArgs = (requestId: string) => ({ token: TOKEN.customer, title: "Customer Ticket", description: "", requestId });
+  const targetCreate = createArgs("purge-target-create");
+  const neighbourCreate = createArgs("purge-neighbour-create");
+  const { ticket: { _id: target } } = await t.mutation(api.tickets.createTextTicket, targetCreate);
+  const { ticket: { _id: neighbour } } = await t.mutation(api.tickets.createTextTicket, neighbourCreate);
+  const routeArgs = (ticketId: Id<"tickets">, requestId: string) => ({ token: TOKEN.primary, ticketId, requestId, expectedVersion: 2 });
+  for (const id of [target, neighbour]) {
+    expect((await label(f, id)).status).toBe("pending");
+    await t.mutation(api.tickets.updateTicketStatus, { token: TOKEN.primary, id, expectedVersion: 1, status: "acknowledged" });
+  }
+  const targetRoute = routeArgs(target, "purge-target-route");
+  const neighbourRoute = routeArgs(neighbour, "purge-neighbour-route");
+  expect(await t.mutation(api.ticket_routing.checkRule, targetRoute)).toMatchObject({ status: "pending" });
+  const neighbourProposal = await t.mutation(api.ticket_routing.checkRule, neighbourRoute);
+  expect(neighbourProposal.status).toBe("pending");
+  await t.mutation(api.tickets.updateTicketStatus, { token: TOKEN.primary, id: target, expectedVersion: 2, status: "done" });
+  const abstention = { ...targetRoute, expectedVersion: 3, requestId: "purge-target-abstention" };
+  expect(await t.mutation(api.ticket_routing.checkRule, abstention)).toMatchObject({ status: "manual" });
+
+  const rows = (ticketId: Id<"tickets">) => t.run(async ({ db }) => ({
+    customer: await db.query("customerInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).collect(),
+    staff: await db.query("staffInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).collect(),
+    suggestions: await db.query("ticketRoutingSuggestions").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).collect(),
+    requests: await db.query("ticketRoutingSuggestionRequests").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).collect(),
+  }));
+  const original = await rows(target);
+  const neighbourRows = await rows(neighbour);
+  expect(neighbourRows).toMatchObject({ customer: [{ ticketId: neighbour }], staff: [{ ticketId: neighbour }, { ticketId: neighbour }] });
+  await t.run(async ({ db }) => {
+    // Extend the history past a transaction boundary using rows from the normal writers.
+    const [{ _id: _customerId, _creationTime: _customerTime, ...customer }] = original.customer;
+    const [{ _id: _staffId, _creationTime: _staffTime, ...staff }] = original.staff;
+    const request = original.requests.find(row => !("outcome" in row) && row.requestId === abstention.requestId);
+    if (!request || "outcome" in request) throw new Error("Expected a live routing request");
+    const { _id: _requestId, _creationTime: _requestTime, ...routing } = request;
+    for (let i = original.customer.length; i <= AUDIT_BATCH; i++) await db.insert("customerInbox", customer);
+    for (let i = original.staff.length; i <= AUDIT_BATCH; i++) await db.insert("staffInbox", staff);
+    for (let i = original.requests.length; i < AUDIT_BATCH * 2 + 7; i++) {
+      await db.insert("ticketRoutingSuggestionRequests", { ...routing, requestId: `purge-batch-request-${i}` });
+    }
+  });
+  const counts = async () => {
+    const { customer, staff, requests } = await rows(target);
+    return { customer: customer.length, staff: staff.length, requests: requests.length };
+  };
+  await t.mutation(api.tickets.archiveTicket, { token: TOKEN.customer, id: target, expectedVersion: 3 });
+  await t.run(({ db }) => db.patch(target, { archivedAt: Date.now() - ARCHIVE_RETENTION_MS }));
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true");
+  expect(await t.mutation(internal.retention.claimPurges, {})).toBe(1);
+  const pending = (await t.run(({ db }) => db.query("mediaJobs").unique()))!;
+  const claimed = (await t.mutation(internal.retention.claim, { jobId: pending._id }))!;
+  const fence = { jobId: pending._id, leaseId: claimed.leaseId!, attempt: claimed.attempt };
+  const advance = () => t.mutation(internal.retention.advance, fence);
+  expect(await advance()).toBe(true);
+  expect(await advance()).toBe(true);
+  expect(await t.run(({ db }) => db.get(target))).toBeNull();
+  expect(await counts()).toEqual({ customer: AUDIT_BATCH + 1, staff: AUDIT_BATCH + 1, requests: AUDIT_BATCH * 2 + 7 });
+
+  vi.stubEnv("TICKET_PILOT_TRAFFIC", "closed");
+  expect(await advance()).toBe(false);
+  expect(await counts()).toEqual({ customer: AUDIT_BATCH + 1, staff: AUDIT_BATCH + 1, requests: AUDIT_BATCH * 2 + 7 });
+  vi.stubEnv("TICKET_PILOT_TRAFFIC", undefined);
+  expect(await advance()).toBe(true);
+  expect(await counts()).toEqual({ customer: 1, staff: 1, requests: AUDIT_BATCH + 7 });
+  expect(await advance()).toBe(true);
+  expect(await counts()).toEqual({ customer: 0, staff: 0, requests: 7 });
+  expect(await t.run(({ db }) => db.get(pending._id))).toMatchObject({ state: "running", phase: "delete_events" });
+  await t.finishAllScheduledFunctions(() => vi.runAllTimers(), 100);
+  expect(await rows(target)).toEqual({ customer: [], staff: [], requests: [], suggestions: [] });
+  expect(await t.run(({ db }) => db.get(pending._id))).toMatchObject({ state: "completed", phase: "complete", attempt: 0 });
+  expect(await rows(neighbour)).toEqual(neighbourRows);
+  for (const { _id, _creationTime, source, caller, requestId, inputDigest } of original.requests) {
+    expect(await t.run(({ db }) => db.get(_id))).toEqual({ _id, _creationTime, source, caller, requestId, inputDigest, outcome: "unavailable" });
+  }
+  for (const args of [targetRoute, abstention]) {
+    await expect(t.mutation(api.ticket_routing.checkRule, args)).rejects.toThrow("TICKET_UNAVAILABLE");
+    await expect(t.mutation(api.ticket_routing.checkRule, { ...neighbourRoute, requestId: args.requestId })).rejects.toThrow("REQUEST_ID_CONFLICT");
+  }
+  expect(await t.mutation(api.ticket_routing.checkRule, neighbourRoute)).toEqual(neighbourProposal);
+  await expect(t.mutation(api.tickets.createTextTicket, targetCreate)).rejects.toThrow("TICKET_UNAVAILABLE");
+  expect(await t.mutation(api.tickets.createTextTicket, neighbourCreate)).toMatchObject({ created: false, ticket: { _id: neighbour } });
 });
 
 test("human holds, dismissal, revoked access, roster drift and expiry leave the Ticket under human control", async () => {

@@ -394,9 +394,25 @@ credentials are rejected; sign in again to write the current encoded format.
 Local media cleanup scheduling now uses durable jobs: abandoned intents are
 claimed every five minutes, and Tickets archived for at least 30 days are
 claimed hourly. Purging blocks restore, retains media reservations through
-failure and removes the Ticket only after verified deletion. Audit history is
-then removed in batches of at most 100 entries per table. Shared development
-and production have not been changed.
+failure and removes the Ticket only after verified deletion. Legacy finalization
+then removes the Ticket's events, messages, routing suggestions and customer and
+staff inbox items, and strips routing request receipts in indexed batches of at
+most 100 entries per table. Account and Project inbox preferences are retained.
+The purge completes after all these batches drain. Named-pilot settings or an
+installed pilot release block legacy finalization, including queued batches.
+
+Routing requests that produced a suggestion and those that returned manual
+routing both leave permanent tombstones with the request source, caller, request
+ID, immutable input digest and `unavailable` outcome. They discard the Ticket,
+Project and suggestion references and the Ticket and policy revisions. A replay
+against the purged Ticket returns `TICKET_UNAVAILABLE`. The same caller reusing
+the routing request ID with different input on an accessible Ticket receives
+`REQUEST_ID_CONFLICT`. Ticket creation and attachment receipts keep their
+existing tombstone policy.
+
+Purges already completed before this change need separate, scoped reconciliation
+if inbox rows or routing requests remain. Recovery resumes in-progress jobs.
+
 The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates job execution,
 recovery and new purge claims; P8 enables it last, after configuration and smoke
 checks. Cancellation, rejected callbacks and expiry always create pending jobs

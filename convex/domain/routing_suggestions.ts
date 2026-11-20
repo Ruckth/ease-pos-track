@@ -21,6 +21,7 @@ async function proposalRequest(ctx: RoutingDb, input: Request) {
     q.eq("source", input.source).eq("caller", input.caller).eq("requestId", input.requestId)).unique();
   if (!request) return null;
   if (request.inputDigest !== input.inputDigest) throw new Error("REQUEST_ID_CONFLICT");
+  if ("outcome" in request) throw new Error("TICKET_UNAVAILABLE");
   const suggestion = request.suggestionId ? await ctx.db.get(request.suggestionId) : null;
   if (request.suggestionId && !suggestion) throw new Error("TICKET_UNAVAILABLE");
   return { request, suggestion };

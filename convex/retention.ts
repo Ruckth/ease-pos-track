@@ -136,14 +136,24 @@ export const advance = internalJobMutation({
       await ctx.db.delete(ticket._id);
       phase = "delete_events";
     } else if (phase === "delete_events") {
-      const events = await ctx.db.query("ticketEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      const annotations = await ctx.db.query("annotationEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      const messages = await ctx.db.query("ticketMessages").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      const assignments = await ctx.db.query("ticketAssignmentEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      const suggestions = await ctx.db.query("ticketRoutingSuggestions").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      const batches = [events, annotations, messages, assignments, suggestions];
+      const { ticketId } = job;
+      if (job.kind !== "ticket_purge" || !ticketId) { await failJob(ctx, job, "ownership_conflict"); return false; }
+      const events = await ctx.db.query("ticketEvents").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const annotations = await ctx.db.query("annotationEvents").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const messages = await ctx.db.query("ticketMessages").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const assignments = await ctx.db.query("ticketAssignmentEvents").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const suggestions = await ctx.db.query("ticketRoutingSuggestions").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const customerInbox = await ctx.db.query("customerInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const staffInbox = await ctx.db.query("staffInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const suggestionRequests = await ctx.db.query("ticketRoutingSuggestionRequests").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const batches = [events, annotations, messages, assignments, suggestions, customerInbox, staffInbox];
       for (const row of batches.flat()) await ctx.db.delete(row._id);
-      if (batches.every(batch => batch.length < AUDIT_BATCH)) phase = "complete";
+      // Keep caller-scoped request IDs reserved while clearing every result and Ticket reference.
+      // Replacing the row also removes it from the next Ticket-scoped batch.
+      for (const { _id, source, caller, requestId, inputDigest } of suggestionRequests) {
+        await ctx.db.replace(_id, { source, caller, requestId, inputDigest, outcome: "unavailable" });
+      }
+      if ([...batches, suggestionRequests].every(batch => batch.length < AUDIT_BATCH)) phase = "complete";
     }
     if (phase === "complete") {
       await patchMediaJob(ctx, job, { state: "completed", phase, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });

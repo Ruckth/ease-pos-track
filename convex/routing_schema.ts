@@ -28,6 +28,9 @@ const routingKey = {
   policyGeneration: v.number(), ruleRevision: v.number(),
 };
 const assignmentReceipt = { eventId: v.id("ticketAssignmentEvents"), version: v.number() };
+const suggestionRequestKey = {
+  source: proposalSource, caller: v.string(), requestId: v.string(), inputDigest: v.string(),
+};
 
 export const routingTables = {
   // Staff IDs below are durable `staff` IDs, normalized on every read
@@ -60,8 +63,8 @@ export const routingTables = {
   }).index("by_key", ["source", "projectId", "ticketId", "ticketVersion", "policyGeneration", "ruleRevision"])
     .index("by_review", ["projectId", "policyGeneration", "status", "expiresAt"])
     .index("by_ticket", ["ticketId"]),
-  ticketRoutingSuggestionRequests: defineTable({
-    ...routingKey, source: proposalSource, caller: v.string(), requestId: v.string(),
-    inputDigest: v.string(), suggestionId: v.optional(v.id("ticketRoutingSuggestions")),
-  }).index("by_caller_request", ["source", "caller", "requestId"]).index("by_ticket", ["ticketId"]),
+  ticketRoutingSuggestionRequests: defineTable(v.union(
+    v.object({ ...suggestionRequestKey, ...routingKey, suggestionId: v.optional(v.id("ticketRoutingSuggestions")) }),
+    v.object({ ...suggestionRequestKey, outcome: v.literal("unavailable") }),
+  )).index("by_caller_request", ["source", "caller", "requestId"]).index("by_ticket", ["ticketId"]),
 };
