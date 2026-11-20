@@ -6,9 +6,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { platform, tmpdir } from "node:os";
+import { platform, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { keychainLockPath } from "../scripts/ticket/keychain";
 import { TicketCliError } from "../scripts/ticket/errors";
 import { withFileLock } from "../scripts/ticket/lock";
 
@@ -207,5 +208,19 @@ test("the session lock excludes a second holder and times out with a stable code
     assert.equal(await withFileLock(path, async () => "released", 100), "released");
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("configuration profiles share the OS account's Keychain lock", () => {
+  const original = process.env.XDG_CONFIG_HOME;
+  try {
+    const lock = join(userInfo().homedir, ".config", "track-ease-pos", "ticket.lock");
+    for (const profile of ["ticket-profile-a", "ticket-profile-b"]) {
+      process.env.XDG_CONFIG_HOME = join(tmpdir(), profile);
+      assert.equal(keychainLockPath(), lock);
+    }
+  } finally {
+    if (original === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = original;
   }
 });

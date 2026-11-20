@@ -11,9 +11,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { platform } from "node:os";
+import { platform, userInfo } from "node:os";
 import { join } from "node:path";
-import { ticketStateDirectory } from "./config";
 import { authError, type TicketCliError } from "./errors";
 import { ticketCommand, type Deployment } from "./deployment";
 import { withFileLock } from "./lock";
@@ -46,6 +45,10 @@ const spawnProcess: ProcessRunner = (command, args, stdin) => new Promise((resol
 });
 
 const KEYCHAIN_SERVICE = "com.track-ease-pos.ticket-cli";
+/** Every configuration profile of this OS user shares the same Keychain item. */
+export function keychainLockPath() {
+  return join(userInfo().homedir, ".config", "track-ease-pos", "ticket.lock");
+}
 const SECURITY_BINARY = "/usr/bin/security";
 /** `security` reports a missing item with this status; it is not a failure. */
 const ITEM_NOT_FOUND = 44;
@@ -73,7 +76,7 @@ export class MacOsKeychainCredentialStore implements CredentialStore {
   constructor(
     private readonly run: ProcessRunner = spawnProcess,
     private readonly os = platform(),
-    private readonly lockPath = join(ticketStateDirectory(), "ticket.lock"),
+    private readonly lockPath?: string,
   ) {}
 
   async get(target: Deployment) {
@@ -106,7 +109,7 @@ export class MacOsKeychainCredentialStore implements CredentialStore {
 
   async exclusive<T>(fn: () => Promise<T>) {
     this.requireMacOs();
-    return await withFileLock(this.lockPath, fn);
+    return await withFileLock(this.lockPath ?? keychainLockPath(), fn);
   }
 
   private async security(args: string[], stdin?: string) {

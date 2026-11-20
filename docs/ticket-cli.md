@@ -252,7 +252,7 @@ syntax.
 - Concurrent runs on the same macOS account take turns with the saved session.
   Each run's read, rotation and write of the refresh token, logout, and the
   config and Keychain steps of login hold an exclusive lock on
-  `~/.config/track-ease-pos/ticket.lock` (under `$XDG_CONFIG_HOME` when set);
+  `~/.config/track-ease-pos/ticket.lock` in the OS account’s home directory, shared across all `XDG_CONFIG_HOME` profiles;
   the browser sign-in itself does not. The kernel releases the lock when a run
   exits or is killed, so there is nothing to clean up. A run that waits more than
   60 seconds fails with `CREDENTIAL_LOCK_TIMEOUT` (exit 4) before touching the
