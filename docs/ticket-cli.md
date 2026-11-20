@@ -231,8 +231,9 @@ the original error and exit status are retained with
 
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
-`SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`, and
-`NOT_AUTHORIZED`. Their hints use `pnpm ticket …` syntax.
+`SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`,
+`CREDENTIAL_LOCK_TIMEOUT`, and `NOT_AUTHORIZED`. Their hints use `pnpm ticket …`
+syntax.
 
 ## Security and platform limits
 
@@ -248,6 +249,14 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
   sessions are distinguished with stable JSON codes.
 - Logout asks the app to revoke the session, then removes the local Keychain
   record. Expired server sessions are also safe to clean up this way.
+- Concurrent runs on the same macOS account take turns with the saved session.
+  Each run's read, rotation and write of the refresh token, logout, and the
+  config and Keychain steps of login hold an exclusive lock on
+  `~/.config/track-ease-pos/ticket.lock` (under `$XDG_CONFIG_HOME` when set);
+  the browser sign-in itself does not. The kernel releases the lock when a run
+  exits or is killed, so there is nothing to clean up. A run that waits more than
+  60 seconds fails with `CREDENTIAL_LOCK_TIMEOUT` (exit 4) before touching the
+  session; retry the same command, with the same `--request-id` for writes.
 
 ## Implementation map
 
@@ -260,6 +269,7 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/deployment.ts` | Development/production selection, URL rules, and `pnpm ticket` hints. |
 | `scripts/ticket/config.ts` | Restrictive non-secret configuration file. |
 | `scripts/ticket/keychain.ts` | Injectable macOS Keychain credential adapter. |
+| `scripts/ticket/lock.ts` | Crash-safe cross-process session lock (macOS `O_EXLOCK`). |
 | `scripts/ticket/google-login.ts` | Loopback listener for the named Google sign-in. |
 | `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
 | `scripts/ticket/images.ts` | Original-byte local/HTTPS image loading and UploadThing storage. |

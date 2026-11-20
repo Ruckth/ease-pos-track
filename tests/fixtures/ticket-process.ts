@@ -37,7 +37,7 @@ const outcome = await runTicketCli(process.argv.slice(2), {
   config: { load: async () => config, save: async value => { config = value; } },
   credentials: {
     get: async () => ({ token: "fake-refresh", expiresAt: 20_000, url: "https://fixture.invalid" }),
-    set: async () => {}, delete: async () => {},
+    set: async () => {}, delete: async () => {}, exclusive: fn => fn(),
   },
   // The browser is simulated by requesting the loopback redirect directly.
   signIn: url => googleLoopbackSignIn(remote, url, {

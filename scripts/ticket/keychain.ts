@@ -5,12 +5,18 @@
  * The only implementation is macOS Keychain, driven through `/usr/bin/security`
  * with an injectable process runner. Non-macOS hosts fail closed rather than
  * falling back to a plaintext file.
+ *
+ * Keychain has no compare-and-swap, so read-rotate-write sequences run inside
+ * `exclusive`, which serializes them across every CLI process of the account.
  */
 
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
+import { join } from "node:path";
+import { ticketStateDirectory } from "./config";
 import { authError, type TicketCliError } from "./errors";
 import { ticketCommand, type Deployment } from "./deployment";
+import { withFileLock } from "./lock";
 
 export type StoredCredential = { token: string; expiresAt: number; url: string };
 
@@ -18,6 +24,11 @@ export interface CredentialStore {
   get(target: Deployment): Promise<StoredCredential | null>;
   set(target: Deployment, credential: StoredCredential): Promise<void>;
   delete(target: Deployment): Promise<void>;
+  /**
+   * Runs `fn` with exclusive use of the saved sessions across processes. Calls
+   * do not nest: `fn` must not call `exclusive` again.
+   */
+  exclusive<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 export type ProcessResult = { exitCode: number; stdout: string; stderr: string };
@@ -59,7 +70,11 @@ function decodeCredential(stored: string): StoredCredential | null {
 
 /** macOS Keychain adapter. Secret values are passed on stdin, never as arguments. */
 export class MacOsKeychainCredentialStore implements CredentialStore {
-  constructor(private readonly run: ProcessRunner = spawnProcess, private readonly os = platform()) {}
+  constructor(
+    private readonly run: ProcessRunner = spawnProcess,
+    private readonly os = platform(),
+    private readonly lockPath = join(ticketStateDirectory(), "ticket.lock"),
+  ) {}
 
   async get(target: Deployment) {
     const result = await this.security(["find-generic-password", "-a", target, "-s", KEYCHAIN_SERVICE, "-w"]);
@@ -89,7 +104,17 @@ export class MacOsKeychainCredentialStore implements CredentialStore {
     if (result.exitCode !== 0 && result.exitCode !== ITEM_NOT_FOUND) throw this.failure(result);
   }
 
+  async exclusive<T>(fn: () => Promise<T>) {
+    this.requireMacOs();
+    return await withFileLock(this.lockPath, fn);
+  }
+
   private async security(args: string[], stdin?: string) {
+    this.requireMacOs();
+    return await this.run(SECURITY_BINARY, args, stdin);
+  }
+
+  private requireMacOs() {
     if (this.os !== "darwin") {
       throw authError(
         "KEYCHAIN_UNAVAILABLE",
@@ -97,7 +122,6 @@ export class MacOsKeychainCredentialStore implements CredentialStore {
         "Run the Ticket CLI on macOS or inject a platform credential store.",
       );
     }
-    return await this.run(SECURITY_BINARY, args, stdin);
   }
 
   private failure(result: ProcessResult): TicketCliError {

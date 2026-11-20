@@ -21,6 +21,7 @@ const deps: TicketCliDeps = {
     get: async () => credential,
     set: async (_target, value) => { credential = value; },
     delete: async () => { credential = null; },
+    exclusive: fn => fn(),
   },
   images: {
     prepare: async () => { throw new Error("Text-only smoke cannot prepare uploads"); },

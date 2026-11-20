@@ -13,7 +13,7 @@ export async function verifyResetCli(url: string, ownerRefreshToken: string) {
   const deps: TicketCliDeps = {
     remote,
     config: { load: async () => config, save: async value => { config = value; } },
-    credentials: { get: async () => credential, set: async (_target, value) => { credential = value; }, delete: async () => { credential = null; } },
+    credentials: { get: async () => credential, set: async (_target, value) => { credential = value; }, delete: async () => { credential = null; }, exclusive: fn => fn() },
     images: { prepare: async () => { throw new Error("RESET_CLI_UPLOAD_FORBIDDEN"); }, upload: async () => { throw new Error("RESET_CLI_UPLOAD_FORBIDDEN"); } },
     // The operator's named Owner session; the CLI rotates it like a saved login.
     env: {}, now: Date.now, newRequestId: randomUUID,

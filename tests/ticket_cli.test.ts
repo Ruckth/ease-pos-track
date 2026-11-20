@@ -52,11 +52,19 @@ class MemoryConfig implements ConfigStore {
   async save(value: TicketConfig) { this.value = structuredClone(value); this.saves += 1; }
 }
 
+/** Fails credential access outside `exclusive` and nested calls, which would deadlock the real lock. */
 class MemoryCredentials implements CredentialStore {
   values: Partial<Record<"dev" | "prod", StoredCredential>> = {};
-  async get(target: "dev" | "prod") { return this.values[target] ?? null; }
-  async set(target: "dev" | "prod", value: StoredCredential) { this.values[target] = value; }
-  async delete(target: "dev" | "prod") { delete this.values[target]; }
+  held = false;
+  async get(target: "dev" | "prod") { this.locked(); return this.values[target] ?? null; }
+  async set(target: "dev" | "prod", value: StoredCredential) { this.locked(); this.values[target] = value; }
+  async delete(target: "dev" | "prod") { this.locked(); delete this.values[target]; }
+  async exclusive<T>(fn: () => Promise<T>) {
+    assert.equal(this.held, false, "exclusive must not nest");
+    this.held = true;
+    try { return await fn(); } finally { this.held = false; }
+  }
+  private locked() { assert.ok(this.held, "credential access outside exclusive"); }
 }
 
 // Validate transport shapes against the registered handlers, including extra fields.

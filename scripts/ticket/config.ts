@@ -22,9 +22,13 @@ export interface ConfigStore {
   save(config: TicketConfig): Promise<void>;
 }
 
+/** The per-user directory for the CLI's configuration and session lock. */
+export function ticketStateDirectory() {
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "track-ease-pos");
+}
+
 function defaultConfigPath() {
-  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(base, "track-ease-pos", "ticket.json");
+  return join(ticketStateDirectory(), "ticket.json");
 }
 
 const DIRECTORY_MODE = 0o700;

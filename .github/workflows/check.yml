@@ -43,4 +43,4 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:one tests/t3_kit.test.ts
+      - run: pnpm test:one tests/t3_kit.test.ts tests/ticket_session_lock.test.ts
