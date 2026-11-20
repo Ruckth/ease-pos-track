@@ -90,6 +90,10 @@ async function fixture() {
       return accessTokenSessionId(result.tokens.accessToken);
     },
     owner: async () => {
+      // Model a new browser sign-in after the last access transition, even on a fast test runner.
+      const cutoff = await t.run(async ctx => (await ctx.db.get(principals.owner._id))!.validAfter);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Math.max(Date.now(), cutoff + 1_000));
       const state = `pilot-google-flow-${++flows}`;
       await t.mutation(fixtures.recordFlow, { state });
       return await t.mutation(fixtures.googleCompletion, { userId: principals.owner.userId, state });
