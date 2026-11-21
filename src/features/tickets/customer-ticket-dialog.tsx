@@ -21,20 +21,22 @@ import {
   Trash2
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useSelectedTicket, useTicketActivity } from "./adapter";
+import { useProjectTicket, useTicketActivity } from "./adapter";
 import { useTicketOperations } from "./use-ticket-operations";
 
 export function CustomerTicketDialog({
   token,
   ticketId,
+  projectId,
   onClose,
 }: {
   token: string;
-  ticketId: Id<"tickets"> | null;
+  ticketId: string | undefined;
+  projectId: Id<"projects"> | null | undefined;
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const detail = useSelectedTicket(token, ticketId);
+  const detail = useProjectTicket(token, ticketId, projectId);
   const previous = useRef(detail);
   useEffect(() => { if (detail) previous.current = detail; }, [detail]);
   const item = ticketId ? detail : previous.current;

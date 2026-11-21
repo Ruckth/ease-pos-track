@@ -5,13 +5,14 @@ import { pendingAnnotationsForViewer, pendingMediaForViewer } from "@/lib/pendin
 import { toast } from "sonner";
 import { useDraftAdapter } from "./adapter";
 import { DisposableTicketDraft, type DraftSnapshot } from "./draft";
+import { useDraftGuard } from "./use-draft-guard";
 
 const idle: DraftSnapshot = { idempotencyKey: "", error: null, title: "", description: "", items: [], annotations: [], progress: null };
 const subscribeIdle = () => () => {};
 const getIdle = () => idle;
 
 /** Project identity is captured when opening; hiding a composer preserves its draft. */
-export function useComposer(project: ProjectSummary | null | undefined) {
+export function useComposer(project: ProjectSummary | null | undefined, logout: () => Promise<void>) {
   const [entry, setEntry] = useState<{ project: ProjectSummary; owner: DisposableTicketDraft } | null>(null);
   const [open, setOpen] = useState(false);
   const current = useRef(entry);
@@ -25,6 +26,7 @@ export function useComposer(project: ProjectSummary | null | undefined) {
   const state = useSyncExternalStore(entry?.owner.subscribe ?? subscribeIdle, entry?.owner.getSnapshot ?? getIdle);
   const busy = state.progress !== null;
   const hasDraft = Boolean(state.title || state.description || state.items.length || state.annotations.length);
+  const signOut = useDraftGuard(hasDraft, busy, async () => { await current.current?.owner.cancelAndSettle(); }, logout);
   function replace(next: typeof entry) {
     current.current?.owner.dispose();
     current.current = next;
@@ -33,7 +35,7 @@ export function useComposer(project: ProjectSummary | null | undefined) {
   function complete() { replace(null); setOpen(false); }
   return {
     owner: entry?.owner, project: entry?.project, open,
-    busy, hasDraft,
+    busy, hasDraft, signOut,
     show() {
       if (project && (!entry || (!hasDraft && !busy && entry.project._id !== project._id))) {
         replace({ project, owner: new DisposableTicketDraft(project._id) });

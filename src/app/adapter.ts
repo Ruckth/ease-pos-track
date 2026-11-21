@@ -3,8 +3,9 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 
 export function useSession(token: string) {
-  return { logout: useMutation(api.auth.logout), session: useQuery(api.auth.currentSession, { token: token || undefined }) };
+  return useQuery(api.auth.currentSession, token ? { token } : "skip");
 }
+export function useLogout() { return useMutation(api.auth.logout); }
 export function useStaffLogin() { return useAction(api.auth.login); }
 export function useCustomerAuth() { return { register: useAction(api.customers.register), login: useAction(api.customers.login) }; }
 export function useProjects(token: string) { return useQuery(api.projects.listProjects, { token }); }

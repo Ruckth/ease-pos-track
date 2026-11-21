@@ -6,6 +6,14 @@ Created/updated ranges include both entire dates in the browser's local timezone
 
 Table columns sort before pagination, with deterministic ID tie-breaking. Rows per page are 10/25/50. Criteria changes reset the page; live data shrinkage clamps it. Table pagination never feeds the Board: all matching active Tickets remain available for status counts and drag operations. Board preserves its existing status/workflow order. Showing archives adds archived matches to the table and to the existing separate board archive section.
 
+## Workspace links
+
+The code-based TanStack Router in `src/app/router.tsx` keeps the existing staff and customer URLs. A signed-out visitor who opens a Ticket link returns to that workspace after signing in with the matching role.
+
+Both workspaces accept `project` and `ticket`. For example, `/staff?project=POS&q=printer` opens the POS search. Staff links also support `archived=true`, the mobile board's `lane`, and `panel=health`. Customer links support `filter=active`, `waiting`, or `done`. Opening a Ticket adds a history entry so Back returns to the list. Changing Projects clears the selected Ticket.
+
+Ticket links use the opaque ID accepted by `getTicket`. The server checks the current actor's access and the workspace checks the Ticket's Project before showing its contents. Consider human-readable Ticket paths when an external integration needs to build links directly from Project keys and Ticket numbers.
+
 ## Scale and authorization
 
 The explorer consumes Project-scoped, bounded `api.tickets.pageTickets` summaries. Filters, sorting and table totals apply to loaded Tickets; the UI states this scope and offers controls to load older Tickets. Board lanes retain their independent server pages and totals. Tag labels are joined on bounded reads, and tag management APIs require staff access.

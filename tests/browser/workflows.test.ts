@@ -8,7 +8,7 @@ import { loadPorts } from "../../scripts/worktree-ports.mjs";
 import { translations, translate } from "../../src/lib/i18n";
 
 const baseURL = process.env.BROWSER_BASE_URL!;
-const seed = JSON.parse(process.env.BROWSER_FIXTURE!) as { sessions: string[]; projects: { id: Id<"projects">; key: string }[] };
+const seed = JSON.parse(process.env.BROWSER_FIXTURE!) as { sessions: string[]; tickets: Id<"tickets">[]; projects: { id: Id<"projects">; key: string }[] };
 const convex = new ConvexHttpClient(`http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`);
 let browser: Browser;
 before(async () => { browser = await chromium.launch({ headless: true, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] }); });
@@ -171,6 +171,14 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("POS");
     if (role === "staff") await page.getByPlaceholder("Search", { exact: true }).fill(name);
     await page.getByRole("button", { name: `Open ticket ${created.projectKey}-${String(created.ticketNumber).padStart(4, "0")}`, exact: true }).click();
+    await page.waitForURL(url => url.searchParams.get("ticket") === created._id);
+    await page.reload();
+    await page.getByRole("dialog").getByRole("heading", { name: new RegExp(name) }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
+    await page.goBack();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    assert.equal(new URL(page.url()).searchParams.has("ticket"), false);
+    await page.goForward();
     await page.getByRole("button", { name: copy("en", role === "staff" ? "edit" : "editTicket"), exact: true }).click();
     await page.locator(role === "staff" ? "#edit-ticket-title" : "#customer-edit-title").fill(`${name} edited`);
     await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -401,13 +409,20 @@ test("staff sign-in uses the committed rate-limit action through the real form",
   try {
     await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
     const page = await context.newPage();
-    await page.goto(`${baseURL}/staff`);
+    const search = new URLSearchParams({ project: "POS", q: "007", ticket: seed.tickets[0] });
+    await page.goto(`${baseURL}/staff?${search}`);
+    await page.waitForURL(url => url.pathname === "/staff/login" && !!url.searchParams.get("redirect"));
     await page.locator("#staff-password").fill("wrong-password");
     await page.getByRole("button", { name: copy("en", "enter"), exact: true }).click();
     await page.getByRole("alert").waitFor();
     await page.locator("#staff-password").fill("LocalStaff123!");
     await page.getByRole("button", { name: copy("en", "enter"), exact: true }).click();
-    await page.getByRole("button", { name: "New Ticket", exact: true }).waitFor();
+    await page.getByRole("dialog").getByRole("heading", { name: /Printer needs review/ }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("ticket"), seed.tickets[0]);
+    assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "007");
+    await page.goto(`${baseURL}/staff/login?redirect=${encodeURIComponent("/customer?project=APP")}`);
+    await page.waitForURL(url => url.pathname === "/staff" && !!url.searchParams.get("project"));
+    assert.equal(new URL(page.url()).searchParams.has("redirect"), false);
     assert.equal(await page.locator("#staff-password").count(), 0);
   } finally { await context.close(); }
 });
@@ -458,4 +473,94 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     assert.deepEqual(f.errors, []);
     assert.equal(f.uploads(), 0);
   } finally { await f.context.close(); }
+});
+
+test("malformed and wrong-Project Ticket links show the same unavailable state", async () => {
+  const { context, page, errors } = await open("staff");
+  try {
+    for (const path of ["/staff?project=POS&ticket=bad", `/staff?project=APP&ticket=${seed.tickets[0]}`]) {
+      await page.goto(baseURL + path);
+      const dialog = page.getByRole("dialog");
+      await dialog.getByText(copy("en", "ticketMissing"), { exact: true }).waitFor();
+      assert.equal(await dialog.getByText("Printer needs review", { exact: false }).count(), 0);
+      await dialog.getByRole("button", { name: copy("en", "closeDialog") }).click();
+      await page.waitForURL(url => !url.searchParams.has("ticket"));
+    }
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("sign-out waits for the active draft to cancel with a live session", { timeout: 30_000 }, async () => {
+  let intentRequest: number | undefined;
+  let received!: (release: () => void) => void;
+  const intentResponse = new Promise<() => void>(resolve => { received = resolve; });
+  const events: string[] = [];
+  const { page, context, title, uploads } = await open("staff", "en", async context => {
+    await context.routeWebSocket(/\/sync$/, socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const msg = JSON.parse(String(raw));
+        if (msg.udfPath === "uploads:createUploadIntent") intentRequest = msg.requestId;
+        if (msg.udfPath === "auth:logout") events.push("logout");
+        server.send(raw);
+      });
+      let queued: (string | Buffer)[] | undefined;
+      server.onMessage(raw => {
+        if (queued) { queued.push(raw); return; }
+        const msg = JSON.parse(String(raw));
+        if (msg.type === "MutationResponse" && msg.requestId === intentRequest) {
+          // Convex resolves this write when the following Transition arrives.
+          // Preserve server message order while holding its acknowledgement.
+          queued = [raw];
+          received(() => {
+            for (const message of queued ?? []) socket.send(message);
+            queued = undefined;
+          });
+        } else socket.send(raw);
+      });
+    });
+    await context.route("**/api/uploads/cancel", async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      assert.equal((await response.json()).ok, true);
+      events.push("canceled");
+      await route.fulfill({ response });
+    });
+  });
+  try {
+    await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
+    await page.waitForURL(url => url.searchParams.get("project") === "APP");
+    await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
+    await title.fill("Sign-out during upload intent creation");
+    await files(page);
+    await page.getByRole("button", { name: copy("en", "submit"), exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "cancelUpload") }).waitFor();
+    const releaseIntent = await intentResponse;
+    // Back would leave the upload's Project. Declining keeps the draft active.
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), copy("en", "switchDuringUpload"));
+        await dialog.dismiss();
+      }),
+      page.evaluate(() => history.back()),
+    ]);
+    await page.waitForURL(url => url.searchParams.get("project") === "APP");
+    assert.equal(await title.inputValue(), "Sign-out during upload intent creation");
+    // The modal traps pointer input. Dispatch the workspace action directly to
+    // exercise a sign-out arriving while the upload intent response is in flight.
+    const signOut = page.locator(`button[aria-label="${copy("en", "signOut")}"]`);
+    await Promise.all([page.waitForEvent("dialog").then(dialog => dialog.dismiss()), signOut.dispatchEvent("click")]);
+    assert.deepEqual(events, []);
+    await Promise.all([page.waitForEvent("dialog").then(dialog => dialog.accept()), signOut.dispatchEvent("click")]);
+    await page.waitForFunction(() => window.draftStats.aborts > 0);
+    assert.deepEqual(events, []);
+    releaseIntent();
+    await page.locator("#staff-password").waitFor();
+    assert.deepEqual(events, ["canceled", "logout"]);
+    assert.equal(uploads(), 0);
+  } catch (error) {
+    console.error("Sign-out state", events, page.url(), (await page.locator("body").innerText()).slice(-1500));
+    throw error;
+  } finally { await context.close(); }
 });

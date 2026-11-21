@@ -39,7 +39,7 @@ export function StaffTicketDialog({
   onArchive,
 }: {
   ticket: Ticket | null | undefined;
-  ticketId: Id<"tickets"> | null;
+  ticketId: string | undefined;
   token: string;
   onClose: () => void;
   onMove: (id: Id<"tickets">, status: TicketStatus) => void;

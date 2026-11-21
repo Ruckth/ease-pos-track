@@ -1,6 +1,3 @@
-/** The query parameter that keeps the open Project in the URL: `/staff?project=POS`. */
-const PROJECT_PARAM = "project";
-
 /**
  * The Project to show: the one the URL names, or the first available one when
  * the URL names none, or names one this account cannot use.
@@ -8,15 +5,4 @@ const PROJECT_PARAM = "project";
 export function pickProject<Project extends { key: string }>(projects: Project[], requestedKey: string | null) {
   const key = requestedKey?.trim().toUpperCase();
   return projects.find((project) => project.key === key) ?? projects[0] ?? null;
-}
-
-export function readProjectParam(search: string) {
-  return new URLSearchParams(search).get(PROJECT_PARAM);
-}
-
-/** The same URL with the project parameter set, other parameters untouched. */
-export function withProjectParam(href: string, key: string) {
-  const url = new URL(href);
-  url.searchParams.set(PROJECT_PARAM, key);
-  return `${url.pathname}${url.search}${url.hash}`;
 }

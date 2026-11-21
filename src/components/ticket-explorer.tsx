@@ -19,11 +19,13 @@ type Page = { status: string; loadMore: (count: number) => void };
 
 /** Filters and table pages operate on the explicitly loaded server pages. Search
  * is resolved by the backend before summaries arrive, including full descriptions. */
-export function TicketExplorer({ projectId, token, items, archivedItems, tags, search, onSearch, showArchived, totals, pages, archive, loading, searchHasMore, archiveSearchHasMore, onSelect, onMove, onRestore }: {
+export function TicketExplorer({ projectId, token, items, archivedItems, tags, search, onSearch, showArchived, totals, pages, archive, loading, searchHasMore, archiveSearchHasMore, visibleLane, onLaneChange, onSelect, onMove, onRestore }: {
   projectId: Id<"projects">; token: string; items: TicketSummary[]; archivedItems: TicketSummary[];
   tags: ExplorerTag[]; search: string; onSearch: (search: string) => void; showArchived: boolean;
   totals: Partial<Record<TicketStatus, number>>; pages: Record<TicketStatus, Page>; archive: Page;
   loading: boolean; searchHasMore?: boolean; archiveSearchHasMore?: boolean;
+  visibleLane: TicketStatus;
+  onLaneChange: (status: TicketStatus) => void;
   onSelect: (id: Id<"tickets">) => void;
   onMove: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
   onRestore: (id: Id<"tickets">) => void;
@@ -58,7 +60,7 @@ export function TicketExplorer({ projectId, token, items, archivedItems, tags, s
     </div>
     {loading ? <div className="grid min-h-72 place-items-center rounded-lg border bg-card"><Loader2 className="size-7 animate-spin text-muted-foreground" /></div> : view === "table" ? <TicketTable items={sorted} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect} />
       : search ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{active.map(item => <TicketCard key={item._id} item={item} onSelect={onSelect} />)}</div>
-      : <StaffBoard projectId={projectId} token={token} items={active} totals={filteredTotals} pages={pages} onSelect={onSelect} onMoveCard={onMove} />}
+      : <StaffBoard projectId={projectId} token={token} items={active} totals={filteredTotals} pages={pages} visibleLane={visibleLane} onLaneChange={onLaneChange} onSelect={onSelect} onMoveCard={onMove} />}
     {view === "table" && morePages ? <Button className="mt-4" disabled={Object.values(pages).some(p => p.status === "LoadingMore") || archive.status === "LoadingMore"} onClick={() => {
       Object.values(pages).forEach(p => { if (p.status === "CanLoadMore") p.loadMore(20); });
       if (showArchived && archive.status === "CanLoadMore") archive.loadMore(20);

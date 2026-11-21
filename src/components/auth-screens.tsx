@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { FormEvent, useState } from "react";
 import { useStaffLogin, useCustomerAuth } from "@/app/adapter";
 import { Headphones, Loader2 } from "lucide-react";
@@ -30,11 +31,9 @@ export function LanguageSelector({
 export function AuthPage({
   page,
   onSignedIn,
-  onNavigate,
 }: {
   page: AuthPageKind;
   onSignedIn: (token: string) => void;
-  onNavigate: (path: string) => void;
 }) {
   const { language, setLanguage, t } = useI18n();
   const isStaff = page === "staff-login";
@@ -73,7 +72,6 @@ export function AuthPage({
             <CustomerSignInForm
               mode={isRegistering ? "register" : "login"}
               onSignedIn={onSignedIn}
-              onNavigate={onNavigate}
             />
           )}
         </CardContent>
@@ -129,11 +127,9 @@ function StaffSignInForm({ onSignedIn }: { onSignedIn: (token: string) => void }
 function CustomerSignInForm({
   mode,
   onSignedIn,
-  onNavigate,
 }: {
   mode: "login" | "register";
   onSignedIn: (token: string) => void;
-  onNavigate: (path: string) => void;
 }) {
   const { t } = useI18n();
   const { register, login } = useCustomerAuth();
@@ -209,17 +205,11 @@ function CustomerSignInForm({
           : (isRegistering ? t("createAccount") : t("signIn"))}
       </Button>
       <div className="text-center">
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-full"
-          onClick={() => {
-            setError("");
-            setConfirmation("");
-            onNavigate(isRegistering ? APP_PATHS.customerLogin : APP_PATHS.customerRegister);
-          }}
-        >
-          {isRegistering ? t("haveAccountQuestion") : t("noAccountQuestion")}
+        <Button asChild variant="ghost" className="w-full">
+          {/* The return target travels between sign-in and registration. */}
+          <Link to={isRegistering ? APP_PATHS.customerLogin : APP_PATHS.customerRegister} search={true}>
+            {isRegistering ? t("haveAccountQuestion") : t("noAccountQuestion")}
+          </Link>
         </Button>
       </div>
     </form>

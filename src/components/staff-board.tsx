@@ -66,12 +66,14 @@ const isMultiColumnOnServer = () => true;
  * applied locally first, then persisted with the ticket's expected version. A
  * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard }: {
+export function StaffBoard({ items, projectId, token, totals, pages, visibleLane, onLaneChange, onSelect, onMoveCard }: {
   items: TicketSummary[];
   projectId: Id<"projects">;
   token: string;
   totals: Partial<Record<TicketStatus, number>>;
   pages: Record<TicketStatus, { status: string; loadMore: (count: number) => void }>;
+  visibleLane: TicketStatus;
+  onLaneChange: (status: TicketStatus) => void;
   onSelect: (id: Id<"tickets">) => void;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
 }) {
@@ -80,7 +82,6 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = reconcileColumns(projectId, items, pending);
   const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
-  const [visibleStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
   const tabsId = useId();
   const panelId = `${tabsId}-panel`;
   const tabId = (status: TicketStatus) => `${tabsId}-${status}`;
@@ -127,17 +128,17 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
       {multiColumn ? null : (
         <StatusTabs
           totals={totals}
-          value={visibleStatus}
-          onValueChange={setVisibleStatus}
+          value={visibleLane}
+          onValueChange={onLaneChange}
           panelId={panelId}
           tabId={tabId}
         />
       )}
       <KanbanBoard
         className="grid auto-rows-fr gap-4 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-5"
-        {...(multiColumn ? {} : { id: panelId, role: "tabpanel", "aria-labelledby": tabId(visibleStatus) })}
+        {...(multiColumn ? {} : { id: panelId, role: "tabpanel", "aria-labelledby": tabId(visibleLane) })}
       >
-        {(multiColumn ? BOARD_COLUMNS : [visibleStatus]).map((status) => (
+        {(multiColumn ? BOARD_COLUMNS : [visibleLane]).map((status) => (
           <BoardColumn
             key={status}
             status={status}
