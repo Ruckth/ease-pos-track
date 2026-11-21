@@ -59,7 +59,7 @@ export const run = internalJobAction({
       const token = seeded.sessions[index];
       check((await ctx.runQuery(api.auth.currentSession, { token }))?.role === (index === 0 ? "staff" : "customer"), "random seed session and explicit role");
     }
-    const staff = (await ctx.runMutation(api.auth.login, { password: "LocalStaff123!", clientId: "local-smoke-staff-client" })).token;
+    const staff = (await ctx.runAction(api.auth.login, { password: "LocalStaff123!", clientId: "local-smoke-staff-client" })).token;
     const alice = (await ctx.runAction(api.customers.login, { email: "alice@local.test", password: "LocalCustomer123!", clientId: "local-smoke-alice-client" })).token;
     const bob = (await ctx.runAction(api.customers.login, { email: "bob@local.test", password: "LocalCustomer123!", clientId: "local-smoke-bob-client" })).token;
     check((await ctx.runQuery(api.auth.currentSession, { token: staff }))?.role === "staff", "staff credential and explicit role");

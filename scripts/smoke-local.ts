@@ -1,12 +1,13 @@
 /** Exercises the real CLI orchestration/adapter without Keychain, provider I/O or remote targets. */
 import assert from "node:assert/strict";
+import { loadPorts } from "./worktree-ports.mjs";
 import { randomUUID } from "node:crypto";
 import { runTicketCli, type TicketCliDeps } from "./ticket/run";
 import { ConvexTicketRemote } from "./ticket/remote";
 import type { TicketConfig } from "./ticket/config";
 import type { StoredCredential } from "./ticket/keychain";
 
-const url = "http://127.0.0.1:3212";
+const url = `http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`;
 let configuration: TicketConfig = { version: 1, clientId: "local-cli-smoke-client", deployments: { dev: { url } } };
 let credential: StoredCredential | null = null;
 const deps: TicketCliDeps = {

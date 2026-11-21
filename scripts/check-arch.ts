@@ -132,7 +132,7 @@ export function checkArchitecture(root: string) {
 }
 
 const exceptions: Record<string, string> = {
-  "auth.ts:login": "publicAuthMutation:staff-login",
+  "auth.ts:login": "publicAuthAction:staff-login",
   "auth.ts:logout": "publicAuthMutation:logout",
   "auth.ts:currentSession": "publicAuthQuery:current-session",
   "customers.ts:login": "publicAuthAction:customer-login",

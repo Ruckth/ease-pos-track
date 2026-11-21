@@ -3,7 +3,7 @@ import { httpRouter } from "convex/server";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
-import { publicAuthMutation, publicAuthQuery, trustedCallbackMutation } from "../convex/functions";
+import { publicAuthAction, publicAuthMutation, publicAuthQuery, trustedCallbackMutation } from "../convex/functions";
 import { v } from "convex/values";
 import { mutationGeneric, queryGeneric, actionGeneric, internalMutationGeneric, internalQueryGeneric, internalActionGeneric, httpActionGeneric } from "./fixtures/raw-registration";
 
@@ -23,7 +23,7 @@ test("policy check rejects raw registrations through re-exports, including insid
 });
 
 test("policy manifest rejects new public auth/callback exports and wrong purpose labels", () => {
-  const login = publicAuthMutation("staff-login")({ name: "fixture", args: {}, handler: () => null });
+  const login = publicAuthAction("staff-login")({ name: "fixture", args: {}, handler: () => null });
   const wrong = publicAuthMutation("logout")({ name: "fixture", args: {}, handler: () => null });
   const query = publicAuthQuery("current-session")({ name: "fixture", args: {}, handler: () => null });
   const callback = trustedCallbackMutation({ name: "fixture", args: { token: v.optional(v.string()), callbackToken: v.optional(v.string()) }, handler: () => null });

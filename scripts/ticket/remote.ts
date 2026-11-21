@@ -84,7 +84,7 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async login(url: string, password: string, clientId: string) {
-    return await this.client(url).mutation(api.auth.login, { password, clientId });
+    return await this.client(url).action(api.auth.login, { password, clientId });
   }
 
   async currentSession(url: string, token: string) {

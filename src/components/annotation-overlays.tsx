@@ -28,7 +28,7 @@ export function PinMarker({
       }}
       aria-label={`${t("comment", { label: annotation.label })}: ${annotation.text}`}
       className={cn(
-        "absolute z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-xs font-bold text-primary-foreground shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/80",
+        "absolute z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full annotation-glass-marker border border-white/70 text-xs font-bold text-primary-foreground shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/80",
         highlighted && "scale-125 ring-4 ring-amber-400/80",
       )}
       style={{ left: `${(annotation.x ?? 0) * 100}%`, top: `${(annotation.y ?? 0) * 100}%` }}
@@ -74,7 +74,7 @@ export function PinPopover({
   const below = annotation.y <= 0.6;
   return (
     <div
-      className="absolute z-20 w-52 rounded-md border bg-background p-2.5 text-sm shadow-lg"
+      className="annotation-glass-popover absolute z-20 w-52 max-w-[calc(100%_-_16px)] rounded-lg border border-white/60 p-2.5 text-sm shadow-lg"
       style={{
         left: `clamp(112px, ${annotation.x * 100}%, calc(100% - 112px))`,
         top: `${annotation.y * 100}%`,

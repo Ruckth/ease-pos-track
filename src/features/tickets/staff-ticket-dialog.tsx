@@ -5,6 +5,7 @@ import {
   MediaViewer,
   type MediaViewerHandle
 } from "@/components/media-viewer";
+import { TicketTagEditor } from "@/components/ticket-tag-editor";
 import { TicketActivityList } from "@/components/ticket-activity";
 import { statuses, statusMeta } from "@/components/ticket-status";
 import { Badge } from "@/components/ui/badge";
@@ -26,17 +27,19 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useTicketActivity } from "./adapter";
+import { useTicketTags, useTicketActivity } from "./adapter";
 import { useTicketOperations } from "./use-ticket-operations";
 
 export function StaffTicketDialog({
   ticket,
+  ticketId,
   token,
   onClose,
   onMove,
   onArchive,
 }: {
-  ticket: Ticket | null;
+  ticket: Ticket | null | undefined;
+  ticketId: Id<"tickets"> | null;
   token: string;
   onClose: () => void;
   onMove: (id: Id<"tickets">, status: TicketStatus) => void;
@@ -45,11 +48,11 @@ export function StaffTicketDialog({
   const { t } = useI18n();
   const previous = useRef(ticket);
   useEffect(() => { if (ticket) previous.current = ticket; }, [ticket]);
-  const item = ticket ?? previous.current;
+  const item = ticketId ? ticket : previous.current;
   return (
-    <Dialog open={Boolean(ticket)} onOpenChange={open => !open && onClose()}
+    <Dialog open={Boolean(ticketId)} onOpenChange={open => !open && onClose()}
       title={item ? `${formatTicketNumber(item.ticketNumber, item.projectKey)} · ${item.title}` : t("ticket")}>
-      {item ? <StaffTicketContent key={item._id} ticket={item} token={token} onMove={onMove} onArchive={onArchive} /> : null}
+      {item ? <StaffTicketContent key={item._id} ticket={item} token={token} onMove={onMove} onArchive={onArchive} /> : ticketId ? ticket === undefined ? <Loader2 className="mx-auto size-6 animate-spin" /> : <p role="alert" className="text-sm text-muted-foreground">{t("ticketMissing")}</p> : null}
     </Dialog>
   );
 }
@@ -62,6 +65,7 @@ function StaffTicketContent({ ticket, token, onMove, onArchive }: {
   const { t, formatDate } = useI18n();
   const { activity, ticketActivity } = useTicketActivity(token, ticket?._id ?? null);
   const operations = useTicketOperations(token);
+  const tags = useTicketTags(token);
   const viewerRef = useRef<MediaViewerHandle>(null);
   const item = ticket;
   const [editVersion, setEditVersion] = useState<number | null>(null);
@@ -169,6 +173,7 @@ function StaffTicketContent({ ticket, token, onMove, onArchive }: {
         </div>
         <p id="ticket-urgency-hint" className="mt-2 text-xs leading-5 text-muted-foreground">{t("urgencyScoreHint")}</p>
       </div>
+      <TicketTagEditor item={item} token={token} />
       <MediaViewer
         key={item._id}
         ref={viewerRef}
@@ -254,7 +259,7 @@ function StaffTicketContent({ ticket, token, onMove, onArchive }: {
           onRestore={handleRestoreAnnotation}
         />
         <AnnotationActivityList events={activity ?? []} />
-        <TicketActivityList events={ticketActivity ?? []} />
+        <TicketActivityList events={ticketActivity ?? []} tags={tags} tagsLoading={tags === undefined} />
         <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
       </div>
     </div>

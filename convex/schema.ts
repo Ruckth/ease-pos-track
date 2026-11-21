@@ -1,6 +1,8 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+export const tagColor = v.union(v.literal("slate"), v.literal("red"), v.literal("orange"), v.literal("green"), v.literal("blue"), v.literal("violet"));
+
 export const ticketStatus = v.union(
   v.literal("new"),
   v.literal("acknowledged"),
@@ -62,6 +64,7 @@ const annotationEventAction = v.union(
 );
 
 const ticketEventAction = v.union(
+  v.literal("tags_changed"),
   v.literal("created"),
   v.literal("media_attached"),
   v.literal("edited"),
@@ -86,6 +89,7 @@ const ticketStateValidator = v.object({
   annotationCount: v.number(),
   lifecycle: ticketLifecycle,
   archivedAt: v.optional(v.number()),
+  tagIds: v.optional(v.array(v.id("ticketTags"))),
 });
 
 const ticketCreatedVia = v.literal("codex");
@@ -99,6 +103,10 @@ const uploadIntentStatus = v.union(
 );
 
 export default defineSchema({
+  ticketTags: defineTable({
+    name: v.string(), normalizedName: v.string(), color: tagColor,
+    createdBy: v.id("sessions"), createdAt: v.number(),
+  }).index("by_normalized_name", ["normalizedName"]),
   projects: defineTable({
     name: v.string(),
     // Immutable once created: it prefixes every Ticket reference in the Project.
@@ -123,6 +131,7 @@ export default defineSchema({
     searchText: v.string(),
     status: ticketStatus,
     urgencyScore: v.optional(v.number()),
+    tagIds: v.optional(v.array(v.id("ticketTags"))),
     ticketNumber: v.number(),
     media: v.array(mediaItemValidator),
     annotations: v.array(annotationValidator),

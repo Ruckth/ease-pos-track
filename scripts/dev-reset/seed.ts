@@ -7,7 +7,7 @@ export const seedCustomers = ["alice@dev.example", "bob@dev.example"];
 
 /** Fresh installation only. All writes use registered domain commands, including totals and audit. */
 export async function seedDevelopment(client: Client, credentials: { staff: string; customer: string }) {
-  const { token: staff } = await client.mutation(api.auth.login, { password: credentials.staff, clientId: "dev-reset-staff-client" });
+  const { token: staff } = await client.action(api.auth.login, { password: credentials.staff, clientId: "dev-reset-staff-client" });
   assert.equal((await client.query(api.projects.listProjects, { token: staff })).length, 0, "seed requires empty Projects");
   const projects = [];
   for (const [key, name] of [["POS", "Point of Sale"], ["APP", "Customer App"]]) {

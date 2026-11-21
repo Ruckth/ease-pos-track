@@ -1,12 +1,13 @@
 import { History } from "lucide-react";
 import { statusMeta } from "@/components/ticket-status";
-import type { TicketEvent } from "@/lib/types";
+import type { TicketEvent, TicketTag } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-const actionKeys = { created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", urgency_changed: "actionUrgencyChanged", urgency_undone: "actionUrgencyUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored", annotation_changed: "actionAnnotationChanged", purge_claimed: "actionPurgeClaimed" } as const;
+const actionKeys = { tags_changed: "actionTagsChanged", created: "actionCreated", media_attached: "actionMediaAttached", edited: "actionEdited", edit_undone: "actionEditUndone", urgency_changed: "actionUrgencyChanged", urgency_undone: "actionUrgencyUndone", status_changed: "actionStatusChanged", status_undone: "actionStatusUndone", archived: "archive", restored: "actionRestored", annotation_changed: "actionAnnotationChanged", purge_claimed: "actionPurgeClaimed" } as const;
 
-export function TicketActivityList({ events }: { events: TicketEvent[] }) {
+export function TicketActivityList({ events, tags, tagsLoading = false }: { events: TicketEvent[]; tags?: TicketTag[]; tagsLoading?: boolean }) {
   const { t, formatDate } = useI18n();
+  const tagNames = (ids: string[] = []) => ids.map(id => tags?.find(tag => tag._id === id)?.name ?? "?").join(", ") || t("noTicketTags");
   if (events.length === 0) return null;
   return (
     <details className="rounded-md border bg-muted/20 px-3 py-2">
@@ -23,6 +24,7 @@ export function TicketActivityList({ events }: { events: TicketEvent[] }) {
             {event.before?.urgencyScore !== event.after?.urgencyScore && event.before && event.after
               ? ` · ${event.before.urgencyScore ?? "—"} → ${event.after.urgencyScore ?? "—"}`
               : ""}
+            {event.action === "tags_changed" && (tagsLoading || tags) ? <span className="break-words">{tagsLoading ? ` · ${t("syncing")}` : ` · ${tagNames(event.before?.tagIds)} → ${tagNames(event.after?.tagIds)}`}</span> : null}
             <span className="ml-1">{formatDate(event.createdAt)}</span>
           </li>
         ))}

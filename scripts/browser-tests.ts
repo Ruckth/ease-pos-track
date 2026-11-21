@@ -37,6 +37,10 @@ async function main() {
     await Promise.all([ready(baseURL, 200), ready(`http://127.0.0.1:${ports.UPLOAD_API_PORT}/health`, 200)]);
     const tests = start(["tsx", "--tsconfig", "tsconfig.test.json", "--test", "tests/browser/workflows.test.ts"]);
     process.exitCode = await new Promise<number>(resolve => tests.on("exit", code => resolve(code ?? 1)));
+    if (process.exitCode === 0) {
+      const explorer = start(["node", "tests/browser/explorer-check.mjs"]);
+      process.exitCode = await new Promise<number>(resolve => explorer.on("exit", code => resolve(code ?? 1)));
+    }
   } finally {
     cleanup();
     await Promise.all(children.map(child => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, "exit")));
