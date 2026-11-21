@@ -130,3 +130,32 @@ test("a definitive request conflict renews the draft key for the next explicit s
   assert.notEqual(draft.getSnapshot().idempotencyKey, key);
   draft.dispose();
 });
+
+test("cancelAndSettle waits for guarded cleanup before releasing the session", async () => {
+  const { draft, deps } = fixture();
+  let release!: () => void;
+  let cancelStarted!: () => void;
+  const cleanupStarted = new Promise<void>(resolve => { cancelStarted = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    cancelStarted();
+    await held;
+    return Response.json({ ok: true, state: "queued", jobIds: [] });
+  };
+  try {
+    const submit = draft.submit(deps);
+    let settled = false;
+    const cancellation = draft.cancelAndSettle().then(() => { settled = true; });
+    await cleanupStarted;
+    assert.equal(settled, false);
+    release();
+    await cancellation;
+    assert.equal(await submit, false);
+    assert.equal(draft.getSnapshot().progress, null);
+  } finally {
+    release();
+    globalThis.fetch = originalFetch;
+    draft.dispose();
+  }
+});

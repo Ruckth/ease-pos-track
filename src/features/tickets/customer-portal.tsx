@@ -1,3 +1,5 @@
+import { getRouteApi } from "@tanstack/react-router";
+import type { CustomerTicketFilter } from "@/app/workspace-search";
 import { errorCode } from "../../../shared/errors";
 import { LanguageSelector } from "@/components/auth-screens";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
@@ -27,14 +29,13 @@ import {
   Sparkles,
   UserRound
 } from "lucide-react";
-import { Component, useMemo, useState, type ReactNode } from "react";
-import { Toaster } from "sonner";
+import { Component, useCallback, useMemo, type ReactNode } from "react";
 import type { TicketSummary as TicketSummaryRow } from "../../../shared/ticket-contracts";
 import { useCustomerTickets } from "./adapter";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
 import { useComposer } from "./use-composer";
 
-type CustomerTicketFilter = "all" | "active" | "waiting" | "done";
+const customerRoute = getRouteApi("/customer");
 
 function ticketMatchesFilter(status: TicketStatus, filter: CustomerTicketFilter) {
   if (filter === "all") return true;
@@ -58,16 +59,37 @@ export function CustomerPortal({
   onLogout: () => Promise<void>;
 }) {
   const { language, setLanguage, t } = useI18n();
-  const { projects, current: project, select: selectProject } = useCurrentProject(token);
-  const composer = useComposer(project);
+  const navigate = customerRoute.useNavigate();
+  const { project: requestedProject, filter, ticket } = customerRoute.useSearch();
+  const navigateProject = useCallback((key: string, replace: boolean) => {
+    void navigate({
+      search: (current) => ({ ...current, project: key, ticket: replace ? current.ticket : undefined }),
+      replace,
+    });
+  }, [navigate]);
+  const { projects, current: project, select: selectProject } = useCurrentProject(token, requestedProject, navigateProject);
+  const composer = useComposer(project, onLogout);
 
-  const [selection, setSelection] = useState<{ id: Id<"tickets">; projectId: Id<"projects"> } | null>(null);
-  const selectedId = selection?.projectId === project?._id ? selection?.id ?? null : null;
-  const setSelectedId = (id: Id<"tickets"> | null) => setSelection(id && project ? { id, projectId: project._id } : null);
+  function selectTicket(id: Id<"tickets">) {
+    void navigate({ search: (current) => ({ ...current, ticket: id }), resetScroll: false });
+  }
+
+  function closeTicket() {
+    void navigate({
+      search: (current) => current.ticket === ticket ? { ...current, ticket: undefined } : current,
+      replace: true, resetScroll: false,
+    });
+  }
+
+  function setFilter(value: CustomerTicketFilter) {
+    void navigate({
+      search: (current) => ({ ...current, filter: value === "all" ? undefined : value }),
+      replace: true, resetScroll: false,
+    });
+  }
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)/0.8),transparent_32rem)]">
-      <Toaster richColors position="bottom-right" />
       <header className="sticky top-0 z-20 border-b bg-card/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
@@ -82,7 +104,7 @@ export function CustomerPortal({
           <div className="flex min-w-0 items-center gap-2">
             {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
             <LanguageSelector language={language} onChange={setLanguage} />
-            <Button variant="ghost" size="icon" onClick={() => void onLogout()} aria-label={t("signOut")}>
+            <Button variant="ghost" size="icon" onClick={() => void composer.signOut()} aria-label={t("signOut")}>
               <LogOut />
             </Button>
           </div>
@@ -124,7 +146,7 @@ export function CustomerPortal({
         </section>
 
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
-          <CustomerTickets token={token} project={project} onNewTicket={composer.show} onSelect={setSelectedId} />
+          <CustomerTickets token={token} project={project} filter={filter ?? "all"} setFilter={setFilter} onNewTicket={composer.show} onSelect={selectTicket} />
         </ProjectTicketsBoundary>
       </div>
 
@@ -148,9 +170,11 @@ export function CustomerPortal({
       </Dialog>
 
       <CustomerTicketDialog
+        key={project?._id}
         token={token}
-        ticketId={selectedId}
-        onClose={() => setSelectedId(null)}
+        ticketId={ticket}
+        projectId={project === null ? null : project?._id}
+        onClose={closeTicket}
       />
     </main>
   );
@@ -167,13 +191,17 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
   render() { return this.state.denied ? <NoProjects /> : this.props.children; }
 }
 
-function CustomerTickets({ token, project, onNewTicket, onSelect }: {
-  token: string; project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
+function CustomerTickets({ token, project, filter, setFilter, onNewTicket, onSelect }: {
+  token: string;
+  project: ProjectSummary | null | undefined;
+  filter: CustomerTicketFilter;
+  setFilter: (filter: CustomerTicketFilter) => void;
+  onNewTicket: () => void;
+  onSelect: (id: Id<"tickets">) => void;
 }) {
   const { t } = useI18n();
   const page = useCustomerTickets(token, project?._id);
   const tickets = page.results;
-  const [filter, setFilter] = useState<CustomerTicketFilter>("all");
 
   const ticketCounts = useMemo(() => {
     const rows = tickets ?? [];

@@ -47,6 +47,21 @@ async function readableTicket(
   return doc;
 }
 
+/**
+ * Normalizes untrusted Ticket id strings (such as URL `?ticket=` params) before
+ * loading. Malformed, cross-table, missing, purging and unauthorized inputs all
+ * return null so reads never crash or leak whether a Ticket id exists.
+ */
+async function readableTicketInput(
+  ctx: QueryCtx,
+  actor: Actor<Id<"customers">>,
+  id: string,
+) {
+  const ticketId = ctx.db.normalizeId("tickets", id);
+  if (!ticketId) return null;
+  return readableTicket(ctx, actor, ticketId);
+}
+
 function publicAnnotationEvent(event: Doc<"annotationEvents">) {
   return {
     _id: event._id,
@@ -88,11 +103,11 @@ async function requireWritableTicket(
 export const getTicket = queryOperation({
   args: {
     token: v.string(),
-    id: v.id("tickets"),
+    id: v.string(),
   },
   handler: async (ctx, args) => {
     const { actor } = ctx;
-    const row = await readableTicket(ctx, actor, args.id);
+    const row = await readableTicketInput(ctx, actor, args.id);
     return row ? ticketDetail(row, await resolveTicketTags(ctx, row)) : null;
   },
 });
@@ -119,14 +134,15 @@ export const getTicketByTicketNumber = queryOperation({
 export const listAnnotationActivity = queryOperation({
   args: {
     token: v.string(),
-    id: v.id("tickets"),
+    id: v.string(),
   },
   handler: async (ctx, args) => {
     const { actor } = ctx;
-    if (!(await readableTicket(ctx, actor, args.id))) return [];
+    const ticket = await readableTicketInput(ctx, actor, args.id);
+    if (!ticket) return [];
     const events = await ctx.db
       .query("annotationEvents")
-      .withIndex("by_ticket", (q) => q.eq("ticketId", args.id))
+      .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
       .order("desc")
       .take(30);
     return events.map(publicAnnotationEvent);
@@ -134,13 +150,14 @@ export const listAnnotationActivity = queryOperation({
 });
 
 export const listTicketActivity = queryOperation({
-  args: { token: v.string(), id: v.id("tickets") },
+  args: { token: v.string(), id: v.string() },
   handler: async (ctx, args) => {
     const { actor } = ctx;
-    if (!(await readableTicket(ctx, actor, args.id))) return [];
+    const ticket = await readableTicketInput(ctx, actor, args.id);
+    if (!ticket) return [];
     const events = await ctx.db
       .query("ticketEvents")
-      .withIndex("by_ticket", (q) => q.eq("ticketId", args.id))
+      .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
       .order("desc")
       .take(30);
     return events.map(publicTicketEvent);

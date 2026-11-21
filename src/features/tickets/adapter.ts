@@ -30,8 +30,15 @@ export function useDraftAdapter() {
   };
 }
 
-export function useSelectedTicket(token: string, id: Id<"tickets"> | null) {
+export function useSelectedTicket(token: string, id: string | null) {
   return useQuery(api.tickets.getTicket, id ? { token, id } : "skip");
+}
+
+export function useProjectTicket(token: string, id: string | undefined, projectId: Id<"projects"> | null | undefined) {
+  const detail = useSelectedTicket(token, id && projectId ? id : null);
+  if (!id || projectId === null) return null;
+  if (detail && detail.projectId !== projectId) return null;
+  return detail;
 }
 
 export function useTicketActivity(token: string, id: Id<"tickets"> | null) {

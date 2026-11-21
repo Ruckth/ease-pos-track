@@ -36,6 +36,8 @@ function listens(port, host) {
     server.listen(port, host, () => server.close(() => resolve(true)));
   });
 }
+// 4190 (ManageSieve) is the Fetch-blocked port in our four-port slot ranges.
+const fetchBlocked = (ports) => Object.values(ports).includes(4190);
 const portFree = async (port) => (await listens(port)) && (await listens(port, "127.0.0.1"));
 
 /** Atomic mkdir lock in the shared git dir, so concurrent setups never pick the same slot. */
@@ -67,7 +69,7 @@ async function claimPorts() {
   const taken = new Set(worktrees.map((dir) => readPortsFile(dir)?.CONVEX_CLOUD_PORT).filter(Boolean));
   for (let slot = 1; slot < 100; slot++) {
     const ports = portsForSlot(slot);
-    if (taken.has(ports.CONVEX_CLOUD_PORT)) continue;
+    if (taken.has(ports.CONVEX_CLOUD_PORT) || fetchBlocked(ports)) continue;
     const free = await Promise.all(Object.values(ports).map(portFree));
     if (free.every(Boolean)) {
       writeFileSync(path.join(here, PORTS_FILE), Object.entries(ports).map(([k, v]) => `${k}=${v}\n`).join(""));
@@ -86,7 +88,8 @@ if (!isMain && !existsSync(path.join(here, ".env.local"))) {
   }
 }
 
-if (!isMain && !readPortsFile(here)) await withLock(claimPorts);
+const existingPorts = readPortsFile(here);
+if (!isMain && (!existingPorts || fetchBlocked(existingPorts))) await withLock(claimPorts);
 
 run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"]);
 

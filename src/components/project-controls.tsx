@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { pickProject, readProjectParam, withProjectParam } from "@/lib/projects";
+import { pickProject } from "@/lib/projects";
 
 import type { ProjectSummary } from "@/lib/types";
 
@@ -16,28 +16,22 @@ import type { ProjectSummary } from "@/lib/types";
  * The Projects this account can use and the one currently open. The open
  * Project lives in the URL, so a refresh or a shared link keeps it.
  */
-export function useCurrentProject(token: string) {
+export function useCurrentProject(
+  token: string,
+  requestedKey: string | undefined,
+  navigateProject: (key: string, replace: boolean) => void,
+) {
   const projects = useProjects(token);
-  const [requestedKey, setRequestedKey] = useState(() => readProjectParam(window.location.search));
-  const current = projects ? pickProject(projects, requestedKey) : undefined;
+  const current = projects ? pickProject(projects, requestedKey ?? null) : undefined;
 
+  // Replace missing or inaccessible Projects with the Project actually shown.
   useEffect(() => {
-    const sync = () => setRequestedKey(readProjectParam(window.location.search));
-    window.addEventListener("popstate", sync);
-    return () => window.removeEventListener("popstate", sync);
-  }, []);
-
-  // Rewrite a missing or unusable key to the Project actually shown.
-  useEffect(() => {
-    if (current && readProjectParam(window.location.search) !== current.key) {
-      window.history.replaceState(null, "", withProjectParam(window.location.href, current.key));
-    }
-  }, [current]);
+    if (current && requestedKey !== current.key) navigateProject(current.key, true);
+  }, [current, requestedKey, navigateProject]);
 
   const select = useCallback((key: string) => {
-    window.history.pushState(null, "", withProjectParam(window.location.href, key));
-    setRequestedKey(key);
-  }, []);
+    if (key !== current?.key) navigateProject(key, false);
+  }, [current, navigateProject]);
 
   return { projects, current, select };
 }

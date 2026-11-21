@@ -183,3 +183,98 @@ test("staff detail pages are bounded, scoped and preserve full CLI content witho
   expect(rows.find(row => row._id === seed.tickets[0])?.description).toBe("x".repeat(10_000));
   for (const row of rows) for (const field of ["ownerCustomerId", "purgeBlocked", "searchText"]) expect(row).not.toHaveProperty(field);
 }, 30_000);
+
+test("URL Ticket read endpoints normalize untrusted string ids safely without crashing or leaking access", async () => {
+  const { t, seed, staff, alice, bob } = await fixture();
+  const ticketId = seed.tickets[1];
+
+  // Populate real Ticket and annotation activity so non-empty reads and denial silence are both exercised.
+  await t.run(async ctx => {
+    await ctx.db.patch(ticketId, {
+      media: [{ key: "fake-read-hardening", name: "fixture.png", type: "image/png", size: 1, url: "https://fixture.invalid/image.png" }],
+    });
+    await ctx.db.insert("sessions", { token: "expired-session", role: "staff", createdAt: 1, expiresAt: 2 });
+  });
+  await t.mutation(api.annotations.addAnnotation, {
+    token: alice, id: ticketId, expectedVersion: 0, mediaIndex: 0, kind: "point", x: 0.25, y: 0.5, text: "Check receipt",
+  });
+
+  const { customerId, sessionId, ticketEventId, annotationEventId } = await t.run(async ctx => ({
+    customerId: (await ctx.db.query("customers").first())!._id,
+    sessionId: (await ctx.db.query("sessions").first())!._id,
+    ticketEventId: (await ctx.db.query("ticketEvents").first())!._id,
+    annotationEventId: (await ctx.db.query("annotationEvents").first())!._id,
+  }));
+
+  // Valid string id returns full detail and both activity feeds for authorized actors.
+  for (const token of [staff, alice]) {
+    expect(await t.query(api.tickets.getTicket, { token, id: String(ticketId) })).toMatchObject({ _id: ticketId });
+    expect((await t.query(api.tickets.listTicketActivity, { token, id: String(ticketId) })).length).toBeGreaterThan(0);
+    expect((await t.query(api.annotations.listAnnotationActivity, { token, id: String(ticketId) })).length).toBe(1);
+  }
+
+  // Malformed, truncated, whitespace-padded, reference-shaped, oversized, and cross-table ids return null / [].
+  const invalidIds = [
+    "",
+    "   ",
+    "bad",
+    "not-a-ticket-id",
+    "POS-0002",
+    String(ticketId).slice(0, -2),
+    ` ${String(ticketId)} `,
+    "x".repeat(512),
+    String(seed.projects[0].id),
+    String(customerId),
+    String(sessionId),
+    String(ticketEventId),
+    String(annotationEventId),
+  ];
+  for (const token of [staff, alice]) {
+    for (const id of invalidIds) {
+      expect(await t.query(api.tickets.getTicket, { token, id })).toBeNull();
+      expect(await t.query(api.tickets.listTicketActivity, { token, id })).toEqual([]);
+      expect(await t.query(api.annotations.listAnnotationActivity, { token, id })).toEqual([]);
+    }
+  }
+
+  // Unauthorized customer reads (foreign customer Ticket and staff Ticket) are indistinguishable from malformed ids.
+  for (const deniedId of [String(ticketId), String(seed.tickets[0])]) {
+    expect(await t.query(api.tickets.getTicket, { token: bob, id: deniedId })).toBeNull();
+    expect(await t.query(api.tickets.listTicketActivity, { token: bob, id: deniedId })).toEqual([]);
+    expect(await t.query(api.annotations.listAnnotationActivity, { token: bob, id: deniedId })).toEqual([]);
+  }
+
+  // Invalid/expired sessions still reject with SESSION_EXPIRED even for malformed ids (auth precedes id lookup).
+  for (const token of ["unknown-session", "expired-session"]) {
+    for (const id of ["bad", String(ticketId)]) {
+      await expect(t.query(api.tickets.getTicket, { token, id })).rejects.toMatchObject({ data: { code: "SESSION_EXPIRED" } });
+      await expect(t.query(api.tickets.listTicketActivity, { token, id })).rejects.toMatchObject({ data: { code: "SESSION_EXPIRED" } });
+      await expect(t.query(api.annotations.listAnnotationActivity, { token, id })).rejects.toMatchObject({ data: { code: "SESSION_EXPIRED" } });
+    }
+  }
+
+  // Removed Project membership denies customer reads while staff still retains access.
+  await t.run(async ctx => {
+    for (const membership of await ctx.db.query("projectMembers").collect()) await ctx.db.delete(membership._id);
+  });
+  expect(await t.query(api.tickets.getTicket, { token: alice, id: String(ticketId) })).toBeNull();
+  expect(await t.query(api.tickets.listTicketActivity, { token: alice, id: String(ticketId) })).toEqual([]);
+  expect(await t.query(api.annotations.listAnnotationActivity, { token: alice, id: String(ticketId) })).toEqual([]);
+  expect(await t.query(api.tickets.getTicket, { token: staff, id: String(ticketId) })).toMatchObject({ _id: ticketId });
+  expect((await t.query(api.tickets.listTicketActivity, { token: staff, id: String(ticketId) })).length).toBeGreaterThan(0);
+  expect((await t.query(api.annotations.listAnnotationActivity, { token: staff, id: String(ticketId) })).length).toBe(1);
+
+  // Purging and hard-deleted Ticket ids both return null / [] without errors.
+  await t.run(ctx => ctx.db.patch(ticketId, { lifecycle: "purging" }));
+  for (const token of [staff, alice]) {
+    expect(await t.query(api.tickets.getTicket, { token, id: String(ticketId) })).toBeNull();
+    expect(await t.query(api.tickets.listTicketActivity, { token, id: String(ticketId) })).toEqual([]);
+    expect(await t.query(api.annotations.listAnnotationActivity, { token, id: String(ticketId) })).toEqual([]);
+  }
+  await t.run(ctx => ctx.db.delete(ticketId));
+  for (const token of [staff, alice]) {
+    expect(await t.query(api.tickets.getTicket, { token, id: String(ticketId) })).toBeNull();
+    expect(await t.query(api.tickets.listTicketActivity, { token, id: String(ticketId) })).toEqual([]);
+    expect(await t.query(api.annotations.listAnnotationActivity, { token, id: String(ticketId) })).toEqual([]);
+  }
+});
