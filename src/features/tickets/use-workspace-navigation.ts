@@ -27,10 +27,12 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
   const router = useRouter();
   const location = useRouterState({ select: state => state.location });
   const search = workspaceSearch(role, location.search);
-  const view = search.view ?? (search.lane ? "board" : "queue");
+  // Staff without an explicit view start on the Board; a URL view always wins.
+  const view = search.view ?? (role === "staff" ? "board" : "queue");
   const listView: ListView = view === "focus" ? location.state.workspaceFocusOrigin ?? "queue" : view;
   const ticket = search.ticket ?? null;
-  const filter = search.filter ?? (search.archived ? "archive" : "active");
+  const defaultFilter = role === "staff" && listView === "board" ? "all" : "active";
+  const filter = search.filter ?? (search.archived ? "archive" : defaultFilter);
 
   const update = useCallback((change: (search: WorkspaceSearch) => WorkspaceSearch, options?: {
     replace?: boolean;
@@ -96,8 +98,8 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
     assignment: search.assignment, lane: search.lane, health: search.panel === "health",
     setHealth: (open: boolean) => update(search => ({ ...search, panel: open ? "health" : undefined }), { replace: !open }),
     setView: (next: WorkspaceView) => update(search => ({ ...search, ...closedTicket, view: next, lane: undefined })),
-    setFilter: (next: string, clearQuery = false) => update(search => workspaceSearch(role, {
-      ...search, ...closedTicket, archived: undefined, filter: next === "active" ? undefined : next,
+    setFilter: (next: string | undefined, clearQuery = false) => update(search => workspaceSearch(role, {
+      ...search, ...closedTicket, archived: undefined, filter: next,
       ...(clearQuery ? { q: undefined } : {}),
     })),
     setQuery,

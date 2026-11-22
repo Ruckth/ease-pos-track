@@ -70,12 +70,52 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await page.getByRole("table").waitFor();
   await button("Start work · POS-0002").waitFor();
 
+  const board = page.getByRole("region", { name: "Board", exact: true });
+  const lane = status => board.locator(`[data-slot="kanban-column"][data-value="${status}"]`);
+  const shortcuts = page.getByRole("group", { name: "Show tickets by status" });
+  const shortcut = name => shortcuts.getByRole("button", { name, exact: true });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // A constrained search keeps this standalone harness independent of Convex.
+  await page.getByRole("textbox", { name: "Search", exact: true }).fill("Ticket");
+  await button("Board").click();
+  await lane("new").waitFor();
+  assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 5);
+  assert.equal(await board.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+  assert.equal(await shortcuts.count(), 0);
+  const drag = lane("new").getByRole("button", { name: "Drag ticket POS-0005", exact: true });
+  const source = await drag.boundingBox();
+  const destination = await lane("waiting").boundingBox();
+  assert.ok(source && destination);
+  await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(destination.x + destination.width / 2, destination.y + 72, { steps: 20 });
+  await page.mouse.up();
+  await lane("waiting").locator("button[data-ticket-id='4']").waitFor();
+  assert.equal(await lane("new").locator("button[data-ticket-id='4']").count(), 0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shortcut("New").click();
+  assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 5);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await board.getByRole("button", { name: /Drag ticket/ }).count(), 0);
+  const viewport = await board.boundingBox();
+  const adjacent = await lane("acknowledged").boundingBox();
+  assert.ok(viewport && adjacent && adjacent.x < viewport.x + viewport.width && adjacent.x + adjacent.width > viewport.x + viewport.width);
+  await shortcut("Waiting for customer").focus();
+  await page.keyboard.press("Enter");
+  await shortcut("Waiting for customer").and(page.locator('[aria-pressed="true"]')).waitFor();
+  assert.equal(await lane("waiting").evaluate(el => Math.abs(el.getBoundingClientRect().left - el.closest('[role="region"]').getBoundingClientRect().left) < 2), true);
+  await board.evaluate(el => { el.scrollLeft = 0; });
+  await shortcut("New").and(page.locator('[aria-pressed="true"]')).waitFor();
+  await page.screenshot({ path: shot("board-mobile"), fullPage: true });
+
   // Browse counts and capped indexed search have different denominators.
   await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html?partial`);
   await page.setViewportSize({ width: 390, height: 844 });
   await button("High or critical").click();
   await summary("2 matching among 20 loaded · 80 total");
-  await button("Load older Tickets").click();
+  await lane("new").getByRole("button", { name: "Load older Tickets", exact: true }).click();
   await summary("4 matching among 40 loaded · 80 total");
   const search = page.getByRole("textbox", { name: "Search", exact: true });
   await search.fill("Printer");
@@ -88,6 +128,8 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await summary("50 shown from the first 50 matches · Refine search");
   await search.fill("POS-0002");
   await button("Board").click();
-  await button("Acknowledge · POS-0002").waitFor();
+  await lane("new").getByRole("button", { name: "Acknowledge · POS-0002", exact: true }).click();
+  await shortcut("Acknowledged").click();
+  await lane("acknowledged").getByRole("button", { name: "Start work · POS-0002", exact: true }).waitFor();
   assert.deepEqual(errors,[]); console.log("Explorer browser checks passed: table, board, filters, dates, urgency, pagination, archives, details, Thai and mobile.");
 }); } catch (error) { console.error(error); process.exitCode = 1; } finally { await browser.close(); }

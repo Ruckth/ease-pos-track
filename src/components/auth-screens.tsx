@@ -8,11 +8,15 @@ import { stashReturnTarget } from "@/app/auth-store";
 import { PrivacyNoticeLink } from "@/components/privacy-notice-link";
 import { ProductWordmark } from "@/components/product-wordmark";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { APP_PATHS } from "@/lib/app-routes";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { readFragmentSecret } from "@/lib/session";
+import { cn } from "@/lib/utils";
+
+const authFieldClass = "aurora-control h-11 rounded-lg bg-card/85";
+const authLinkClass = "flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** Errors returned as data (not thrown) use the same localized codes. */
 function userErrorMessage(error: string, t: ReturnType<typeof useI18n>["t"]) {
@@ -28,25 +32,33 @@ export function LanguageSelector({
 }) {
   const { t } = useI18n();
   return (
-    <div className="inline-flex rounded-md border p-0.5" aria-label={t("language")}>
-      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-11 px-3" aria-pressed={language === "th"} onClick={() => onChange("th")}>ไทย</Button>
-      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-11 px-3" aria-pressed={language === "en"} onClick={() => onChange("en")}>EN</Button>
+    <div className="aurora-control inline-flex rounded-lg border p-0.5" aria-label={t("language")}>
+      <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-11 rounded-md px-3" aria-pressed={language === "th"} onClick={() => onChange("th")}>ไทย</Button>
+      <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-11 rounded-md px-3" aria-pressed={language === "en"} onClick={() => onChange("en")}>EN</Button>
     </div>
   );
 }
 
-function AuthLayout({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+function AuthLayout({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
   const { language, setLanguage } = useI18n();
   return (
-    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)),transparent_32rem)] px-4 py-8 sm:py-12">
-      <Card className="w-full max-w-md overflow-hidden rounded-2xl border-primary/10 bg-card/95 shadow-xl shadow-primary/5">
-        <CardHeader className="space-y-5 border-b bg-muted/20 p-5 sm:p-6">
+    <main className="aurora-canvas grid min-h-screen place-items-center px-4 py-8 sm:py-12">
+      <div className="aurora-panel w-full max-w-md overflow-hidden text-card-foreground">
+        <CardHeader className="space-y-5 border-b border-border/60 bg-card/60 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
             <ProductWordmark />
             <LanguageSelector language={language} onChange={setLanguage} />
           </div>
           <div>
-            <CardTitle className="text-xl leading-7">{title}</CardTitle>
+            <h1 className="text-xl font-semibold leading-7 tracking-tight">{title}</h1>
             {description ? <CardDescription className="mt-1.5 leading-5">{description}</CardDescription> : null}
           </div>
         </CardHeader>
@@ -54,7 +66,7 @@ function AuthLayout({ title, description, children }: { title: string; descripti
           <PrivacyNoticeLink />
           {children}
         </CardContent>
-      </Card>
+      </div>
     </main>
   );
 }
@@ -62,15 +74,15 @@ function AuthLayout({ title, description, children }: { title: string; descripti
 function Alert({ children, tone = "error", focus = false }: { children: ReactNode; tone?: "error" | "info"; focus?: boolean }) {
   return <p role={tone === "error" ? "alert" : "status"} tabIndex={focus ? -1 : undefined}
     ref={focus ? focusMessage : undefined} className={tone === "error"
-    ? "rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
-    : "rounded-md bg-muted px-3 py-2 text-sm"}>{children}</p>;
+    ? "rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+    : "rounded-lg border border-border/70 bg-muted/70 px-3 py-2.5 text-sm text-foreground"}>{children}</p>;
 }
 
 function focusMessage(node: HTMLElement | null) { node?.focus(); }
 
 function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: ReactNode }) {
   return <div className="space-y-2">
-    <label className="text-sm font-medium" htmlFor={id}>{label}</label>
+    <label className="text-sm font-medium text-foreground" htmlFor={id}>{label}</label>
     {children}
     {hint ? <p id={`${id}-hint`} className="text-sm leading-5 text-muted-foreground">{hint}</p> : null}
   </div>;
@@ -80,8 +92,8 @@ export function PasswordInput(props: ComponentProps<typeof Input>) {
   const { t } = useI18n();
   const [shown, setShown] = useState(false);
   return <div className="relative">
-    <Input {...props} className="h-11 pr-12" type={shown ? "text" : "password"} />
-    <button type="button" className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-md focus-visible:ring-2"
+    <Input {...props} className={cn(authFieldClass, "pr-12", props.className)} type={shown ? "text" : "password"} />
+    <button type="button" className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={t(shown ? "hidePassword" : "showPassword")} aria-controls={props.id} onClick={() => setShown(!shown)}>
       {shown ? <EyeOff aria-hidden="true" className="size-4" /> : <Eye aria-hidden="true" className="size-4" />}
     </button>
@@ -136,10 +148,10 @@ function GoogleSignIn({ invitation }: { invitation?: string }) {
       {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("continueWithGoogle")}
     </Button>
     <p className="text-sm text-muted-foreground">{t("googleRedirectHint")}</p>
-    {LOCAL_FIXTURE_SIGN_IN ? <div className="space-y-2 rounded-md border border-dashed p-3">
+    {LOCAL_FIXTURE_SIGN_IN ? <div className="space-y-2 rounded-xl border border-dashed border-border/80 bg-card/55 p-3">
       <p className="text-sm font-medium">{t("localFixtureSignIn")}</p>
       <p className="text-xs text-muted-foreground">{t("localFixtureHint")}</p>
-      {["owner@local.test", "staff@local.test"].map(email => <Button key={email} type="button" variant="outline" className="h-11 w-full" disabled={busy} onClick={() => void local(email)}>{email}</Button>)}
+      {["owner@local.test", "staff@local.test"].map(email => <Button key={email} type="button" variant="outline" className="aurora-control h-11 w-full rounded-lg" disabled={busy} onClick={() => void local(email)}>{email}</Button>)}
     </div> : null}
   </div>;
 }
@@ -148,7 +160,7 @@ export function StaffSignInPage() {
   const { t } = useI18n();
   return <AuthLayout title={t("staffSignIn")} description={t("staffSignInDescription")}>
     <GoogleSignIn />
-    <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4" href={APP_PATHS.customerLogin}>{t("customerSignIn")}</a>
+    <a className={authLinkClass} href={APP_PATHS.customerLogin}>{t("customerSignIn")}</a>
   </AuthLayout>;
 }
 
@@ -180,7 +192,7 @@ export function CustomerSignInPage({ onForgotPassword, onReturnToJoin }: {
   return <AuthLayout title={t("customerSignIn")} description={t("customerSignInDescription")}>
     <form className="space-y-4" onSubmit={onSubmit}>
       <Field id="customer-username" label={t("username")}>
-        <Input id="customer-username" className="h-11" autoComplete="username" autoCapitalize="none" spellCheck={false}
+        <Input id="customer-username" className={authFieldClass} autoComplete="username" autoCapitalize="none" spellCheck={false}
           value={username} onChange={event => setUsername(event.target.value)} autoFocus />
       </Field>
       <Field id="customer-password" label={t("password")}>
@@ -189,11 +201,11 @@ export function CustomerSignInPage({ onForgotPassword, onReturnToJoin }: {
       {error ? <Alert focus>{error}</Alert> : null}
       <SubmitButton busy={busy} disabled={!username || !password} idle={t("signIn")} working={t("signingIn")} />
     </form>
-    {onReturnToJoin ? <Button variant="ghost" className="min-h-11 w-full text-primary underline underline-offset-4" onClick={onReturnToJoin}>{t("backToInvitation")}</Button> : null}
-    <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4"
+    {onReturnToJoin ? <Button variant="ghost" className="min-h-11 w-full rounded-lg text-primary underline underline-offset-4" onClick={onReturnToJoin}>{t("backToInvitation")}</Button> : null}
+    <a className={authLinkClass}
       href={APP_PATHS.customerRecover} onClick={event => followAuthLink(event, onForgotPassword)}>{t("forgotPassword")}</a>
     <p className="text-center text-sm text-muted-foreground">{t("customerSignUpDescription")}</p>
-    <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4" href={APP_PATHS.staffLogin}>{t("staffSignIn")}</a>
+    <a className={authLinkClass} href={APP_PATHS.staffLogin}>{t("staffSignIn")}</a>
   </AuthLayout>;
 }
 
@@ -227,7 +239,7 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
   const [busy, setBusy] = useState(false);
 
   if (!invitation) return <AuthLayout title={t("customerSignUp")}><Alert tone="info">{t("joinNeedsInvite")}</Alert></AuthLayout>;
-  if (preview === undefined) return <AuthLayout title={t("customerSignUp")}><Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} /></AuthLayout>;
+  if (preview === undefined) return <AuthLayout title={t("customerSignUp")}><Loader2 className="mx-auto animate-spin text-primary" aria-label={t("loadingWorkspace")} /></AuthLayout>;
   if (preview.status !== "ready") return <AuthLayout title={t("customerSignUp")}><Alert focus>{userErrorMessage(preview.status, t)}</Alert></AuthLayout>;
   const project = preview.projectName;
 
@@ -235,7 +247,7 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
     return <AuthLayout title={t("joinTitle", { project })}>
       <Alert tone="info">{t("joinSwitchAccount")}</Alert>
       {error ? <Alert focus>{error}</Alert> : null}
-      <Button className="h-11 w-full" variant="outline" onClick={() => void switchAccount()}>{t("signOut")}</Button>
+      <Button className="aurora-control h-11 w-full rounded-lg" variant="outline" onClick={() => void switchAccount()}>{t("signOut")}</Button>
     </AuthLayout>;
   }
   async function switchAccount() {
@@ -245,7 +257,7 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
   }
   if (signedInAs === "customer") {
     if (preview.viewer?.kind !== "customer") return <AuthLayout title={t("joinTitle", { project })}>
-      <Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} />
+      <Loader2 className="mx-auto animate-spin text-primary" aria-label={t("loadingWorkspace")} />
     </AuthLayout>;
     const viewer = preview.viewer;
     async function onJoin() {
@@ -259,9 +271,9 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
       {viewer.alreadyMember ? <Alert tone="info">{t("joinAlreadyMember", { project })}</Alert> : <p className="text-sm">{t("joinAsCustomer", { project, username: viewer.username })}</p>}
       {error ? <Alert focus>{error}</Alert> : null}
       {viewer.alreadyMember
-        ? <Button className="h-11 w-full" autoFocus onClick={onDone}>{t("openWorkspace")}</Button>
-        : <Button className="h-11 w-full" autoFocus disabled={busy} onClick={() => void onJoin()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("joinAction")}</Button>}
-      <Button className="h-11 w-full" variant="ghost" onClick={() => void switchAccount()}>{t("signOut")}</Button>
+        ? <Button className="h-11 w-full rounded-xl" autoFocus onClick={onDone}>{t("openWorkspace")}</Button>
+        : <Button className="h-11 w-full rounded-xl" autoFocus disabled={busy} onClick={() => void onJoin()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("joinAction")}</Button>}
+      <Button className="h-11 w-full rounded-lg" variant="ghost" onClick={() => void switchAccount()}>{t("signOut")}</Button>
     </AuthLayout>;
   }
 
@@ -281,19 +293,19 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
   return <AuthLayout title={t("joinTitle", { project })} description={t("joinDescription")}>
     <form className="space-y-4" onSubmit={onSubmit}>
       <Field id="join-username" label={t("username")} hint={t("usernameRules")}>
-        <Input id="join-username" className="h-11" autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={shown ? "join-username-hint join-username-preview" : "join-username-hint"}
+        <Input id="join-username" className={authFieldClass} autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={shown ? "join-username-hint join-username-preview" : "join-username-hint"}
           value={username} onChange={event => setUsername(event.target.value)} autoFocus />
       </Field>
       {shown ? <p id="join-username-preview" className="text-sm" aria-live="polite">{t("usernamePreview", { username: shown })}</p> : null}
       <Field id="join-display-name" label={t("displayName")}>
-        <Input id="join-display-name" className="h-11" autoComplete="name" value={displayName} onChange={event => setDisplayName(event.target.value)} />
+        <Input id="join-display-name" className={authFieldClass} autoComplete="name" value={displayName} onChange={event => setDisplayName(event.target.value)} />
       </Field>
       <NewPasswordFields label={t("newPassword")} password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
       <p className="text-sm text-muted-foreground">{t("recoverLostBoth")}</p>
       {error ? <Alert focus>{error}</Alert> : null}
       <SubmitButton busy={busy} disabled={!username || !displayName || !password} idle={t("createAccount")} working={t("creatingAccount")} />
     </form>
-    <Button type="button" variant="ghost" className="min-h-11 w-full text-primary underline underline-offset-4" onClick={onExistingAccount}>{t("haveAccountQuestion")}</Button>
+    <Button type="button" variant="ghost" className="min-h-11 w-full rounded-lg text-primary underline underline-offset-4" onClick={onExistingAccount}>{t("haveAccountQuestion")}</Button>
   </AuthLayout>;
 }
 
@@ -322,21 +334,21 @@ export function CustomerRecoverPage({ onSignIn }: { onSignIn: () => void }) {
   return <AuthLayout title={t("recoverTitle")} description={t("recoverDescription")}>
     {done ? <>
       <Alert tone="info" focus>{t("recoverSuccess")}</Alert>
-      <a className="flex min-h-11 items-center justify-center rounded-xl bg-primary text-sm font-medium text-primary-foreground"
+      <a className="flex min-h-11 items-center justify-center rounded-xl bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         href={APP_PATHS.customerLogin} onClick={event => followAuthLink(event, onSignIn)}>{t("signIn")}</a>
     </> : <form className="space-y-4" onSubmit={onSubmit}>
       <Field id="recover-username" label={t("username")}>
-        <Input id="recover-username" className="h-11" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={event => setUsername(event.target.value)} autoFocus />
+        <Input id="recover-username" className={authFieldClass} autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={event => setUsername(event.target.value)} autoFocus />
       </Field>
       <Field id="recover-code" label={t("recoveryCode")}>
-        <Input id="recover-code" className="h-11 font-mono uppercase" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} />
+        <Input id="recover-code" className={cn(authFieldClass, "font-mono uppercase")} autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} />
       </Field>
       <NewPasswordFields label={t("newPassword")} password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
       {error ? <Alert focus>{error}</Alert> : null}
       <SubmitButton busy={busy} disabled={!username || !code || !password} idle={t("recoverAction")} working={t("signingIn")} />
     </form>}
     <p className="text-sm text-muted-foreground">{t("recoverLostBoth")}</p>
-    {done ? null : <a className="flex min-h-11 items-center justify-center text-sm font-medium text-primary underline underline-offset-4"
+    {done ? null : <a className={authLinkClass}
       href={APP_PATHS.customerLogin} onClick={event => followAuthLink(event, onSignIn)}>{t("customerSignIn")}</a>}
   </AuthLayout>;
 }
@@ -365,17 +377,17 @@ function PendingInvitation({ invitation, onSignOut }: { invitation: string; onSi
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  if (preview === undefined) return <AuthLayout title={t("staffInviteTitle")}><Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} /></AuthLayout>;
+  if (preview === undefined) return <AuthLayout title={t("staffInviteTitle")}><Loader2 className="mx-auto animate-spin text-primary" aria-label={t("loadingWorkspace")} /></AuthLayout>;
   if (accepted) {
     return <AuthLayout title={t("staffInviteTitle")}>
       <Alert tone="info">{t("inviteAccepted")}</Alert>
-      <Button className="h-11 w-full" onClick={() => void onSignOut()}>{t("continueWithGoogle")}</Button>
+      <Button className="h-11 w-full rounded-xl" onClick={() => void onSignOut()}>{t("continueWithGoogle")}</Button>
     </AuthLayout>;
   }
   if (preview.status === "WRONG_GOOGLE_ACCOUNT") {
     return <AuthLayout title={t("staffInviteTitle")}>
       <Alert>{t("staffInviteWrongAccount", { invited: preview.invitedEmail, email: preview.signedInEmail ?? "" })}</Alert>
-      <Button className="h-11 w-full" variant="outline" onClick={() => void onSignOut()}>{t("signOut")}</Button>
+      <Button className="aurora-control h-11 w-full rounded-lg" variant="outline" onClick={() => void onSignOut()}>{t("signOut")}</Button>
     </AuthLayout>;
   }
   if (preview.status !== "ready") return <AuthLayout title={t("staffInviteTitle")}><Alert>{userErrorMessage(preview.status, t)}</Alert></AuthLayout>;
@@ -403,11 +415,11 @@ function PendingInvitation({ invitation, onSignOut }: { invitation: string; onSi
     {sent ? <form className="space-y-4" onSubmit={onAccept}>
       <Alert tone="info">{t("codeSent", { email: ready.invitedEmail })}</Alert>
       <Field id="invite-code" label={t("verificationCode")}>
-        <Input id="invite-code" className="h-11 font-mono" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} autoFocus />
+        <Input id="invite-code" className="aurora-control h-11 rounded-lg bg-card/85 font-mono" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} autoFocus />
       </Field>
       <SubmitButton busy={busy} disabled={code.trim().length < 8} idle={t("acceptInvite")} working={t("signingIn")} />
-    </form> : <Button className="h-11 w-full" disabled={busy} onClick={() => void onSend()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("sendCode")}</Button>}
-    <Button className="h-11 w-full" variant="ghost" onClick={() => void onSignOut()}>{t("signOut")}</Button>
+    </form> : <Button className="h-11 w-full rounded-xl" disabled={busy} onClick={() => void onSend()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("sendCode")}</Button>}
+    <Button className="h-11 w-full rounded-lg" variant="ghost" onClick={() => void onSignOut()}>{t("signOut")}</Button>
   </AuthLayout>;
 }
 
@@ -419,11 +431,11 @@ export function PendingIdentityPage({ email, googleSubject, onSignOut }: {
     <p className="text-sm">{t("pendingDescription", { email: email ?? "" })}</p>
     {googleSubject ? <div className="space-y-2">
       <p className="text-sm">{t("pendingGoogleAccount")}</p>
-      <dl className="grid gap-1 rounded-md border p-3 text-sm">
+      <dl className="aurora-ticket grid gap-1 p-3 text-sm">
         <dt className="font-medium">{t("googleVerifiedEmail")}</dt><dd className="break-all">{email}</dd>
         <dt className="font-medium">{t("googleSubject")}</dt><dd className="break-all font-mono">{googleSubject}</dd>
       </dl>
     </div> : null}
-    <Button className="h-11 w-full" variant="outline" onClick={() => void onSignOut()}>{t("signOut")}</Button>
+    <Button className="aurora-control h-11 w-full rounded-lg" variant="outline" onClick={() => void onSignOut()}>{t("signOut")}</Button>
   </AuthLayout>;
 }

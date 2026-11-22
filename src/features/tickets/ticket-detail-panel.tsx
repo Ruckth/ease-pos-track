@@ -84,7 +84,7 @@ export function TicketDetailPanel(props: PanelProps) {
       close();
     }
   }} aria-label={ticket ? undefined : t("ticket")} aria-labelledby={ticket ? heading : undefined}
-    className="min-w-0 space-y-4 rounded-xl border bg-background p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5">{content}</section>;
+    className="aurora-ticket min-w-0 space-y-4 p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5">{content}</section>;
   return <Dialog open mobileFullScreen placement={props.focusMode ? "fullscreen" : "side"} onOpenChange={open => { if (!open) close(); }} title={title}>{content}</Dialog>;
 }
 

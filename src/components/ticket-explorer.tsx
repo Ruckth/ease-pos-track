@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Columns3, Loader2, RotateCw, Table2 } from "lucide-react";
+import { Columns3, ListFilter, Loader2, RotateCw, Table2 } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { TicketCard, type OpenTicket } from "@/components/ticket-card";
@@ -8,6 +8,7 @@ import type { FilterQuery } from "@/components/reui/filters/filters-types";
 import { filterTickets, sortTickets, type ExplorerSort, type ExplorerTag } from "@/lib/ticket-explorer";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { useI18n } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { BOARD_COLUMNS } from "@/lib/kanban-board";
 import { DEFAULT_STAFF_LANE } from "@/app/workspace-search";
 import { stableQueue } from "@/lib/staff-ticket-queue";
@@ -135,24 +136,24 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
     busy={workspace?.busy.has(item._id)} onMove={(_id, status) => { void onMove(item, status); }} onRestore={onRestore} />;
 
   return <section className="min-w-0 space-y-3">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <Button type="button" variant={highUrgency ? "secondary" : "outline"} size="sm" className="min-h-11" aria-pressed={highUrgency}
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Button type="button" variant="ghost" size="sm" className={cn("aurora-control min-h-11 rounded-lg md:min-h-8", highUrgency && "bg-primary/15 text-primary")} aria-pressed={highUrgency}
         onClick={() => setHighUrgency(value => !value)}>{c.highOrCritical}</Button>
       {workspace ? <details className="min-w-0 flex-1 open:basis-full" open={filtersOpen} onToggle={event => {
         const open = event.currentTarget.open;
         setFiltersOpen(open);
       }}>
-        <summary className="w-fit min-h-11 cursor-pointer rounded py-3 text-sm font-medium text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          {t("queueFilters")}{rules > 0 ? ` (${rules})` : ""}
+        <summary className="aurora-control flex w-fit min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring md:min-h-8">
+          <ListFilter aria-hidden className="size-4" />{t("queueFilters")}{rules > 0 ? ` (${rules})` : ""}
         </summary>
-        {filtersOpen && <div className="space-y-2 pb-2">{filters}<p className="text-xs text-muted-foreground">{c.loadedScope}</p></div>}
+        {filtersOpen && <div className="aurora-panel mt-1.5 space-y-2 rounded-xl p-2">{filters}<p className="text-xs text-muted-foreground">{c.loadedScope}</p></div>}
       </details> : <div className="min-w-0 basis-full md:flex-1">{filters}</div>}
-      {(search || filtering) && <Button variant="ghost" size="sm" className="min-h-11" onClick={reset}>{c.clearAll}</Button>}
+      {(search || filtering) && <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" onClick={reset}>{c.clearAll}</Button>}
       {!workspace && <div className="flex rounded-md border bg-card p-1" role="group" aria-label={c.view}>
         <Button size="sm" variant={view === "board" ? "secondary" : "ghost"} aria-pressed={view === "board"} onClick={() => setLocalView("board")}><Columns3 />{c.board}</Button>
         <Button size="sm" variant={view === "table" ? "secondary" : "ghost"} aria-pressed={view === "table"} onClick={() => setLocalView("table")}><Table2 />{c.table}</Button>
       </div>}
-      {workspace && view === "queue" && !search && !showArchived && <Button size="sm" variant="ghost" className="min-h-11" onClick={() => setRevision(current => current + 1)}><RotateCw />{t("queueRefresh")}</Button>}
+      {workspace && view === "queue" && !search && !showArchived && <Button size="sm" variant="ghost" className="min-h-11 md:min-h-8" onClick={() => setRevision(current => current + 1)}><RotateCw />{t("queueRefresh")}</Button>}
     </div>
     {!loading && resultSummary && <p role="status" className="text-sm text-muted-foreground">{resultSummary}</p>}
     <Suspense fallback={fallback}>

@@ -10,7 +10,7 @@ import {
   useRouteContext,
 } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { Toaster } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ const RecoveryCodePanel = lazy(() => import("@/components/account-dialogs").then
 
 function Pending() {
   const { t } = useI18n();
-  return <main className="grid min-h-screen place-items-center" role="status">
+  return <main className="aurora-canvas grid min-h-screen place-items-center" role="status">
     <Loader2 aria-hidden="true" className="size-7 animate-spin text-muted-foreground" /><span className="sr-only">{t("loadingWorkspace")}</span>
   </main>;
 }
@@ -54,11 +54,13 @@ function Gate({ children }: { children: ReactNode }) {
     return <PendingIdentityPage email={viewer.email} googleSubject={viewer.googleSubject} onSignOut={() => leave(APP_PATHS.staffLogin)} />;
   }
   if (viewer.kind === "customer" && viewer.recoveryEnrollmentRequired) {
-    return <main className="mx-auto max-w-lg space-y-5 px-4 py-8">
-      <h1 className="text-xl font-semibold" tabIndex={-1} ref={focusHeading}>{t("recoveryEnrollmentTitle")}</h1>
-      <p className="text-sm text-muted-foreground">{t("recoveryEnrollmentDescription")}</p>
-      <Suspense fallback={<Pending />}><RecoveryCodePanel hasCode={!viewer.needsRecoveryCode} requireConfirmation /></Suspense>
-      <Button type="button" variant="outline" onClick={() => void leave(APP_PATHS.customerLogin)}>{t("signOut")}</Button>
+    return <main className="aurora-canvas grid min-h-screen place-items-center px-4 py-8">
+      <div className="aurora-ticket w-full max-w-lg space-y-5 p-5 sm:p-7">
+        <h1 className="text-xl font-semibold" tabIndex={-1} ref={focusHeading}>{t("recoveryEnrollmentTitle")}</h1>
+        <p className="text-sm text-muted-foreground">{t("recoveryEnrollmentDescription")}</p>
+        <Suspense fallback={<Pending />}><RecoveryCodePanel hasCode={!viewer.needsRecoveryCode} requireConfirmation /></Suspense>
+        <Button type="button" variant="outline" onClick={() => void leave(APP_PATHS.customerLogin)}>{t("signOut")}</Button>
+      </div>
     </main>;
   }
   return children;
@@ -183,6 +185,16 @@ declare module "@tanstack/react-router" {
 export function AppRouter() {
   const auth = useAuthState();
   const previous = useRef<AuthState | null>(null);
+  const pathname = useSyncExternalStore(router.history.subscribe, () => router.history.location.pathname);
+  const customerRoute = pathname === APP_PATHS.customerHome || pathname.startsWith(APP_PATHS.customerHome + "/");
+  const viewer = auth !== "loading" && auth.status === "signed-in" ? auth.viewer : undefined;
+  const customerTheme = normalizePathname(pathname) === APP_PATHS.customerJoin
+    || (viewer && viewer.kind !== "pending" ? viewer.kind === "customer" : customerRoute);
+
+  // Portalled dialogs, drag previews and native form controls share the workspace palette.
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle("dark", !customerTheme);
+  }, [customerTheme]);
 
   useEffect(() => {
     if (auth === "loading") return;
@@ -193,7 +205,7 @@ export function AppRouter() {
 
   return (
     <>
-      <Toaster richColors position="bottom-right" />
+      <Toaster richColors theme={customerTheme ? "light" : "dark"} position="bottom-right" />
       {auth === "loading" ? <Pending /> : <RouterProvider router={router} context={{ auth }} />}
     </>
   );
