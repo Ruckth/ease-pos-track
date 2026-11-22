@@ -2,6 +2,10 @@ loglevel: silent
 reporter: silent
 overrides:
   effect: 3.22.0
+  # Browser accessibility scans pin the engine; review upgrades deliberately.
+  axe-core: 4.14.0
 allowBuilds:
   esbuild: true
   msgpackr-extract: true
+patchedDependencies:
+  '@convex-dev/auth@2.0.0': patches/@convex-dev__auth@2.0.0.patch

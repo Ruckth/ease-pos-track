@@ -79,14 +79,16 @@ test("upload middleware verifies the server callback credential before accepting
   const input = { intentId: "intent", secret: "s".repeat(48) };
   const req = new Request("https://fixture.invalid", { headers: { authorization: "Bearer customer" } });
   const files = [{ name: "fixture.png", size: 1, type: "image/png", lastModified: 1 }];
+  // The browser's access token selects a per-request client; it is never an argument.
+  const forUser = (accessToken: string) => { assert.equal(accessToken, "customer"); return client; };
   try {
     for (const code of ["UPLOAD_CALLBACK_NOT_CONFIGURED", "TRUSTED_CALLBACK_REQUIRED"]) {
       client.query = async (_reference, ...args) => {
         checks++;
-        assert.deepEqual(args[0], { token: "customer", callbackToken: "server-secret", ...input, files: [{ name: "fixture.png", size: 1, type: "image/png" }] });
+        assert.deepEqual(args[0], { callbackToken: "server-secret", ...input, files: [{ name: "fixture.png", size: 1, type: "image/png" }] });
         throw new ConvexError({ code, private: "private-content" });
       };
-      const route = createUploadRouter(client, "server-secret").ticketMedia;
+      const route = createUploadRouter(client, "server-secret", forUser).ticketMedia;
       await assert.rejects(async () => route.middleware({ req, input, files }), new RegExp(code));
       assert.deepEqual(logs.pop(), [code]);
     }
@@ -95,9 +97,9 @@ test("upload middleware verifies the server callback credential before accepting
     assert.deepEqual(logs.pop(), ["UPLOAD_CALLBACK_NOT_CONFIGURED"]);
     assert.equal(checks, 2);
     client.query = async () => true as never;
-    assert.deepEqual(await createUploadRouter(client, "server-secret").ticketMedia.middleware({ req, input, files }), input);
+    assert.deepEqual(await createUploadRouter(client, "server-secret", forUser).ticketMedia.middleware({ req, input, files }), input);
     client.query = async () => false as never;
-    await assert.rejects(async () => createUploadRouter(client, "server-secret").ticketMedia.middleware({ req, input, files }),
+    await assert.rejects(async () => createUploadRouter(client, "server-secret", forUser).ticketMedia.middleware({ req, input, files }),
       (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "FORBIDDEN");
     assert.equal(logs.length, 0);
   } finally { console.error = original; }

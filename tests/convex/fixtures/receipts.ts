@@ -6,7 +6,7 @@ import { tombstoneTicketRequests } from "../../../convex/domain/requests";
 // Test-only finalization: no deployed purge endpoint or external storage I/O.
 export const purge = internalJobMutation({
   name: "receipts:purge",
-  args: { id: v.id("tickets"), sessionId: v.id("sessions") },
+  args: { id: v.id("tickets"), sessionId: v.id("sessionAdmissions") },
   handler: async (ctx, args) => {
     const doc = (await ctx.db.get(args.id))!;
     await applyTicketChange(ctx, {

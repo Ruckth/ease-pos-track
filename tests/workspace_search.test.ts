@@ -4,6 +4,7 @@ import {
   customerWorkspaceSearch,
   MAX_WORKSPACE_QUERY_LENGTH,
   parseWorkspaceSearch,
+  projectWorkspaceSearch,
   staffWorkspaceSearch,
   stringifyWorkspaceSearch,
 } from "../src/app/workspace-search";
@@ -28,14 +29,14 @@ test("defaults and unusable parameters are omitted without dropping valid siblin
       project: "POS",
       q: "a".repeat(MAX_WORKSPACE_QUERY_LENGTH + 1),
       archived: "false",
-      lane: "new",
+      lane: "unknown",
       ticket: "bad/id",
       panel: "unknown",
     })),
     "?project=POS",
   );
   assert.equal(
-    stringifyWorkspaceSearch(customerWorkspaceSearch({ project: "_POS", filter: "all", ticket: "a".repeat(65) })),
+    stringifyWorkspaceSearch(customerWorkspaceSearch({ project: "_POS", filter: "archive", ticket: "a".repeat(65) })),
     "",
   );
 });
@@ -45,4 +46,28 @@ test("query text round-trips literally, including JSON-like and localized values
     const search = staffWorkspaceSearch(parseWorkspaceSearch(stringifyWorkspaceSearch({ q })));
     assert.equal(search.q, q);
   }
+});
+
+
+test("staff workflow links retain the result view, status, assignment, and media section", () => {
+  assert.deepEqual(
+    staffWorkspaceSearch(parseWorkspaceSearch("?project=POS&view=focus&filter=waiting&assignment=mine&section=media&ticket=abc123&lane=new")),
+    { project: "POS", view: "focus", filter: "waiting", assignment: "mine", section: "media", ticket: "abc123", lane: "new" },
+  );
+});
+
+test("customer workflow links retain their search, All filter and media section", () => {
+  assert.deepEqual(
+    customerWorkspaceSearch(parseWorkspaceSearch("?q=007&filter=all&section=media&ticket=abc123&view=focus&assignment=mine")),
+    { q: "007", filter: "all", section: "media", ticket: "abc123" },
+  );
+});
+
+test("Project switches clear the previous Project's selection and result context", () => {
+  const previous = staffWorkspaceSearch({
+    project: "POS", ticket: "abc123", section: "media", q: "printer", view: "focus",
+    filter: "waiting", assignment: "mine", lane: "waiting", archived: true,
+  });
+  assert.equal(stringifyWorkspaceSearch(projectWorkspaceSearch(previous, "OPS", "table")), "?project=OPS&view=table");
+  assert.equal(stringifyWorkspaceSearch(projectWorkspaceSearch(previous, "OPS")), "?project=OPS");
 });

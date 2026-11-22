@@ -1,8 +1,13 @@
+// Run with tsx (pnpm test:browser does): the evidence helpers are TypeScript.
 import assert from "node:assert/strict";
+import path from "node:path";
 import { chromium } from "playwright";
+import { capture, EVIDENCE_DIR, newContext, recordChromium } from "../../scripts/browser-evidence.ts";
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-const errors=[]; page.on("pageerror", error => errors.push(error.message));
+recordChromium(browser.version());
+const shot = name => path.join(EVIDENCE_DIR, "public", "screenshots", `explorer-${name}.png`);
+let page;
+const errors=[];
 const button = name => page.getByRole("button", { name, exact: true });
 const countRows = async n => { await page.waitForFunction(n => document.querySelectorAll('tbody tr').length === n,n); };
 const summary = async text => { await page.getByText(text,{exact:true}).waitFor(); };
@@ -11,7 +16,10 @@ async function add(field, operator) {
   await page.getByRole("option", { name: field, exact: true }).click();
   await page.getByRole("option", { name: operator, exact: true }).click();
 }
-try {
+try { await capture("explorer", "Ticket Explorer harness", async () => {
+  const context = await newContext(browser, { viewport: { width: 1440, height: 1000 } });
+  page = await context.newPage();
+  page.on("pageerror", error => errors.push(error.message));
   await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html`);
   await button("Language").click(); await button("Table").click(); await countRows(10);
   await button("Next page").click(); await summary("Page 2 of 6 · 54 Tickets");
@@ -46,11 +54,40 @@ try {
   assert.doesNotMatch(await page.locator("tbody").innerText(),/Archived/);
   await button("Clear all").click(); await button("Last page").click(); await button("Shrink").click(); await summary("Page 1 of 1 · 5 Tickets");
   assert.equal(await button("Next page").isDisabled(),true);
-  await page.screenshot({path:"/tmp/ticket-explorer-desktop.png",fullPage:true});
+  await page.screenshot({path:shot("desktop"),fullPage:true});
   await button("Language").click(); await button("เพิ่มตัวกรอง").click();
   await page.getByRole("option",{name:"สถานะ",exact:true}).click(); await page.getByRole("option",{name:"ตรงกับรายการใดก็ได้",exact:true}).click(); await page.keyboard.press("Escape");
   await page.setViewportSize({width:390,height:844});
-  await page.screenshot({path:"/tmp/ticket-explorer-mobile.png",fullPage:true});
+  await page.screenshot({path:shot("mobile"),fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,"no horizontal page overflow");
+  // A populated phone Table keeps its sort and primary action within reach.
+  await button("Language").click();
+  await page.getByRole("combobox", { name: "Sort", exact: true }).selectOption("ticketNumber:asc");
+  assert.equal(await page.getByRole("table").count(), 0, "only the compact Table is mounted");
+  await button("Acknowledge · POS-0002").click();
+  await button("Start work · POS-0002").waitFor();
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.getByRole("table").waitFor();
+  await button("Start work · POS-0002").waitFor();
+
+  // Browse counts and capped indexed search have different denominators.
+  await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html?partial`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await button("High or critical").click();
+  await summary("2 matching among 20 loaded · 80 total");
+  await button("Load older Tickets").click();
+  await summary("4 matching among 40 loaded · 80 total");
+  const search = page.getByRole("textbox", { name: "Search", exact: true });
+  await search.fill("Printer");
+  await summary("5 shown from the first 50 matches · Refine search");
+  await page.locator('[data-slot="kanban-board"]').waitFor();
+  await button("Table").click();
+  await summary("5 shown from the first 50 matches · Refine search");
+  assert.equal(await page.locator("[data-ticket-id]").count(), 5);
+  await button("High or critical").click();
+  await summary("50 shown from the first 50 matches · Refine search");
+  await search.fill("POS-0002");
+  await button("Board").click();
+  await button("Acknowledge · POS-0002").waitFor();
   assert.deepEqual(errors,[]); console.log("Explorer browser checks passed: table, board, filters, dates, urgency, pagination, archives, details, Thai and mobile.");
-} finally { await browser.close(); }
+}); } catch (error) { console.error(error); process.exitCode = 1; } finally { await browser.close(); }

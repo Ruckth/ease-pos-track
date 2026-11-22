@@ -33,8 +33,12 @@ export const run = internalJobAction({
         });
         for (const key of keys) {
           if (timedOut) return;
+          if (!await ctx.runQuery(internal.retention.mayStartProviderCall, fence) || timedOut) return;
           const request = async (): Promise<StorageDeletionOutcome | { outcome: "ownership_unverified" }> => {
-            if (job.verifyKeys.includes(key) && !await storage.verifyAppKey(key)) return { outcome: "ownership_unverified" };
+            if (job.verifyKeys.includes(key)) {
+              if (!await storage.verifyAppKey(key)) return { outcome: "ownership_unverified" };
+              if (!await ctx.runQuery(internal.retention.mayStartProviderCall, fence)) return { outcome: "unknown" };
+            }
             if (timedOut) return { outcome: "unknown" };
             return await storage.deleteFiles([key]);
           };

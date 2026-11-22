@@ -159,3 +159,46 @@ test("cancelAndSettle waits for guarded cleanup before releasing the session", a
     draft.dispose();
   }
 });
+
+test("a reconciled successful create exposes its Ticket for selection after the composer closes", async () => {
+  const { draft, deps } = fixture();
+  const id = "created-ticket" as Id<"tickets">;
+  let calls = 0;
+  assert.equal(await draft.submit({ ...deps, createTicket: async () => {
+    if (++calls === 1) throw new Error("response lost after create");
+    return id;
+  } }), true);
+  assert.equal(calls, 2);
+  assert.equal(draft.lastSubmittedId, id);
+  assert.equal(draft.getSnapshot().title, "");
+  draft.dispose();
+});
+
+test("text-only composer refuses a retained file and submits plain text without upload transport", async () => {
+  const { draft, deps } = fixture();
+  const classification = { product: "printer", symptom: "blank", restricted: true };
+  draft.setRoutingClassification(classification);
+  let intentCalls = 0;
+  let submitCalls = 0;
+  const textOnly = {
+    ...deps,
+    mediaEnabled: false,
+    createUploadIntent: async () => { intentCalls++; throw new Error("unexpected upload intent"); },
+    createTicket: async (args: Parameters<Parameters<typeof draft.submit>[0]["createTicket"]>[0]) => {
+      submitCalls++;
+      assert.deepEqual(args, {
+        requestId: "key-0", title: "Ticket", description: "",
+        media: [], annotations: [], routingClassification: classification, projectId: "original-project",
+      });
+      return "new-text-id";
+    },
+  };
+  assert.equal(await draft.submit(textOnly), false);
+  assert.match(String(draft.getSnapshot().error), /PILOT_MEDIA_DISABLED/);
+  assert.equal(submitCalls, 0);
+  draft.remove(draft.getSnapshot().items[0]);
+  assert.equal(await draft.submit(textOnly), true);
+  assert.equal(draft.lastSubmittedId, "new-text-id");
+  assert.equal(submitCalls, 1);
+  assert.equal(intentCalls, 0);
+});

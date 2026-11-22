@@ -39,7 +39,7 @@ import {
   whoamiOutput,
 } from "./output";
 import { commandDiscoveryOutput, humanHelp } from "./registry";
-import type { TicketRemote } from "./remote";
+import type { SessionTokens, TicketRemote } from "./remote";
 import type { TicketImages } from "./images";
 import { TicketSessions, credentialError, type StaffAccess } from "./session";
 
@@ -47,7 +47,8 @@ export type TicketCliDeps = {
   remote: TicketRemote;
   config: ConfigStore;
   credentials: CredentialStore;
-  readPassword: () => Promise<string>;
+  /** Named interactive sign-in; returns the new session tokens or null. */
+  signIn: (url: string) => Promise<SessionTokens | null>;
   newRequestId: () => string;
   now: () => number;
   env: NodeJS.ProcessEnv;
@@ -150,12 +151,8 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
     toError: () => conflictError("UPLOAD_REQUEST_CONFLICT", "This request id was already used with different images.", "Use the same --request-id only when retrying the same images."),
   },
   {
-    codes: ["INCORRECT_PASSWORD"],
-    toError: (target) => credentialError("INVALID_CREDENTIALS", "The staff password is incorrect.", target),
-  },
-  {
-    codes: ["AUTH_RATE_LIMITED"],
-    toError: () => authError("AUTH_RATE_LIMITED", "Too many sign-in attempts. Try again after the lockout window."),
+    codes: ["ACCESS_UNAVAILABLE", "SIGN_IN_RESTART_REQUIRED", "IDENTITY_PENDING"],
+    toError: (target) => credentialError("NOT_AUTHORIZED", "This account is not an active staff member. Sign in again with the invited Google account.", target),
   },
   {
     codes: ["SESSION_EXPIRED"],
@@ -187,10 +184,8 @@ async function runSessionCommand(command: SessionCommand, sessions: TicketSessio
   switch (command.kind) {
     case "logout":
       return logoutOutput(target, await sessions.logout(target));
-    case "login": {
-      const password = await deps.readPassword();
-      return loginOutput(target, await sessions.login(target, command.url, password));
-    }
+    case "login":
+      return loginOutput(target, await sessions.login(target, command.url));
     default:
       return unreachable(command);
   }

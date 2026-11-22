@@ -10,7 +10,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { PORTS_FILE, loadPorts, portsForSlot, readPortsFile } from "./worktree-ports.mjs";
+import { pushLocalWithIdentityEnv } from "./local-identity-env.mjs";
+import { PORTS_FILE, loadPorts, portsForSlot, readPortsFile, slotUsable, FETCH_BLOCKED_PORTS } from "./worktree-ports.mjs";
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const here = git("rev-parse", "--show-toplevel");
@@ -36,8 +37,6 @@ function listens(port, host) {
     server.listen(port, host, () => server.close(() => resolve(true)));
   });
 }
-// 4190 (ManageSieve) is the Fetch-blocked port in our four-port slot ranges.
-const fetchBlocked = (ports) => Object.values(ports).includes(4190);
 const portFree = async (port) => (await listens(port)) && (await listens(port, "127.0.0.1"));
 
 /** Atomic mkdir lock in the shared git dir, so concurrent setups never pick the same slot. */
@@ -69,7 +68,7 @@ async function claimPorts() {
   const taken = new Set(worktrees.map((dir) => readPortsFile(dir)?.CONVEX_CLOUD_PORT).filter(Boolean));
   for (let slot = 1; slot < 100; slot++) {
     const ports = portsForSlot(slot);
-    if (taken.has(ports.CONVEX_CLOUD_PORT) || fetchBlocked(ports)) continue;
+    if (taken.has(ports.CONVEX_CLOUD_PORT) || !slotUsable(slot)) continue;
     const free = await Promise.all(Object.values(ports).map(portFree));
     if (free.every(Boolean)) {
       writeFileSync(path.join(here, PORTS_FILE), Object.entries(ports).map(([k, v]) => `${k}=${v}\n`).join(""));
@@ -88,15 +87,24 @@ if (!isMain && !existsSync(path.join(here, ".env.local"))) {
   }
 }
 
-const existingPorts = readPortsFile(here);
-if (!isMain && (!existingPorts || fetchBlocked(existingPorts))) await withLock(claimPorts);
+// A slot claimed before blocked ports were excluded is reclaimed, unless the
+// Convex CLI is running here on the old ports.
+if (!isMain) await withLock(async () => {
+  const claimed = readPortsFile(here);
+  const blocked = claimed && Object.values(claimed).some((port) => FETCH_BLOCKED_PORTS.has(port));
+  if (!claimed || (blocked && !existsSync(path.join(here, ENV_BACKUP)))) await claimPorts();
+});
 
 run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"]);
 
 if (existsSync(path.join(here, ENV_BACKUP))) {
   console.log(`\nSkipped the schema push: ${ENV_BACKUP} exists, so the Convex CLI is running here (pnpm dev pushes on its own) or an earlier run was interrupted.`);
 } else {
-  run("pnpm", ["convex:local"]);
+  console.log("\n$ pnpm convex:local (with local identity placeholders)");
+  if (pushLocalWithIdentityEnv(here) !== 0) {
+    console.error("agent:setup failed at: pnpm convex:local");
+    process.exit(1);
+  }
 }
 
 const ports = loadPorts(here);

@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { fixtures, identityTest, whoami } from "./identity-harness";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
@@ -8,19 +8,20 @@ beforeEach(() => { vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true"); vi.stubEnv("CON
 afterEach(() => vi.unstubAllEnvs());
 
 async function fixture() {
-  const t = convexTest(schema, modules);
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest(modules);
+  const seed = await t.mutation(internal.seed.install, {});
   return { t, seed, staff: seed.sessions[0], alice: seed.sessions[1], bob: seed.sessions[2] };
 }
 
 test("entry policies resolve explicit roles and reject missing, expired and forged credentials", async () => {
   const { t, staff, alice, seed } = await fixture();
+  // A core session that was signed out no longer resolves, even with its admission row.
+  const expired = await t.mutation(fixtures.session, { staffId: (await t.run(ctx => ctx.db.query("staff").first()))!._id });
   await t.run(async ctx => {
-    await ctx.db.insert("sessions", { token: "expired", role: "staff", createdAt: 1, expiresAt: 2 });
+    const admission = (await ctx.db.query("sessionAdmissions").withIndex("by_auth_session", q => q.eq("authSessionId", expired)).unique())!;
+    await ctx.db.patch(admission._id, { revokedAt: Date.now() });
   });
-  for (const token of ["unknown", "expired"]) {
+  for (const token of ["unknown", expired]) {
     await expect(t.query(api.projects.listProjects, { token })).rejects.toThrow("SESSION_EXPIRED");
   }
   await expect(t.query(api.tickets.laneTotals, { token: alice, projectId: seed.projects[0].id })).rejects.toThrow("STAFF_ONLY");
@@ -36,29 +37,29 @@ test("entry policies resolve explicit roles and reject missing, expired and forg
   expect(staffTicket.ticket.origin).toBe("staff");
 });
 
-test("registered sign-in creates explicit roles from staff credentials or durable customer identity", async () => {
-  vi.stubEnv("APP_PASSWORD", "LocalStaff123!");
-  vi.stubEnv("CUSTOMER_PASSWORD_PEPPER", "test-only-pepper");
-  const t = convexTest(schema, modules);
+test("registered sign-in creates explicit roles from named staff identity or durable customer identity", async () => {
+  const t = identityTest(modules);
   await t.action(internal.seed.run, {});
-  const staff = await t.action(api.auth.login, { password: "LocalStaff123!", clientId: "test-staff-client-id" });
-  const customer = await t.action(api.customers.login, { email: "alice@local.test", password: "LocalCustomer123!", clientId: "test-customer-client-id" });
-  expect(await t.query(api.auth.currentSession, { token: staff.token })).toMatchObject({ role: "staff", customerId: null });
-  const account = await t.query(api.auth.currentSession, { token: customer.token });
-  expect(account).toMatchObject({ role: "customer", email: "alice@local.test" });
-  expect(account?.customerId).toBeTruthy();
-  await expect(t.action(api.auth.login, { password: "wrong", clientId: "test-staff-client-id" })).rejects.toThrow("INCORRECT_PASSWORD");
-  await expect(t.action(api.customers.login, { email: "alice@local.test", password: "wrong", clientId: "test-customer-client-id" })).rejects.toThrow("INVALID_CREDENTIALS");
-  await expect(t.action(api.customers.register, { email: "alice@local.test", password: "LocalCustomer123!", clientId: "test-customer-client-id" }))
-    .rejects.toThrow("EMAIL_ALREADY_REGISTERED");
+  const staff = await t.mutation(api.auth.signInLocalFixture, { email: "owner@local.test" });
+  const customer = await t.action(api.auth.signInWithPassword, { username: "Alice", password: "local customer passphrase" });
+  expect(staff.status).toBe("complete");
+  expect(customer.status).toBe("complete");
+  const subject = (bundle: typeof staff) => JSON.parse(atob(bundle.status === "complete" ? bundle.tokens.accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/") : "")).sub as string;
+  expect(await t.query(api.identity.viewer, { token: subject(staff) })).toMatchObject({ kind: "staff", role: "owner" });
+  const account = await t.query(api.identity.viewer, { token: subject(customer) });
+  expect(account).toMatchObject({ kind: "customer", username: "alice" });
+  expect(account?.kind === "customer" && account.customerId).toBeTruthy();
+  expect(await t.action(api.auth.signInWithPassword, { username: "alice", password: "wrong customer passphrase" }))
+    .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
+  expect(await t.action(api.auth.signInWithPassword, { username: "nobody", password: "local customer passphrase" }))
+    .toEqual({ status: "error", userError: { error: "INVALID_CREDENTIALS" } });
+  await expect(t.mutation(api.auth.signInLocalFixture, { email: "alice@local.test" })).resolves.toMatchObject({ status: "error" });
 }, 30_000);
 
 test("local seed is disabled without explicit fixture opt-in", async () => {
   vi.stubEnv("LOCAL_FIXTURES_ENABLED", "");
-  const t = convexTest(schema, modules);
-  await expect(t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  })).rejects.toThrow("LOCAL_FIXTURES_DISABLED");
+  const t = identityTest(modules);
+  await expect(t.mutation(internal.seed.install, {})).rejects.toThrow("LOCAL_FIXTURES_DISABLED");
   expect(await t.run(ctx => ctx.db.query("projects").collect())).toEqual([]);
 });
 
@@ -160,12 +161,12 @@ test("annotations enforce ownership and media validity; both roles can annotate 
 
 test("seed is repeatable and final model numbering, totals and purging reads agree", async () => {
   const { t, seed, staff, alice } = await fixture();
-  const again = await t.mutation(internal.seed.install, { passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1 });
+  const again = await t.mutation(internal.seed.install, {});
   expect(again.tickets).toEqual(seed.tickets);
   expect(again.projects).toEqual(seed.projects);
   expect(again.sessions).not.toEqual(seed.sessions);
   expect(new Set([...again.sessions, ...seed.sessions]).size).toBe(6);
-  for (const token of [...seed.sessions, ...again.sessions]) expect(token).toMatch(/^[0-9a-f-]{36}$/);
+  for (const token of [...seed.sessions, ...again.sessions]) expect((await whoami(t, token)).admissionId).toBeTruthy();
   const { page: rows } = await t.query(api.tickets.pageTickets, { token: staff, projectId: seed.projects[0].id, lifecycle: "active", paginationOpts: { numItems: 50, cursor: null } });
   expect(rows.map(row => row.ticketNumber).sort()).toEqual([1, 2, 3]);
   const totals = await t.run(ctx => ctx.db.query("ticketTotals").collect());
@@ -187,8 +188,9 @@ test("trusted callback constructor rejects customers, unconfigured credentials a
   vi.stubEnv("UPLOAD_CALLBACK_SECRET", "server-only");
   await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, callbackToken: "forged" })).rejects.toThrow("TRUSTED_CALLBACK_REQUIRED");
   await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, token: alice })).rejects.toThrow("STAFF_ONLY");
-  await t.run(ctx => ctx.db.insert("sessions", { token: "other-staff", role: "staff", createdAt: Date.now(), expiresAt: Date.now() + 60_000 }));
-  await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, token: "other-staff" })).rejects.toThrow("UPLOAD_INTENT_NOT_FOUND");
+  const other = await t.mutation(fixtures.staff, { email: "other@fixture.test", role: "staff" });
+  await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, token: other.session })).rejects.toThrow("UPLOAD_INTENT_NOT_FOUND");
+  await expect(t.mutation(api.uploads.recordUploadedFile, { ...input, token: staff, callbackToken: "server-only" })).rejects.toThrow("MIXED_CREDENTIALS");
   await t.mutation(api.uploads.recordUploadedFile, { ...input, token: staff });
   await t.mutation(api.uploads.recordUploadedFile, { ...input, callbackToken: "server-only" });
   expect(await t.run(ctx => ctx.db.get(intent.intentId))).toMatchObject({ uploadedFiles: [input.file] });
@@ -198,10 +200,8 @@ test("trusted callback constructor rejects customers, unconfigured credentials a
 test("local fixtures reject missing, malformed and remote deployment URLs even with opt-in", async () => {
   for (const url of ["", "invalid", "https://shared.convex.cloud", "http://127.0.0.1.evil.test"]) {
     vi.stubEnv("CONVEX_CLOUD_URL", url);
-    const t = convexTest(schema, modules);
-    await expect(t.mutation(internal.seed.install, {
-      passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-    })).rejects.toMatchObject({ data: { code: "LOCAL_FIXTURES_DISABLED" } });
+    const t = identityTest(modules);
+    await expect(t.mutation(internal.seed.install, {})).rejects.toMatchObject({ data: { code: "LOCAL_FIXTURES_DISABLED" } });
     expect(await t.run(ctx => ctx.db.query("projects").collect())).toEqual([]);
   }
 });

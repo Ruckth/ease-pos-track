@@ -1,17 +1,21 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { CustomerPortal } from "@/features/tickets/customer-portal";
-import { authStore, useSignOut } from "./auth-store";
+import { loginPathForRole } from "@/lib/app-routes";
+import { useLeave, useSessionExpiry } from "./auth-store";
 import { SessionBoundary } from "./session-boundary";
 
 const route = getRouteApi("/customer");
 
 /** Lazy customer chunk, independent of the staff board. */
 export function CustomerEntry() {
-  const { session } = route.useRouteContext();
-  const signOut = useSignOut(session.token, "customer");
+  const { viewer } = route.useRouteContext();
+  const leave = useLeave();
+  const onExpired = useSessionExpiry(loginPathForRole("customer"));
+  if (viewer?.kind !== "customer") return null;
+  const onLogout = () => leave(loginPathForRole("customer"));
   return (
-    <SessionBoundary key={session.token} onExpired={() => authStore.clear()}>
-      <CustomerPortal token={session.token} email={session.email} onLogout={signOut} />
+    <SessionBoundary key={viewer.customerId} onExpired={onExpired}>
+      <CustomerPortal viewer={viewer} onLogout={onLogout} />
     </SessionBoundary>
   );
 }

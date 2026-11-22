@@ -1,133 +1,79 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  assertPasswordIsNotEmail,
-  normalizeCustomerEmail,
-  validateClientId,
-  validateCustomerEmail,
-  validateCustomerPassword,
-} from "../convex/customer_validation";
-import {
-  CUSTOMER_GUARD,
-  customerAttemptKey,
-  customerEmailAttemptKey,
-  customerLoginAttemptKeys,
-  customerRegistrationAttemptKeys,
-  isLockedOut,
-  planFailure,
-} from "../convex/login_guard";
-import {
-  constantTimeEquals,
-  createPasswordRecord,
-  DECOY_PASSWORD_RECORD,
-  derivePasswordHash,
-  PASSWORD_ALGORITHM,
-  resolvePasswordPepper,
-  verifyPasswordRecord,
-} from "../convex/password";
+  canonicalRecoveryCode, checkNewPassword, constantTimeEquals, encodeRecoveryCode, formatRecoveryCode, normalizeDisplayName,
+  normalizeEmail, normalizeUsername, PASSWORD_MAX_CODE_POINTS, PASSWORD_MIN_CODE_POINTS, recoveryCodeDigest,
+} from "../convex/identity_rules";
+import { isLockedOut, planFailure } from "../convex/login_guard";
 
-test("the pepper is required and account paths fail closed without it", () => {
-  // A configured pepper is returned verbatim, so derivations stay stable.
-  assert.equal(resolvePasswordPepper("deployment-secret"), "deployment-secret");
-  assert.equal(resolvePasswordPepper(" padded "), " padded ");
-  for (const missing of [undefined, "", "   ", "\n\t"]) {
-    assert.throws(() => resolvePasswordPepper(missing), /CUSTOMER_ACCOUNTS_UNAVAILABLE/, String(missing));
+test("usernames: trimmed, lowercased ASCII 3–32 with a letter or digit; reserved names refused", () => {
+  assert.equal(normalizeUsername("  Alice_01 "), "alice_01");
+  assert.equal(normalizeUsername("a-b"), "a-b");
+  for (const bad of ["ab", "a".repeat(33), "___", "---", "สมชาย", "al ice", "al.ice", ""]) {
+    assert.throws(() => normalizeUsername(bad), /INVALID_USERNAME/, bad);
   }
+  for (const reserved of ["Admin", "support", "OWNER"]) assert.throws(() => normalizeUsername(reserved), /USERNAME_UNAVAILABLE/);
 });
 
-test("emails are normalized and clearly invalid ones are rejected", () => {
-  assert.equal(normalizeCustomerEmail("  Owner@Shop.CO  "), "owner@shop.co");
-  assert.equal(validateCustomerEmail(" Owner@Shop.CO "), "owner@shop.co");
-  for (const invalid of ["", "   ", "owner", "owner@shop", "owner shop@mail.com", "@shop.co", `${"a".repeat(250)}@shop.co`]) {
-    assert.throws(() => validateCustomerEmail(invalid), /INVALID_EMAIL/, invalid);
-  }
+test("display names accept Thai and English and refuse control characters", () => {
+  assert.equal(normalizeDisplayName("  สมชาย   ใจดี "), "สมชาย ใจดี");
+  assert.throws(() => normalizeDisplayName("   "), /INVALID_DISPLAY_NAME/);
+  assert.throws(() => normalizeDisplayName("a\u0000b"), /INVALID_DISPLAY_NAME/);
+  assert.throws(() => normalizeDisplayName("x".repeat(81)), /INVALID_DISPLAY_NAME/);
 });
 
-test("passwords need length plus a letter and a digit", () => {
-  assert.equal(validateCustomerPassword("printer2024"), "printer2024");
-  assert.throws(() => validateCustomerPassword("short1"), /WEAK_PASSWORD/);
-  assert.throws(() => validateCustomerPassword("allletterspassword"), /WEAK_PASSWORD/);
-  assert.throws(() => validateCustomerPassword("1234567890"), /WEAK_PASSWORD/);
-  assert.throws(() => validateCustomerPassword(`${"a1".repeat(65)}`), /PASSWORD_TOO_LONG/);
-  assert.throws(() => assertPasswordIsNotEmail("owner@shop.co", "Owner@Shop.CO"), /WEAK_PASSWORD/);
-  assert.doesNotThrow(() => assertPasswordIsNotEmail("owner@shop.co", "printer2024"));
+test("one password policy counts NFC code points: 14/15/100/101, astral, Thai and whitespace", () => {
+  assert.equal(PASSWORD_MIN_CODE_POINTS, 15);
+  assert.equal(PASSWORD_MAX_CODE_POINTS, 100);
+  assert.deepEqual(checkNewPassword("a".repeat(14)), { problem: "PASSWORD_TOO_SHORT" });
+  assert.deepEqual(checkNewPassword("a".repeat(15)), { password: "a".repeat(15) });
+  assert.deepEqual(checkNewPassword("a".repeat(100)), { password: "a".repeat(100) });
+  assert.deepEqual(checkNewPassword("a".repeat(101)), { problem: "PASSWORD_TOO_LONG" });
+  assert.deepEqual(checkNewPassword("🙂".repeat(15)), { password: "🙂".repeat(15) });
+  assert.deepEqual(checkNewPassword("รหัสผ่านภาษาไทยยาวพอ"), { password: "รหัสผ่านภาษาไทยยาวพอ" });
+  // Decomposed and composed spellings are the same password after NFC.
+  const composed = "café passphrase!";
+  const decomposed = "café passphrase!";
+  assert.deepEqual(checkNewPassword(decomposed), checkNewPassword(composed));
+  assert.deepEqual(checkNewPassword(" leading passphrase"), { problem: "PASSWORD_HAS_SURROUNDING_WHITESPACE" });
+  assert.deepEqual(checkNewPassword("trailing passphrase "), { problem: "PASSWORD_HAS_SURROUNDING_WHITESPACE" });
+  assert.ok("password" in checkNewPassword("spaces inside are fine"));
 });
 
-test("client ids are bounded so the rate limiter keys stay sane", () => {
-  const clientId = "a".repeat(36);
-  assert.equal(validateClientId(` ${clientId} `), clientId);
-  assert.throws(() => validateClientId("short"), /INVALID_SIGNIN_CLIENT/);
-  assert.throws(() => validateClientId("a".repeat(129)), /INVALID_SIGNIN_CLIENT/);
+test("saved recovery codes carry 128 random bits as 26 Crockford characters and ignore separators and case", async () => {
+  const bytes = new Uint8Array(16).fill(255);
+  const code = encodeRecoveryCode(bytes);
+  assert.equal(code.length, 26);
+  assert.match(code, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+  assert.equal(canonicalRecoveryCode(formatRecoveryCode(code).toLowerCase()), code);
+  assert.equal(canonicalRecoveryCode("ILO" + "0".repeat(23)), "110" + "0".repeat(23));
+  assert.equal(canonicalRecoveryCode("short"), null);
+  assert.equal(canonicalRecoveryCode("U".repeat(26)), null);
+  assert.notEqual(encodeRecoveryCode(new Uint8Array(16)), code);
+  // The digest binds customer and generation: the same code differs across either.
+  const digest = await recoveryCodeDigest("customer_1", 1, code);
+  assert.notEqual(digest, await recoveryCodeDigest("customer_1", 2, code));
+  assert.notEqual(digest, await recoveryCodeDigest("customer_2", 1, code));
 });
 
-test("customer attempt keys scope lockouts to one device and one account", () => {
-  assert.equal(customerAttemptKey("device-1"), "customer:device-1");
-  assert.equal(customerEmailAttemptKey("owner@shop.co"), "customer-email:owner@shop.co");
-  assert.notEqual(customerAttemptKey("__global__"), "__global__");
-  assert.notEqual(customerEmailAttemptKey("owner@shop.co"), customerEmailAttemptKey("other@shop.co"));
-  assert.deepEqual(customerRegistrationAttemptKeys("device-1"), ["customer:device-1"]);
-  assert.deepEqual(customerLoginAttemptKeys("device-1", "owner@shop.co"), [
-    "customer:device-1",
-    "customer-email:owner@shop.co",
-  ]);
+test("emails are normalized for invitation matching", () => {
+  assert.equal(normalizeEmail("  Owner@Shop.CO  "), "owner@shop.co");
+  for (const bad of ["", "no-at", "a@b", "a b@c.d"]) assert.throws(() => normalizeEmail(bad), /INVALID_EMAIL/);
 });
 
-test("repeated failures lock out, and a stale window starts over", () => {
-  const now = 1_000_000;
-  let record = planFailure(null, now, CUSTOMER_GUARD);
-  assert.deepEqual(record, { attempts: 1, firstAttemptAt: now });
-  for (let attempt = 2; attempt < CUSTOMER_GUARD.maxAttempts; attempt += 1) {
-    record = planFailure(record, now + attempt, CUSTOMER_GUARD);
-    assert.equal(record.lockedUntil, undefined);
-  }
-  record = planFailure(record, now + 10, CUSTOMER_GUARD);
-  assert.equal(record.attempts, CUSTOMER_GUARD.maxAttempts);
-  assert.equal(record.lockedUntil, now + 10 + CUSTOMER_GUARD.lockoutMs);
-
-  assert.equal(isLockedOut([record], now + 10), true);
-  assert.equal(isLockedOut([record], now + 10 + CUSTOMER_GUARD.lockoutMs + 1), false);
-  assert.equal(isLockedOut([null, undefined], now), false);
-
-  const afterWindow = planFailure(record, now + CUSTOMER_GUARD.windowMs + 1, CUSTOMER_GUARD);
-  assert.equal(afterWindow.attempts, 1);
+test("attempt budgets lock after the threshold and a stale window starts over", () => {
+  const config = { windowMs: 1000, maxAttempts: 3, lockoutMs: 5000 };
+  let record = planFailure(null, 0, config);
+  record = planFailure(record, 10, config);
+  assert.equal(isLockedOut([record], 20), false);
+  record = planFailure(record, 20, config);
+  assert.equal(isLockedOut([record], 21), true);
+  assert.equal(isLockedOut([record], 5021), false);
+  assert.deepEqual(planFailure({ attempts: 2, firstAttemptAt: 0 }, 5000, config), { attempts: 1, firstAttemptAt: 5000 });
 });
 
-test("passwords are stored as salted PBKDF2 hashes, never in the clear", async () => {
-  const record = await createPasswordRecord("printer2024", "pepper");
-  assert.equal(record.passwordAlgorithm, PASSWORD_ALGORITHM);
-  assert.equal(record.passwordSalt.length, 32);
-  assert.equal(record.passwordHash.length, 64);
-  assert.equal(record.passwordIterations > 100_000, true);
-  assert.equal(record.passwordHash.includes("printer2024"), false);
-
-  assert.equal(await verifyPasswordRecord("printer2024", "pepper", record), true);
-  assert.equal(await verifyPasswordRecord("printer2025", "pepper", record), false);
-  // The pepper is part of the key material, so the same password fails without it.
-  assert.equal(await verifyPasswordRecord("printer2024", "", record), false);
-
-  const second = await createPasswordRecord("printer2024", "pepper");
-  assert.notEqual(second.passwordSalt, record.passwordSalt);
-  assert.notEqual(second.passwordHash, record.passwordHash);
-});
-
-test("derivation is deterministic for a given salt and iteration count", async () => {
-  const first = await derivePasswordHash("printer2024", "0".repeat(32), 1_000, "");
-  const same = await derivePasswordHash("printer2024", "0".repeat(32), 1_000, "");
-  const other = await derivePasswordHash("printer2024", "1".repeat(32), 1_000, "");
-  assert.equal(first, same);
-  assert.notEqual(first, other);
-  await assert.rejects(() => derivePasswordHash("printer2024", "zz", 1_000, ""), /INVALID_PASSWORD_RECORD/);
-  await assert.rejects(() => derivePasswordHash("printer2024", "0".repeat(32), 10, ""), /INVALID_PASSWORD_RECORD/);
-});
-
-test("the decoy record makes unknown emails do the same work and still fail", async () => {
-  assert.equal(await verifyPasswordRecord("anything1234", "pepper", DECOY_PASSWORD_RECORD), false);
-  assert.equal(DECOY_PASSWORD_RECORD.passwordIterations > 100_000, true);
-});
-
-test("hash comparison does not exit on the first differing character", () => {
+test("digest comparison does not exit on the first differing character", () => {
   assert.equal(constantTimeEquals("abcd", "abcd"), true);
   assert.equal(constantTimeEquals("abcd", "abce"), false);
-  assert.equal(constantTimeEquals("abcd", "abcde"), false);
-  assert.equal(constantTimeEquals("", ""), true);
+  assert.equal(constantTimeEquals("abc", "abcd"), false);
 });

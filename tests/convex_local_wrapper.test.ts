@@ -154,3 +154,23 @@ console.log("[]");
     assert.equal(result.status, 0, result.stderr);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("local wrapper refuses malformed backend configuration before invoking the CLI", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-invalid-local-identity-"));
+  try {
+    const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}\nrequire("node:fs").writeFileSync("invoked", "yes");\n`, { mode: 0o755 });
+    for (const config of ["malformed", JSON.stringify({ deploymentName: "dev:shared-cloud" })]) {
+      writeFileSync(join(dir, ".convex/local/default/config.json"), config);
+      const refused = spawnSync(process.execPath, [wrapper, "run", "probe:noop"], {
+        cwd: dir, env: { ...process.env, PATH: join(dir, "bin") }, encoding: "utf8",
+      });
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /LOCAL_DEPLOYMENT_REFUSED/);
+      assert.equal(existsSync(join(dir, "invoked")), false);
+      assert.equal(existsSync(join(dir, ".env.convex-local")), false);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -12,7 +12,7 @@ The code-based TanStack Router in `src/app/router.tsx` keeps the existing staff 
 
 Both workspaces accept `project` and `ticket`. For example, `/staff?project=POS&q=printer` opens the POS search. Staff links also support `archived=true`, the mobile board's `lane`, and `panel=health`. Customer links support `filter=active`, `waiting`, or `done`. Opening a Ticket adds a history entry so Back returns to the list. Changing Projects clears the selected Ticket.
 
-Ticket links use the opaque ID accepted by `getTicket`. The server checks the current actor's access and the workspace checks the Ticket's Project before showing its contents. Consider human-readable Ticket paths when an external integration needs to build links directly from Project keys and Ticket numbers.
+Ticket links use the opaque Ticket ID. The workspace reads the Ticket through `getWorkspaceTicket`, which checks the signed-in actor and the selected Project before returning its contents. Consider human-readable Ticket paths when an external integration needs to build links directly from Project keys and Ticket numbers.
 
 ## Scale and authorization
 
@@ -33,6 +33,6 @@ The CLI's generated filter source expects Base UI while new-york dependencies re
 `pnpm test` covers combined filters/search, inclusive dates, negation, sorting, pagination/clamping, and unset urgency. `pnpm typecheck` and `pnpm run build` cover integration. The browser fixture uses only local sample Tickets and makes no backend writes (its optional base URL is `BROWSER_BASE_URL`):
 
 1. `pnpm exec vite --host 127.0.0.1 --port 5193`
-2. `pnpm exec node tests/browser/explorer-check.mjs`
+2. `pnpm exec tsx tests/browser/explorer-check.mjs` (failure evidence goes to `test-results/browser`; see [browser-verification.md](browser-verification.md))
 
 The browser checks table/board switching, tags and status filters, dates and urgency, page sizes, live shrinking, sorting, archives, details callback, Thai, keyboard controls, and mobile overflow.

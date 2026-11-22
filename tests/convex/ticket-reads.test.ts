@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { fixtures, identityTest, whoami } from "./identity-harness";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
@@ -12,13 +12,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 async function fixture(large = false) {
-  const t = convexTest(schema, modules);
-  const seed = await t.mutation(internal.seed.install, { passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1 });
+  const t = identityTest(modules);
+  const seed = await t.mutation(internal.seed.install, {});
   if (large) for (const project of seed.projects) for (let start = 0; start < 150; start += 25) {
     await t.mutation(internal.seed.largeBatch, { projectId: project.id, sessions: seed.sessions, start });
   }
   const args = { token: seed.sessions[0], projectId: seed.projects[0].id, lifecycle: "active" as const, paginationOpts: { numItems: 7, cursor: null as string | null } };
-  const page = async (overrides: Partial<FunctionArgs<typeof api.tickets.pageTickets>> & { search?: string } = {}) => {
+  const page = async (overrides: Partial<FunctionArgs<typeof api.tickets.pageTickets>> & { search?: string; token?: string } = {}) => {
     const { search, ...rest } = overrides;
     if (search !== undefined) {
       const { paginationOpts: _opts, ...scope } = { ...args, ...rest };
@@ -38,9 +38,9 @@ test("customer pages enforce current Project membership, ownership and lifecycle
   await expect(page({ token: alice, projectId: seed.projects[1].id })).rejects.toThrow("PROJECT_NOT_FOUND");
   await t.mutation(api.tickets.archiveTicket, { token: alice, id: seed.tickets[1], expectedVersion: 0 });
   expect((await page({ token: alice })).page).toEqual([]);
-  expect((await page({ token: alice, lifecycle: "archived" })).page.map(row => row._id)).toEqual([seed.tickets[1]]);
-  // Detail selection remains available by ID outside any loaded page.
-  expect(await t.query(api.tickets.getTicket, { token: alice, id: seed.tickets[1] })).toMatchObject({ lifecycle: "archived" });
+  expect((await page({ token: alice, lifecycle: "archived" })).page.map(row => row._id)).toEqual([]);
+  // Direct ID lookup observes the same archive boundary.
+  expect(await t.query(api.tickets.getTicket, { token: alice, id: seed.tickets[1] })).toBeNull();
   await t.run(async ctx => {
     for (const row of await ctx.db.query("projectMembers").collect()) await ctx.db.delete(row._id);
   });
@@ -115,7 +115,7 @@ test("indexed reference and token/prefix search preserve Project, owner, lane an
   expect(customerMatches.page[0].title).toBe("Printer calibration");
   await t.mutation(api.tickets.archiveTicket, { token: alice, id: customerMatches.page[0]._id, expectedVersion: customerMatches.page[0].version });
   expect((await page({ token: alice, search: "quartz" })).page).toEqual([]);
-  expect((await page({ token: alice, search: "quartz", lifecycle: "archived" })).page).toHaveLength(1);
+  expect((await page({ token: alice, search: "quartz", lifecycle: "archived" })).page).toHaveLength(0);
 }, 30_000);
 
 test("status result versions and rejected stale moves preserve lane membership and totals atomically", async () => {
@@ -142,7 +142,7 @@ test("reference-shaped text falls back to scoped search when no exact visible Ti
   await t.mutation(api.tickets.updateTicketStatus, { token: staff, id: seed.tickets[1], expectedVersion: 1, status: "done" });
   expect((await page({ search: "POS-0003", status: "done" })).page.map(row => row._id)).toEqual([seed.tickets[1]]);
   await t.mutation(api.tickets.archiveTicket, { token: alice, id: seed.tickets[1], expectedVersion: 2 });
-  expect((await page({ token: alice, search: "POS-0003", lifecycle: "archived" })).page.map(row => row._id)).toEqual([seed.tickets[1]]);
+  expect((await page({ token: alice, search: "POS-0003", lifecycle: "archived" })).page.map(row => row._id)).toEqual([]);
 });
 
 test("summary excerpts truncate by code point without splitting an emoji at the boundary", async () => {
@@ -193,7 +193,6 @@ test("URL Ticket read endpoints normalize untrusted string ids safely without cr
     await ctx.db.patch(ticketId, {
       media: [{ key: "fake-read-hardening", name: "fixture.png", type: "image/png", size: 1, url: "https://fixture.invalid/image.png" }],
     });
-    await ctx.db.insert("sessions", { token: "expired-session", role: "staff", createdAt: 1, expiresAt: 2 });
   });
   await t.mutation(api.annotations.addAnnotation, {
     token: alice, id: ticketId, expectedVersion: 0, mediaIndex: 0, kind: "point", x: 0.25, y: 0.5, text: "Check receipt",
@@ -201,7 +200,7 @@ test("URL Ticket read endpoints normalize untrusted string ids safely without cr
 
   const { customerId, sessionId, ticketEventId, annotationEventId } = await t.run(async ctx => ({
     customerId: (await ctx.db.query("customers").first())!._id,
-    sessionId: (await ctx.db.query("sessions").first())!._id,
+    sessionId: (await ctx.db.query("sessionAdmissions").first())!._id,
     ticketEventId: (await ctx.db.query("ticketEvents").first())!._id,
     annotationEventId: (await ctx.db.query("annotationEvents").first())!._id,
   }));
@@ -244,8 +243,12 @@ test("URL Ticket read endpoints normalize untrusted string ids safely without cr
     expect(await t.query(api.annotations.listAnnotationActivity, { token: bob, id: deniedId })).toEqual([]);
   }
 
-  // Invalid/expired sessions still reject with SESSION_EXPIRED even for malformed ids (auth precedes id lookup).
-  for (const token of ["unknown-session", "expired-session"]) {
+  // Unknown/revoked sessions still reject with SESSION_EXPIRED even for malformed ids (auth precedes id lookup).
+  const { staffId } = await whoami(t, staff);
+  const revoked = await t.mutation(fixtures.session, { staffId });
+  const { admissionId } = await whoami(t, revoked);
+  await t.run(ctx => ctx.db.patch(admissionId, { revokedAt: Date.now() }));
+  for (const token of ["unknown-session", revoked]) {
     for (const id of ["bad", String(ticketId)]) {
       await expect(t.query(api.tickets.getTicket, { token, id })).rejects.toMatchObject({ data: { code: "SESSION_EXPIRED" } });
       await expect(t.query(api.tickets.listTicketActivity, { token, id })).rejects.toMatchObject({ data: { code: "SESSION_EXPIRED" } });

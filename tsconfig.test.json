@@ -2,6 +2,8 @@
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
     "types": ["node", "vite/client"],
+    // The pinned auth package ships its convex-test helpers as TypeScript.
+    "allowImportingTsExtensions": true,
     "tsBuildInfoFile": "./node_modules/.cache/tsc/test.tsbuildinfo"
   },
   "include": ["src", "convex", "shared", "tests", "vitest.convex.config.ts"]

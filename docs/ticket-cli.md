@@ -31,18 +31,22 @@ Configure and sign in to the development deployment:
 pnpm ticket login --url https://your-development-deployment.convex.cloud
 ```
 
-The CLI asks for the existing staff password on the controlling terminal. Input
-is not echoed, there is no password flag, and the password is never placed in
-shell history. The app's existing staff login function performs the check and
-applies its existing per-client and global rate limits.
-
-The prompt restores terminal mode and releases its terminal streams when input
-finishes or is cancelled. Login prints its JSON result and exits promptly; Ctrl-C
-returns `LOGIN_CANCELLED` with exit code 4.
+Login is a named staff sign-in with Google. The CLI starts the same guarded
+Google flow as the browser, opens the provider page, and receives the result on
+a loopback listener at `http://127.0.0.1:4271/` (override with
+`TICKET_LOGIN_PORT`). The deployment must list that origin in
+`AUTH_REDIRECT_ORIGINS`. Only an active staff member (an invited, bound Google
+identity) is admitted; a pending or customer account is refused with
+`NOT_AUTHORIZED` and nothing is stored. The shared staff password no longer
+exists. Against a disposable loopback backend with local fixtures enabled,
+`TICKET_LOCAL_FIXTURE_EMAIL=owner@local.test` uses the local test provider
+instead of Google.
 
 Successful login stores:
 
-- the secret session token, expiry, and bound deployment URL in macOS Keychain;
+- the rotating Convex Auth refresh token, its expiry, and bound deployment URL in
+  macOS Keychain. Each authenticated run rotates it once and uses the resulting
+  one-minute access token; the access token is never stored;
 - only non-secret configuration—the stable machine client ID and deployment
   URLs—in `~/.config/track-ease-pos/ticket.json` (or under
   `$XDG_CONFIG_HOME`) with mode `0600`; its directory uses mode `0700`.
@@ -89,11 +93,12 @@ pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
 ```
 
-`list` reads active Projects and consumes bounded summary pages (up to 50 Tickets
-per server page), then fetches detail by ID to preserve its complete descriptions,
-media counts, annotation counts and existing JSON shape. `--include-archived`
-also consumes archived lifecycle pages. The printed count is the number of Tickets
-returned; concurrent writes between pages do not form a single database snapshot.
+`list` reads active Projects and consumes staff-only `tickets:pageTicketDetails`
+pages (up to 50 Tickets per server page), preserving full descriptions, media
+counts, annotation counts and the existing JSON shape without a separate detail
+query for every Ticket. `--include-archived` also consumes archived lifecycle
+pages. The printed count is the number of Tickets returned; concurrent writes
+between pages do not form a single database snapshot.
 
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
@@ -201,7 +206,7 @@ state should still be changed; do not blindly increment the version.
 
 Programmatic success is exactly one compact JSON object on stdout. Programmatic
 failure is exactly one compact JSON object on stderr with a nonzero exit code.
-The hidden password prompt is the only interactive behavior and writes directly
+The browser sign-in during `login` is the only interactive behavior and writes directly
 to the controlling terminal. The repository's pnpm workspace configuration uses
 the silent reporter so pnpm does not add lifecycle lines around those streams.
 
@@ -226,8 +231,9 @@ the original error and exit status are retained with
 
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
-`SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`, and
-`NOT_AUTHORIZED`. Their hints use `pnpm ticket …` syntax.
+`SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`,
+`CREDENTIAL_LOCK_TIMEOUT`, `CREDENTIAL_LOCK_ERROR`, and `NOT_AUTHORIZED`. Their hints use `pnpm ticket …`
+syntax.
 
 ## Security and platform limits
 
@@ -243,6 +249,16 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
   sessions are distinguished with stable JSON codes.
 - Logout asks the app to revoke the session, then removes the local Keychain
   record. Expired server sessions are also safe to clean up this way.
+- Concurrent runs on the same macOS account take turns with the saved session.
+  Each run's read, rotation and write of the refresh token, logout, and the
+  config and Keychain steps of login hold an exclusive lock on
+  `~/.config/track-ease-pos/ticket.lock` in the OS account’s home directory,
+  shared across all `XDG_CONFIG_HOME` profiles. Browser sign-in takes place
+  outside the lock. Each Keychain subprocess inherits the lock. If the CLI
+  is killed, the kernel releases the lock after the last holder exits.
+  A run that waits more than 60 seconds fails with `CREDENTIAL_LOCK_TIMEOUT`
+  (exit 4) before touching the session. Retry the same command with the
+  same `--request-id` for writes.
 
 ## Implementation map
 
@@ -255,14 +271,15 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/deployment.ts` | Development/production selection, URL rules, and `pnpm ticket` hints. |
 | `scripts/ticket/config.ts` | Restrictive non-secret configuration file. |
 | `scripts/ticket/keychain.ts` | Injectable macOS Keychain credential adapter. |
-| `scripts/ticket/prompt.ts` | Controlling-terminal password input with echo disabled. |
+| `scripts/ticket/lock.ts` | Crash-safe cross-process session lock (macOS `O_EXLOCK`). |
+| `scripts/ticket/google-login.ts` | Loopback listener for the named Google sign-in. |
 | `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
 | `scripts/ticket/images.ts` | Original-byte local/HTTPS image loading and UploadThing storage. |
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
 | `convex/tickets.ts` | Canonical policy-declared Ticket handlers for the browser and CLI. |
-| `convex/ticket_state.ts` | Ticket text limits and the optimistic-version check. |
+| `shared/ticket-state.ts` | Ticket text limits and the optimistic-version check. |
 | `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 | `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
@@ -270,9 +287,7 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 Verify changes with:
 
 ```bash
-pnpm test
-pnpm run typecheck
-pnpm run build
+pnpm check
 ```
 
 The CLI process tests use `python3` and its standard-library `pty` module on
@@ -287,20 +302,28 @@ procedure, see [Development reset](dev-reset.md). `pnpm dev:reset` inspects the
 recorded development target by default; implementation rehearsals must explicitly
 use `--target local`. Reset execution also requires `--expect <reviewed inspect manifest>`;
 remove the target's `UPLOADTHING_TOKEN` and set cleanup to exactly `false` first,
-using the reset tool's env commands. This does not change the Ticket CLI's flags or JSON contract.
+using the reset tool's env commands. After clearing, the reset bootstraps the
+Owner again and verifies this CLI's login/whoami/list/get/logout with that fresh
+Owner session; a run that stops after clearing continues with `pnpm dev:reset resume`.
+This does not change the Ticket CLI's flags or JSON contract.
 
-The implementation target is the anonymous deployment recorded in this checkout’s `.convex/local/default/config.json` (normally `anonymous:anonymous-agent`). The main checkout uses `http://127.0.0.1:3212`; agent worktrees use their assigned port block.
-The wrapper preserves `.env.local`, which still selects shared development for
-ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
-by these fixtures. Do not run bare Convex commands or edit either environment
+The implementation target is this checkout's disposable anonymous backend. Run
+`pnpm agent:setup` in a new worktree to install dependencies and initialize its
+local backend; use the URLs it prints. Ports are assigned per checkout in
+`.env.worktree`, so do not assume the main checkout's default ports or edit that
+file manually.
+The wrapper preserves `.env.local`; its saved deployment can differ from the
+local backend. `pnpm dev` sets local URLs for the web and API processes, and
+`pnpm dev:convex` pushes only to the local backend. No shared deployment or
+provider resources are changed by these fixtures. Do not run bare Convex commands or edit either environment
 file manually. The local wrapper accepts only `dev`, `run`, `env`, `import`,
 `export`, `data`, `codegen` and `--help`; no arguments defaults to a local push.
 
 ```bash
 pnpm convex:local
 pnpm convex:local env set LOCAL_FIXTURES_ENABLED true
-pnpm convex:local env set APP_PASSWORD 'LocalStaff123!'
-pnpm convex:local env set CUSTOMER_PASSWORD_PEPPER local-only-fixture-pepper
+pnpm convex:local env set IDENTITY_SENDER local
+pnpm convex:local env set IDENTITY_CODE_KEY local-only-identity-code-key-0123456789abcdef
 pnpm convex:local env set UPLOAD_CALLBACK_SECRET local-only-callback-fixture
 pnpm convex:local env remove MEDIA_CLEANUP_ENABLED
 pnpm convex:local env list
@@ -313,11 +336,14 @@ pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/
 ```
 
 The internal seed requires explicit fixture opt-in and a loopback deployment URL, and is repeatable. It creates Projects `POS` and `APP`,
-customers `alice@local.test` and `bob@local.test` (password `LocalCustomer123!`),
-POS memberships, explicit-role sessions and three text-only Tickets through the
-Ticket domain. Each seed run returns fresh random tokens in `sessions` (staff, Alice, Bob order)
-for tests and smoke clients; Ticket rows are reused. The staff
-password remains the configured global staff sign-in mechanism.
+the Owner `owner@local.test` and Staff `staff@local.test` (local test provider in
+place of Google), customers `alice` and `bob` (password `local customer passphrase`,
+real username and password components), POS memberships and three text-only
+Tickets through the Ticket domain. Each run mints fresh admitted Convex Auth
+sessions: `sessions` holds their session IDs and `accessTokens` their one-hour
+local access tokens (staff, Alice, Bob order) for tests and smoke clients; Ticket
+rows are reused. `pnpm agent:setup` gives the local backend inert Google
+placeholders; Google sign-in itself is never available locally.
 
 The opt-in `largeDataset` fixture adds 300 text-only Tickets across POS and APP
 in bounded batches through Ticket domain commands. It grants both fixture customers
@@ -332,9 +358,6 @@ active counts rather than assuming an empty backend.
 It also checks reference-shaped printer text and two Thai examples against the
 real tokenizer. Thai token boundaries do not always match words: `ชำระเงิน` does
 not match inside the fixture's `เมื่อกดปุ่มชำระเงิน`, while the longer phrase does.
-The CLI consumes staff-only `tickets:pageTicketDetails` pages (at most 50 Tickets
-per page), preserving full descriptions and the existing JSON shape without a
-separate detail query for every Ticket.
 The backend smoke also creates a fresh Project without customer membership for
 its access-denial check; APP membership may already exist after the large seed.
 All three smokes can be repeated in any order on the same local data.
@@ -383,9 +406,25 @@ credentials are rejected; sign in again to write the current encoded format.
 Local media cleanup scheduling now uses durable jobs: abandoned intents are
 claimed every five minutes, and Tickets archived for at least 30 days are
 claimed hourly. Purging blocks restore, retains media reservations through
-failure and removes the Ticket only after verified deletion. Audit history is
-then removed in batches of at most 100 entries per table. Shared development
-and production have not been changed.
+failure and removes the Ticket only after verified deletion. Legacy finalization
+then removes the Ticket's events, messages, routing suggestions and customer and
+staff inbox items, and strips routing request receipts in indexed batches of at
+most 100 entries per table. Account and Project inbox preferences are retained.
+The purge completes after all these batches drain. Named-pilot settings or an
+installed pilot release block legacy finalization, including queued batches.
+
+Routing requests that produced a suggestion and those that returned manual
+routing both leave permanent tombstones with the request source, caller, request
+ID, immutable input digest and `unavailable` outcome. They discard the Ticket,
+Project and suggestion references and the Ticket and policy revisions. A replay
+against the purged Ticket returns `TICKET_UNAVAILABLE`. The same caller reusing
+the routing request ID with different input on an accessible Ticket receives
+`REQUEST_ID_CONFLICT`. Ticket creation and attachment receipts keep their
+existing tombstone policy.
+
+Purges already completed before this change need separate, scoped reconciliation
+if inbox rows or routing requests remain. Recovery resumes in-progress jobs.
+
 The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates job execution,
 recovery and new purge claims; P8 enables it last, after configuration and smoke
 checks. Cancellation, rejected callbacks and expiry always create pending jobs

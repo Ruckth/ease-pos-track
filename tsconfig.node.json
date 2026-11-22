@@ -1,10 +1,12 @@
 {
   "compilerOptions": {
     "composite": true,
+    "target": "ES2022",
     "tsBuildInfoFile": "./node_modules/.cache/tsc/node.tsbuildinfo",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "customConditions": ["convex-auth-internal-types"],
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "noEmit": true,

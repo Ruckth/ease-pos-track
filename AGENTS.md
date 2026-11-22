@@ -15,7 +15,10 @@ Local seed and smoke instructions are in [docs/ticket-cli.md](docs/ticket-cli.md
 P8 reset preparation/rehearsal is documented in [docs/dev-reset.md](docs/dev-reset.md).
 `pnpm dev:reset` defaults to read-only inspection of the recorded development
 identity; use `--target local` during implementation. Execution needs the exact
-`--confirm` identity and `--expect <reviewed inspect manifest>`. The local wrapper
+`--confirm` identity and `--expect <reviewed inspect manifest>`. Clearing erases
+every session, so the reset bootstraps the Owner afterwards (the local rehearsal
+uses the loopback fixture Owner); a run stopped after clearing continues with
+`resume --confirm <identity> --expect <run manifest>`. The local wrapper
 has no remote mode and accepts only `dev`, `run`, `env`, `import`, `export`,
 `data`, `codegen` and `--help` (no arguments defaults to a local push).
 Only an explicitly authorized development cutover may use the reset tool's isolated development runner and env commands. Remove the target's
@@ -24,6 +27,8 @@ Keep every unresolved manifest, stop old writers/callbacks/schedulers first, and
 enable cleanup last.
 Every Convex registration uses a policy constructor from `convex/functions.ts`;
 resource ownership and Project access belong in domain operations.
+Identity (Convex Auth 2.0.0 sessions, admission, staff and customer IDs for
+peers) is documented in [docs/identity.md](docs/identity.md).
 
 The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates media job execution
 and purge claims. Leave it disabled until P8 cutover validation is complete;
@@ -44,6 +49,18 @@ Restoring a blocked archived Ticket supersedes its failed purge job and clears
 the block; re-archiving starts a fresh 30-day window. Purge requeue requires
 confirmation in Operations health.
 Local smoke flag setup is in docs/ticket-cli.md.
+
+## Ticket routing
+
+The zero-user launch uses manual assignment, Project rosters and availability,
+holds, staff-reviewed local rules, and in-app assignment and intake alerts.
+Reuse the routing domain's Project and named-staff checks and its shared manual
+assignment operation. Roster membership grants no Project access.
+
+Keep external T3 routing paused. The deferred broker, promotion and evaluation design is documented
+in [the routing plan](docs/architecture/t3code-phase1/04-responsibilities-and-delegation.html). Revisit it after an approved dataset meets the criteria
+in [docs/ticket-routing.md](docs/ticket-routing.md). The active app has no routing
+provider transport or promotion path.
 
 ## Creating a Ticket
 
@@ -129,5 +146,7 @@ Chromium with fake camera devices using the installed Playwright package. Browse
 tests block provider upload traffic and use fake files/recorded metadata for draft
 lifecycle checks; they never upload or delete provider files. Install Chromium
 with `pnpm exec playwright install chromium` if it is not already available.
-`pnpm test` remains browser-independent. Do not run another local Convex wrapper
+`pnpm test` remains browser-independent. Failure evidence, accessibility
+scans, the visual pilot, seeded draft exploration (`pnpm test:explore`) and the
+advisory browser CI rollout are in [docs/browser-verification.md](docs/browser-verification.md). Do not run another local Convex wrapper
 while the browser check owns its local backend.

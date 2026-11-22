@@ -1,8 +1,9 @@
+import type { TicketRoutingClassification } from "../../shared/ticket-routing";
 /**
  * The single submit pipeline for new tickets, shared by the staff composer and
- * the customer three-step flow.
+ * the customer composer.
  *
- * Order matters: an upload intent is claimed first (idempotently), files upload
+ * For media-enabled deployments, an intent is claimed first (idempotently), files upload
  * against that intent, and only then is the Ticket created. Unknown writes are
  * reconciled with the same input; only definitive rejections queue cleanup.
  */
@@ -12,7 +13,7 @@ import type { PendingMedia } from "@/lib/types";
 import { pendingAnnotationsForCreate, type CreateAnnotationInput, type PendingAnnotation } from "@/lib/pending-annotations";
 import type { MediaItem } from "@/lib/types";
 import { readUploadCancelResponse } from "@/lib/upload-cancel";
-import { uploadFiles } from "@/uploadthing";
+import type { uploadFiles } from "@/uploadthing";
 import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 import { fileSignature } from "../../shared/media-policy";
 
@@ -26,6 +27,7 @@ type UploadIntentHandle = {
 export type TicketDraft = {
   title: string;
   description: string;
+  routingClassification?: TicketRoutingClassification;
   items: PendingMedia[];
   annotations: PendingAnnotation[];
   /** Stable per-draft key so a retried submit reuses the same intent. */
@@ -33,21 +35,22 @@ export type TicketDraft = {
 };
 
 export type SubmitTicketDeps = {
+  /** The Convex Auth access token, sent only to the upload server as a bearer. */
   token: string;
+  mediaEnabled?: boolean;
   createUploadIntent: (args: {
-    token: string;
     idempotencyKey: string;
     files: Array<{ name: string; size: number; type: string }>;
   }) => Promise<UploadIntentHandle>;
   createTicket: (args: {
-    token: string;
     requestId: string;
     title: string;
     description: string;
+  routingClassification?: TicketRoutingClassification;
     media: MediaItem[];
     annotations: CreateAnnotationInput[];
-    uploadIntentId: Id<"uploadIntents">;
-    uploadIntentSecret: string;
+    uploadIntentId?: Id<"uploadIntents">;
+    uploadIntentSecret?: string;
   }) => Promise<unknown>;
   /** Injectable at the upload boundary so the zero-media path is regression tested. */
   uploadMedia?: typeof uploadFiles;
@@ -76,8 +79,18 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
   let activeIntent: { intentId: Id<"uploadIntents">; secret: string } | null = null;
   let creating = false;
   try {
+    if (deps.mediaEnabled === false) {
+      if (draft.items.length || draft.annotations.length) throw new Error("PILOT_MEDIA_DISABLED");
+      return await reconcileUploadWrite(() => {
+        deps.signal?.throwIfAborted();
+        return deps.createTicket({
+          requestId: draft.idempotencyKey, title: draft.title,
+          description: draft.description, media: [], annotations: [],
+          ...(draft.routingClassification ? { routingClassification: draft.routingClassification } : {}),
+        });
+      });
+    }
     const intent = await reconcileUploadWrite(() => deps.createUploadIntent({
-      token: deps.token,
       idempotencyKey: draft.idempotencyKey,
       files: draft.items.map((item) => ({
         name: item.file.name,
@@ -96,7 +109,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     });
     const missing = draft.items.flatMap((item, index) => media[index] ? [] : [{ file: item.file, index }]);
     const uploads = intent.ticketId || missing.length === 0 ? []
-      : await (deps.uploadMedia ?? uploadFiles)("ticketMedia", {
+      : await (deps.uploadMedia ?? (await import("@/uploadthing")).uploadFiles)("ticketMedia", {
           files: missing.map(item => item.file),
           input: { intentId: intent.intentId, secret: intent.secret },
           headers: { authorization: `Bearer ${deps.token}` },
@@ -119,17 +132,18 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     if (resolved.length !== draft.items.length) throw new Error("UPLOAD_INCOMPLETE");
     deps.signal?.throwIfAborted();
     creating = true;
-    await reconcileUploadWrite(() => deps.createTicket({
-      token: deps.token,
+    const created = await reconcileUploadWrite(() => deps.createTicket({
       requestId: draft.idempotencyKey,
       title: draft.title,
       description: draft.description,
+      ...(draft.routingClassification ? { routingClassification: draft.routingClassification } : {}),
       media: resolved,
       annotations: pendingAnnotationsForCreate(draft.items, draft.annotations),
       uploadIntentId: intent.intentId,
       uploadIntentSecret: intent.secret,
     }));
     activeIntent = null;
+    return created;
   } catch (error) {
     const abortedBeforeCreate = deps.signal?.aborted && !creating;
     const rejected = definitiveUploadRejection(error);

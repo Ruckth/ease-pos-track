@@ -1,391 +1,226 @@
-import { getRouteApi } from "@tanstack/react-router";
-import type { CustomerTicketFilter } from "@/app/workspace-search";
+import { TicketInbox } from "./ticket-inbox";
 import { errorCode } from "../../../shared/errors";
+import { DiscardTicketDraft } from "./discard-ticket-draft";
+import { ProductWordmark } from "@/components/product-wordmark";
+import { queueNeighbors } from "@/lib/staff-ticket-queue";
 import { LanguageSelector } from "@/components/auth-screens";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
 import { statusMeta } from "@/components/ticket-status";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
-import { CustomerTicketWizard } from "@/features/tickets/customer-ticket-wizard";
+import { Input } from "@/components/ui/input";
+import { CustomerTicketWizard } from "./customer-ticket-wizard";
 import { useI18n } from "@/lib/i18n";
 import { formatTicketNumber } from "../../../shared/ticket-numbers";
-import { ticketProgress } from "@/lib/ticket-ui";
-import { type ProjectSummary, type TicketStatus } from "@/lib/types";
+import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import {
-  ArrowRight,
-  CheckCircle2,
-  CircleDot,
-  Clock3,
-  Headphones,
-  Images,
-  Loader2,
-  LogOut,
-  MapPin,
-  Plus,
-  Sparkles,
-  UserRound
-} from "lucide-react";
-import { Component, useCallback, useMemo, type ReactNode } from "react";
-import type { TicketSummary as TicketSummaryRow } from "../../../shared/ticket-contracts";
-import { useCustomerTickets } from "./adapter";
+import { Images, Loader2, LogOut, MapPin, Plus, UserRound } from "lucide-react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
+import type { TicketSummary } from "../../../shared/ticket-contracts";
+import { useCustomerTickets, useWorkspaceTicket } from "./adapter";
+import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
+import { customerQueue, customerQueueCounts } from "./customer-queue";
 import { useComposer } from "./use-composer";
+import { useWorkspaceMenu } from "./use-workspace-menu";
+import { CustomerAccountDialog } from "@/components/account-dialogs";
+import { useWorkspaceNavigation } from "./use-workspace-navigation";
 
-const customerRoute = getRouteApi("/customer");
-
-function ticketMatchesFilter(status: TicketStatus, filter: CustomerTicketFilter) {
-  if (filter === "all") return true;
-  if (filter === "active") return status !== "waiting" && status !== "done";
-  return status === filter;
-}
-
-/**
- * The customer portal: only the tickets this account owns, and only the actions
- * a customer is allowed to perform — create, view, edit, annotate, delete. Status
- * changes, archive restore, and the board itself stay staff-only, enforced on the
- * server as well as hidden here.
- */
-export function CustomerPortal({
-  token,
-  email,
-  onLogout,
-}: {
-  token: string;
-  email: string | null;
-  onLogout: () => Promise<void>;
+export function CustomerPortal({ viewer, onLogout }: {
+  viewer: { username: string; displayName: string; needsRecoveryCode: boolean }; onLogout: () => Promise<void>;
 }) {
+  const [accountOpen, setAccountOpen] = useState(false);
   const { language, setLanguage, t } = useI18n();
-  const navigate = customerRoute.useNavigate();
-  const { project: requestedProject, filter, ticket } = customerRoute.useSearch();
-  const navigateProject = useCallback((key: string, replace: boolean) => {
-    void navigate({
-      search: (current) => ({ ...current, project: key, ticket: replace ? current.ticket : undefined }),
-      replace,
-    });
-  }, [navigate]);
-  const { projects, current: project, select: selectProject } = useCurrentProject(token, requestedProject, navigateProject);
+  const navigation = useWorkspaceNavigation("customer");
+  const { projects, current: project, select: selectProject } = useCurrentProject(navigation.project, navigation.selectProject);
   const composer = useComposer(project, onLogout);
-
-  function selectTicket(id: Id<"tickets">) {
-    void navigate({ search: (current) => ({ ...current, ticket: id }), resetScroll: false });
-  }
-
-  function closeTicket() {
-    void navigate({
-      search: (current) => current.ticket === ticket ? { ...current, ticket: undefined } : current,
-      replace: true, resetScroll: false,
+  const toolsMenu = useWorkspaceMenu();
+  const projectId = project?._id;
+  const ticket = project && (!navigation.project || navigation.project === project.key) ? navigation.ticket : null;
+  const selected = useWorkspaceTicket(ticket, projectId);
+  const selectedId = selected?._id ?? null;
+  const [visible, setVisible] = useState<{ projectId?: Id<"projects">; ids: Id<"tickets">[] }>({ ids: [] });
+  const visibleIds = visible.projectId === projectId ? visible.ids : [];
+  const setVisibleIds = useCallback((ids: Id<"tickets">[]) => setVisible({ projectId, ids }), [projectId]);
+  const previousSelection = useRef(ticket);
+  const focusTicket = useRef<Id<"tickets"> | null>(null);
+  if (selectedId) focusTicket.current = selectedId;
+  const scrollOrigin = useRef<number | null>(null);
+  const activeProjectBeforeUpdate = useRef(projectId);
+  useEffect(() => {
+    if (projects === undefined) return;
+    const previous = activeProjectBeforeUpdate.current;
+    activeProjectBeforeUpdate.current = projectId;
+    if (previous && !projects.some(member => member._id === previous)) toast.info(t("projectMissing"));
+  }, [projects, projectId, t]);
+  useEffect(() => {
+    const previous = previousSelection.current;
+    previousSelection.current = ticket;
+    if (!previous || ticket) return;
+    const frame = requestAnimationFrame(() => {
+      if (scrollOrigin.current !== null) window.scrollTo({ top: scrollOrigin.current, behavior: "instant" });
+      scrollOrigin.current = null;
+      // Filtering can close detail while focus remains in the search/select.
+      // Browser Back removes the focused panel; recover that lost focus only.
+      if (document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement) return;
+      const row = focusTicket.current && document.querySelector<HTMLElement>(`button[data-ticket-id="${CSS.escape(focusTicket.current)}"]`);
+      const target = row?.getClientRects().length ? row : document.getElementById("customer-tickets-heading");
+      target?.focus({ preventScroll: true });
     });
+    return () => cancelAnimationFrame(frame);
+  }, [ticket]);
+  const sequence = useRef<Id<"tickets">[]>([]);
+  const previousProject = useRef(project?._id);
+  if (previousProject.current !== project?._id) {
+    previousProject.current = project?._id;
+    sequence.current = [];
   }
-
-  function setFilter(value: CustomerTicketFilter) {
-    void navigate({
-      search: (current) => ({ ...current, filter: value === "all" ? undefined : value }),
-      replace: true, resetScroll: false,
-    });
+  function openTicket(id: Id<"tickets">) {
+    sequence.current = visibleIds;
+    scrollOrigin.current = window.scrollY;
+    navigation.openTicket(id);
   }
+  if (selectedId && sequence.current.length === 0 && visibleIds.includes(selectedId)) sequence.current = visibleIds;
+  const { previous: previousId, next: nextId } = queueNeighbors(selectedId, visibleIds, sequence.current);
+  const foreignDraft = composer.hasDraft && composer.project?._id !== project?._id;
 
-  return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)/0.8),transparent_32rem)]">
-      <header className="sticky top-0 z-20 border-b bg-card/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <Headphones className="size-5" aria-hidden="true" />
+  return <main className="min-h-screen">
+    <header className="border-b bg-card/90">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <ProductWordmark />
+        <div className="flex flex-wrap items-center gap-2 [&>select]:min-h-11 [&>span]:min-h-11">
+          {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
+          {project && <TicketInbox role="customer" key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
+          <details {...toolsMenu.props} className="relative">
+            <summary className="flex min-h-11 cursor-pointer items-center rounded-md border px-3 text-sm font-medium">{t("customerQueueMore")}</summary>
+            <div className="absolute right-0 z-30 mt-1 grid min-w-56 gap-3 rounded-lg border bg-popover p-3 shadow-lg">
+              <p className="break-all text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
+              <Button variant="outline" className="min-h-11" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
+              <div className="[&_button]:min-h-11"><LanguageSelector language={language} onChange={setLanguage} /></div>
+              <Button variant="outline" className="min-h-11" onClick={() => void composer.signOut()}><LogOut />{t("signOut")}</Button>
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold leading-5">{t("appName")}</p>
-              <p className="truncate text-xs leading-4 text-muted-foreground">{t("customerPortal")}</p>
-            </div>
-          </div>
-          <div className="flex min-w-0 items-center gap-2">
-            {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
-            <LanguageSelector language={language} onChange={setLanguage} />
-            <Button variant="ghost" size="icon" onClick={() => void composer.signOut()} aria-label={t("signOut")}>
-              <LogOut />
-            </Button>
-          </div>
+          </details>
         </div>
-      </header>
-
-      <div className="mx-auto max-w-6xl px-4 pb-12 pt-6 sm:px-6 sm:pt-8">
-        <section className="relative overflow-hidden rounded-2xl border border-primary/15 bg-primary px-5 py-7 text-primary-foreground shadow-lg shadow-primary/10 sm:px-8 sm:py-9">
-          <div className="pointer-events-none absolute -right-16 -top-24 size-64 rounded-full bg-white/10 blur-2xl" />
-          <div className="pointer-events-none absolute -bottom-28 right-28 size-56 rounded-full bg-cyan-300/15 blur-2xl" />
-          <div className="relative flex flex-col gap-7 md:flex-row md:items-end md:justify-between">
-            <div className="max-w-2xl">
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium text-white/90">
-                <Sparkles className="size-3.5" aria-hidden="true" />
-                {t("customerSupport")}
-              </div>
-              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{t("customerPortalTitle")}</h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-white/75 sm:text-base">{t("customerPortalIntro")}</p>
-              {email ? (
-                <p className="mt-5 flex items-center gap-2 text-xs text-white/70 sm:text-sm">
-                  <UserRound className="size-4" aria-hidden="true" />
-                  {t("signedInAs", { email })}
-                </p>
-              ) : null}
-            </div>
-            <Button
-              type="button"
-              size="lg"
-              variant="secondary"
-              className="w-full shrink-0 rounded-xl bg-white text-primary shadow-md hover:bg-white/90 md:w-auto"
-              aria-expanded={composer.open}
-              disabled={!project && !composer.owner}
-              onClick={composer.show}
-            >
-              <Plus className="size-5" />
-              {t("newTicket")}
-            </Button>
-          </div>
-        </section>
-
-        <ProjectTicketsBoundary key={project?._id ?? "none"}>
-          <CustomerTickets token={token} project={project} filter={filter ?? "all"} setFilter={setFilter} onNewTicket={composer.show} onSelect={selectTicket} />
-        </ProjectTicketsBoundary>
       </div>
+    </header>
+    <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} hasRecoveryCode={!viewer.needsRecoveryCode} />
+    <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
+      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+        <span>{t("recoveryCodeNeeded")}</span>
+        <Button className="min-h-11" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
+      </div> : null}
+      <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
+        <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" tabIndex={-1} className="text-2xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
+        <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
+        <Button className="min-h-11" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
+          <Plus />{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
+        </Button></div>
+      </div>
+      {foreignDraft ? <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
+      <div className={cn("grid items-start gap-4", ticket && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
+        <ProjectTicketsBoundary key={project?._id ?? "none"}>
+          <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
+            ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
+            onFilter={navigation.setFilter} onQuery={navigation.setQuery} onShowAll={() => navigation.setFilter("all", true)} onVisibleIds={setVisibleIds} />
+        </ProjectTicketsBoundary>
+        {project ? <CustomerTicketDialog ticket={selected} ticketId={ticket} onClose={navigation.closeTicket}
+          inResults={selectedId && visible.projectId === projectId ? visibleIds.includes(selectedId) : undefined}
+          inline initialSection={navigation.section} onPrevious={previousId ? () => navigation.changeTicket(previousId) : undefined}
+          onNext={nextId ? () => navigation.changeTicket(nextId) : undefined} /> : null}
+      </div>
+    </div>
+    <Dialog open={composer.open} mobileFullScreen initialFocus={() => document.getElementById("customer-ticket-title")} onOpenChange={composer.setOpen}
+      title={t("newTicket")} description={composer.project ? `${composer.project.name} (${composer.project.key})` : t("customerPortalSubtitle")}>
 
-      <Dialog
-        open={composer.open}
-        initialFocus={() => document.getElementById("customer-ticket-title")}
-        onOpenChange={composer.setOpen}
-        title={t("newTicket")}
-        description={composer.project ? `${composer.project.name} (${composer.project.key})` : t("customerPortalSubtitle")}
-      >
-        {composer.owner ? <Button type="button" variant="outline" disabled={composer.busy} onClick={composer.discard}>{t("discardDraft")}</Button> : null}
-        {composer.project ? (
-          <CustomerTicketWizard
-            key={composer.project._id}
-            token={token}
-            draftOwner={composer.owner!}
-            active={composer.open}
-            onSubmitted={composer.complete}
-          />
-        ) : null}
-      </Dialog>
-
-      <CustomerTicketDialog
-        key={project?._id}
-        token={token}
-        ticketId={ticket}
-        projectId={project === null ? null : project?._id}
-        onClose={closeTicket}
-      />
-    </main>
-  );
+      {composer.project ? <CustomerTicketWizard key={composer.project._id} draftOwner={composer.owner!}
+        active={composer.open} onSubmitted={id => {
+          const createdProject = composer.project;
+          composer.complete();
+          if (id) {
+            sequence.current = createdProject?._id === projectId ? [id, ...visibleIds.filter(item => item !== id)] : [];
+            navigation.openTicket(id, undefined, createdProject && createdProject._id !== project?._id ? { key: createdProject.key } : undefined);
+          }
+        }} /> : null}
+      {composer.hasDraft && <DiscardTicketDraft busy={composer.busy} onDiscard={composer.discard} />}
+    </Dialog>
+  </main>;
 }
 
-/** Access can disappear before the Project subscription changes. Keep the draft
- * owner outside this boundary so a stale list subscription cannot dispose it. */
+/** Keep draft ownership outside a denied Project subscription. */
 class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied: boolean }> {
   state = { denied: false };
   static getDerivedStateFromError(error: unknown) {
     if (errorCode(error) !== "PROJECT_NOT_FOUND") throw error;
     return { denied: true };
   }
-  render() { return this.state.denied ? <NoProjects /> : this.props.children; }
+  render() { return this.state.denied ? <ProjectUnavailable /> : this.props.children; }
 }
 
-function CustomerTickets({ token, project, filter, setFilter, onNewTicket, onSelect }: {
-  token: string;
-  project: ProjectSummary | null | undefined;
-  filter: CustomerTicketFilter;
-  setFilter: (filter: CustomerTicketFilter) => void;
-  onNewTicket: () => void;
-  onSelect: (id: Id<"tickets">) => void;
+function ProjectUnavailable() {
+  const { t } = useI18n();
+  return <p role="alert" className="rounded-lg border p-4 text-sm">{t("projectMissing")}</p>;
+}
+
+function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onQuery, onShowAll, onVisibleIds }: {
+  project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
+  selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string) => void; onQuery: (query: string) => void;
+  onShowAll: () => void;
+  onVisibleIds: (ids: Id<"tickets">[]) => void;
 }) {
   const { t } = useI18n();
-  const page = useCustomerTickets(token, project?._id);
+  const page = useCustomerTickets(project?._id);
   const tickets = page.results;
-
-  const ticketCounts = useMemo(() => {
-    const rows = tickets ?? [];
-    return {
-      all: rows.length,
-      active: rows.filter((ticket) => ticketMatchesFilter(ticket.status, "active")).length,
-      waiting: rows.filter((ticket) => ticket.status === "waiting").length,
-      done: rows.filter((ticket) => ticket.status === "done").length,
-    };
-  }, [tickets]);
-  const visibleTickets = useMemo(
-    () => (tickets ?? []).filter((ticket) => ticketMatchesFilter(ticket.status, filter)),
-    [filter, tickets],
-  );
-  const filters: Array<{ value: CustomerTicketFilter; label: string; count: number }> = [
-    { value: "all", label: t("allTickets"), count: ticketCounts.all },
-    { value: "active", label: t("activeTickets"), count: ticketCounts.active },
-    { value: "waiting", label: t("awaitingReply"), count: ticketCounts.waiting },
-    { value: "done", label: t("resolvedTickets"), count: ticketCounts.done },
+  const counts = useMemo(() => customerQueueCounts(tickets), [tickets]);
+  const visibleTickets = useMemo(() => customerQueue(tickets, filter, query), [tickets, filter, query]);
+  useEffect(() => { onVisibleIds(visibleTickets.map(item => item._id)); }, [visibleTickets, onVisibleIds]);
+  const options = [
+    { value: "active", label: t("customerQueueAllActive"), count: counts.active },
+    { value: "waiting", label: t("customerQueueWaiting"), count: counts.waiting },
+    { value: "done", label: t("resolvedTickets"), count: counts.done },
+    { value: "all", label: t("allTickets"), count: counts.all },
   ];
-
-  return (
-    <>
-        <p className="mt-4 text-sm text-muted-foreground">{t("loadedCountsHint")}</p>
-        <section aria-label={t("ticketSummary")} className="mt-5 grid grid-cols-3 gap-2 sm:gap-4">
-          <TicketSummary icon={CircleDot} label={t("activeTickets")} value={ticketCounts.active} tone="text-sky-700 bg-sky-50" />
-          <TicketSummary icon={Clock3} label={t("awaitingReply")} mobileLabel={t("awaitingReplyShort")} value={ticketCounts.waiting} tone="text-violet-700 bg-violet-50" />
-          <TicketSummary icon={CheckCircle2} label={t("resolvedTickets")} value={ticketCounts.done} tone="text-emerald-700 bg-emerald-50" />
-        </section>
-
-        <section className="mt-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight">{t("yourTickets")}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {project === null ? t("noProjectsTitle") : t("loadedTickets", { count: tickets.length })}
-              </p>
-            </div>
-            <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border bg-card p-1 shadow-sm" aria-label={t("filterTickets")}>
-              {filters.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setFilter(item.value)}
-                  aria-pressed={filter === item.value}
-                  className={cn(
-                    "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    filter === item.value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  {item.label}
-                  <span className={cn("rounded-full px-1.5 py-0.5 text-[11px] tabular-nums", filter === item.value ? "bg-white/20" : "bg-muted text-foreground")}>
-                    {item.count}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <div className="mt-4">
-        {project === null ? (
-          <NoProjects />
-        ) : page.status === "LoadingFirstPage" ? (
-          <div className="grid min-h-72 place-items-center rounded-2xl border bg-card shadow-sm">
-            <div className="space-y-3 text-center text-sm text-muted-foreground">
-              <Loader2 className="mx-auto size-7 animate-spin" />
-              <p>{t("syncingTickets")}</p>
-            </div>
-          </div>
-        ) : tickets.length === 0 ? (
-          <div className="grid min-h-72 place-items-center rounded-2xl border border-dashed bg-card px-6 text-center shadow-sm">
-            <div className="max-w-sm space-y-3">
-              <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-secondary text-secondary-foreground">
-                <Sparkles className="size-5" />
-              </div>
-              <p className="text-lg font-semibold">{t("myTicketsEmpty")}</p>
-              <p className="text-sm leading-6 text-muted-foreground">{t("myTicketsEmptyHint")}</p>
-              <Button className="mt-1 rounded-xl" type="button" onClick={onNewTicket}>
-                <Plus /> {t("newTicket")}
-              </Button>
-            </div>
-          </div>
-        ) : visibleTickets.length === 0 ? (
-          <div className="grid min-h-48 place-items-center rounded-2xl border border-dashed bg-card px-6 text-center">
-            <div>
-              <p className="font-semibold">{t("noFilteredTickets")}</p>
-              <Button type="button" variant="ghost" className="mt-2" onClick={() => setFilter("all")}>{t("showAllTickets")}</Button>
-            </div>
-          </div>
-        ) : (
-          <ul className="grid gap-3 lg:grid-cols-2">
-            {visibleTickets.map((ticket) => (
-              <li key={ticket._id}>
-                <CustomerTicketCard item={ticket} onSelect={onSelect} />
-              </li>
-            ))}
-          </ul>
-        )}
-        </div>
-        {page.status !== "Exhausted" && project ? <Button className="mt-4" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
-    </>
-  );
-}
-
-function TicketSummary({
-  icon: Icon,
-  label,
-  mobileLabel,
-  value,
-  tone,
-}: {
-  icon: typeof CircleDot;
-  label: string;
-  mobileLabel?: string;
-  value: number;
-  tone: string;
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3 shadow-sm sm:gap-3 sm:p-4">
-      <div className={cn("hidden size-10 shrink-0 place-items-center rounded-xl sm:grid", tone)}>
-        <Icon className="size-5" aria-hidden="true" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-xl font-semibold tabular-nums sm:text-2xl">{value}</p>
-        <p className="truncate text-[11px] text-muted-foreground sm:text-sm">
-          {mobileLabel ? <><span className="sm:hidden">{mobileLabel}</span><span className="hidden sm:inline">{label}</span></> : label}
-        </p>
-      </div>
+  const loaded = page.status !== "LoadingFirstPage";
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    if (!loaded || !project) return;
+    const timer = window.setTimeout(() => setAnnouncement(t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })), 250);
+    return () => window.clearTimeout(timer);
+  }, [loaded, project, visibleTickets.length, tickets.length, t]);
+  if (project === null) return <NoProjects />;
+  if (!project || !loaded) return <div className="grid min-h-48 place-items-center rounded-lg border" role="status"><Loader2 className="size-6 animate-spin" /><span className="sr-only">{t("syncingTickets")}</span></div>;
+  return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
+    <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
+    <div className="mb-3 flex flex-wrap items-end gap-3">
+      <label className="min-w-40 flex-1 space-y-1 text-sm"><span>{t("customerQueueSearch")}</span><Input className="min-h-11" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} /></label>
+      <label className="grid gap-1 text-sm"><span>{t("ticketStatus")}</span><select className="min-h-11 max-w-full rounded-md border bg-background px-3" value={filter} onChange={event => onFilter(event.target.value)}>
+        {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
+      </select></label>
     </div>
-  );
+    <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p>
+    {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="space-y-3 rounded-lg border border-dashed p-6"><h2 className="font-semibold">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
+      : <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="flex flex-wrap justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
+        {visibleTickets.length ? <ul className="divide-y">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+          : <div className="space-y-3 p-5"><p>{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
+      </div>}
+    {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
+  </section>;
 }
 
-const statusHintKeys: Record<TicketStatus, "statusNextNew" | "statusNextAcknowledged" | "statusNextInProgress" | "statusNextWaiting" | "statusNextDone"> = {
-  new: "statusNextNew",
-  acknowledged: "statusNextAcknowledged",
-  in_progress: "statusNextInProgress",
-  waiting: "statusNextWaiting",
-  done: "statusNextDone",
-};
-
-function CustomerTicketCard({ item, onSelect }: { item: TicketSummaryRow; onSelect: (id: Id<"tickets">) => void }) {
+function CustomerTicketRow({ item, selected, onSelect }: { item: TicketSummary; selected: boolean; onSelect: (id: Id<"tickets">) => void }) {
   const { t, formatDate } = useI18n();
   const meta = statusMeta(item.status);
-  const StatusIcon = meta.icon;
-  const progress = ticketProgress(item.status);
-  const pinCount = item.annotationCount;
-  const ticketLabel = formatTicketNumber(item.ticketNumber, item.projectKey);
-
-  return (
-    <article className={cn("group relative overflow-hidden rounded-2xl border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md", item.status === "waiting" && "border-violet-200 bg-violet-50/20")}>
-      <button
-        type="button"
-        className="absolute inset-0 z-10 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        aria-label={t("viewTicket", { ticket: ticketLabel })}
-        onClick={() => onSelect(item._id)}
-      />
-      <div className="flex min-h-52 flex-col sm:min-h-48 sm:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className={cn("gap-1.5 rounded-full border px-2.5 py-1", meta.tone)}>
-              <StatusIcon className="size-3.5" aria-hidden="true" />
-              {t(meta.labelKey)}
-            </Badge>
-            <span className="font-mono text-xs font-semibold text-muted-foreground">{ticketLabel}</span>
-            <span className="text-xs text-muted-foreground">· {formatDate(item.createdAt)}</span>
-          </div>
-          <h3 className="mt-3 line-clamp-2 text-base font-semibold leading-6 group-hover:text-primary">{item.title}</h3>
-          <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">{item.excerpt || t("noDescription")}</p>
-
-          <div className="mt-auto pt-4">
-            <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-              <span className={cn("font-medium", item.status === "waiting" ? "text-violet-700" : "text-muted-foreground")}>{t(statusHintKeys[item.status])}</span>
-              <span className="shrink-0 font-semibold tabular-nums">{progress.percent}%</span>
-            </div>
-            <Progress value={progress.percent} className="h-1.5" aria-label={t("ticketProgress", { ticket: ticketLabel, step: progress.step, total: progress.total, percent: progress.percent })} />
-            <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
-              {item.mediaCount > 0 ? <span className="flex items-center gap-1"><Images className="size-3.5" />{item.mediaCount}</span> : null}
-              {pinCount > 0 ? <span className="flex items-center gap-1"><MapPin className="size-3.5" />{pinCount}</span> : null}
-              <span className="ml-auto inline-flex items-center gap-1 font-medium text-primary">{t("openTicket")}<ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" /></span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
+  const label = formatTicketNumber(item.ticketNumber, item.projectKey);
+  return <button type="button" data-ticket-id={item._id} className={cn("flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", selected && "bg-primary/5")}
+    aria-label={[t("viewTicket", { ticket: label }), item.title, t(meta.labelKey)].join(", ")} aria-current={selected ? "true" : undefined} onClick={() => onSelect(item._id)}>
+    <span className="break-words text-sm font-semibold">{item.title}</span>
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="font-mono">{label}</span><span className={cn("font-medium", item.status === "waiting" && "text-violet-700 dark:text-violet-300")}>{item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}</span><time dateTime={new Date(item.createdAt).toISOString()}>{formatDate(item.createdAt)}</time></span>
+    {item.excerpt ? <span className="line-clamp-1 text-sm text-muted-foreground">{item.excerpt}</span> : null}
+    <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      {item.mediaCount ? <span className="inline-flex items-center gap-1"><Images className="size-3" aria-hidden="true" />{t("reviewMedia", { count: item.mediaCount })}</span> : null}
+      {item.annotationCount ? <span className="inline-flex items-center gap-1"><MapPin className="size-3" aria-hidden="true" />{t("reviewPins", { count: item.annotationCount })}</span> : null}
+    </span>
+  </button>;
 }

@@ -39,7 +39,18 @@ function bearerToken(request: Request) {
 }
 
 
-export function createUploadRouter(convex: ConvexHttpClient, callbackToken: string | undefined): OurFileRouter {
+/** A fresh client per request: the shared client never carries a user's JWT. */
+export function authenticatedClient(convex: ConvexHttpClient, accessToken: string) {
+  const client = new ConvexHttpClient(convex.url, { logger: false });
+  client.setAuth(accessToken);
+  return client;
+}
+
+export function createUploadRouter(
+  convex: ConvexHttpClient,
+  callbackToken: string | undefined,
+  forUser: (accessToken: string) => Pick<ConvexHttpClient, "query"> = accessToken => authenticatedClient(convex, accessToken),
+): OurFileRouter {
   const f = createUploadthing();
   const record = recordUploadHandler(input => convex.mutation(api.uploads.recordUploadedFile, input), callbackToken);
   return {
@@ -63,8 +74,9 @@ export function createUploadRouter(convex: ConvexHttpClient, callbackToken: stri
       if (!token) throw new UploadThingError({ code: "FORBIDDEN", message: "Sign in before uploading." });
       let valid = false;
       try {
-        valid = await convex.query(api.uploads.validateUploadIntent, {
-          token,
+        // The browser's Convex Auth access token authenticates a per-request
+        // client; the server callback credential stays separate.
+        valid = await forUser(token).query(api.uploads.validateUploadIntent, {
           callbackToken,
           intentId: input.intentId as Id<"uploadIntents">,
           secret: input.secret,

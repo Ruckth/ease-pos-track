@@ -18,12 +18,15 @@ import {
   softDeleteAnnotationRecord,
   updateAnnotationRecord,
 } from "../annotation_state";
+import { classificationInput } from "../routing_schema";
+import { validateTicketClassification } from "./routing_policy";
 import { requireCurrentVersion, validateTicketText, validateUrgencyScore } from "../../shared/ticket-state";
 import { hashTicketRequest, normalizeRequestId } from "../ticket_requests";
 import { ticketRequestFingerprintInput, ticketMediaRequestFingerprintInput } from "../../shared/ticket-contracts";
 import { commitTicketRequest, replayTicketRequest, type RequestScope } from "./requests";
 import { normalizeProjectKey } from "../../shared/ticket-numbers";
 import { isMember, requireUsableProject, resolveStaffProject } from "./projects";
+import { legacyMediaEnabled, projectInDeployment, requireLegacyMedia } from "../pilot_access";
 import { validateMediaItems } from "../../shared/media-policy";
 import { requireOwnedUploadIntent, verifyPendingUploadIntent, verifyAssetReceipts, attachIntentAssets } from "./media";
 import {
@@ -36,14 +39,19 @@ import {
  * Loads a ticket the actor may read, or null. Denied and non-existent tickets are
  * indistinguishable, so the portal cannot be used to probe for ticket ids.
  */
-async function readableTicket(
+export async function readableTicket(
   ctx: QueryCtx | MutationCtx,
   actor: Actor<Id<"customers">>,
   id: Id<"tickets">,
 ) {
   const doc = await ctx.db.get(id);
   if (!doc || doc.lifecycle === "purging" || !canReadTicket(actor, doc)) return null;
-  if (actor.role === "customer" && !await isMember(ctx, doc.projectId, actor)) return null;
+  if (!await projectInDeployment(ctx, doc.projectId)) return null;
+  if (actor.role === "customer") {
+    if (doc.lifecycle !== "active") return null;
+    const project = await ctx.db.get(doc.projectId);
+    if (!project || project.archivedAt !== undefined || !await isMember(ctx, doc.projectId, actor)) return null;
+  }
   return doc;
 }
 
@@ -75,14 +83,16 @@ function publicAnnotationEvent(event: Doc<"annotationEvents">) {
   };
 }
 
-function publicTicketEvent(event: Doc<"ticketEvents">) {
+function publicTicketEvent(event: Doc<"ticketEvents">, mediaEnabled: boolean) {
+  const state = (value: Doc<"ticketEvents">["before"]) => value && (mediaEnabled ? value
+    : { ...value, mediaCount: 0, annotationCount: 0 });
   return {
     _id: event._id,
     _creationTime: event._creationTime,
     ticketId: event.ticketId,
     action: event.action,
-    before: event.before,
-    after: event.after,
+    before: state(event.before),
+    after: state(event.after),
     sourceEventId: event.sourceEventId,
     createdAt: event.createdAt,
   };
@@ -102,7 +112,6 @@ async function requireWritableTicket(
 
 export const getTicket = queryOperation({
   args: {
-    token: v.string(),
     id: v.string(),
   },
   handler: async (ctx, args) => {
@@ -112,10 +121,21 @@ export const getTicket = queryOperation({
   },
 });
 
+/** Normalize a browser deep link before resolving it within the current Project. */
+export const getWorkspaceTicket = queryOperation({
+  args: { projectId: v.id("projects"), ticket: v.string() },
+  handler: async (ctx, args) => {
+    const row = await readableTicketInput(ctx, ctx.actor, args.ticket);
+    if (!row || row.projectId !== args.projectId) return null;
+    const project = await ctx.db.get(row.projectId);
+    if (!project || project.archivedAt !== undefined) return null;
+    return ticketDetail(row, await resolveTicketTags(ctx, row));
+  },
+});
+
 /** Ticket-reference lookup (`POS-0012`) for authenticated staff tools such as the Ticket CLI. */
 export const getTicketByTicketNumber = queryOperation({
   args: {
-    token: v.string(),
     projectKey: v.string(),
     ticketNumber: v.number(),
     includeDeleted: v.optional(v.boolean()),
@@ -126,20 +146,21 @@ export const getTicketByTicketNumber = queryOperation({
       .query("tickets")
       .withIndex("by_project_ticket", (q) => q.eq("projectKey", projectKey).eq("ticketNumber", args.ticketNumber))
       .unique();
-    if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")) return null;
+    if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")
+      || !await projectInDeployment(ctx, doc.projectId)) return null;
     return ticketDetail(doc, await resolveTicketTags(ctx, doc));
   },
 });
 
 export const listAnnotationActivity = queryOperation({
   args: {
-    token: v.string(),
     id: v.string(),
   },
   handler: async (ctx, args) => {
     const { actor } = ctx;
     const ticket = await readableTicketInput(ctx, actor, args.id);
     if (!ticket) return [];
+    if (!legacyMediaEnabled()) return [];
     const events = await ctx.db
       .query("annotationEvents")
       .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
@@ -150,7 +171,7 @@ export const listAnnotationActivity = queryOperation({
 });
 
 export const listTicketActivity = queryOperation({
-  args: { token: v.string(), id: v.string() },
+  args: { id: v.string() },
   handler: async (ctx, args) => {
     const { actor } = ctx;
     const ticket = await readableTicketInput(ctx, actor, args.id);
@@ -160,42 +181,49 @@ export const listTicketActivity = queryOperation({
       .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
       .order("desc")
       .take(30);
-    return events.map(publicTicketEvent);
+    const mediaEnabled = legacyMediaEnabled();
+    return events.filter(event => mediaEnabled || (event.action !== "media_attached" && event.action !== "annotation_changed"))
+      .map(event => publicTicketEvent(event, mediaEnabled));
   },
 });
 
 export const createTicket = mutationOperation({
   args: {
-    token: v.string(),
     projectId: v.id("projects"),
     title: v.string(),
     description: v.string(),
     media: v.array(mediaItemValidator),
     annotations: v.optional(v.array(annotationCreateInputValidator)),
+    routingClassification: v.optional(classificationInput),
     requestId: v.string(),
-    uploadIntentId: v.id("uploadIntents"),
-    uploadIntentSecret: v.string(),
+    uploadIntentId: v.optional(v.id("uploadIntents")),
+    uploadIntentSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
+    if (args.media.length || args.annotations?.length || args.uploadIntentId !== undefined || args.uploadIntentSecret !== undefined) {
+      requireLegacyMedia();
+      if (args.uploadIntentId === undefined || args.uploadIntentSecret === undefined) throw new Error("UPLOAD_INTENT_INVALID");
+    }
     const project = await requireUsableProject(ctx, actor, args.projectId);
     const request: RequestScope = {
       operation: "ticket.create", requestId: normalizeRequestId(args.requestId), actor, projectId: args.projectId,
       ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, mediaKeys: args.media.map(item => item.key) })),
     };
     const replay = await replayTicketRequest(ctx, request);
+    const { title, description } = replay ? args : validateTicketText(args.title, args.description);
+    const intent = args.uploadIntentId !== undefined && args.uploadIntentSecret !== undefined
+      ? requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId), actor, args.uploadIntentSecret)
+      : null;
     if (replay) {
-      requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId), actor, args.uploadIntentSecret);
-      await verifyAssetReceipts(ctx, args.uploadIntentId, args.media, replay.ticket._id);
+      if (intent) await verifyAssetReceipts(ctx, intent._id, args.media, replay.ticket._id);
       return replay.ticket._id;
     }
-    const { title, description } = validateTicketText(args.title, args.description);
-    const intent = requireOwnedUploadIntent(
-      await ctx.db.get(args.uploadIntentId),
-      actor,
-      args.uploadIntentSecret,
-    );
-    await verifyPendingUploadIntent(ctx, intent, args.media);
+    const routingClassification = args.routingClassification && {
+      ...await validateTicketClassification(ctx, project._id, args.routingClassification),
+      reviewed: false,
+    };
+    if (intent) await verifyPendingUploadIntent(ctx, intent, args.media);
 
     const now = Date.now();
     const annotations = (args.annotations ?? []).map((annotation, index) =>
@@ -207,12 +235,13 @@ export const createTicket = mutationOperation({
       description,
       media: args.media,
       annotations,
+      routingClassification,
       // Ownership is derived from the session; clients cannot pass it in.
       ownership: newTicketOwnership(actor),
       author: { sessionId: session._id, ...actorFields(actor) },
       now,
     });
-    await attachIntentAssets(ctx, intent, created._id, args.media);
+    if (intent) await attachIntentAssets(ctx, intent, created._id, args.media);
     await commitTicketRequest(ctx, request, { ticketId: created._id, version: created.version });
     return created._id;
   },
@@ -226,7 +255,6 @@ export const createTicket = mutationOperation({
  */
 export const createTextTicket = mutationOperation({
   args: {
-    token: v.string(),
     projectKey: v.optional(v.string()),
     title: v.string(),
     description: v.string(),
@@ -261,7 +289,6 @@ export const createTextTicket = mutationOperation({
 
 export const attachTicketMedia = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     media: v.array(mediaItemValidator),
     uploadIntentId: v.id("uploadIntents"),
@@ -270,6 +297,7 @@ export const attachTicketMedia = mutationOperation({
     requestId: v.string(),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const visible = await readableTicket(ctx, actor, args.id);
     if (!visible) throw new Error("TICKET_UNAVAILABLE");
@@ -310,7 +338,6 @@ export const attachTicketMedia = mutationOperation({
 
 export const updateTicketStatus = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     status: ticketStatus,
     expectedVersion: v.number(),
@@ -318,7 +345,7 @@ export const updateTicketStatus = mutationOperation({
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
     const doc = await ctx.db.get(args.id);
-    if (!doc || doc.lifecycle !== "active") throw new Error("TICKET_UNAVAILABLE");
+    if (!doc || doc.lifecycle !== "active" || !await projectInDeployment(ctx, doc.projectId)) throw new Error("TICKET_UNAVAILABLE");
     const currentVersion = requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status === args.status) return { eventId: null, version: currentVersion };
 
@@ -337,7 +364,6 @@ export const updateTicketStatus = mutationOperation({
 /** Staff triage control for the optional 1-100 urgency score. */
 export const updateUrgencyScore = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     urgencyScore: v.optional(v.number()),
     expectedVersion: v.number(),
@@ -362,7 +388,6 @@ export const updateUrgencyScore = mutationOperation({
 
 export const undoUrgencyScore = mutationOperation({
   args: {
-    token: v.string(),
     eventId: v.id("ticketEvents"),
     expectedVersion: v.number(),
   },
@@ -391,7 +416,6 @@ export const undoUrgencyScore = mutationOperation({
 
 export const undoTicketStatus = mutationOperation({
   args: {
-    token: v.string(),
     eventId: v.id("ticketEvents"),
     expectedVersion: v.number(),
   },
@@ -402,7 +426,7 @@ export const undoTicketStatus = mutationOperation({
       throw new Error("STATUS_UNDO_UNAVAILABLE");
     }
     const doc = await ctx.db.get(event.ticketId);
-    if (!doc || doc.lifecycle !== "active") throw new Error("TICKET_UNAVAILABLE");
+    if (!doc || doc.lifecycle !== "active" || !await projectInDeployment(ctx, doc.projectId)) throw new Error("TICKET_UNAVAILABLE");
     requireCurrentVersion(doc, args.expectedVersion);
     if (doc.status !== event.after.status) throw new Error("STATUS_UNDO_UNAVAILABLE");
 
@@ -420,7 +444,7 @@ export const undoTicketStatus = mutationOperation({
 });
 
 export const undoTicketEdit = mutationOperation({
-  args: { token: v.string(), eventId: v.id("ticketEvents"), expectedVersion: v.number() },
+  args: { eventId: v.id("ticketEvents"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
@@ -450,7 +474,6 @@ export const undoTicketEdit = mutationOperation({
 
 export const editTicket = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     title: v.string(),
     description: v.string(),
@@ -476,7 +499,7 @@ export const editTicket = mutationOperation({
 });
 
 export const archiveTicket = mutationOperation({
-  args: { token: v.string(), id: v.id("tickets"), expectedVersion: v.number() },
+  args: { id: v.id("tickets"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
     const doc = await requireWritableTicket(ctx, actor, args.id);
@@ -494,13 +517,14 @@ export const archiveTicket = mutationOperation({
 });
 
 export const restoreTicket = mutationOperation({
-  args: { token: v.string(), id: v.id("tickets"), expectedVersion: v.number() },
+  args: { id: v.id("tickets"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
     const { session, actor } = ctx;
     // Restoring an archived ticket is a staff control.
     const doc = await ctx.db.get(args.id);
-    if (doc?.lifecycle === "purging") throw new Error("TICKET_PURGING");
-    if (!doc || doc.lifecycle !== "archived") throw new Error("TICKET_UNAVAILABLE");
+    if (!doc || !await projectInDeployment(ctx, doc.projectId)) throw new Error("TICKET_UNAVAILABLE");
+    if (doc.lifecycle === "purging") throw new Error("TICKET_PURGING");
+    if (doc.lifecycle !== "archived") throw new Error("TICKET_UNAVAILABLE");
     const result = await applyTicketChange(ctx, {
       doc,
       expectedVersion: args.expectedVersion,
@@ -522,7 +546,6 @@ export const restoreTicket = mutationOperation({
 
 export const addAnnotation = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     expectedVersion: v.number(),
     mediaIndex: v.number(),
@@ -533,6 +556,7 @@ export const addAnnotation = mutationOperation({
     text: v.string(),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const doc = await requireWritableTicket(ctx, actor, args.id);
 
@@ -562,7 +586,6 @@ export const addAnnotation = mutationOperation({
 
 export const updateAnnotation = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     expectedVersion: v.number(),
     annotationId: v.string(),
@@ -572,6 +595,7 @@ export const updateAnnotation = mutationOperation({
     time: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const doc = await requireWritableTicket(ctx, actor, args.id);
 
@@ -603,8 +627,9 @@ export const updateAnnotation = mutationOperation({
 });
 
 export const undoAnnotationUpdate = mutationOperation({
-  args: { token: v.string(), eventId: v.id("annotationEvents"), expectedVersion: v.number() },
+  args: { eventId: v.id("annotationEvents"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const event = await ctx.db.get(args.eventId);
     if (!event) throw new Error("TICKET_UNAVAILABLE");
@@ -642,12 +667,12 @@ export const undoAnnotationUpdate = mutationOperation({
 
 export const removeAnnotation = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     expectedVersion: v.number(),
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const doc = await requireWritableTicket(ctx, actor, args.id);
 
@@ -679,12 +704,12 @@ export const removeAnnotation = mutationOperation({
 
 export const restoreAnnotation = mutationOperation({
   args: {
-    token: v.string(),
     id: v.id("tickets"),
     expectedVersion: v.number(),
     annotationId: v.string(),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const doc = await requireWritableTicket(ctx, actor, args.id);
 
