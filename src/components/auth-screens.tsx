@@ -15,6 +15,9 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { readFragmentSecret } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
+const authFieldClass = "aurora-control h-11 rounded-lg bg-card/85";
+const authLinkClass = "flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
 /** Errors returned as data (not thrown) use the same localized codes. */
 function userErrorMessage(error: string, t: ReturnType<typeof useI18n>["t"]) {
   return localizeError({ data: { code: error } }, t);
@@ -89,7 +92,7 @@ export function PasswordInput(props: ComponentProps<typeof Input>) {
   const { t } = useI18n();
   const [shown, setShown] = useState(false);
   return <div className="relative">
-    <Input {...props} className={cn("aurora-control h-11 rounded-lg bg-card/85 pr-12", props.className)} type={shown ? "text" : "password"} />
+    <Input {...props} className={cn(authFieldClass, "pr-12", props.className)} type={shown ? "text" : "password"} />
     <button type="button" className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={t(shown ? "hidePassword" : "showPassword")} aria-controls={props.id} onClick={() => setShown(!shown)}>
       {shown ? <EyeOff aria-hidden="true" className="size-4" /> : <Eye aria-hidden="true" className="size-4" />}
@@ -157,7 +160,7 @@ export function StaffSignInPage() {
   const { t } = useI18n();
   return <AuthLayout title={t("staffSignIn")} description={t("staffSignInDescription")}>
     <GoogleSignIn />
-    <a className="flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={APP_PATHS.customerLogin}>{t("customerSignIn")}</a>
+    <a className={authLinkClass} href={APP_PATHS.customerLogin}>{t("customerSignIn")}</a>
   </AuthLayout>;
 }
 
@@ -189,7 +192,7 @@ export function CustomerSignInPage({ onForgotPassword, onReturnToJoin }: {
   return <AuthLayout title={t("customerSignIn")} description={t("customerSignInDescription")}>
     <form className="space-y-4" onSubmit={onSubmit}>
       <Field id="customer-username" label={t("username")}>
-        <Input id="customer-username" className="aurora-control h-11 rounded-lg bg-card/85" autoComplete="username" autoCapitalize="none" spellCheck={false}
+        <Input id="customer-username" className={authFieldClass} autoComplete="username" autoCapitalize="none" spellCheck={false}
           value={username} onChange={event => setUsername(event.target.value)} autoFocus />
       </Field>
       <Field id="customer-password" label={t("password")}>
@@ -199,10 +202,10 @@ export function CustomerSignInPage({ onForgotPassword, onReturnToJoin }: {
       <SubmitButton busy={busy} disabled={!username || !password} idle={t("signIn")} working={t("signingIn")} />
     </form>
     {onReturnToJoin ? <Button variant="ghost" className="min-h-11 w-full rounded-lg text-primary underline underline-offset-4" onClick={onReturnToJoin}>{t("backToInvitation")}</Button> : null}
-    <a className="flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    <a className={authLinkClass}
       href={APP_PATHS.customerRecover} onClick={event => followAuthLink(event, onForgotPassword)}>{t("forgotPassword")}</a>
     <p className="text-center text-sm text-muted-foreground">{t("customerSignUpDescription")}</p>
-    <a className="flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={APP_PATHS.staffLogin}>{t("staffSignIn")}</a>
+    <a className={authLinkClass} href={APP_PATHS.staffLogin}>{t("staffSignIn")}</a>
   </AuthLayout>;
 }
 
@@ -290,12 +293,12 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
   return <AuthLayout title={t("joinTitle", { project })} description={t("joinDescription")}>
     <form className="space-y-4" onSubmit={onSubmit}>
       <Field id="join-username" label={t("username")} hint={t("usernameRules")}>
-        <Input id="join-username" className="aurora-control h-11 rounded-lg bg-card/85" autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={shown ? "join-username-hint join-username-preview" : "join-username-hint"}
+        <Input id="join-username" className={authFieldClass} autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={shown ? "join-username-hint join-username-preview" : "join-username-hint"}
           value={username} onChange={event => setUsername(event.target.value)} autoFocus />
       </Field>
       {shown ? <p id="join-username-preview" className="text-sm" aria-live="polite">{t("usernamePreview", { username: shown })}</p> : null}
       <Field id="join-display-name" label={t("displayName")}>
-        <Input id="join-display-name" className="aurora-control h-11 rounded-lg bg-card/85" autoComplete="name" value={displayName} onChange={event => setDisplayName(event.target.value)} />
+        <Input id="join-display-name" className={authFieldClass} autoComplete="name" value={displayName} onChange={event => setDisplayName(event.target.value)} />
       </Field>
       <NewPasswordFields label={t("newPassword")} password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
       <p className="text-sm text-muted-foreground">{t("recoverLostBoth")}</p>
@@ -335,17 +338,17 @@ export function CustomerRecoverPage({ onSignIn }: { onSignIn: () => void }) {
         href={APP_PATHS.customerLogin} onClick={event => followAuthLink(event, onSignIn)}>{t("signIn")}</a>
     </> : <form className="space-y-4" onSubmit={onSubmit}>
       <Field id="recover-username" label={t("username")}>
-        <Input id="recover-username" className="aurora-control h-11 rounded-lg bg-card/85" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={event => setUsername(event.target.value)} autoFocus />
+        <Input id="recover-username" className={authFieldClass} autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={event => setUsername(event.target.value)} autoFocus />
       </Field>
       <Field id="recover-code" label={t("recoveryCode")}>
-        <Input id="recover-code" className="aurora-control h-11 rounded-lg bg-card/85 font-mono uppercase" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} />
+        <Input id="recover-code" className={cn(authFieldClass, "font-mono uppercase")} autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} />
       </Field>
       <NewPasswordFields label={t("newPassword")} password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
       {error ? <Alert focus>{error}</Alert> : null}
       <SubmitButton busy={busy} disabled={!username || !code || !password} idle={t("recoverAction")} working={t("signingIn")} />
     </form>}
     <p className="text-sm text-muted-foreground">{t("recoverLostBoth")}</p>
-    {done ? null : <a className="flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    {done ? null : <a className={authLinkClass}
       href={APP_PATHS.customerLogin} onClick={event => followAuthLink(event, onSignIn)}>{t("customerSignIn")}</a>}
   </AuthLayout>;
 }

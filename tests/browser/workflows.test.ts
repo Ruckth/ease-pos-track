@@ -512,8 +512,21 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
-    assert.equal(await page.getByRole("combobox", { name: copy("en", "ticketStatus"), exact: true }).inputValue(), "all");
+    const statusFilter = page.getByRole("combobox", { name: copy("en", "ticketStatus"), exact: true });
+    assert.equal(await statusFilter.inputValue(), "all");
+    await views.getByRole("button", { name: "Queue", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "active");
+    await views.getByRole("button", { name: "Board", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "all");
+    await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
+    const destinations = page.getByRole("navigation", { name: copy("en", "project"), exact: true });
+    await destinations.getByRole("button", { name: "Archive", exact: true }).click();
+    await destinations.getByRole("button", { name: "Tickets", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "all");
+    await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
+    await statusFilter.selectOption("active");
     await views.getByRole("button", { name: "Table", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "active");
     await switcher.selectOption("APP");
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
     await views.getByRole("button", { name: "Board", exact: true }).click();

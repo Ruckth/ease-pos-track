@@ -99,7 +99,7 @@ export function CustomerPortal({ viewer, onLogout }: {
               <p className="break-all text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
               <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
               <div className="[&_button]:min-h-11"><LanguageSelector language={language} onChange={setLanguage} /></div>
-              <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => void composer.signOut()}><LogOut />{t("signOut")}</Button>
+              <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => { toolsMenu.close(); void composer.signOut(); }}><LogOut />{t("signOut")}</Button>
             </div>
           </details>
         </div>

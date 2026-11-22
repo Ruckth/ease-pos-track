@@ -31,7 +31,7 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
   const view = search.view ?? (role === "staff" ? "board" : "queue");
   const listView: ListView = view === "focus" ? location.state.workspaceFocusOrigin ?? "queue" : view;
   const ticket = search.ticket ?? null;
-  const defaultFilter = role === "staff" && listView !== "queue" ? "all" : "active";
+  const defaultFilter = role === "staff" && listView === "board" ? "all" : "active";
   const filter = search.filter ?? (search.archived ? "archive" : defaultFilter);
 
   const update = useCallback((change: (search: WorkspaceSearch) => WorkspaceSearch, options?: {
@@ -97,9 +97,9 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
     section: ticket ? search.section ?? null : null,
     assignment: search.assignment, lane: search.lane, health: search.panel === "health",
     setHealth: (open: boolean) => update(search => ({ ...search, panel: open ? "health" : undefined }), { replace: !open }),
-    setView: (next: WorkspaceView) => update(search => ({ ...search, ...closedTicket, view: next, filter, lane: undefined })),
-    setFilter: (next: string, clearQuery = false) => update(search => workspaceSearch(role, {
-      ...search, ...closedTicket, archived: undefined, filter: next === defaultFilter ? undefined : next,
+    setView: (next: WorkspaceView) => update(search => ({ ...search, ...closedTicket, view: next, lane: undefined })),
+    setFilter: (next: string | undefined, clearQuery = false) => update(search => workspaceSearch(role, {
+      ...search, ...closedTicket, archived: undefined, filter: next,
       ...(clearQuery ? { q: undefined } : {}),
     })),
     setQuery,

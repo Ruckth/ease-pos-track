@@ -86,7 +86,7 @@ export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPh
           </Button>}
           {t3Available && <Button variant="ghost" className="min-h-11 justify-start" onClick={() => openTool("t3")}><Plug aria-hidden />{t("connectT3")}</Button>}
           <div className="flex items-center justify-between gap-2 border-t px-2 pt-2 text-sm text-muted-foreground"><span>{t("language")}</span><LanguageSelector language={language} onChange={setLanguage} /></div>
-          <Button variant="ghost" className="min-h-11 justify-start" onClick={() => void onLogout()}><LogOut aria-hidden />{t("signOut")}</Button>
+          <Button variant="ghost" className="min-h-11 justify-start" onClick={() => { closeMenu(); void onLogout(); }}><LogOut aria-hidden />{t("signOut")}</Button>
         </div>
       </details>
     </div>

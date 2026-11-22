@@ -199,7 +199,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation projects={projects} current={project} archived={showArchived} hideOnPhone={split}
         legacyToolsEnabled={legacyToolsEnabled} t3Available={t3Available} routingAvailable={!!routing}
-        onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : "active"); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
+        onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : undefined); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
       <div className="mx-auto w-full min-w-0 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-5">
         <div className={`mb-3 flex-wrap items-center justify-between gap-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
@@ -217,7 +217,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
         {!ticket && moves.recovery}
         {project === null ? <NoProjects action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
           project === undefined ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
-            <div className={`aurora-toolbar sticky top-2 z-20 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
+            <div className={`aurora-toolbar relative z-20 md:sticky md:top-2 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
               <label className="relative min-w-0 grow basis-full sm:basis-52">
                 <span className="sr-only">{t("search")}</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input className="aurora-control min-h-11 rounded-lg pl-9 md:min-h-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
