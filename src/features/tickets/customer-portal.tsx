@@ -15,7 +15,7 @@ import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { Images, Loader2, LogOut, MapPin, Plus, UserRound } from "lucide-react";
+import { Images, Loader2, LogOut, MapPin, Plus, Search, UserRound } from "lucide-react";
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { TicketSummary } from "../../../shared/ticket-contracts";
@@ -86,39 +86,39 @@ export function CustomerPortal({ viewer, onLogout }: {
   const { previous: previousId, next: nextId } = queueNeighbors(selectedId, visibleIds, sequence.current);
   const foreignDraft = composer.hasDraft && composer.project?._id !== project?._id;
 
-  return <main className="min-h-screen">
-    <header className="border-b bg-card/90">
+  return <main className="aurora-canvas min-h-screen px-3 pt-3 sm:px-5">
+    <header className="aurora-toolbar relative z-30 mx-auto max-w-6xl">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <ProductWordmark />
-        <div className="flex flex-wrap items-center gap-2 [&>select]:min-h-11 [&>span]:min-h-11">
+        <div className="flex flex-wrap items-center max-w-full gap-2 [&>select]:min-h-11 sm:[&>select]:w-auto [&>span]:min-h-11">
           {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
           {project && <TicketInbox role="customer" key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
           <details {...toolsMenu.props} className="relative">
-            <summary className="flex min-h-11 cursor-pointer items-center rounded-md border px-3 text-sm font-medium">{t("customerQueueMore")}</summary>
-            <div className="absolute right-0 z-30 mt-1 grid min-w-56 gap-3 rounded-lg border bg-popover p-3 shadow-lg">
+            <summary className="aurora-control flex min-h-11 cursor-pointer list-none items-center rounded-lg border px-3 text-sm font-medium text-foreground transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("customerQueueMore")}</summary>
+            <div className="absolute right-0 z-30 mt-1.5 grid w-60 max-w-[calc(100vw-3rem)] gap-3 rounded-xl border bg-popover p-3.5 text-popover-foreground shadow-lg">
               <p className="break-all text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
-              <Button variant="outline" className="min-h-11" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
+              <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
               <div className="[&_button]:min-h-11"><LanguageSelector language={language} onChange={setLanguage} /></div>
-              <Button variant="outline" className="min-h-11" onClick={() => void composer.signOut()}><LogOut />{t("signOut")}</Button>
+              <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => void composer.signOut()}><LogOut />{t("signOut")}</Button>
             </div>
           </details>
         </div>
       </div>
     </header>
     <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} hasRecoveryCode={!viewer.needsRecoveryCode} />
-    <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
-      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+    <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
+      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/90 bg-amber-50/95 px-4 py-3 text-sm text-amber-950 shadow-sm dark:bg-amber-950/30 dark:text-amber-100">
         <span>{t("recoveryCodeNeeded")}</span>
-        <Button className="min-h-11" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
+        <Button className="min-h-11 rounded-lg" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
       </div> : null}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
-        <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" tabIndex={-1} className="text-2xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
+        <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
         <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
-        <Button className="min-h-11" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
+        <Button className="min-h-11 rounded-lg" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
           <Plus />{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
         </Button></div>
       </div>
-      {foreignDraft ? <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
+      {foreignDraft ? <div className="aurora-panel mb-4 px-4 py-3 text-sm text-foreground" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
       <div className={cn("grid items-start gap-4", ticket && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
           <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
@@ -143,7 +143,7 @@ export function CustomerPortal({ viewer, onLogout }: {
             navigation.openTicket(id, undefined, createdProject && createdProject._id !== project?._id ? { key: createdProject.key } : undefined);
           }
         }} /> : null}
-      {composer.hasDraft && <DiscardTicketDraft busy={composer.busy} onDiscard={composer.discard} />}
+      {composer.hasDraft && <div className="mt-3"><DiscardTicketDraft busy={composer.busy} onDiscard={composer.discard} /></div>}
     </Dialog>
   </main>;
 }
@@ -160,7 +160,7 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
 
 function ProjectUnavailable() {
   const { t } = useI18n();
-  return <p role="alert" className="rounded-lg border p-4 text-sm">{t("projectMissing")}</p>;
+  return <p role="alert" className="aurora-panel p-4 text-sm text-foreground">{t("projectMissing")}</p>;
 }
 
 function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onQuery, onShowAll, onVisibleIds }: {
@@ -189,38 +189,59 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
     return () => window.clearTimeout(timer);
   }, [loaded, project, visibleTickets.length, tickets.length, t]);
   if (project === null) return <NoProjects />;
-  if (!project || !loaded) return <div className="grid min-h-48 place-items-center rounded-lg border" role="status"><Loader2 className="size-6 animate-spin" /><span className="sr-only">{t("syncingTickets")}</span></div>;
+  if (!project || !loaded) return <div className="aurora-panel grid min-h-48 place-items-center" role="status"><Loader2 className="size-6 animate-spin text-primary" /><span className="sr-only">{t("syncingTickets")}</span></div>;
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
-    <div className="mb-3 flex flex-wrap items-end gap-3">
-      <label className="min-w-40 flex-1 space-y-1 text-sm"><span>{t("customerQueueSearch")}</span><Input className="min-h-11" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} /></label>
-      <label className="grid gap-1 text-sm"><span>{t("ticketStatus")}</span><select className="min-h-11 max-w-full rounded-md border bg-background px-3" value={filter} onChange={event => onFilter(event.target.value)}>
-        {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
-      </select></label>
+    <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
+      <label className="min-w-40 flex-1 space-y-1 text-sm font-medium text-foreground">
+        <span>{t("customerQueueSearch")}</span>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input className="aurora-control min-h-11 rounded-lg bg-card/85 pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
+        </div>
+      </label>
+      <label className="grid gap-1 text-sm font-medium text-foreground">
+        <span>{t("ticketStatus")}</span>
+        <select className="aurora-control min-h-11 max-w-full rounded-lg border px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={filter} onChange={event => onFilter(event.target.value)}>
+          {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
+        </select>
+      </label>
     </div>
     <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p>
-    {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="space-y-3 rounded-lg border border-dashed p-6"><h2 className="font-semibold">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
-      : <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex flex-wrap justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
-        {visibleTickets.length ? <ul className="divide-y">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
-          : <div className="space-y-3 p-5"><p>{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
+    {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
+      : <div className="aurora-panel overflow-hidden">
+        <div className="flex flex-wrap justify-between gap-2 border-b border-border/60 px-4 py-3 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
+        {visibleTickets.length ? <ul className="space-y-2.5 p-3">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+          : <div className="space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
       </div>}
-    {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
+    {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
   </section>;
 }
 
 function CustomerTicketRow({ item, selected, onSelect }: { item: TicketSummary; selected: boolean; onSelect: (id: Id<"tickets">) => void }) {
   const { t, formatDate } = useI18n();
   const meta = statusMeta(item.status);
+  const StatusIcon = meta.icon;
   const label = formatTicketNumber(item.ticketNumber, item.projectKey);
-  return <button type="button" data-ticket-id={item._id} className={cn("flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", selected && "bg-primary/5")}
+  return <button type="button" data-ticket-id={item._id}
+    className={cn(
+      "aurora-ticket flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      selected && "border-primary/70 ring-2 ring-primary/35",
+    )}
     aria-label={[t("viewTicket", { ticket: label }), item.title, t(meta.labelKey)].join(", ")} aria-current={selected ? "true" : undefined} onClick={() => onSelect(item._id)}>
-    <span className="break-words text-sm font-semibold">{item.title}</span>
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="font-mono">{label}</span><span className={cn("font-medium", item.status === "waiting" && "text-violet-700 dark:text-violet-300")}>{item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}</span><time dateTime={new Date(item.createdAt).toISOString()}>{formatDate(item.createdAt)}</time></span>
+    <span className="break-words text-sm font-semibold text-foreground">{item.title}</span>
+    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+      <span className="font-mono text-foreground/80">{label}</span>
+      <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-medium", meta.tone)}>
+        <StatusIcon className="size-3.5" aria-hidden />
+        {item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}
+      </span>
+      <time dateTime={new Date(item.createdAt).toISOString()}>{formatDate(item.createdAt)}</time>
+    </span>
     {item.excerpt ? <span className="line-clamp-1 text-sm text-muted-foreground">{item.excerpt}</span> : null}
-    <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+    {(item.mediaCount || item.annotationCount) ? <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
       {item.mediaCount ? <span className="inline-flex items-center gap-1"><Images className="size-3" aria-hidden="true" />{t("reviewMedia", { count: item.mediaCount })}</span> : null}
       {item.annotationCount ? <span className="inline-flex items-center gap-1"><MapPin className="size-3" aria-hidden="true" />{t("reviewPins", { count: item.annotationCount })}</span> : null}
-    </span>
+    </span> : null}
   </button>;
 }
