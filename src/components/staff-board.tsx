@@ -83,8 +83,8 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
     const lane = document.getElementById(`${boardId}-${status}`);
     if (!viewport || !lane) return;
     setCurrentStatus(status);
-    const start = viewport.getBoundingClientRect().left;
-    const laneStart = lane.getBoundingClientRect().left - start + viewport.scrollLeft;
+    // Sortable transforms can still be animating when the viewport changes size.
+    const laneStart = lane.offsetLeft;
     const target = Math.max(0, Math.min(laneStart, viewport.scrollWidth - viewport.clientWidth));
     scrollTarget.current = target;
     viewport.scrollTo({ left: target, behavior: "instant" });
@@ -201,7 +201,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
         role="region" aria-label={c.board} tabIndex={hasOverflow ? 0 : undefined}
         onScroll={event => syncStatusFromScroll(event.currentTarget)}>
         <KanbanBoard
-          className={cn("items-start gap-3", visibleStatuses.length === 1
+          className={cn("relative items-start gap-3", visibleStatuses.length === 1
             ? "grid-cols-1 sm:grid-cols-1"
             : "grid-cols-[repeat(var(--lane-count),minmax(85%,1fr))] sm:grid-cols-[repeat(var(--lane-count),minmax(min(85%,13rem),1fr))]")}
           style={{ "--lane-count": visibleStatuses.length } as CSSProperties}

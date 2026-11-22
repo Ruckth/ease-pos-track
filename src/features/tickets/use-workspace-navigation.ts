@@ -60,7 +60,7 @@ export function useWorkspaceNavigation(role: "staff" | "customer", projectKey: s
   const listView: ListView = view === "focus" ? focusOrigin : view;
   return {
     view, listView, filter, query: params.get("q") ?? "", ticketId, section,
-    setView: (next: WorkspaceView) => update({ view: next, filter: filter === "archive" ? "archive" : null, ticket: null, section: null }),
+    setView: (next: WorkspaceView) => update({ view: next, ticket: null, section: null }),
     setFilter: (next?: string) => update({ filter: next === defaultFilter ? null : next ?? null, ticket: null, section: null }),
     setQuery: (next: string) => update({ q: next, ticket: null, section: null }, true),
     enterFocus: () => update({ view: "focus" }, true, false, listView),
