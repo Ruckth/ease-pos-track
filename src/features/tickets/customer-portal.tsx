@@ -209,10 +209,10 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
     </div>
     <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p>
     {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
-      : <div className="aurora-panel overflow-hidden">
-        <div className="flex flex-wrap justify-between gap-2 border-b border-border/60 px-4 py-3 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
-        {visibleTickets.length ? <ul className="space-y-2.5 p-3">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
-          : <div className="space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
+      : <div>
+        <div className="flex flex-wrap justify-between gap-2 px-1 pb-2 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
+        {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
       </div>}
     {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
   </section>;
@@ -225,14 +225,15 @@ function CustomerTicketRow({ item, selected, onSelect }: { item: TicketSummary; 
   const label = formatTicketNumber(item.ticketNumber, item.projectKey);
   return <button type="button" data-ticket-id={item._id}
     className={cn(
-      "aurora-ticket flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      selected && "border-primary/70 ring-2 ring-primary/35",
+      "ticket-surface flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      item.status === "waiting" && "border-l-[3px] border-l-violet-500",
+      selected && "border-primary/70 bg-primary/5",
     )}
     aria-label={[t("viewTicket", { ticket: label }), item.title, t(meta.labelKey)].join(", ")} aria-current={selected ? "true" : undefined} onClick={() => onSelect(item._id)}>
     <span className="break-words text-sm font-semibold text-foreground">{item.title}</span>
     <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
       <span className="font-mono text-foreground/80">{label}</span>
-      <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-medium", meta.tone)}>
+      <span className={cn("inline-flex items-center gap-1 font-medium", meta.text)}>
         <StatusIcon className="size-3.5" aria-hidden />
         {item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}
       </span>

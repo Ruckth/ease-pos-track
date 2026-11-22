@@ -100,6 +100,20 @@
     border-radius: 0.75rem;
   }
 
+  /* Board lanes and Ticket surfaces: one soft outline each, no glass shadow. */
+  .ticket-lane {
+    background-color: hsl(var(--card) / 0.5);
+    border: 1px solid hsl(var(--border) / 0.75);
+    border-radius: 0.75rem;
+  }
+
+  .ticket-surface {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border: 1px solid hsl(var(--border) / 0.9);
+    border-radius: 0.5rem;
+  }
+
   .aurora-control {
     border: 1px solid var(--glass-rim);
     background-color: hsl(var(--card) / 0.8);
@@ -117,16 +131,18 @@
   }
 
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .aurora-ticket:has([data-ticket-id]), button.aurora-ticket {
-      transition: box-shadow 160ms ease, background-color 160ms ease;
+    .ticket-surface:has([data-ticket-id]), button.ticket-surface {
+      transition: border-color 140ms ease, background-color 140ms ease;
     }
-    .aurora-ticket:has([data-ticket-id]):hover, button.aurora-ticket:hover {
-      background-color: hsl(var(--card));
-      box-shadow: inset 0 1px var(--glass-glint), 0 8px 20px -4px var(--glass-shadow);
+    .ticket-surface:has([data-ticket-id]):hover, button.ticket-surface:hover {
+      border-color: hsl(var(--primary) / 0.45);
     }
   }
 
   @media (prefers-reduced-transparency: reduce) {
+    .ticket-lane {
+      background-color: hsl(var(--background));
+    }
     .aurora-panel, .aurora-toolbar {
       background-color: rgb(var(--glass-fill));
       backdrop-filter: none;
