@@ -91,8 +91,12 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
   // serializes an evaluate callback; it exists only in the isolated test page.
   await context.addInitScript("globalThis.__name = (fn) => fn;");
   await context.addInitScript(({ token, refreshToken, keys, language }) => {
-    sessionStorage.setItem(keys.jwt, token);
-    sessionStorage.setItem(keys.refresh, refreshToken);
+    // Let Convex Auth own rotation and sign-out across document navigations.
+    if (!sessionStorage.getItem("browser-fixture-initialized")) {
+      sessionStorage.setItem(keys.jwt, token);
+      sessionStorage.setItem(keys.refresh, refreshToken);
+      sessionStorage.setItem("browser-fixture-initialized", "1");
+    }
     localStorage.setItem("ease-pos-tracking-language", language);
     const stats = { created: [] as string[], revoked: [] as string[], stops: [] as string[], streams: [] as string[], aborts: 0 };
     Object.assign(window, { draftStats: stats });

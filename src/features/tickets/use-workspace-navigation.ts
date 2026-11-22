@@ -49,7 +49,7 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
       workspaceTicketFromList: next.ticket ? options?.openedFromList ? to :
         options?.replace ? previous.workspaceTicketFromList : undefined : undefined,
     });
-    void router.navigate({ to, search: next, state, replace: options?.replace, resetScroll: false });
+    return router.navigate({ to, search: next, state, replace: options?.replace, resetScroll: false });
   }, [role, router]);
 
   const selectProject = useCallback((key: string, replace: boolean, nextView?: ListView) => {
@@ -66,8 +66,32 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
     }, { replace: true });
   }, [router, update]);
 
+  const withQuery = (value: string, action: () => void) => {
+    if (value === (search.q ?? "")) {
+      action();
+      return;
+    }
+    const { pathname, state } = router.history.location;
+    const project = search.project;
+    // Replace the current result URL before a control pushes its destination.
+    // Retain any open Ticket so assignment, lane and selection can decide what to do with it.
+    const commit = update(search => search.q === (value || undefined) ? search : {
+      ...search, q: value || undefined, lane: undefined,
+    }, { replace: true });
+    if (!commit) {
+      action();
+      return;
+    }
+    void commit.then(() => {
+      const current = router.history.location;
+      const currentSearch = new URLSearchParams(current.search);
+      if (current.pathname === pathname && current.state.__TSR_index === state.__TSR_index &&
+          (currentSearch.get("project") ?? undefined) === project && (currentSearch.get("q") ?? "") === value) action();
+    });
+  };
+
   return {
-    locationKey: location.state.__TSR_key, project: search.project, selectProject, view, listView, filter, query: search.q ?? "", ticket,
+    withQuery, locationKey: location.state.__TSR_key, project: search.project, selectProject, view, listView, filter, query: search.q ?? "", ticket,
     section: ticket ? search.section ?? null : null,
     assignment: search.assignment, lane: search.lane, health: search.panel === "health",
     setHealth: (open: boolean) => update(search => ({ ...search, panel: open ? "health" : undefined }), { replace: !open }),

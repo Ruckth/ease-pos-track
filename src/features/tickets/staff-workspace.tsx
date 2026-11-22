@@ -91,6 +91,10 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     setSearchInput("");
     if (nav.query) commitSearch("");
   };
+  const withSearch = (action: () => void) => {
+    clearTimeout(searchTimer.current);
+    nav.withQuery(searchInput, action);
+  };
   const query = nav.query.trim();
   const filter = nav.filter;
   const showArchived = filter === "archive";
@@ -117,7 +121,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     focusSource.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (project) returnPoint.current = { project: project.key, id, scroll: window.scrollY };
     snapshot.current = currentOrder.current;
-    nav.openTicket(id, section);
+    withSearch(() => { void nav.openTicket(id, section); });
   };
   const focusFirst = (id: TicketId) => {
     snapshot.current = currentOrder.current;
@@ -195,7 +199,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation projects={projects} current={project} archived={showArchived} hideOnPhone={split}
         legacyToolsEnabled={legacyToolsEnabled} t3Available={t3Available} routingAvailable={!!routing}
-        onArchive={archived => nav.setFilter(archived ? "archive" : "active")} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
+        onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : "active"); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
       <div className="mx-auto w-full min-w-0 max-w-[100rem] px-3 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5 xl:px-7 xl:pt-7">
         <div className={`mb-3 flex-wrap items-center justify-between gap-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
@@ -219,7 +223,10 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                 <Input className="mt-1 min-h-11 pl-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
               </label>
               {!showArchived && <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">{t("ticketStatus")}
-                <select className={selectClass} value={filter} onChange={event => nav.setFilter(event.target.value)}>
+                <select className={selectClass} value={filter} onChange={event => {
+                  const status = event.target.value;
+                  withSearch(() => { void nav.setFilter(status); });
+                }}>
                   <option value="active">{t("activeTickets")}</option><option value="all">{t("allTickets")}</option>
                   {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
                 </select>
@@ -227,13 +234,13 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
               {!showArchived && routing && <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">{routingCopy.assignment}
                 <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
                   const scope = event.target.value;
-                  nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined);
+                  withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });
                 }}>
                   <option value="">{routingCopy.all}</option><option value="mine">{routingCopy.mine}</option>
                   <option value="unassigned">{routingCopy.unassigned}</option>
                 </select>
               </label>}
-              <StaffViewSwitcher archived={showArchived} view={listView} onSelect={nav.setView} />
+              <StaffViewSwitcher archived={showArchived} view={listView} onSelect={view => withSearch(() => { void nav.setView(view); })} />
             </div>
             <div id="staff-ticket-results" tabIndex={-1} className={split && !single ? "lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start lg:gap-4" : undefined}>
               <div className={single ? "hidden" : split ? "hidden lg:block" : "min-w-0"}>
@@ -243,7 +250,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
               totals={data.totals ?? {}} pages={data.lanes} loading={data.loading}
               searchHasMore={data.searchHasMore} archiveSearchHasMore={data.searchHasMore}
               onSelect={onSelect} onMove={moves.moveItem} onRestore={id => { void restoreItem(id).catch(error => toast.error(localizeError(error, t))); }}
-              workspace={{ view: nav.view === "focus" && inlineDetail ? "focus" : listView, lane: nav.lane, onLaneChange: nav.setLane, ticketOpen: Boolean(ticket), visibleStatuses: data.visibleStatuses, selectedId: selectedId, orderKey: `${project.key}/${filter}/${assignmentFilter ?? ""}`, onOrder: orderChanged,
+              workspace={{ view: nav.view === "focus" && inlineDetail ? "focus" : listView, lane: nav.lane, onLaneChange: lane => withSearch(() => { void nav.setLane(lane); }), ticketOpen: Boolean(ticket), visibleStatuses: data.visibleStatuses, selectedId: selectedId, orderKey: `${project.key}/${filter}/${assignmentFilter ?? ""}`, onOrder: orderChanged,
                 onFocusFirst: focusFirst, onFiltersOpen: setFiltersOpen, hasMore: data.hasMore, loadingMore: data.loadingMore, loadMore: data.loadMore, busy }} />}
               </div>
               {inlineDetail && <div className="min-w-0 space-y-2">
