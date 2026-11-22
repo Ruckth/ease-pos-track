@@ -31,7 +31,7 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
   const archived = item.lifecycle === "archived";
 
   return (
-    <article className={`min-w-0 rounded-lg border bg-background p-3 ${inLane ? "" : "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "border-primary bg-primary/5" : ""}`}>
+    <article className={`ticket-surface min-w-0 p-3 ${inLane ? "" : "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "border-primary bg-primary/5" : ""}`}>
       <div className={`flex min-w-0 items-start gap-2 ${inLane ? "" : "sm:flex-1 sm:basis-40"}`}>
         <div className="min-w-0 flex-1">
           <button type="button" data-ticket-id={item._id} className="min-h-11 w-full min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -43,12 +43,12 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
             </span>
             <span className="mt-1 line-clamp-2 break-words [overflow-wrap:anywhere] text-sm font-semibold leading-5">{item.title}</span>
           </button>
-          {item.tags?.length > 0 && <div className="mt-1"><TicketTagList tags={item.tags} /></div>}
+          {item.tags?.length > 0 && <div className="mt-0.5"><TicketTagList tags={item.tags} plain /></div>}
         </div>
         {handle}
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-        {(showUnscored || item.urgencyScore !== undefined) && <TicketUrgency score={item.urgencyScore} />}
+        {(showUnscored || item.urgencyScore !== undefined) && <TicketUrgency score={item.urgencyScore} plain />}
         {item.mediaCount > 0 && <Button type="button" variant="ghost" size="sm" className="min-h-11 min-w-11 px-2"
           aria-label={t("viewTicketMedia", { ticket: reference, count: item.mediaCount })} onClick={() => onSelect(item._id, "media")}>
           <Images aria-hidden />{item.mediaCount}

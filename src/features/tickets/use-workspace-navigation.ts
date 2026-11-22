@@ -44,7 +44,9 @@ export function useWorkspaceNavigation(role: "staff" | "customer", projectKey: s
   const { search, focusOrigin, ticketFromList } = useSyncExternalStore(subscribe, getSnapshot);
   const params = new URLSearchParams(search);
   const requestedView = params.get("view");
-  const view: WorkspaceView = role === "staff" && (requestedView === "board" || requestedView === "table" || requestedView === "focus") ? requestedView : "queue";
+  const defaultView = role === "staff" && !params.has("ticket") ? "board" : "queue";
+  const validView = requestedView === "queue" || requestedView === "board" || requestedView === "table" || requestedView === "focus";
+  const view: WorkspaceView = role === "staff" && validView ? requestedView : defaultView;
   const matchesProject = projectKey && (!params.has("project") || params.get("project")?.toUpperCase() === projectKey);
   const id = matchesProject ? params.get("ticket") : null;
   // The detail endpoint normalizes external IDs and checks the Project before reading.
@@ -53,20 +55,21 @@ export function useWorkspaceNavigation(role: "staff" | "customer", projectKey: s
   const candidate = params.get("filter") ?? "";
   const allowed = role === "customer" ? ["active", "waiting", "done", "all"] :
     ["active", "all", "new", "acknowledged", "in_progress", "waiting", "done", "archive"];
-  const filter = allowed.includes(candidate) ? candidate : "active";
+  const defaultFilter = view === "board" ? "all" : "active";
+  const filter = allowed.includes(candidate) ? candidate : defaultFilter;
   const listView: ListView = view === "focus" ? focusOrigin : view;
   return {
     view, listView, filter, query: params.get("q") ?? "", ticketId, section,
-    setView: (next: WorkspaceView) => update({ view: next === "queue" ? null : next, ticket: null, section: null }),
-    setFilter: (next: string) => update({ filter: next === "active" ? null : next, ticket: null, section: null }),
+    setView: (next: WorkspaceView) => update({ view: next, filter: filter === "archive" ? "archive" : null, ticket: null, section: null }),
+    setFilter: (next?: string) => update({ filter: next === defaultFilter ? null : next ?? null, ticket: null, section: null }),
     setQuery: (next: string) => update({ q: next, ticket: null, section: null }, true),
     enterFocus: () => update({ view: "focus" }, true, false, listView),
-    leaveFocus: () => update({ view: listView === "queue" ? null : listView }, true),
-    openTicket: (id: Id<"tickets">, section?: "media") => update({ ticket: id, section: section ?? null }, Boolean(ticketId), !ticketId),
+    leaveFocus: () => update({ view: listView }, true),
+    openTicket: (id: Id<"tickets">, section?: "media") => update({ view: role === "staff" ? new URLSearchParams(window.location.search).get("view") ?? view : null, ticket: id, section: section ?? null }, Boolean(ticketId), !ticketId),
     changeTicket: (id: Id<"tickets">) => update({ ticket: id, section: null }, true),
     closeTicket: () => {
       if (ticketFromList) window.history.back();
-      else update({ ticket: null, section: null, ...(view === "focus" ? { view: listView === "queue" ? null : listView } : {}) }, true);
+      else update({ ticket: null, section: null, ...(view === "focus" ? { view: listView } : {}) }, true);
     },
   };
 }

@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: 210 25% 97%;
+    --background: 216 53% 96%;
     --foreground: 220 24% 12%;
     --card: 0 0% 100%;
     --card-foreground: 220 24% 12%;
@@ -23,7 +23,45 @@
     --border: 216 20% 84%;
     --input: 216 20% 84%;
     --ring: 213 83% 38%;
-    --radius: 8px;
+    --radius: 10px;
+    color-scheme: light;
+    --aurora-glow-a: rgb(158 167 249 / 30%);
+    --aurora-glow-b: rgb(102 213 218 / 26%);
+    --aurora-glow-c: rgb(161 193 251 / 26%);
+    --glass-fill: 250 253 255;
+    --glass-rim: rgb(255 255 255 / 86%);
+    --glass-glint: rgb(255 255 255 / 72%);
+    --glass-shadow: rgb(49 70 114 / 12%);
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    --background: 222 42% 10%;
+    --foreground: 210 37% 96%;
+    --card: 218 32% 17%;
+    --card-foreground: 210 37% 96%;
+    --popover: 220 32% 15%;
+    --popover-foreground: 210 37% 96%;
+    --primary: 191 80% 69%;
+    --primary-foreground: 217 54% 11%;
+    --secondary: 215 29% 24%;
+    --secondary-foreground: 207 39% 94%;
+    --muted: 218 27% 22%;
+    --muted-foreground: 216 23% 75%;
+    --accent: 211 31% 27%;
+    --accent-foreground: 210 44% 97%;
+    --destructive: 353 88% 74%;
+    --destructive-foreground: 345 55% 12%;
+    --border: 215 24% 32%;
+    --input: 216 18% 49%;
+    --ring: 187 82% 71%;
+    --aurora-glow-a: rgb(95 78 183 / 30%);
+    --aurora-glow-b: rgb(30 148 154 / 24%);
+    --aurora-glow-c: rgb(43 80 153 / 23%);
+    --glass-fill: 25 37 57;
+    --glass-rim: rgb(169 200 232 / 25%);
+    --glass-glint: rgb(218 242 255 / 10%);
+    --glass-shadow: rgb(2 7 19 / 27%);
   }
 
   * {
@@ -38,6 +76,79 @@
 }
 
 @layer components {
+  .aurora-canvas {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(ellipse 66rem 42rem at 0% 0%, var(--aurora-glow-a), transparent 75%),
+      radial-gradient(ellipse 60rem 40rem at 100% 5rem, var(--aurora-glow-b), transparent 78%),
+      radial-gradient(ellipse 48rem 36rem at 45% 30rem, var(--aurora-glow-c), transparent 85%);
+  }
+
+  .aurora-panel, .aurora-toolbar, .aurora-ticket {
+    border: 1px solid var(--glass-rim);
+    box-shadow: inset 0 1px var(--glass-glint), 0 6px 20px -7px var(--glass-shadow);
+  }
+
+  .aurora-panel, .aurora-toolbar {
+    background-color: rgb(var(--glass-fill));
+    border-radius: 1rem;
+  }
+
+  .aurora-ticket {
+    background-color: hsl(var(--card) / 0.96);
+    color: hsl(var(--card-foreground));
+    border-radius: 0.75rem;
+  }
+
+  /* Board lanes and Ticket surfaces: one soft outline each, no glass shadow. */
+  .ticket-lane {
+    background-color: hsl(var(--card) / 0.5);
+    border: 1px solid hsl(var(--border) / 0.75);
+    border-radius: 0.75rem;
+  }
+
+  .ticket-surface {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border: 1px solid hsl(var(--border) / 0.9);
+    border-radius: 0.5rem;
+  }
+
+  .aurora-control {
+    border: 1px solid var(--glass-rim);
+    background-color: hsl(var(--card) / 0.8);
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .aurora-panel {
+      background-color: rgb(var(--glass-fill) / 0.64);
+      backdrop-filter: blur(16px);
+    }
+    .aurora-toolbar {
+      background-color: rgb(var(--glass-fill) / 0.76);
+      backdrop-filter: blur(20px);
+    }
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .ticket-surface:has([data-ticket-id]), button.ticket-surface {
+      transition: border-color 140ms ease, background-color 140ms ease;
+    }
+    .ticket-surface:has([data-ticket-id]):hover, button.ticket-surface:hover {
+      border-color: hsl(var(--primary) / 0.45);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .ticket-lane {
+      background-color: hsl(var(--background));
+    }
+    .aurora-panel, .aurora-toolbar {
+      background-color: rgb(var(--glass-fill));
+      backdrop-filter: none;
+    }
+  }
+
   /* Opaque token colors keep annotations readable without backdrop-filter. */
   .annotation-glass-marker {
     background-color: hsl(var(--primary));

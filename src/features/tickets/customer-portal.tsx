@@ -77,9 +77,9 @@ export function CustomerPortal({ token, email, onLogout }: {
   const { previous: previousId, next: nextId } = queueNeighbors(navigation.ticketId, visibleIds, sequence.current);
   const foreignDraft = composer.hasDraft && composer.project?._id !== project?._id;
 
-  return <main className="min-h-screen">
+  return <main className="aurora-canvas min-h-screen pt-3">
     <Toaster richColors position="bottom-right" />
-    <header className="border-b bg-card/90">
+    <header className="aurora-toolbar relative z-30 mx-3 max-w-6xl sm:mx-5 xl:mx-auto">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <ProductWordmark />
         <div className="flex flex-wrap items-center gap-2 [&>select]:min-h-11 [&>span]:min-h-11">
@@ -177,7 +177,7 @@ function CustomerTickets({ token, project, onNewTicket, onSelect, selectedId, fi
   if (!project || !loaded) return <div className="grid min-h-48 place-items-center rounded-lg border" role="status"><Loader2 className="size-6 animate-spin" /><span className="sr-only">{t("syncingTickets")}</span></div>;
   return <section className={cn("min-w-0", selectedId && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
-    <div className="mb-3 flex flex-wrap items-end gap-3">
+    <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
       <label className="min-w-40 flex-1 space-y-1 text-sm"><span>{t("customerQueueSearch")}</span><Input className="min-h-11" value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} /></label>
       <label className="grid gap-1 text-sm"><span>{t("ticketStatus")}</span><select className="min-h-11 max-w-full rounded-md border bg-background px-3" value={filter} onChange={event => onFilter(event.target.value)}>
         {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
@@ -185,9 +185,9 @@ function CustomerTickets({ token, project, onNewTicket, onSelect, selectedId, fi
     </div>
     <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p>
     {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="space-y-3 rounded-lg border border-dashed p-6"><h2 className="font-semibold">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
-      : <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex flex-wrap justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
-        {visibleTickets.length ? <ul className="divide-y">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+      : <div>
+        <div className="flex flex-wrap justify-between gap-2 px-1 pb-2 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
+        {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
           : <div className="space-y-3 p-5"><p>{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11" onClick={() => { onFilter("all"); onQuery(""); }}>{t("showAllTickets")}</Button></div>}
       </div>}
     {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
@@ -198,10 +198,10 @@ function CustomerTicketRow({ item, selected, onSelect }: { item: TicketSummary; 
   const { t, formatDate } = useI18n();
   const meta = statusMeta(item.status);
   const label = formatTicketNumber(item.ticketNumber, item.projectKey);
-  return <button type="button" data-ticket-id={item._id} className={cn("flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", selected && "bg-primary/5")}
+  return <button type="button" data-ticket-id={item._id} className={cn("ticket-surface flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", item.status === "waiting" && "border-l-[3px] border-l-violet-500", selected && "border-primary/70 bg-primary/5")}
     aria-label={[t("viewTicket", { ticket: label }), item.title, t(meta.labelKey)].join(", ")} aria-current={selected ? "true" : undefined} onClick={() => onSelect(item._id)}>
     <span className="break-words text-sm font-semibold">{item.title}</span>
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="font-mono">{label}</span><span className={cn("font-medium", item.status === "waiting" && "text-violet-700 dark:text-violet-300")}>{item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}</span><time dateTime={new Date(item.createdAt).toISOString()}>{formatDate(item.createdAt)}</time></span>
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="font-mono">{label}</span><span className={cn("font-medium", meta.text)}>{item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}</span><time dateTime={new Date(item.createdAt).toISOString()}>{formatDate(item.createdAt)}</time></span>
     {item.excerpt ? <span className="line-clamp-1 text-sm text-muted-foreground">{item.excerpt}</span> : null}
     <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
       {item.mediaCount ? <span className="inline-flex items-center gap-1"><Images className="size-3" aria-hidden="true" />{t("reviewMedia", { count: item.mediaCount })}</span> : null}

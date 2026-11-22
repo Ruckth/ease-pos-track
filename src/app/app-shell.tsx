@@ -4,7 +4,7 @@ import { loginPathForRole, resolveAppRoute } from "@/lib/app-routes";
 import { clearToken, getStoredToken, storeToken } from "@/lib/session";
 import { useSession } from "./adapter";
 import { Loader2 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 
 const StaffWorkspace = lazy(() => import("@/features/tickets/staff-workspace").then(m => ({ default: m.StaffWorkspace })));
@@ -12,7 +12,7 @@ const CustomerPortal = lazy(() => import("@/features/tickets/customer-portal").t
 
 function LoadingPage() {
   const { t } = useI18n();
-  return <main className="grid min-h-screen place-items-center" role="status">
+  return <main className="aurora-canvas grid min-h-screen place-items-center" role="status">
     <Loader2 aria-hidden="true" className="size-7 animate-spin text-muted-foreground" /><span className="sr-only">{t("loadingWorkspace")}</span>
   </main>;
 }
@@ -50,6 +50,8 @@ function RoutedApp() {
       ? "loading"
       : session?.role ?? "signed-out",
   );
+  const dark = session?.role ? session.role === "staff" : pathname.startsWith("/staff");
+  useLayoutEffect(() => { document.documentElement.classList.toggle("dark", dark); }, [dark]);
   const redirectTo = route.page === "redirect" ? route.to : null;
 
   useEffect(() => {

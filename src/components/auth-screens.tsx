@@ -42,7 +42,7 @@ export function AuthPage({
   const isRegistering = page === "customer-register";
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,hsl(var(--secondary)),transparent_32rem)] px-4 py-8 sm:py-12">
+    <main className="aurora-canvas grid min-h-screen place-items-center px-4 py-8 sm:py-12">
       <Card className="w-full max-w-md overflow-hidden rounded-2xl border-primary/10 bg-card/95 shadow-xl shadow-primary/5">
         <CardHeader className="space-y-5 border-b bg-muted/20 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { useSelectedTicket } from "@/features/tickets/adapter";
@@ -69,8 +69,63 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
-  const multiColumn = useMediaQuery("(min-width: 1024px)");
-  const visibleStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
+  const enableDrag = useMediaQuery("(min-width: 1024px)");
+  const c = useExplorerCopy();
+  const boardId = useId();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [hasOverflow, setHasOverflow] = useState(false);
+  const preferredStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
+  const [currentStatus, setCurrentStatus] = useState(preferredStatus);
+  const scrollTarget = useRef<number | null>(null);
+
+  const scrollToStatus = useCallback((status: TicketStatus) => {
+    const viewport = viewportRef.current;
+    const lane = document.getElementById(`${boardId}-${status}`);
+    if (!viewport || !lane) return;
+    setCurrentStatus(status);
+    const start = viewport.getBoundingClientRect().left;
+    const laneStart = lane.getBoundingClientRect().left - start + viewport.scrollLeft;
+    const target = Math.max(0, Math.min(laneStart, viewport.scrollWidth - viewport.clientWidth));
+    scrollTarget.current = target;
+    viewport.scrollTo({ left: target, behavior: "instant" });
+  }, [boardId]);
+
+  function syncStatusFromScroll(viewport: HTMLDivElement) {
+    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+    if (maxScroll <= 1 || (scrollTarget.current !== null && Math.abs(viewport.scrollLeft - scrollTarget.current) <= 1)) return;
+    scrollTarget.current = null;
+    if (maxScroll - viewport.scrollLeft <= 1) {
+      setCurrentStatus(visibleStatuses[visibleStatuses.length - 1]);
+      return;
+    }
+    const start = viewport.getBoundingClientRect().left;
+    let nearest = visibleStatuses[0];
+    let closest = Infinity;
+    for (const status of visibleStatuses) {
+      const lane = document.getElementById(`${boardId}-${status}`);
+      if (!lane) continue;
+      const distance = Math.abs(lane.getBoundingClientRect().left - start);
+      if (distance >= closest) continue;
+      closest = distance;
+      nearest = status;
+    }
+    setCurrentStatus(nearest);
+  }
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const updateOverflow = () => setHasOverflow(viewport.scrollWidth - viewport.clientWidth > 1);
+    updateOverflow();
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [visibleStatuses]);
+
+  useLayoutEffect(() => {
+    if (hasOverflow) scrollToStatus(preferredStatus);
+  }, [hasOverflow, preferredStatus, scrollToStatus, visibleStatuses]);
+
   const draggedRef = useRef<TicketSummary | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -111,6 +166,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
 
   return (
     <Kanban
+      className="min-w-0"
       value={columns}
       onValueChange={() => undefined}
       getItemValue={(item) => item._id}
@@ -123,45 +179,60 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
         if (item && status) void move(item, status);
       }}
     >
-      {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} token={token} entry={entry} onObserve={observe} />)}
-      {!multiColumn && <label className="mb-2 flex min-w-0 items-center gap-2 text-sm font-medium">
-        {t("boardStatusTabs")}
-        <select className="min-h-11 min-w-0 flex-1 rounded-md border bg-background px-2" value={visibleStatus}
-          onChange={event => onChooseStatus(event.target.value as TicketStatus)}>
-          {visibleStatuses.map(status => <option key={status} value={status}>
-            {t(statusMeta(status).labelKey)} · {shownByLane?.[status] ?? totals[status] ?? columns[status].length}
-          </option>)}
-        </select>
-      </label>}
-      <KanbanBoard
-        className={cn("grid items-start gap-3", multiColumn && "grid-flow-col overflow-x-auto pb-2")}
-        style={{ gridTemplateColumns: multiColumn ? `repeat(${visibleStatuses.length}, minmax(14rem, 1fr))` : "minmax(0, 1fr)" }}
-      >
-        {(multiColumn ? visibleStatuses : [visibleStatus]).map((status) => (
-          <BoardColumn
-            key={status}
-            status={status}
-            items={columns[status]}
-            initialHighest={initialHighest}
-            onSelect={onSelect}
-            onMoveCard={move}
-            total={totals[status]}
-            shown={shownByLane?.[status]}
-            loaded={loadedByLane?.[status]}
-            busy={busy}
-            page={pages?.[status]}
-            draggable={multiColumn}
-          />
-        ))}
-      </KanbanBoard>
-      <KanbanOverlay>
+      {Object.values(pending).map(entry => <MoveObservation token={token} key={entry.operationId} entry={entry} onObserve={observe} />)}
+      {hasOverflow && <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label={t("boardStatusTabs")}>
+        {visibleStatuses.map(status => {
+          const meta = statusMeta(status);
+          const Icon = meta.icon;
+          return <Button key={status} type="button" variant={status === currentStatus ? "secondary" : "outline"} size="sm"
+            className="min-h-11"
+            aria-pressed={status === currentStatus}
+            aria-controls={`${boardId}-${status}`}
+            onClick={() => {
+              scrollToStatus(status);
+              onChooseStatus(status);
+            }}>
+            <Icon aria-hidden="true" />
+            {t(meta.labelKey)}
+          </Button>;
+        })}
+      </div>}
+      <div ref={viewportRef} className="min-w-0 max-w-full snap-x snap-proximity overflow-x-auto rounded-xl pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        role="region" aria-label={c.board} tabIndex={hasOverflow ? 0 : undefined}
+        onScroll={event => syncStatusFromScroll(event.currentTarget)}>
+        <KanbanBoard
+          className={cn("items-start gap-3", visibleStatuses.length === 1
+            ? "grid-cols-1 sm:grid-cols-1"
+            : "grid-cols-[repeat(var(--lane-count),minmax(85%,1fr))] sm:grid-cols-[repeat(var(--lane-count),minmax(min(85%,13rem),1fr))]")}
+          style={{ "--lane-count": visibleStatuses.length } as CSSProperties}
+        >
+          {visibleStatuses.map(status => (
+            <BoardColumn
+              key={status}
+              id={`${boardId}-${status}`}
+              status={status}
+              items={columns[status]}
+              initialHighest={initialHighest}
+              onSelect={onSelect}
+              onMoveCard={move}
+              total={totals[status]}
+              shown={shownByLane?.[status]}
+              loaded={loadedByLane?.[status]}
+              busy={busy}
+              page={pages?.[status]}
+              draggable={enableDrag}
+            />
+          ))}
+        </KanbanBoard>
+      </div>
+      <KanbanOverlay className="hidden lg:block">
         {({ value, variant }) => {
           if (variant === "column") return null;
           const dragged = BOARD_COLUMNS.flatMap((status) => columns[status]).find((item) => item._id === value);
           if (!dragged) return null;
           return (
             <div className="w-72 max-w-[90vw] rotate-1 opacity-95">
-              <TicketCard item={dragged} onSelect={() => undefined} />
+              <TicketCard item={dragged} inLane onSelect={() => undefined} />
             </div>
           );
         }}
@@ -171,6 +242,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
 }
 
 function BoardColumn({
+  id,
   status,
   items,
   onSelect,
@@ -183,11 +255,12 @@ function BoardColumn({
   page,
   initialHighest,
 }: {
+  id: string;
   status: TicketStatus;
   items: TicketSummary[];
   onSelect: OpenTicket;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => void;
-  /** False below `lg`, where one column is shown at a time and no card can be dragged. */
+  /** Direct status actions are available even when the drag handle is hidden. */
   draggable: boolean;
   total?: number;
   shown?: number;
@@ -204,25 +277,22 @@ function BoardColumn({
   const c = useExplorerCopy();
 
   return (
-    <KanbanColumn value={status} draggable={false} className="min-w-0 rounded-lg border bg-card">
-      {/* Below `lg` the selected tab already names the column and shows its count. */}
-      {draggable ? (
-        <div className={cn("flex items-center justify-between rounded-t-lg border-b px-3 py-3", meta.tone)}>
-          <div className="flex min-w-0 items-center gap-2">
-            <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <h2 className="break-words text-sm font-semibold">{label}</h2>
-          </div>
-          <Badge variant="outline" className="bg-white/70" aria-label={t("boardColumnCards", { count, status: label })}>
-            {count}
-          </Badge>
+    <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane relative min-w-0 snap-start overflow-hidden">
+      <div className={cn("flex min-h-11 items-center justify-between gap-2 border-b px-3 py-2", meta.tone)}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="size-4 shrink-0" aria-hidden="true" />
+          <h2 className="break-words text-sm font-semibold">{label}</h2>
         </div>
-      ) : null}
-      <KanbanColumnContent value={status} className="min-h-24 space-y-3 p-3">
+        <Badge variant="outline" className="border-transparent bg-background/70 px-1.5 font-mono tabular-nums text-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
+          {count}
+        </Badge>
+      </div>
+      <KanbanColumnContent value={status} className="min-h-24 space-y-2 p-2">
         {shown !== undefined && loaded !== undefined && <p className="text-xs text-muted-foreground">
           {c.matching(shown, loaded)}{total !== undefined && ` · ${c.laneTotal(total)}`}
         </p>}
         {items.length === 0 ? (
-          <div className="grid min-h-24 place-items-center rounded-md border border-dashed text-sm text-muted-foreground">
+          <div className="grid min-h-24 place-items-center rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
             {shown === undefined ? t("empty") : c.loadedEmpty}
           </div>
         ) : (
@@ -242,9 +312,9 @@ function BoardColumn({
                         <Button
                           {...props}
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="icon"
-                          className="size-11 touch-none bg-background/90"
+                          className="-mr-2 -mt-2 size-11 shrink-0 cursor-grab touch-none text-muted-foreground hover:bg-transparent hover:text-foreground active:cursor-grabbing"
                           aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber, item.projectKey) })}
                         >
                           <GripVertical />
@@ -264,7 +334,8 @@ function BoardColumn({
 }
 
 function MoveObservation({ token, entry, onObserve }: {
-  token: string; entry: PendingMoves<TicketSummary>[string];
+  token: string;
+  entry: PendingMoves<TicketSummary>[string];
   onObserve: (operationId: string, row: TicketSummary | null) => void;
 }) {
   const row = useSelectedTicket(token, entry.ticket._id);

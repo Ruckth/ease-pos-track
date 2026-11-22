@@ -95,8 +95,9 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
   const { context, page, title, errors, uploads } = await open(role);
   try {
     const name = `P6 ${role} ${crypto.randomUUID()}`;
-    // An empty, idle composer follows the newly selected Project.
+    // Exercise inline Queue details and restore that view on returning to POS.
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    if (role === "staff") await page.getByRole("button", { name: "Queue", exact: true }).click();
     await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
     await page.getByRole("dialog").getByText("Customer App (APP)", { exact: true }).waitFor();
@@ -111,7 +112,7 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     assert.equal(await title.inputValue(), name);
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
     await page.getByRole("button", { name: copy("en", role === "staff" ? "submit" : "submitTicket"), exact: true }).click();
-    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await page.getByRole("dialog", { name: copy("en", "newTicket"), exact: true }).waitFor({ state: "hidden" });
     const matches = await convex.query(api.tickets.searchTickets, { token: seed.sessions[role === "staff" ? 0 : 1], projectId: seed.projects.find(p => p.key === "POS")!.id, search: name, lifecycle: "active" });
     const created = matches.matches.find(item => item.title === name);
     assert.ok(created, "Draft committed to POS after switching to APP");
@@ -223,7 +224,8 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       assert.equal(await title.inputValue(), name);
       assert.equal(await description.inputValue(), "Keep this description");
       await submit.click();
-      await page.getByRole("dialog").waitFor({ state: "hidden" });
+      await page.getByRole("dialog", { name: copy(language, "newTicket"), exact: true }).waitFor({ state: "hidden" });
+      if (role === "staff") await page.getByRole("dialog").getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       assert.equal(requests.length, 3);
       assert.deepEqual(requests[0], requests[1]);
       assert.deepEqual(requests[0], requests[2]);
@@ -421,9 +423,24 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
   const views = page.getByRole("group", { name: "Ticket view" });
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
+    const statusFilter = page.getByRole("combobox", { name: copy("en", "ticketStatus"), exact: true });
+    assert.equal(await statusFilter.inputValue(), "all");
+    await views.getByRole("button", { name: "Queue", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "active");
+    await views.getByRole("button", { name: "Board", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "all");
+    await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
+    const destinations = page.getByRole("navigation", { name: copy("en", "project"), exact: true });
+    await destinations.getByRole("button", { name: "Archive", exact: true }).click();
+    await destinations.getByRole("button", { name: "Tickets", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "all");
+    await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
+    await statusFilter.selectOption("active");
     await views.getByRole("button", { name: "Table", exact: true }).click();
+    assert.equal(await statusFilter.inputValue(), "active");
     await switcher.selectOption("APP");
-    assert.equal(await views.getByRole("button", { name: "Queue", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
     await views.getByRole("button", { name: "Board", exact: true }).click();
     await switcher.selectOption("POS");
     assert.equal(await views.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
@@ -655,10 +672,14 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await checkWidths(page.getByRole("dialog"));
       assert.equal(await queueHeading.count(), 0, "Modal keeps the queue outside the accessibility tree");
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      if (role === "staff") {
+        assert.equal(await page.getByRole("button", { name: language === "en" ? "Board" : "บอร์ด", exact: true }).getAttribute("aria-pressed"), "true");
+        await page.getByRole("button", { name: copy(language, "queueLabel"), exact: true }).click();
+      }
       await queueHeading.waitFor();
       await checkWidths(page.getByRole("main"));
 
-      const menu = page.locator(role === "staff" ? "aside summary" : "header summary");
+      const menu = page.locator("header summary");
       await menu.click();
       const signOut = page.getByRole("button", { name: copy(language, "signOut"), exact: true });
       await signOut.waitFor();

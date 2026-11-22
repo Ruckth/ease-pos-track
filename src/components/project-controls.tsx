@@ -40,8 +40,7 @@ export function useCurrentProject(token: string) {
 
   const select = useCallback((key: string, view?: string) => {
     const destination = new URL(withProjectParam(window.location.href, key, true), window.location.origin);
-    if (view === "queue") destination.searchParams.delete("view");
-    else if (view) destination.searchParams.set("view", view);
+    if (view) destination.searchParams.set("view", view);
     window.history.pushState(null, "", destination);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
