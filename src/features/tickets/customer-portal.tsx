@@ -1,3 +1,4 @@
+import { TicketCreatedDate } from "@/components/ticket-created-date";
 import { errorCode } from "../../../shared/errors";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
 import { ProductWordmark } from "@/components/product-wordmark";
@@ -195,13 +196,14 @@ function CustomerTickets({ token, project, onNewTicket, onSelect, selectedId, fi
 }
 
 function CustomerTicketRow({ item, selected, onSelect }: { item: TicketSummary; selected: boolean; onSelect: (id: Id<"tickets">) => void }) {
-  const { t, formatDate } = useI18n();
+  const { t } = useI18n();
   const meta = statusMeta(item.status);
   const label = formatTicketNumber(item.ticketNumber, item.projectKey);
   return <button type="button" data-ticket-id={item._id} className={cn("ticket-surface flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", item.status === "waiting" && "border-l-[3px] border-l-violet-500", selected && "border-primary/70 bg-primary/5")}
     aria-label={[t("viewTicket", { ticket: label }), item.title, t(meta.labelKey)].join(", ")} aria-current={selected ? "true" : undefined} onClick={() => onSelect(item._id)}>
     <span className="break-words text-sm font-semibold">{item.title}</span>
     <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="font-mono">{label}</span><span className={cn("font-medium", meta.text)}>{item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}</span><time dateTime={new Date(item.createdAt).toISOString()}>{formatDate(item.createdAt)}</time></span>
+    <span className="break-words text-base font-semibold leading-snug text-foreground">{item.title}</span>
     {item.excerpt ? <span className="line-clamp-1 text-sm text-muted-foreground">{item.excerpt}</span> : null}
     <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
       {item.mediaCount ? <span className="inline-flex items-center gap-1"><Images className="size-3" aria-hidden="true" />{t("reviewMedia", { count: item.mediaCount })}</span> : null}

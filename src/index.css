@@ -25,9 +25,10 @@
     --ring: 213 83% 38%;
     --radius: 10px;
     color-scheme: light;
-    --aurora-glow-a: rgb(158 167 249 / 30%);
-    --aurora-glow-b: rgb(102 213 218 / 26%);
-    --aurora-glow-c: rgb(161 193 251 / 26%);
+    --ticket-paper: 255 252 255;
+    --aurora-glow-a: rgb(194 166 252 / 45%);
+    --aurora-glow-b: rgb(255 197 155 / 45%);
+    --aurora-glow-c: rgb(249 169 214 / 34%);
     --glass-fill: 250 253 255;
     --glass-rim: rgb(255 255 255 / 86%);
     --glass-glint: rgb(255 255 255 / 72%);
@@ -55,9 +56,10 @@
     --border: 215 24% 32%;
     --input: 216 18% 49%;
     --ring: 187 82% 71%;
-    --aurora-glow-a: rgb(95 78 183 / 30%);
-    --aurora-glow-b: rgb(30 148 154 / 24%);
-    --aurora-glow-c: rgb(43 80 153 / 23%);
+    --ticket-paper: 42 42 64;
+    --aurora-glow-a: rgb(126 97 190 / 42%);
+    --aurora-glow-b: rgb(167 95 105 / 34%);
+    --aurora-glow-c: rgb(88 94 161 / 32%);
     --glass-fill: 25 37 57;
     --glass-rim: rgb(169 200 232 / 25%);
     --glass-glint: rgb(218 242 255 / 10%);
@@ -100,18 +102,28 @@
     border-radius: 0.75rem;
   }
 
-  /* Board lanes and Ticket surfaces: one soft outline each, no glass shadow. */
   .ticket-lane {
-    background-color: hsl(var(--card) / 0.5);
-    border: 1px solid hsl(var(--border) / 0.75);
-    border-radius: 0.75rem;
+    background: linear-gradient(155deg, rgb(var(--ticket-paper) / 0.54), rgb(var(--ticket-paper) / 0.28));
+    border: 1px solid var(--glass-rim);
+    border-radius: 1.125rem;
+    box-shadow: inset 0 1px var(--glass-glint);
   }
 
   .ticket-surface {
-    background-color: hsl(var(--card));
+    background: linear-gradient(135deg, rgb(var(--ticket-paper) / 0.97), rgb(var(--ticket-paper) / 0.88));
     color: hsl(var(--card-foreground));
-    border: 1px solid hsl(var(--border) / 0.9);
-    border-radius: 0.5rem;
+    border: 1px solid color-mix(in srgb, hsl(var(--border)) 62%, transparent);
+    border-radius: 0.875rem;
+    box-shadow: inset 0 1px var(--glass-glint), 0 3px 9px -6px var(--glass-shadow);
+  }
+
+  .ticket-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.125rem 0.5rem;
+    background-color: color-mix(in srgb, currentColor 8%, transparent);
   }
 
   .aurora-control {
@@ -140,8 +152,8 @@
   }
 
   @media (prefers-reduced-transparency: reduce) {
-    .ticket-lane {
-      background-color: hsl(var(--background));
+    .ticket-lane, .ticket-surface {
+      background: hsl(var(--card));
     }
     .aurora-panel, .aurora-toolbar {
       background-color: rgb(var(--glass-fill));

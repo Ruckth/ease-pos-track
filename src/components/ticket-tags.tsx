@@ -22,8 +22,8 @@ const tagText: Record<TicketTag["color"], string> = {
 /** `plain` renders tags as coloured text for compact Ticket surfaces. */
 export function TicketTagList({ tags, plain = false }: { tags: TicketTag[]; plain?: boolean }) {
   if (!tags.length) return null;
-  if (plain) return <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs font-medium">{tags.map((tag) => (
-    <span key={tag._id} className={`${tagText[tag.color]} max-w-full break-words [overflow-wrap:anywhere]`}>{tag.name}</span>
+  if (plain) return <div className="flex flex-wrap gap-1 text-xs font-medium">{tags.map((tag) => (
+    <span key={tag._id} className={`ticket-chip ${tagText[tag.color]} max-w-full`}><span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{tag.name}</span></span>
   ))}</div>;
   return <div className="flex flex-wrap gap-1.5">{tags.map((tag) => (
     <Badge key={tag._id} variant="outline" className={`${tagTones[tag.color]} max-w-full whitespace-normal break-words [overflow-wrap:anywhere]`}>
