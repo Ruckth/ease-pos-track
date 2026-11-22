@@ -14,8 +14,22 @@ export default defineConfig({
     {
       name: "pilot-privacy-notices",
       apply: "build",
-      configResolved({ env, mode }) {
+      async configResolved({ env, mode }) {
         if (mode !== "named-pilot" && process.env.TICKET_DEPLOYMENT_MODE !== "named-pilot" && process.env.VERCEL_ENV !== "production") return;
+        if (process.env.VERCEL_ENV === "production") {
+          if (!env.VITE_CONVEX_URL) throw new Error("Production requires VITE_CONVEX_URL");
+          // Exercise the same signed-out query used on entry, without a session or any write.
+          const response = await fetch(new URL("/api/query", env.VITE_CONVEX_URL), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: "identity:viewer", args: {}, format: "json" }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const viewer = response.ok ? await response.json() : null;
+          if (viewer?.status !== "success" || viewer.value !== null) {
+            throw new Error("Production backend does not serve the signed-out identity:viewer query required by this frontend");
+          }
+        }
         for (const name of ["VITE_PILOT_PRIVACY_NOTICE_TH", "VITE_PILOT_PRIVACY_NOTICE_EN"]) {
           if (!validNoticeUrl(env[name])) throw new Error(`A named pilot build requires an approved HTTPS URL in ${name}`);
         }

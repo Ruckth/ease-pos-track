@@ -12,7 +12,7 @@ test("Vercel serves the SPA entry point for every direct auth and portal URL", (
   const rewrites = new Map(config.rewrites?.map(({ source, destination }) => [source, destination]));
 
   assert.equal(config.buildCommand, "pnpm run build");
-  assert.equal(config.git.deploymentEnabled.main, false);
+  assert.equal(config.git.deploymentEnabled.main, true);
   for (const path of [...Object.values(APP_PATHS), "/customer/register"]) {
     if (path === "/") continue;
     assert.equal(rewrites.get(path), "/index.html", `missing SPA rewrite for ${path}`);
