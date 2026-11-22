@@ -10,8 +10,21 @@ export const tagTones: Record<TicketTag["color"], string> = {
   violet: "bg-violet-100 text-violet-900 border-violet-300 dark:bg-violet-950 dark:text-violet-200 dark:border-violet-700",
 };
 
-export function TicketTagList({ tags }: { tags: TicketTag[] }) {
+const tagText: Record<TicketTag["color"], string> = {
+  slate: "text-slate-700 dark:text-slate-300",
+  red: "text-red-700 dark:text-red-300",
+  orange: "text-orange-700 dark:text-orange-300",
+  green: "text-green-700 dark:text-green-300",
+  blue: "text-blue-700 dark:text-blue-300",
+  violet: "text-violet-700 dark:text-violet-300",
+};
+
+/** `plain` renders tags as coloured text for compact Ticket surfaces. */
+export function TicketTagList({ tags, plain = false }: { tags: TicketTag[]; plain?: boolean }) {
   if (!tags.length) return null;
+  if (plain) return <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs font-medium">{tags.map((tag) => (
+    <span key={tag._id} className={`${tagText[tag.color]} max-w-full break-words [overflow-wrap:anywhere]`}>{tag.name}</span>
+  ))}</div>;
   return <div className="flex flex-wrap gap-1.5">{tags.map((tag) => (
     <Badge key={tag._id} variant="outline" className={`${tagTones[tag.color]} max-w-full whitespace-normal break-words [overflow-wrap:anywhere]`}>
       {tag.name}

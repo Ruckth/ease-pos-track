@@ -276,22 +276,22 @@ function BoardColumn({
   const c = useExplorerCopy();
 
   return (
-    <KanbanColumn id={id} value={status} draggable={false} className="aurora-panel min-w-0 snap-start rounded-xl border">
-      <div className={cn("flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-3", meta.tone)}>
+    <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane min-w-0 snap-start overflow-hidden">
+      <div className={cn("flex min-h-11 items-center justify-between gap-2 border-b px-3 py-2", meta.tone)}>
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0" aria-hidden="true" />
           <h2 className="break-words text-sm font-semibold">{label}</h2>
         </div>
-        <Badge variant="outline" className="bg-background/90" aria-label={t("boardColumnCards", { count, status: label })}>
+        <Badge variant="outline" className="border-transparent bg-background/70 px-1.5 font-mono tabular-nums text-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
           {count}
         </Badge>
       </div>
-      <KanbanColumnContent value={status} className="min-h-24 space-y-3 p-3">
+      <KanbanColumnContent value={status} className="min-h-24 space-y-2 p-2">
         {shown !== undefined && loaded !== undefined && <p className="text-xs text-muted-foreground">
           {c.matching(shown, loaded)}{total !== undefined && ` · ${c.laneTotal(total)}`}
         </p>}
         {items.length === 0 ? (
-          <div className="grid min-h-24 place-items-center rounded-lg border border-dashed bg-background/45 px-3 py-4 text-center text-sm text-muted-foreground">
+          <div className="grid min-h-24 place-items-center rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
             {shown === undefined ? t("empty") : c.loadedEmpty}
           </div>
         ) : (
@@ -311,9 +311,9 @@ function BoardColumn({
                         <Button
                           {...props}
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="icon"
-                          className="size-11 touch-none bg-background/90"
+                          className="-mr-2 -mt-2 size-11 shrink-0 cursor-grab touch-none text-muted-foreground hover:bg-transparent hover:text-foreground active:cursor-grabbing"
                           aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber, item.projectKey) })}
                         >
                           <GripVertical />
