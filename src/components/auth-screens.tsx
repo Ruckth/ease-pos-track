@@ -4,6 +4,7 @@ import {
   useStaffInvitation,
 } from "@/app/adapter";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { stashReturnTarget } from "@/app/auth-store";
 import { PrivacyNoticeLink } from "@/components/privacy-notice-link";
 import { ProductWordmark } from "@/components/product-wordmark";
 import { Button } from "@/components/ui/button";
@@ -97,7 +98,8 @@ function previewUsername(value: string) {
   return value.trim().toLowerCase();
 }
 
-const LOCAL_FIXTURE_SIGN_IN = import.meta.env.VITE_LOCAL_FIXTURE_SIGN_IN === "true";
+// Optional chaining keeps the module importable by Node route tests.
+const LOCAL_FIXTURE_SIGN_IN = import.meta.env?.VITE_LOCAL_FIXTURE_SIGN_IN === "true";
 
 /** Staff sign in only with Google; the invitation decides who joins the team. */
 function GoogleSignIn({ invitation }: { invitation?: string }) {
@@ -111,6 +113,8 @@ function GoogleSignIn({ invitation }: { invitation?: string }) {
     setError("");
     try {
       if (invitation) sessionStorage.setItem(staffInviteStorageKey, invitation);
+      // The Google redirect URL carries no query; keep a deep-link return target per tab.
+      else stashReturnTarget(new URLSearchParams(window.location.search).get("redirect"));
       const path = invitation ? APP_PATHS.staffInvite : APP_PATHS.staffLogin;
       await signIn({ redirectTo: new URL(path, window.location.origin).href });
     }

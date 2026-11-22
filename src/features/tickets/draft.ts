@@ -11,6 +11,7 @@ export class DisposableTicketDraft {
   private state: DraftSnapshot;
   private listeners = new Set<() => void>();
   private controller: AbortController | null = null;
+  private submission: ReturnType<typeof submitTicketDraft> | null = null;
   private disposed = false;
   /** Set only after the create receipt is reconciled and cancellation checked. */
   private submittedId: Id<"tickets"> | undefined;
@@ -78,6 +79,11 @@ export class DisposableTicketDraft {
   cancel = () => {
     if (this.controller && !this.controller.signal.aborted) this.controller.abort();
   };
+  cancelAndSettle = async () => {
+    this.cancel();
+    // submit records failures on the draft. Wait for its guarded cleanup, too.
+    await this.submission?.catch(() => {});
+  };
   async submit(deps: Omit<SubmitTicketDeps, "signal" | "onProgress" | "onRequestConflict" | "createTicket"> & {
     createTicket: (args: Parameters<SubmitTicketDeps["createTicket"]>[0] & { projectId: Id<"projects"> }) => Promise<unknown>;
   }) {
@@ -87,11 +93,12 @@ export class DisposableTicketDraft {
     const draft = this.state;
     this.change({ progress: 0, error: null });
     try {
-      const created = await submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
+      this.submission = submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
         signal: controller.signal,
         onProgress: progress => { if (this.controller === controller) this.change({ progress }); },
         onRequestConflict: () => { if (this.controller === controller) this.change({ idempotencyKey: this.resources.requestKey() }); },
       }, draft);
+      const created = await this.submission;
       if (this.disposed || this.controller !== controller) return false;
       controller.signal.throwIfAborted();
       this.submittedId = typeof created === "string" ? created as Id<"tickets"> : undefined;
@@ -102,6 +109,7 @@ export class DisposableTicketDraft {
       if (this.controller === controller) this.change({ error });
       return false;
     } finally {
+      this.submission = null;
       if (this.controller === controller) {
         if (!controller.signal.aborted) controller.abort();
         this.controller = null;

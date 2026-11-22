@@ -1,11 +1,9 @@
-import type { Id } from "@convex/_generated/dataModel";
-import { useWorkspaceTicket } from "./adapter";
+import type { Ticket } from "@/lib/types";
 import { TicketDetailPanel, type DetailNavigation } from "./ticket-detail-panel";
 
-export function CustomerTicketDialog({ projectId, ticketId, ...navigation }: DetailNavigation & {
-  ticketId: Id<"tickets"> | null;
-  projectId: Id<"projects"> | undefined;
+export function CustomerTicketDialog(props: DetailNavigation & {
+  ticket: Ticket | null | undefined;
+  ticketId: string | null;
 }) {
-  const ticket = useWorkspaceTicket(ticketId, projectId);
-  return <TicketDetailPanel {...navigation} role="customer" ticketId={ticketId} ticket={ticket} />;
+  return <TicketDetailPanel {...props} role="customer" />;
 }

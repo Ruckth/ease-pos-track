@@ -47,7 +47,7 @@ export type StaffDetailActions = {
 };
 type RoleActions = ({ role: "staff" } & StaffDetailActions) | { role: "customer" };
 type PanelProps = DetailNavigation & RoleActions & {
-  ticket: Ticket | null | undefined; ticketId: Id<"tickets"> | null;
+  ticket: Ticket | null | undefined; ticketId: string | null;
 };
 
 export function TicketDetailPanel(props: PanelProps) {

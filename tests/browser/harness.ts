@@ -12,9 +12,9 @@ import { translations, translate } from "../../src/lib/i18n";
 import { newContext, recordChromium, redact } from "../../scripts/browser-evidence";
 
 export const baseURL = process.env.BROWSER_BASE_URL!;
-const fixture = JSON.parse(process.env.BROWSER_FIXTURE!) as { accessTokens: string[]; projects: { id: Id<"projects">; key: string }[] };
+const fixture = JSON.parse(process.env.BROWSER_FIXTURE!) as { accessTokens: string[]; tickets: Id<"tickets">[]; projects: { id: Id<"projects">; key: string }[] };
 // Seeded fixture sessions as access tokens (staff, Alice, Bob), for direct API checks.
-export const seed = { sessions: fixture.accessTokens, projects: fixture.projects };
+export const seed = { sessions: fixture.accessTokens, tickets: fixture.tickets, projects: fixture.projects };
 for (const session of seed.sessions) redact(session);
 const convexUrl = `http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`;
 type WithToken<F extends FunctionReference<"query" | "mutation" | "action">> = FunctionArgs<F> & { token?: string };
@@ -91,8 +91,12 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
   // serializes an evaluate callback; it exists only in the isolated test page.
   await context.addInitScript("globalThis.__name = (fn) => fn;");
   await context.addInitScript(({ token, refreshToken, keys, language }) => {
-    sessionStorage.setItem(keys.jwt, token);
-    sessionStorage.setItem(keys.refresh, refreshToken);
+    // Let Convex Auth own rotation and sign-out across document navigations.
+    if (!sessionStorage.getItem("browser-fixture-initialized")) {
+      sessionStorage.setItem(keys.jwt, token);
+      sessionStorage.setItem(keys.refresh, refreshToken);
+      sessionStorage.setItem("browser-fixture-initialized", "1");
+    }
     localStorage.setItem("ease-pos-tracking-language", language);
     const stats = { created: [] as string[], revoked: [] as string[], stops: [] as string[], streams: [] as string[], aborts: 0 };
     Object.assign(window, { draftStats: stats });

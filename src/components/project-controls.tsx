@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { pickProject, readProjectParam, withProjectParam } from "@/lib/projects";
+import { pickProject } from "@/lib/projects";
+import type { ListView } from "@/app/workspace-search";
 
 import type { ProjectSummary } from "@/lib/types";
 
@@ -16,35 +17,22 @@ import type { ProjectSummary } from "@/lib/types";
  * The Projects this account can use and the one currently open. The open
  * Project lives in the URL, so a refresh or a shared link keeps it.
  */
-export function useCurrentProject() {
+export function useCurrentProject(
+  requestedKey: string | undefined,
+  navigateProject: (key: string, replace: boolean, view?: ListView) => void,
+) {
   const projects = useProjects();
-  const [requestedKey, setRequestedKey] = useState(() => readProjectParam(window.location.search));
-  const current = projects ? pickProject(projects, requestedKey) : undefined;
+  const current = projects ? pickProject(projects, requestedKey ?? null) : undefined;
   // An Undo closure belongs to the Project and session that produced it.
   useEffect(() => () => { toast.dismiss(); }, [current?.key]);
 
   useEffect(() => {
-    const sync = () => setRequestedKey(readProjectParam(window.location.search));
-    window.addEventListener("popstate", sync);
-    return () => window.removeEventListener("popstate", sync);
-  }, []);
+    if (current && requestedKey !== current.key) navigateProject(current.key, true);
+  }, [current, requestedKey, navigateProject]);
 
-  // Rewrite a missing or unusable key to the Project actually shown.
-  useEffect(() => {
-    if (current && readProjectParam(window.location.search) !== current.key) {
-      const requested = readProjectParam(window.location.search);
-      window.history.replaceState(requested ? null : window.history.state, "", withProjectParam(window.location.href, current.key, Boolean(requested)));
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    }
-  }, [current]);
-
-  const select = useCallback((key: string, view?: string) => {
-    const destination = new URL(withProjectParam(window.location.href, key, true), window.location.origin);
-    if (view === "queue") destination.searchParams.delete("view");
-    else if (view) destination.searchParams.set("view", view);
-    window.history.pushState(null, "", destination);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  }, []);
+  const select = useCallback((key: string, view?: ListView) => {
+    if (key !== current?.key) navigateProject(key, false, view);
+  }, [current, navigateProject]);
 
   return { projects, current, select };
 }

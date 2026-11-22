@@ -81,3 +81,25 @@ test("named staff use rules, review, Mine and manual holds while the customer se
     }
   });
 });
+
+test("staff settings history preserves the Project and saved Ticket draft", async () => {
+  await capture("workflows", "staff settings history and saved Ticket draft", async () => {
+    const { context, page, errors } = await open(await browser.get(), "staff");
+    try {
+      await page.goto(`${baseURL}/staff/settings/t3?project=POS`);
+      const settings = page.getByRole("dialog", { name: copy("en", "connectT3"), exact: true });
+      await settings.getByRole("button", { name: copy("en", "closeDialog") }).click();
+      await page.waitForURL(url => url.pathname === "/staff");
+      await page.getByRole("button", { name: copy("en", "newTicket"), exact: true }).click();
+      await page.locator("#title").fill("Resume after T3 settings");
+      await page.getByRole("dialog").getByRole("button", { name: copy("en", "closeDialog") }).click();
+      await page.goBack();
+      await settings.waitFor();
+      assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
+      await page.goForward();
+      await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).click();
+      assert.equal(await page.locator("#title").inputValue(), "Resume after T3 settings");
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+});

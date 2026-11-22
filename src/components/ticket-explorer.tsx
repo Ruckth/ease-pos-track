@@ -9,6 +9,7 @@ import { filterTickets, sortTickets, type ExplorerSort, type ExplorerTag } from 
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { useI18n } from "@/lib/i18n";
 import { BOARD_COLUMNS } from "@/lib/kanban-board";
+import { DEFAULT_STAFF_LANE } from "@/app/workspace-search";
 import { stableQueue } from "@/lib/staff-ticket-queue";
 import type { TicketSummary } from "../../shared/ticket-contracts";
 import type { TicketStatus } from "@/lib/types";
@@ -30,6 +31,9 @@ type View = "queue" | "focus" | "board" | "table";
 type Workspace = {
   view: View;
   selectedId: Id<"tickets"> | null;
+  ticketOpen: boolean;
+  lane?: TicketStatus;
+  onLaneChange: (status: TicketStatus) => void;
   visibleStatuses: readonly TicketStatus[];
   orderKey: string;
   onOrder: (ordered: Id<"tickets">[]) => void;
@@ -59,7 +63,7 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [highUrgency, setHighUrgency] = useState(false);
   const [searchLane, setSearchLane] = useState<{ query: string; lane: TicketStatus } | null>(null);
-  const [boardLane, setBoardLane] = useState<TicketStatus>("new");
+  const [boardLane, setBoardLane] = useState<TicketStatus>(DEFAULT_STAFF_LANE);
   const effectiveQuery = useMemo(() => highUrgency
     ? createFilterQuery([filterQuery, priorityRule])
     : filterQuery, [filterQuery, highUrgency]);
@@ -88,9 +92,10 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
   const first = ordered[0]?._id;
   const focusFirst = workspace?.onFocusFirst;
   const selectedId = workspace?.selectedId;
+  const ticketOpen = workspace?.ticketOpen;
   useEffect(() => {
-    if (view === "focus" && !selectedId && !loading && first) focusFirst?.(first);
-  }, [view, selectedId, loading, first, focusFirst]);
+    if (view === "focus" && !ticketOpen && !loading && first) focusFirst?.(first);
+  }, [view, ticketOpen, loading, first, focusFirst]);
 
   const onFiltersOpen = workspace?.onFiltersOpen;
   useEffect(() => {
@@ -115,11 +120,12 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
     : filtering ? c.matching(combined.length, loaded)
     : search ? t("searchMatches", { count: combined.length })
     : morePages && view === "table" ? t("loadedTickets", { count: loaded }) : undefined;
-  const preferredLane = search
-    ? searchLane?.query === search ? searchLane.lane : active[0]?.status ?? boardLane
-    : boardLane;
+  const preferredLane = workspace
+    ? workspace.lane ?? (search ? active[0]?.status : undefined) ?? DEFAULT_STAFF_LANE
+    : search && searchLane?.query === search ? searchLane.lane : search ? active[0]?.status ?? boardLane : boardLane;
   const chooseLane = (lane: TicketStatus) => {
-    if (search) setSearchLane({ query: search, lane });
+    if (workspace) workspace.onLaneChange(lane);
+    else if (search) setSearchLane({ query: search, lane });
     else setBoardLane(lane);
   };
   const fallback = <p role="status" className="py-3 text-sm text-muted-foreground">{t("syncing")}</p>;

@@ -12,7 +12,12 @@ after(() => browsers.close());
 const open = async (role: "staff" | "customer", language?: Language, configure?: (context: BrowserContext) => Promise<void>) => openWith(await browsers.get(), role, language, configure);
 // Every check runs in an evidence scope: failures keep a screenshot, the
 // assertion, and (locally) a Playwright trace taken before teardown.
-const test = (name: string, run: () => Promise<void>) => nodeTest(name, () => capture("workflows", name, run));
+function test(name: string, run: () => Promise<void>): void;
+function test(name: string, options: { timeout?: number }, run: () => Promise<void>): void;
+function test(name: string, optionsOrRun: { timeout?: number } | (() => Promise<void>), maybeRun?: () => Promise<void>) {
+  if (typeof optionsOrRun === "function") nodeTest(name, () => capture("workflows", name, optionsOrRun));
+  else nodeTest(name, optionsOrRun, () => capture("workflows", name, maybeRun!));
+}
 
 for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
   test(`${role} ${language}: focus, pointer pin removal, camera teardown and unmount`, async () => {
@@ -124,6 +129,20 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     await page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
     if (role === "staff") await page.getByPlaceholder("Search", { exact: true }).fill(name);
     await page.locator(`button[data-ticket-id="${created._id}"]`).click();
+    await page.waitForURL(url => url.searchParams.get("ticket") === created._id);
+    const detail = page.getByRole("region", { name, exact: true });
+    await detail.waitFor();
+    await page.reload();
+    await detail.waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
+    assert.equal(new URL(page.url()).searchParams.get("ticket"), created._id);
+    if (role === "staff") assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), name);
+    await page.goBack();
+    await detail.waitFor({ state: "hidden" });
+    assert.equal(new URL(page.url()).searchParams.has("ticket"), false);
+    await page.goForward();
+    await page.waitForURL(url => url.searchParams.get("ticket") === created._id);
+    await detail.waitFor();
     await page.getByRole("button", { name: copy("en", role === "staff" ? "edit" : "editTicket"), exact: true }).click();
     await page.locator(role === "staff" ? "#edit-ticket-title" : "#customer-edit-title").fill(`${name} edited`);
     await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -413,7 +432,9 @@ test("customer sign-in masks a wrong password, then admits the named customer th
   try {
     await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
     const page = await context.newPage();
-    await page.goto(`${baseURL}/customer`);
+    const search = new URLSearchParams({ project: "POS", q: "007", ticket: seed.tickets[1] });
+    await page.goto(`${baseURL}/customer?${search}`);
+    await page.waitForURL(url => url.pathname === "/customer/login" && !!url.searchParams.get("redirect"));
     await page.locator("#customer-username").fill("alice");
     await page.locator("#customer-password").fill("wrong customer passphrase");
     await page.getByRole("button", { name: copy("en", "signIn"), exact: true }).click();
@@ -421,6 +442,13 @@ test("customer sign-in masks a wrong password, then admits the named customer th
     await page.locator("#customer-password").fill(LOCAL_CUSTOMER_PASSWORD);
     await page.getByRole("button", { name: copy("en", "signIn"), exact: true }).click();
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
+    await page.getByRole("region", { name: "Ticket from Alice", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
+    assert.equal(new URL(page.url()).searchParams.get("ticket"), seed.tickets[1]);
+    assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "007");
+    await page.goto(`${baseURL}/customer/login?redirect=${encodeURIComponent("/staff?project=POS")}`);
+    await page.waitForURL(url => url.pathname === "/customer" && !!url.searchParams.get("project"));
+    assert.equal(new URL(page.url()).searchParams.has("redirect"), false);
     assert.equal(await page.locator("#customer-password").count(), 0);
   } finally { await context.close(); }
 });
@@ -459,10 +487,20 @@ test("staff sign-in offers Google, and the local test provider admits a seeded O
   try {
     await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
     const page = await context.newPage();
-    await page.goto(`${baseURL}/staff`);
+    const search = new URLSearchParams({ project: "POS", q: "007", ticket: seed.tickets[0] });
+    await page.goto(`${baseURL}/staff?${search}`);
+    await page.waitForURL(url => url.pathname === "/staff/login" && !!url.searchParams.get("redirect"));
     await page.getByRole("button", { name: copy("en", "continueWithGoogle"), exact: true }).waitFor();
     await page.getByRole("button", { name: "owner@local.test", exact: true }).click();
     await page.getByRole("button", { name: "New Ticket", exact: true }).waitFor();
+    await page.getByRole("region", { name: "Printer needs review", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
+    assert.equal(new URL(page.url()).searchParams.get("ticket"), seed.tickets[0]);
+    assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "007");
+    await page.goto(`${baseURL}/staff/login?redirect=${encodeURIComponent("/customer?project=APP")}`);
+    await page.waitForURL(url => url.pathname === "/staff" && !!url.searchParams.get("project"));
+    assert.equal(new URL(page.url()).searchParams.has("redirect"), false);
+    assert.equal(await page.getByRole("button", { name: copy("en", "continueWithGoogle"), exact: true }).count(), 0);
   } finally { await context.close(); }
 });
 
@@ -1019,4 +1057,248 @@ test("Owner verifies staff invitation creation and reissue, then replaces and re
     await authority.context.close();
     await candidate.context.close();
   }
+});
+
+test("staff deep link survives a query-free Google redirect through tab return storage", async () => {
+  const context = await newContext(await browsers.get());
+  try {
+    await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
+    let observe!: (url: string) => void;
+    const started = new Promise<string>(resolve => { observe = resolve; });
+    await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const message = JSON.parse(String(raw));
+        if (message.udfPath === "auth:startSignInWithGoogle") {
+          observe(message.args[0].redirectTo);
+          return;
+        }
+        server.send(raw);
+      });
+      server.onMessage(raw => socket.send(raw));
+    });
+    const page = await context.newPage();
+    const search = new URLSearchParams({ project: "POS", q: "007", ticket: seed.tickets[0] });
+    await page.goto(`${baseURL}/staff?${search}`);
+    await page.waitForURL(url => url.pathname === "/staff/login" && !!url.searchParams.get("redirect"));
+    const google = page.getByRole("button", { name: copy("en", "continueWithGoogle"), exact: true });
+    const [returnURL] = await Promise.all([started, google.click()]);
+    assert.equal(returnURL, new URL("/staff/login", baseURL).href);
+    // Returning from Google lands on bare /staff/login; completing sign-in consumes the stashed return target once.
+    await page.goto(returnURL);
+    await page.getByRole("button", { name: "owner@local.test", exact: true }).click();
+    await page.getByRole("region", { name: "Printer needs review", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
+    assert.equal(new URL(page.url()).searchParams.get("ticket"), seed.tickets[0]);
+    assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "007");
+    await page.goto(`${baseURL}/staff/login`);
+    await page.waitForURL(url => url.pathname === "/staff" && !!url.searchParams.get("project"));
+    assert.equal(new URL(page.url()).searchParams.has("ticket"), false);
+  } finally { await context.close(); }
+});
+
+test("authorized, malformed, wrong-Project and cross-customer Ticket deep links enforce the same unavailable state", async () => {
+  const staff = await open("staff");
+  const customer = await open("customer");
+  try {
+    // Staff: authorized Queue deep link opens the Ticket and closes cleanly.
+    await staff.page.goto(`${baseURL}/staff?project=POS&ticket=${seed.tickets[0]}`);
+    const staffAuthorized = staff.page.getByRole("region", { name: "Printer needs review", exact: true });
+    await staffAuthorized.waitFor();
+    await staffAuthorized.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+    await staff.page.waitForURL(url => !url.searchParams.has("ticket"));
+
+    // Staff: malformed and wrong-Project links show the same unavailable state in inline Queue view.
+    for (const path of ["/staff?project=POS&ticket=bad", `/staff?project=APP&ticket=${seed.tickets[0]}`]) {
+      await staff.page.goto(baseURL + path);
+      const panel = staff.page.getByRole("region", { name: copy("en", "ticket"), exact: true });
+      await panel.getByRole("alert").filter({ hasText: copy("en", "ticketMissing") }).waitFor();
+      assert.equal(await panel.getByText("Printer needs review", { exact: false }).count(), 0);
+      await panel.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+      await staff.page.waitForURL(url => !url.searchParams.has("ticket"));
+    }
+
+    // Staff: malformed and wrong-Project links show the same unavailable state in dialog Table view.
+    for (const path of ["/staff?project=POS&view=table&ticket=bad", `/staff?project=APP&view=table&ticket=${seed.tickets[0]}`]) {
+      await staff.page.goto(baseURL + path);
+      const dialog = staff.page.getByRole("dialog", { name: copy("en", "ticket"), exact: true });
+      await dialog.getByRole("alert").filter({ hasText: copy("en", "ticketMissing") }).waitFor();
+      assert.equal(await dialog.getByText("Printer needs review", { exact: false }).count(), 0);
+      await dialog.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+      await staff.page.waitForURL(url => !url.searchParams.has("ticket"));
+    }
+
+    // Disallowed Ticket characters are rejected by search validation without crashing or opening detail.
+    await staff.page.goto(`${baseURL}/staff?project=POS&ticket=${encodeURIComponent("bad/id")}`);
+    await staff.page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
+    assert.equal(await staff.page.getByRole("region", { name: copy("en", "ticket"), exact: true }).count(), 0);
+
+    // Customer (Alice): own Ticket opens; malformed, wrong-Project and Bob's Ticket are indistinguishable.
+    await customer.page.goto(`${baseURL}/customer?project=POS&ticket=${seed.tickets[1]}`);
+    const customerAuthorized = customer.page.getByRole("region", { name: "Ticket from Alice", exact: true });
+    await customerAuthorized.waitFor();
+    await customerAuthorized.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+    await customer.page.waitForURL(url => !url.searchParams.has("ticket"));
+
+    for (const path of [
+      "/customer?project=POS&ticket=bad",
+      `/customer?project=APP&ticket=${seed.tickets[1]}`,
+      `/customer?project=POS&ticket=${seed.tickets[2]}`,
+    ]) {
+      await customer.page.goto(baseURL + path);
+      const panel = customer.page.getByRole("region", { name: copy("en", "ticket"), exact: true });
+      await panel.getByRole("alert").filter({ hasText: copy("en", "ticketMissing") }).waitFor();
+      assert.equal(await panel.getByText("Ticket from Alice", { exact: false }).count(), 0);
+      assert.equal(await panel.getByText("Ticket from Bob", { exact: false }).count(), 0);
+      await panel.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+      await customer.page.waitForURL(url => !url.searchParams.has("ticket"));
+    }
+
+    assert.deepEqual(staff.errors, []);
+    assert.deepEqual(customer.errors, []);
+  } finally {
+    await customer.context.close();
+    await staff.context.close();
+  }
+});
+
+test("active text draft confirms before sign-out without upload traffic", async () => {
+  const { page, context, title, token, errors, uploads } = await open("customer", "en");
+  try {
+    await title.fill("Active text draft");
+    await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+
+    const menu = page.locator("summary").filter({ hasText: copy("en", "customerQueueMore") });
+    const signOut = page.getByRole("button", { name: copy("en", "signOut"), exact: true });
+    await menu.click();
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), copy("en", "leaveTicketDraft"));
+        await dialog.dismiss();
+      }),
+      signOut.click(),
+    ]);
+    assert.equal(new URL(page.url()).pathname, "/customer");
+    assert.notEqual(await convex.query(api.identity.viewer, { token }), null);
+    await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
+    assert.equal(await title.inputValue(), "Active text draft");
+
+    await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await menu.click();
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), copy("en", "leaveTicketDraft"));
+        await dialog.accept();
+      }),
+      signOut.click(),
+    ]);
+    await page.waitForURL(url => url.pathname === "/customer/login");
+    await page.locator("#customer-password").waitFor({ state: "visible" });
+    assert.equal(await convex.query(api.identity.viewer, { token }), null);
+    assert.equal(uploads(), 0);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("sign-out waits for the active draft to cancel with a live session", { timeout: 30_000 }, async () => {
+  let intentRequest: number | undefined;
+  let releaseIntent: (() => void) | undefined;
+  let received!: (release: () => void) => void;
+  const intentResponse = new Promise<() => void>(resolve => { received = resolve; });
+  const events: string[] = [];
+  const { page, context, title, token, errors, uploads } = await open("staff", "en", async context => {
+    await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const msg = JSON.parse(String(raw));
+        if (msg.udfPath === "uploads:createUploadIntent") intentRequest = msg.requestId;
+        if (msg.udfPath === "auth:signOut") events.push("logout");
+        server.send(raw);
+      });
+      let queued: (string | Buffer)[] | undefined;
+      server.onMessage(raw => {
+        if (queued) { queued.push(raw); return; }
+        const msg = JSON.parse(String(raw));
+        if (msg.type === "MutationResponse" && intentRequest !== undefined && msg.requestId === intentRequest) {
+          // Convex resolves this write when the following Transition arrives.
+          // Preserve server message order while holding its acknowledgement.
+          queued = [raw];
+          received(() => {
+            for (const message of queued ?? []) socket.send(message);
+            queued = undefined;
+          });
+        } else socket.send(raw);
+      });
+    });
+    // Convex Auth revokes sessions over its separate HTTP client (/api/mutation).
+    await context.route("**/api/mutation", async route => {
+      if (route.request().postDataJSON()?.path === "auth:signOut") events.push("logout");
+      await route.continue();
+    });
+    await context.route("**/api/uploads/cancel", async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      assert.equal((await response.json()).ok, true);
+      events.push("canceled");
+      await route.fulfill({ response });
+    });
+  });
+  try {
+    await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
+    await page.waitForURL(url => url.searchParams.get("project") === "APP");
+    await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
+    await title.fill("Sign-out during upload intent creation");
+    await files(page);
+    await page.getByRole("button", { name: copy("en", "submit"), exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "cancelUpload") }).waitFor();
+    releaseIntent = await intentResponse;
+    // Back would leave the upload's Project. Declining keeps the draft active.
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), copy("en", "switchDuringUpload"));
+        await dialog.dismiss();
+      }),
+      page.evaluate(() => history.back()),
+    ]);
+    await page.waitForURL(url => url.searchParams.get("project") === "APP");
+    assert.equal(await title.inputValue(), "Sign-out during upload intent creation");
+    assert.deepEqual(events, []);
+    // The modal traps pointer input. Dispatch the workspace action directly to
+    // exercise a sign-out arriving while the upload intent response is in flight.
+    const signOut = page.locator("aside details button", { hasText: copy("en", "signOut") });
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), copy("en", "leaveTicketDraft"));
+        await dialog.dismiss();
+      }),
+      signOut.dispatchEvent("click"),
+    ]);
+    assert.deepEqual(events, []);
+    const abortsBefore = (await stats(page)).aborts;
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), copy("en", "leaveTicketDraft"));
+        await dialog.accept();
+      }),
+      signOut.dispatchEvent("click"),
+    ]);
+    await page.waitForFunction(before => window.draftStats.aborts > before, abortsBefore);
+    assert.deepEqual(events, []);
+    releaseIntent();
+    releaseIntent = undefined;
+    await page.waitForURL(url => url.pathname === "/staff/login");
+    await page.getByRole("button", { name: copy("en", "continueWithGoogle"), exact: true }).waitFor({ state: "visible" });
+    assert.equal(events[0], "canceled", "Upload cancel must complete with a live session before sign-out");
+    assert.equal(events[1], "logout", "Sign-out must follow upload cancellation");
+    assert.equal(events.filter(event => event === "canceled").length, 1);
+    assert.equal(await convex.query(api.identity.viewer, { token }), null);
+    assert.equal(uploads(), 0);
+    assert.deepEqual(errors, []);
+  } catch (error) {
+    console.error("Sign-out state", events, page.url(), (await page.locator("body").innerText()).slice(-1500));
+    throw error;
+  } finally { releaseIntent?.(); await context.close(); }
 });

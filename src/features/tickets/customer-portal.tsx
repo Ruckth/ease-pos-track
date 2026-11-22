@@ -17,9 +17,10 @@ import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
 import { Images, Loader2, LogOut, MapPin, Plus, UserRound } from "lucide-react";
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
 import type { TicketSummary } from "../../../shared/ticket-contracts";
-import { useCustomerTickets } from "./adapter";
+import { useCustomerTickets, useWorkspaceTicket } from "./adapter";
+import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
 import { customerQueue, customerQueueCounts } from "./customer-queue";
 import { useComposer } from "./use-composer";
@@ -32,15 +33,20 @@ export function CustomerPortal({ viewer, onLogout }: {
 }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const { language, setLanguage, t } = useI18n();
-  const { projects, current: project, select: selectProject } = useCurrentProject();
-  const navigation = useWorkspaceNavigation("customer", project?.key);
-  const composer = useComposer(project);
+  const navigation = useWorkspaceNavigation("customer");
+  const { projects, current: project, select: selectProject } = useCurrentProject(navigation.project, navigation.selectProject);
+  const composer = useComposer(project, onLogout);
   const toolsMenu = useWorkspaceMenu();
   const projectId = project?._id;
+  const ticket = project && (!navigation.project || navigation.project === project.key) ? navigation.ticket : null;
+  const selected = useWorkspaceTicket(ticket, projectId);
+  const selectedId = selected?._id ?? null;
   const [visible, setVisible] = useState<{ projectId?: Id<"projects">; ids: Id<"tickets">[] }>({ ids: [] });
   const visibleIds = visible.projectId === projectId ? visible.ids : [];
   const setVisibleIds = useCallback((ids: Id<"tickets">[]) => setVisible({ projectId, ids }), [projectId]);
-  const previousSelection = useRef(navigation.ticketId);
+  const previousSelection = useRef(ticket);
+  const focusTicket = useRef<Id<"tickets"> | null>(null);
+  if (selectedId) focusTicket.current = selectedId;
   const scrollOrigin = useRef<number | null>(null);
   const activeProjectBeforeUpdate = useRef(projectId);
   useEffect(() => {
@@ -51,20 +57,20 @@ export function CustomerPortal({ viewer, onLogout }: {
   }, [projects, projectId, t]);
   useEffect(() => {
     const previous = previousSelection.current;
-    previousSelection.current = navigation.ticketId;
-    if (!previous || navigation.ticketId) return;
+    previousSelection.current = ticket;
+    if (!previous || ticket) return;
     const frame = requestAnimationFrame(() => {
       if (scrollOrigin.current !== null) window.scrollTo({ top: scrollOrigin.current, behavior: "instant" });
       scrollOrigin.current = null;
       // Filtering can close detail while focus remains in the search/select.
       // Browser Back removes the focused panel; recover that lost focus only.
       if (document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement) return;
-      const row = document.querySelector<HTMLElement>(`button[data-ticket-id="${CSS.escape(previous)}"]`);
+      const row = focusTicket.current && document.querySelector<HTMLElement>(`button[data-ticket-id="${CSS.escape(focusTicket.current)}"]`);
       const target = row?.getClientRects().length ? row : document.getElementById("customer-tickets-heading");
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [navigation.ticketId]);
+  }, [ticket]);
   const sequence = useRef<Id<"tickets">[]>([]);
   const previousProject = useRef(project?._id);
   if (previousProject.current !== project?._id) {
@@ -76,12 +82,11 @@ export function CustomerPortal({ viewer, onLogout }: {
     scrollOrigin.current = window.scrollY;
     navigation.openTicket(id);
   }
-  if (navigation.ticketId && sequence.current.length === 0 && visibleIds.includes(navigation.ticketId)) sequence.current = visibleIds;
-  const { previous: previousId, next: nextId } = queueNeighbors(navigation.ticketId, visibleIds, sequence.current);
+  if (selectedId && sequence.current.length === 0 && visibleIds.includes(selectedId)) sequence.current = visibleIds;
+  const { previous: previousId, next: nextId } = queueNeighbors(selectedId, visibleIds, sequence.current);
   const foreignDraft = composer.hasDraft && composer.project?._id !== project?._id;
 
   return <main className="min-h-screen">
-    <Toaster richColors position="bottom-right" />
     <header className="border-b bg-card/90">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <ProductWordmark />
@@ -94,7 +99,7 @@ export function CustomerPortal({ viewer, onLogout }: {
               <p className="break-all text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
               <Button variant="outline" className="min-h-11" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
               <div className="[&_button]:min-h-11"><LanguageSelector language={language} onChange={setLanguage} /></div>
-              <Button variant="outline" className="min-h-11" onClick={() => void onLogout()}><LogOut />{t("signOut")}</Button>
+              <Button variant="outline" className="min-h-11" onClick={() => void composer.signOut()}><LogOut />{t("signOut")}</Button>
             </div>
           </details>
         </div>
@@ -106,7 +111,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         <span>{t("recoveryCodeNeeded")}</span>
         <Button className="min-h-11" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
       </div> : null}
-      <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", navigation.ticketId && "hidden lg:flex")}>
+      <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
         <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" tabIndex={-1} className="text-2xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
         <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
         <Button className="min-h-11" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
@@ -114,14 +119,14 @@ export function CustomerPortal({ viewer, onLogout }: {
         </Button></div>
       </div>
       {foreignDraft ? <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
-      <div className={cn("grid items-start gap-4", navigation.ticketId && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
+      <div className={cn("grid items-start gap-4", ticket && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
           <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
-            selectedId={navigation.ticketId} filter={navigation.filter} query={navigation.query}
-            onFilter={navigation.setFilter} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
+            ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
+            onFilter={navigation.setFilter} onQuery={navigation.setQuery} onShowAll={() => navigation.setFilter("all", true)} onVisibleIds={setVisibleIds} />
         </ProjectTicketsBoundary>
-        {project ? <CustomerTicketDialog projectId={project._id} ticketId={navigation.ticketId} onClose={navigation.closeTicket}
-          inResults={navigation.ticketId && visible.projectId === projectId ? visibleIds.includes(navigation.ticketId) : undefined}
+        {project ? <CustomerTicketDialog ticket={selected} ticketId={ticket} onClose={navigation.closeTicket}
+          inResults={selectedId && visible.projectId === projectId ? visibleIds.includes(selectedId) : undefined}
           inline initialSection={navigation.section} onPrevious={previousId ? () => navigation.changeTicket(previousId) : undefined}
           onNext={nextId ? () => navigation.changeTicket(nextId) : undefined} /> : null}
       </div>
@@ -134,9 +139,8 @@ export function CustomerPortal({ viewer, onLogout }: {
           const createdProject = composer.project;
           composer.complete();
           if (id) {
-            if (createdProject && createdProject._id !== project?._id) selectProject(createdProject.key);
             sequence.current = createdProject?._id === projectId ? [id, ...visibleIds.filter(item => item !== id)] : [];
-            navigation.openTicket(id);
+            navigation.openTicket(id, undefined, createdProject && createdProject._id !== project?._id ? { key: createdProject.key } : undefined);
           }
         }} /> : null}
       {composer.hasDraft && <DiscardTicketDraft busy={composer.busy} onDiscard={composer.discard} />}
@@ -159,9 +163,10 @@ function ProjectUnavailable() {
   return <p role="alert" className="rounded-lg border p-4 text-sm">{t("projectMissing")}</p>;
 }
 
-function CustomerTickets({ project, onNewTicket, onSelect, selectedId, filter, query, onFilter, onQuery, onVisibleIds }: {
+function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onQuery, onShowAll, onVisibleIds }: {
   project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
-  selectedId: Id<"tickets"> | null; filter: string; query: string; onFilter: (filter: string) => void; onQuery: (query: string) => void;
+  selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string) => void; onQuery: (query: string) => void;
+  onShowAll: () => void;
   onVisibleIds: (ids: Id<"tickets">[]) => void;
 }) {
   const { t } = useI18n();
@@ -185,10 +190,10 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, filter, q
   }, [loaded, project, visibleTickets.length, tickets.length, t]);
   if (project === null) return <NoProjects />;
   if (!project || !loaded) return <div className="grid min-h-48 place-items-center rounded-lg border" role="status"><Loader2 className="size-6 animate-spin" /><span className="sr-only">{t("syncingTickets")}</span></div>;
-  return <section className={cn("min-w-0", selectedId && "hidden lg:block")} aria-label={t("yourTickets")}>
+  return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
     <div className="mb-3 flex flex-wrap items-end gap-3">
-      <label className="min-w-40 flex-1 space-y-1 text-sm"><span>{t("customerQueueSearch")}</span><Input className="min-h-11" value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} /></label>
+      <label className="min-w-40 flex-1 space-y-1 text-sm"><span>{t("customerQueueSearch")}</span><Input className="min-h-11" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} /></label>
       <label className="grid gap-1 text-sm"><span>{t("ticketStatus")}</span><select className="min-h-11 max-w-full rounded-md border bg-background px-3" value={filter} onChange={event => onFilter(event.target.value)}>
         {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
       </select></label>
@@ -198,7 +203,7 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, filter, q
       : <div className="overflow-hidden rounded-lg border bg-card">
         <div className="flex flex-wrap justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
         {visibleTickets.length ? <ul className="divide-y">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
-          : <div className="space-y-3 p-5"><p>{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11" onClick={() => { onFilter("all"); onQuery(""); }}>{t("showAllTickets")}</Button></div>}
+          : <div className="space-y-3 p-5"><p>{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
       </div>}
     {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
   </section>;

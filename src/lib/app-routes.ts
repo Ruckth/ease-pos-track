@@ -35,7 +35,7 @@ export function loginPathForRole(role: SessionRole) {
   return role === "staff" ? APP_PATHS.staffLogin : APP_PATHS.customerLogin;
 }
 
-function normalizePathname(pathname: string) {
+export function normalizePathname(pathname: string) {
   if (!pathname.startsWith("/")) return `/${pathname}`;
   if (pathname.length > 1 && pathname.endsWith("/")) return pathname.slice(0, -1);
   return pathname;
