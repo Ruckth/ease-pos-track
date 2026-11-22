@@ -104,7 +104,12 @@ async function apply(page: Page, model: Model, action: Action) {
       await composer.waitFor({ state: "hidden" }); model.open = false; return;
     case "resume":
       await page.getByRole("button", { name: copy(language, "resumeTicket"), exact: true }).first().click();
-      await composer.waitFor(); model.open = true; return;
+      await composer.waitFor();
+      // The dialog can open before its lazy media field has rendered.
+      if (model.files.length) {
+        await composer.getByRole("button", { name: copy(language, "openMedia", { name: model.files[0] }), exact: true }).waitFor();
+      }
+      model.open = true; return;
     case "switch":
       await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption(action.project);
       await page.waitForURL(url => url.searchParams.get("project") === action.project);
