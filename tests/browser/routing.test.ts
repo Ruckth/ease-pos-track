@@ -45,7 +45,7 @@ test("named staff use rules, review, Mine and manual holds while the customer se
       const ticket = new URL(customer.page.url()).searchParams.get("ticket");
       assert.ok(ticket);
 
-      await staff.page.goto(`${baseURL}/staff?project=POS`);
+      await staff.page.goto(`${baseURL}/staff?project=POS&view=queue`);
       await staff.page.getByRole("button", { name: "Ticket inbox", exact: true }).click();
       const inbox = staff.page.getByRole("dialog", { name: "Ticket inbox" });
       await inbox.getByRole("button").filter({ hasText: title }).filter({ hasText: "New Ticket for intake" }).click();

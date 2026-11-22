@@ -44,6 +44,7 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
     const { page, context, title, token, errors, uploads } = await open(role, language);
     try {
       const composer = page.getByRole("dialog", { name: copy(language, "newTicket"), exact: true });
+      assert.equal(await composer.evaluate(element => getComputedStyle(element).colorScheme), role === "staff" ? "dark" : "light");
       await expectAccessible(page, `${role} ${language} composer`);
       // Escape closes the composer and focus returns to its trigger.
       await page.keyboard.press("Escape");
@@ -109,6 +110,7 @@ for (const language of ["en", "th"] as const) {
       const { ticket } = await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title: name, description: "Synthetic", requestId: crypto.randomUUID() });
       await convex.mutation(api.tickets.archiveTicket, { token, id: ticket._id, expectedVersion: ticket.version });
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      await page.getByRole("button", { name: copy(language, "queueLabel"), exact: true }).click();
       await page.getByPlaceholder(copy(language, "search"), { exact: true }).fill(name);
       await page.getByRole("button", { name: copy(language, "archive"), exact: true }).click();
       const row = page.locator(`button[data-ticket-id="${ticket._id}"]:visible`);

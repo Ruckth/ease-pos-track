@@ -31,7 +31,7 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
   const archived = item.lifecycle === "archived";
 
   return (
-    <article className={`min-w-0 rounded-lg border bg-background p-3 ${inLane ? "" : "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "border-primary bg-primary/5" : ""}`}>
+    <article className={`min-w-0 border p-3 ${inLane ? "aurora-ticket" : "rounded-lg bg-background sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "border-primary bg-primary/5" : ""}`}>
       <div className={`flex min-w-0 items-start gap-2 ${inLane ? "" : "sm:flex-1 sm:basis-40"}`}>
         <div className="min-w-0 flex-1">
           <button type="button" data-ticket-id={item._id} className="min-h-11 w-full min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

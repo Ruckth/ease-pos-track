@@ -31,7 +31,7 @@ import { StaffViewSwitcher, StaffWorkspaceNavigation, type ProjectTool } from ".
 import { useTicketStatusMoves } from "./use-ticket-status-moves";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
 
-const selectClass = "min-h-11 max-w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground";
+const selectClass = "aurora-control min-h-11 max-w-full rounded-lg px-2.5 text-sm md:min-h-9";
 type TicketId = Id<"tickets">;
 const emptyTickets: TicketSummary[] = [];
 
@@ -70,7 +70,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const projectViews = useRef(new Map<string, ListView>());
   const chooseProject = (key: string) => {
     if (project) projectViews.current.set(project.key, nav.listView);
-    selectProject(key, projectViews.current.get(key) ?? "queue");
+    selectProject(key, projectViews.current.get(key) ?? "board");
   };
   const focusSource = useRef<HTMLElement | null>(null);
   const returnPoint = useRef<{ project: string; id: TicketId; scroll: number } | null>(null);
@@ -175,7 +175,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     composer.complete();
     if (draftProject && draftProject.key !== project?.key) {
       if (project) projectViews.current.set(project.key, nav.listView);
-      if (id) nav.openTicket(id, undefined, { key: draftProject.key, view: projectViews.current.get(draftProject.key) ?? "queue" });
+      if (id) nav.openTicket(id, undefined, { key: draftProject.key, view: projectViews.current.get(draftProject.key) ?? "board" });
       else chooseProject(draftProject.key);
     } else if (id) onSelect(id);
   };
@@ -190,18 +190,18 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     onPrevious={previous ? () => nav.changeTicket(previous) : undefined} onNext={next ? () => nav.changeTicket(next) : undefined}
     initialSection={nav.section} onMove={(_id, status) => { if (selected) void moves.moveItem(selected, status); }} onArchive={archiveItem} onRestore={restoreItem} />;
 
-  return <main className="min-h-screen">
+  return <main className="aurora-canvas min-h-screen">
     {project && !single && <a href="#staff-ticket-results" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:p-3 focus:ring-2" onClick={event => {
       event.preventDefault();
       document.getElementById("staff-ticket-results")?.focus();
     }}>{t("queueSkip")}</a>}
-    <div className={single ? "mx-auto max-w-4xl" : "xl:grid xl:grid-cols-[14rem_minmax(0,1fr)]"}>
+    <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 pt-3 sm:px-5 xl:px-7"}>
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation projects={projects} current={project} archived={showArchived} hideOnPhone={split}
         legacyToolsEnabled={legacyToolsEnabled} t3Available={t3Available} routingAvailable={!!routing}
         onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : "active"); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
-      <div className="mx-auto w-full min-w-0 max-w-[100rem] px-3 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5 xl:px-7 xl:pt-7">
+      <div className="mx-auto w-full min-w-0 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-5">
         <div className={`mb-3 flex-wrap items-center justify-between gap-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
           <h1 className="text-2xl font-semibold tracking-tight">{showArchived ? t("archive") : nav.listView === "queue" ? t("queueTitle") : copy.results}</h1>
           {(project || composer.owner) && <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -217,12 +217,12 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
         {!ticket && moves.recovery}
         {project === null ? <NoProjects action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
           project === undefined ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
-            <div className={`mb-2 flex-wrap items-end gap-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
-              <label className="relative min-w-0 grow basis-full text-xs text-muted-foreground sm:basis-52">
-                {t("search")}<Search className="pointer-events-none absolute bottom-3 left-3 size-4" aria-hidden />
-                <Input className="mt-1 min-h-11 pl-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
+            <div className={`aurora-toolbar sticky top-2 z-20 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
+              <label className="relative min-w-0 grow basis-full sm:basis-52">
+                <span className="sr-only">{t("search")}</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input className="aurora-control min-h-11 rounded-lg pl-9 md:min-h-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
               </label>
-              {!showArchived && <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">{t("ticketStatus")}
+              {!showArchived && <label className="min-w-0"><span className="sr-only">{t("ticketStatus")}</span>
                 <select className={selectClass} value={filter} onChange={event => {
                   const status = event.target.value;
                   withSearch(() => { void nav.setFilter(status); });
@@ -231,7 +231,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                   {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
                 </select>
               </label>}
-              {!showArchived && routing && <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">{routingCopy.assignment}
+              {!showArchived && routing && <label className="min-w-0"><span className="sr-only">{routingCopy.assignment}</span>
                 <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
                   const scope = event.target.value;
                   withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });

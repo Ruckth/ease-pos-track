@@ -102,8 +102,9 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
   const { context, page, title, errors, uploads } = await open(role);
   try {
     const name = `P6 ${role} ${crypto.randomUUID()}`;
-    // An empty, idle composer follows the newly selected Project.
+    // Exercise inline Queue details and restore that view on returning to POS.
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    if (role === "staff") await page.getByRole("button", { name: "Queue", exact: true }).click();
     await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
     await page.getByRole("dialog").getByText("Customer App (APP)", { exact: true }).waitFor();
@@ -118,7 +119,7 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     assert.equal(await title.inputValue(), name);
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
     await page.getByRole("button", { name: copy("en", role === "staff" ? "submit" : "submitTicket"), exact: true }).click();
-    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await page.getByRole("dialog", { name: copy("en", "newTicket"), exact: true }).waitFor({ state: "hidden" });
     const matches = await convex.query(api.tickets.searchTickets, { token: seed.sessions[role === "staff" ? 0 : 1], projectId: seed.projects.find(p => p.key === "POS")!.id, search: name, lifecycle: "active" });
     const created = matches.matches.find(item => item.title === name);
     assert.ok(created, "Draft committed to POS after switching to APP");
@@ -244,7 +245,8 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       assert.equal(await title.inputValue(), name);
       assert.equal(await description.inputValue(), "Keep this description");
       await submit.click();
-      await page.getByRole("dialog").waitFor({ state: "hidden" });
+      await page.getByRole("dialog", { name: copy(language, "newTicket"), exact: true }).waitFor({ state: "hidden" });
+      if (role === "staff") await page.getByRole("dialog").getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       assert.equal(requests.length, 3);
       assert.deepEqual(requests[0], requests[1]);
       assert.deepEqual(requests[0], requests[2]);
@@ -492,8 +494,7 @@ test("staff sign-in offers Google, and the local test provider admits a seeded O
     await page.waitForURL(url => url.pathname === "/staff/login" && !!url.searchParams.get("redirect"));
     await page.getByRole("button", { name: copy("en", "continueWithGoogle"), exact: true }).waitFor();
     await page.getByRole("button", { name: "owner@local.test", exact: true }).click();
-    await page.getByRole("button", { name: "New Ticket", exact: true }).waitFor();
-    await page.getByRole("region", { name: "Printer needs review", exact: true }).waitFor();
+    await page.getByRole("dialog").getByRole("heading", { name: "Printer needs review", exact: true }).waitFor();
     assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
     assert.equal(new URL(page.url()).searchParams.get("ticket"), seed.tickets[0]);
     assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "007");
@@ -510,9 +511,11 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
   const views = page.getByRole("group", { name: "Ticket view" });
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.getByRole("combobox", { name: copy("en", "ticketStatus"), exact: true }).inputValue(), "all");
     await views.getByRole("button", { name: "Table", exact: true }).click();
     await switcher.selectOption("APP");
-    assert.equal(await views.getByRole("button", { name: "Queue", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
     await views.getByRole("button", { name: "Board", exact: true }).click();
     await switcher.selectOption("POS");
     assert.equal(await views.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
@@ -746,10 +749,11 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await checkWidths(page.getByRole("dialog"));
       assert.equal(await queueHeading.count(), 0, "Modal keeps the queue outside the accessibility tree");
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      if (role === "staff") await page.getByRole("button", { name: copy(language, "queueLabel"), exact: true }).click();
       await queueHeading.waitFor();
       await checkWidths(page.getByRole("main"));
 
-      const menu = page.locator(role === "staff" ? "aside summary" : "header summary");
+      const menu = page.locator("header summary");
       await menu.click();
       const signOut = page.getByRole("button", { name: copy(language, "signOut"), exact: true });
       await signOut.waitFor();
@@ -1087,7 +1091,7 @@ test("staff deep link survives a query-free Google redirect through tab return s
     // Returning from Google lands on bare /staff/login; completing sign-in consumes the stashed return target once.
     await page.goto(returnURL);
     await page.getByRole("button", { name: "owner@local.test", exact: true }).click();
-    await page.getByRole("region", { name: "Printer needs review", exact: true }).waitFor();
+    await page.getByRole("dialog").getByRole("heading", { name: "Printer needs review", exact: true }).waitFor();
     assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
     assert.equal(new URL(page.url()).searchParams.get("ticket"), seed.tickets[0]);
     assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "007");
@@ -1102,14 +1106,14 @@ test("authorized, malformed, wrong-Project and cross-customer Ticket deep links 
   const customer = await open("customer");
   try {
     // Staff: authorized Queue deep link opens the Ticket and closes cleanly.
-    await staff.page.goto(`${baseURL}/staff?project=POS&ticket=${seed.tickets[0]}`);
+    await staff.page.goto(`${baseURL}/staff?project=POS&view=queue&ticket=${seed.tickets[0]}`);
     const staffAuthorized = staff.page.getByRole("region", { name: "Printer needs review", exact: true });
     await staffAuthorized.waitFor();
     await staffAuthorized.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
     await staff.page.waitForURL(url => !url.searchParams.has("ticket"));
 
     // Staff: malformed and wrong-Project links show the same unavailable state in inline Queue view.
-    for (const path of ["/staff?project=POS&ticket=bad", `/staff?project=APP&ticket=${seed.tickets[0]}`]) {
+    for (const path of ["/staff?project=POS&view=queue&ticket=bad", `/staff?project=APP&view=queue&ticket=${seed.tickets[0]}`]) {
       await staff.page.goto(baseURL + path);
       const panel = staff.page.getByRole("region", { name: copy("en", "ticket"), exact: true });
       await panel.getByRole("alert").filter({ hasText: copy("en", "ticketMissing") }).waitFor();
@@ -1268,7 +1272,7 @@ test("sign-out waits for the active draft to cancel with a live session", { time
     assert.deepEqual(events, []);
     // The modal traps pointer input. Dispatch the workspace action directly to
     // exercise a sign-out arriving while the upload intent response is in flight.
-    const signOut = page.locator("aside details button", { hasText: copy("en", "signOut") });
+    const signOut = page.locator("header details button", { hasText: copy("en", "signOut") });
     await Promise.all([
       page.waitForEvent("dialog").then(async dialog => {
         assert.equal(dialog.message(), copy("en", "leaveTicketDraft"));

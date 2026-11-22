@@ -287,7 +287,7 @@ export function MediaUploadField({
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
                     aria-label={t("removeFile", { name: item.file.name })}
-                    className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="size-4" />
                   </button>
