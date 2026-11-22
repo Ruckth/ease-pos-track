@@ -277,21 +277,21 @@ function BoardColumn({
 
   return (
     <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane relative min-w-0 snap-start overflow-hidden">
-      <div className={cn("flex min-h-11 items-center justify-between gap-2 border-b px-3 py-2", meta.tone)}>
+      <div className="flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 px-3.5 pb-1 pt-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Icon className="size-4 shrink-0" aria-hidden="true" />
-          <h2 className="break-words text-sm font-semibold">{label}</h2>
+          <Icon className={cn("size-[1.125rem] shrink-0", meta.text)} aria-hidden="true" />
+          <h2 className="break-words text-xs font-semibold uppercase leading-5 tracking-wide">{label}</h2>
         </div>
-        <Badge variant="outline" className="border-transparent bg-background/70 px-1.5 font-mono tabular-nums text-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
+        <Badge variant="outline" className="rounded-full border-border/50 bg-card/50 px-1.5 font-medium tabular-nums text-muted-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
           {count}
         </Badge>
       </div>
-      <KanbanColumnContent value={status} className="min-h-24 space-y-2 p-2">
+      <KanbanColumnContent value={status} className="min-h-40 space-y-2.5 p-2.5">
         {shown !== undefined && loaded !== undefined && <p className="text-xs text-muted-foreground">
           {c.matching(shown, loaded)}{total !== undefined && ` · ${c.laneTotal(total)}`}
         </p>}
         {items.length === 0 ? (
-          <div className="grid min-h-24 place-items-center rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+          <div className="grid min-h-32 place-items-center rounded-xl border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
             {shown === undefined ? t("empty") : c.loadedEmpty}
           </div>
         ) : (
