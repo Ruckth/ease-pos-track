@@ -224,7 +224,7 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
           ))}
         </KanbanBoard>
       </div>
-      <KanbanOverlay>
+      <KanbanOverlay className="hidden lg:block">
         {({ value, variant }) => {
           if (variant === "column") return null;
           const dragged = BOARD_COLUMNS.flatMap((status) => columns[status]).find((item) => item._id === value);
@@ -276,7 +276,7 @@ function BoardColumn({
   const c = useExplorerCopy();
 
   return (
-    <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane min-w-0 snap-start overflow-hidden">
+    <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane relative min-w-0 snap-start overflow-hidden">
       <div className={cn("flex min-h-11 items-center justify-between gap-2 border-b px-3 py-2", meta.tone)}>
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0" aria-hidden="true" />
