@@ -21,7 +21,7 @@
     --destructive: 0 72% 46%;
     --destructive-foreground: 0 0% 100%;
     --border: 216 20% 84%;
-    --input: 216 20% 84%;
+    --input: 216 14% 48%;
     --ring: 213 83% 38%;
     --radius: 10px;
     color-scheme: light;
@@ -58,7 +58,7 @@
     --destructive: 353 88% 74%;
     --destructive-foreground: 345 55% 12%;
     --border: 215 24% 32%;
-    --input: 216 18% 49%;
+    --input: 216 18% 60%;
     --ring: 187 82% 71%;
     --ticket-paper: 42 42 64;
     --aurora-glow-a: rgb(126 97 190 / 42%);
@@ -150,6 +150,10 @@
     background-color: hsl(var(--field));
   }
 
+  select.aurora-control {
+    border-bottom-color: hsl(var(--input));
+  }
+
   /* Elevated glass recipe kept for a later explicit appearance choice; unused by default. */
   .surface-glass {
     background-color: rgb(var(--glass-fill));
@@ -218,6 +222,13 @@
     color: hsl(var(--foreground));
     font-weight: 600;
     border: 1px solid transparent;
+  }
+
+  @media (pointer: coarse) {
+    :root [data-sonner-toast] [data-button].app-toast-action {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
   }
 
   :root [data-sonner-toast] [data-button].app-toast-action:focus-visible {

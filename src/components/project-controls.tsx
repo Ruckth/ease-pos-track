@@ -76,7 +76,7 @@ export function ProjectSwitcher({
         <span className="min-w-0 truncate">{projectLabel(current)}</span>
         <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-max min-w-[max(var(--anchor-width),12rem)] max-w-[min(22rem,var(--available-width))]">
+      <DropdownMenuContent align="start" className="w-56 min-w-0 max-w-[var(--available-width)]">
         <DropdownMenuRadioGroup value={current.key} onValueChange={value => onSelect(String(value))}>
           {projects.map(project => (
             <DropdownMenuRadioItem key={project._id} value={project.key} closeOnClick className="whitespace-normal break-words">

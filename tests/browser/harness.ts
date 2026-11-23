@@ -1,6 +1,6 @@
 // Shared browser fixtures: local-only sessions, instrumented draft resources
 // and blocked provider traffic. Used by the workflow suite and exploration.
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "playwright";
 import { readFileSync } from "node:fs";
 import { ConvexHttpClient } from "convex/browser";
 import { getFunctionName, type FunctionArgs, type FunctionReference, type FunctionReturnType } from "convex/server";
@@ -73,8 +73,8 @@ export type Language = "en" | "th";
 export type DraftStats = { created: string[]; revoked: string[]; streams: string[]; stops: string[]; aborts: number };
 declare global { interface Window { draftStats: DraftStats } }
 export function copy(language: Language, key: keyof typeof translations.en, values?: Record<string, string | number>) { return translate(language, key, values); }
-export async function open(browser: Browser, role: "staff" | "customer", language: Language = "en", configure?: (context: BrowserContext) => Promise<void>) {
-  const context = await newContext(browser, { permissions: ["camera"], viewport: { width: 1280, height: 900 } });
+export async function open(browser: Browser, role: "staff" | "customer", language: Language = "en", configure?: (context: BrowserContext) => Promise<void>, device: Pick<BrowserContextOptions, "hasTouch" | "isMobile" | "viewport"> = {}) {
+  const context = await newContext(browser, { permissions: ["camera"], viewport: { width: 1280, height: 900 }, ...device });
   let uploads = 0;
   await context.route(/\/api\/uploadthing|https:\/\/[^/]*(?:uploadthing|ufs\.sh)/, async route => { uploads++; await route.abort(); });
   const signedIn = role === "staff"

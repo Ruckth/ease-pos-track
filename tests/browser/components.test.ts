@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { after, test as nodeTest } from "node:test";
-import type { Page } from "playwright";
+import type { BrowserContextOptions, Page } from "playwright";
 import { capture, EVIDENCE_DIR, newContext } from "../../scripts/browser-evidence";
-import { baseURL, copy, suiteBrowser, type Language } from "./harness";
+import { baseURL, copy, open as openWith, suiteBrowser, type Language } from "./harness";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -15,8 +15,8 @@ const test = (name: string, run: () => Promise<void>) => nodeTest(name, () => ca
 const shotDir = path.join(EVIDENCE_DIR, "public", "screenshots");
 const shot = async (page: Page, name: string) => { mkdirSync(shotDir, { recursive: true }); await page.screenshot({ path: path.join(shotDir, `components-${name}.png`), animations: "disabled" }); };
 
-async function harness(query: string, viewport = { width: 1280, height: 900 }, language: Language = "en") {
-  const context = await newContext(await browsers.get(), { viewport, reducedMotion: "reduce" });
+async function harness(query: string, viewport = { width: 1280, height: 900 }, language: Language = "en", options: BrowserContextOptions = {}) {
+  const context = await newContext(await browsers.get(), { ...options, viewport, reducedMotion: "reduce" });
   await context.addInitScript(value => localStorage.setItem("ease-pos-tracking-language", value), language);
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -33,12 +33,32 @@ async function assertInViewport(page: Page, label: string) {
   const box = await page.getByRole("menu").evaluate(element => {
     const rect = element.getBoundingClientRect();
     const viewport = window.visualViewport!;
-    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: viewport.width, height: viewport.height, scroll: document.documentElement.scrollWidth };
+    return { left: rect.left - viewport.offsetLeft, right: rect.right - viewport.offsetLeft, top: rect.top - viewport.offsetTop,
+      bottom: rect.bottom - viewport.offsetTop, width: viewport.width, height: viewport.height, layoutWidth: window.innerWidth, scroll: document.documentElement.scrollWidth };
   });
   assert.ok(box.left >= 7.5 && box.right <= box.width - 7.5, `${label}: menu x ${box.left}–${box.right} outside ${box.width}`);
-  assert.ok(box.top >= 0 && box.bottom <= box.height - 7.5, `${label}: menu y ${box.top}–${box.bottom} outside ${box.height}`);
-  assert.ok(box.scroll <= box.width, `${label}: page-wide overflow ${box.scroll} > ${box.width}`);
+  assert.ok(box.top >= 7.5 && box.bottom <= box.height - 7.5, `${label}: menu y ${box.top}–${box.bottom} outside ${box.height}`);
+  assert.ok(box.scroll <= box.layoutWidth, `${label}: page-wide overflow ${box.scroll} > ${box.layoutWidth}`);
 }
+
+test("Project menu supports touch selection and stays visible at 200% pinch zoom", async () => {
+  const { context, page } = await harness("case=switcher&long&align=right", { width: 390, height: 700 }, "en", { isMobile: true, hasTouch: true });
+  try {
+    await trigger(page).tap();
+    await choices(page).first().waitFor();
+    await page.touchscreen.tap(14, 400);
+    await page.getByRole("menu").waitFor({ state: "hidden" });
+    await trigger(page).tap();
+    await choices(page).nth(1).tap();
+    await page.locator("#selected").filter({ hasText: "APP" }).waitFor();
+    const session = await context.newCDPSession(page);
+    await session.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+    await trigger(page).focus();
+    await page.keyboard.press("Enter");
+    await choices(page).first().waitFor();
+    await assertInViewport(page, "200% zoom");
+  } finally { await context.close(); }
+});
 
 test("Project switcher: three Projects to two keeps the mounted menu accurate", async () => {
   const { context, page, errors } = await harness("case=switcher");
@@ -50,8 +70,10 @@ test("Project switcher: three Projects to two keeps the mounted menu accurate", 
     await page.keyboard.press("Escape");
     await page.getByRole("menu").waitFor({ state: "hidden" });
     assert.equal(await trigger(page).evaluate(element => element === document.activeElement), true, "Escape restores focus to the trigger");
-    await page.getByRole("button", { name: "Revoke POS", exact: true }).click();
     await trigger(page).click();
+    // Simulate a reactive permission update while the popup still owns focus.
+    await page.getByRole("button", { name: "Revoke POS", includeHidden: true }).evaluate(element => (element as HTMLButtonElement).click());
+    await page.getByRole("menuitemradio", { name: "Point of Sale (POS)" }).waitFor({ state: "detached" });
     await choices(page).nth(1).waitFor();
     assert.deepEqual(await choices(page).allInnerTexts(), ["Customer App (APP)", "Field Service (FLD)"]);
     assert.equal(await page.getByRole("menuitemradio", { name: "Customer App (APP)" }).getAttribute("aria-checked"), "true");
@@ -104,7 +126,7 @@ for (const theme of ["light", "dark"] as const) for (const width of [320, 390, 6
         const label = await row.locator("[data-status-label]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
         const excerpt = await row.locator("[data-ticket-excerpt]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
         if (width < 640) assert.deepEqual({ dots, label, excerpt }, { dots: 1, label: 0, excerpt: 0 }, `row ${index} at ${width}`);
-        else assert.deepEqual({ dots: dots <= 1, label, excerpt }, { dots: true, label: 1, excerpt: 1 }, `row ${index} at ${width}`);
+        else assert.deepEqual({ dots, label, excerpt }, { dots: 0, label: 1, excerpt: 1 }, `row ${index} at ${width}`);
       }
       // Five distinct shapes: each mark's drawing differs from the others.
       const shapes = await page.locator("svg[data-status-dot]").evaluateAll(marks => [...new Set(marks.map(mark => mark.innerHTML))].length);
@@ -142,11 +164,13 @@ test("Ticket rows: forced colors and grayscale keep every mark visible and focus
 });
 
 for (const theme of ["light", "dark"] as const) test(`notifications ${theme}: two status updates keep independently bound Undo actions`, async () => {
-  const { context, page, errors } = await harness(`case=notices&theme=${theme}`, { width: 390, height: 800 });
+  const { context, page, errors } = await harness(`case=notices&theme=${theme}`, { width: 390, height: 800 }, "en", { hasTouch: true, isMobile: true });
   try {
     await page.getByRole("button", { name: "Update two Tickets", exact: true }).click();
     const undo = page.getByRole("button", { name: copy("en", "undo"), exact: true });
     await page.waitForFunction(() => document.querySelectorAll("[data-sonner-toast]").length === 2);
+    const undoBox = await undo.first().boundingBox();
+    assert.ok(undoBox && undoBox.width >= 44 && undoBox.height >= 44, "Undo has a 44 px touch target");
     // The toast surface is neutral: no rich-colour background for success.
     const surface = await page.locator("[data-sonner-toast]").first().evaluate(element => getComputedStyle(element).backgroundColor);
     assert.doesNotMatch(surface, /rgb\(236, 253, 243\)/);
@@ -157,5 +181,48 @@ for (const theme of ["light", "dark"] as const) test(`notifications ${theme}: tw
     await undo.first().click();
     await page.locator("#undone").filter({ hasText: /^event-B-\d+,event-A-\d+$/ }).waitFor();
     assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("Project menu flips above a trigger near the bottom of a short viewport", async () => {
+  const { context, page } = await harness("case=switcher&align=right", { width: 390, height: 300 });
+  try {
+    await page.getByRole("region", { name: "Switcher harness" }).evaluate(element => {
+      Object.assign(element.style, { position: "fixed", bottom: "8px", right: "8px", width: "auto" });
+    });
+    await trigger(page).click();
+    const popup = page.getByRole("menu");
+    await popup.waitFor();
+    await assertInViewport(page, "bottom edge");
+    const anchor = await trigger(page).boundingBox();
+    const menu = await popup.boundingBox();
+    assert.ok(anchor && menu && menu.y + menu.height <= anchor.y, "menu opens above the trigger");
+  } finally { await context.close(); }
+});
+
+test("staff phone menu returns focus after Team and detail actions have touch targets", async () => {
+  const device = { hasTouch: true, isMobile: true, viewport: { width: 390, height: 700 } };
+  const { context, page } = await openWith(await browsers.get(), "staff", "en", undefined, device);
+  try {
+    const close = page.getByRole("button", { name: copy("en", "closeDialog"), exact: true });
+    await close.tap();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    const more = page.getByRole("button", { name: copy("en", "queueMore"), exact: true });
+    await more.tap();
+    await page.getByRole("menuitem", { name: copy("en", "teamTitle"), exact: true }).tap();
+    const team = page.getByRole("dialog", { name: copy("en", "teamTitle"), exact: true });
+    await team.waitFor();
+    await close.tap();
+    await team.waitFor({ state: "hidden" });
+    await page.waitForFunction(element => element === document.activeElement, await more.elementHandle());
+    await page.getByRole("button", { name: copy("en", "queueLabel"), exact: true }).tap();
+    await page.locator("button[data-ticket-id]:visible").first().tap();
+    const edit = page.getByRole("button", { name: copy("en", "edit"), exact: true });
+    await edit.waitFor();
+    const detail = edit.locator("..");
+    for (const button of [edit, detail.getByRole("button", { name: / · [A-Z]+-\d+$/ })]) {
+      const bounds = await button.boundingBox();
+      assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, "detail action has a 44 px touch target");
+    }
   } finally { await context.close(); }
 });

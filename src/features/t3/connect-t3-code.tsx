@@ -7,7 +7,7 @@ import { T3_DAY_MS, T3_MAX_KEY_DAYS, t3HostPattern, t3ProofIntent, t3ProviderNam
 import { useT3Connection, type ConnectionChange, type RequestT3Proof } from "./adapters/connection";
 import { connectionCopy } from "./connection-copy";
 
-const selectClass = "min-h-10 w-full rounded-md border border-transparent bg-field px-3 text-sm";
+const selectClass = "min-h-10 w-full rounded-md border border-transparent border-b-input bg-field px-3 text-sm";
 
 function errorCode(error: unknown) {
   if (typeof error !== "object" || error === null || !("data" in error)) return "";

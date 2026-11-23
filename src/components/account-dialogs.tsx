@@ -160,7 +160,7 @@ function GoogleBindingForm({ member, ownAccount, onRequest, onCancel }: {
     </h3>
     {ownAccount ? <p className="text-sm">{t("googleIndependentOwner")}</p> : null}
     <label className="block text-sm font-medium" htmlFor="google-binding-action">{t("googleBindingAction")}</label>
-    <select id="google-binding-action" className="h-11 rounded-md border border-transparent bg-field px-2 text-sm"
+    <select id="google-binding-action" className="h-11 rounded-md border border-transparent border-b-input bg-field px-2 text-sm"
       value={kind} onChange={event => setKind(event.target.value === "replace" ? "replace" : "revoke")}>
       {!ownAccount ? <option value="replace">{t("googleBindingReplace")}</option> : null}
       {!member.googleBindingRevoked ? <option value="revoke">{t("googleBindingRevoke")}</option> : null}
@@ -271,7 +271,7 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
         <div className="flex flex-wrap gap-2">
           <Input id="invite-staff-email" type="email" autoComplete="off" required maxLength={254} placeholder={t("inviteEmail")} className="h-11 min-w-0 flex-1" value={email} onChange={event => setEmail(event.target.value)} />
           <label className="sr-only" htmlFor="invite-staff-role">{t("staffInviteRole", { role: "" })}</label>
-          <select id="invite-staff-role" className="h-11 rounded-md border border-transparent bg-field px-2 text-sm" value={role} onChange={event => setRole(event.target.value as "staff" | "owner")}>
+          <select id="invite-staff-role" className="h-11 rounded-md border border-transparent border-b-input bg-field px-2 text-sm" value={role} onChange={event => setRole(event.target.value as "staff" | "owner")}>
             <option value="staff">{t("roleStaff")}</option>
             <option value="owner">{t("roleOwner")}</option>
           </select>

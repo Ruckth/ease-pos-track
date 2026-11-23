@@ -220,7 +220,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
         <div className="space-y-4">
           {props.role === "staff" && <>
             <label className="flex flex-wrap items-center justify-between gap-2 text-sm">{t("detailStatus")}
-              <select className="min-h-11 rounded-md border border-transparent bg-field px-2" value={ticket.status} disabled={props.statusBusy} onChange={event => {
+              <select className="min-h-11 rounded-md border border-transparent border-b-input bg-field px-2" value={ticket.status} disabled={props.statusBusy} onChange={event => {
                 const status = statuses.find(value => value.value === event.target.value);
                 if (status) props.onMove(ticket._id, status.value);
               }}>{statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}</select>
