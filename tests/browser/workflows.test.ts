@@ -2,11 +2,11 @@ import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { after, test as nodeTest } from "node:test";
-import type { BrowserContext, Locator, Page } from "playwright";
+import type { BrowserContext, Locator, Page, Request } from "playwright";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { capture, newContext, redact } from "../../scripts/browser-evidence";
-import { authStorageKeys, baseURL, chooseProject, convex, copy, files, localIdentityAdmin, openHeaderMenu, projectSwitcher, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
+import { authStorageKeys, baseURL, hostedPageErrors, chooseProject, convex, copy, files, localIdentityAdmin, openHeaderMenu, projectSwitcher, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -1346,12 +1346,12 @@ async function openNewTicket(f: Awaited<ReturnType<typeof open>>, role: "staff" 
   await dialog.getByText(copy(language, "pagesHint"), { exact: true }).waitFor();
   return { dialog, ref: created.ticket.ticketNumber };
 }
-async function publishFrom(dialog: Locator, language: Language, input: "choosePageFolder" | "chooseHtmlFile", source: string, entry?: string) {
+async function publishFrom(dialog: Locator, language: Language, input: "choosePageFolder" | "chooseHtmlFile", source: string, entry?: string, timeout?: number) {
   await dialog.getByLabel(copy(language, input), { exact: true }).setInputFiles(source);
   if (entry) await dialog.getByLabel(copy(language, "pageEntry"), { exact: true }).selectOption(entry);
   await dialog.getByRole("button", { name: copy(language, "publishPage"), exact: true }).click();
   const link = dialog.getByRole("link", { name: copy(language, "openPageNamed", { name: entry ?? path.basename(source) }), exact: true });
-  await link.waitFor();
+  await link.waitFor({ timeout });
   return link;
 }
 
@@ -1370,8 +1370,7 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
       assert.equal(await link.getAttribute("rel"), "noopener noreferrer");
 
       const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
-      const popupErrors: string[] = [];
-      popup.on("pageerror", error => popupErrors.push(error.message));
+      const popupErrors = hostedPageErrors(popup);
       await popup.getByText("Inline script ran", { exact: true }).waitFor();
       await popup.getByText("External script ran", { exact: true }).waitFor();
       await popup.waitForFunction(() => (document.getElementById("shot") as HTMLImageElement).naturalWidth === 8);
@@ -1434,16 +1433,88 @@ test("publishing an HTML screenshot fits Full HD and preserves transparent pixel
   } finally { await f.context.close(); }
 });
 
-// The real Thai report (1.4 MB, nine embedded screenshots, zoom dialog) when present locally.
-const sampleHtml = process.env.PAGE_SAMPLE_HTML;
-test("staff: the real sample page publishes, renders every screenshot and opens its zoom dialog", { skip: !sampleHtml && "PAGE_SAMPLE_HTML is not set" }, async () => {
+/**
+ * Records each page publish: its image policy header and multipart payload bytes.
+ * Chromium hides File-backed parts from Playwright, so the payload is summed in
+ * the page from the FormData the app hands to fetch. Applies from the next navigation.
+ */
+async function trackPublishes(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const send = window.fetch.bind(window);
+    const sizes: number[] = [];
+    Object.assign(window, { pageUploadBytes: sizes });
+    window.fetch = (input, init) => {
+      if (init?.body instanceof FormData && String(input).includes("/pages")) {
+        let bytes = 0;
+        init.body.forEach(value => { bytes += typeof value === "string" ? new TextEncoder().encode(value).length : value.size; });
+        sizes.push(bytes);
+      }
+      return send(input, init);
+    };
+  });
+  const requests: Request[] = [];
+  context.on("request", request => { if (request.method() === "POST" && /\/v1\/tickets\/[^/]+\/pages$/.test(new URL(request.url()).pathname)) requests.push(request); });
+  return async (page: Page) => {
+    const sizes = await page.evaluate(() => (window as unknown as { pageUploadBytes: number[] }).pageUploadBytes);
+    return requests.map((request, index) => ({ bytes: sizes[index], policy: request.headers()["x-ticket-image-policy"] ?? null }));
+  };
+}
+
+test("originals over the request limit are prepared in the browser and stay within Full HD", { timeout: 120_000 }, async () => {
+  const { default: sharp } = await import("sharp");
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const folder = await mkdtemp(path.join(tmpdir(), "ticket-page-large-"));
+  // Uncompressed noise: 2200 × 1800 RGBA is about 15.8 MB, over the 10 MiB page limit.
+  const photo = await sharp({ create: { width: 2200, height: 1800, channels: 4, background: "#000", noise: { type: "gaussian", mean: 128, sigma: 50 } } }).png({ compressionLevel: 0 }).toBuffer();
+  await writeFile(path.join(folder, "index.html"), '<img alt="Large photo" src="photo.png">');
+  await writeFile(path.join(folder, "photo.png"), photo);
   const f = await open("staff");
+  const publishes = await trackPublishes(f.context);
+  try {
+    assert.ok(photo.length > 10 * 1024 * 1024);
+    const { dialog } = await openNewTicket(f, "staff", "en");
+    await dialog.getByLabel(copy("en", "choosePageFolder"), { exact: true }).setInputFiles(folder);
+    await dialog.getByRole("button", { name: copy("en", "publishPage"), exact: true }).click();
+    const link = dialog.getByRole("link", { name: copy("en", "openPageNamed", { name: "index.html" }), exact: true });
+    await link.waitFor({ timeout: 60_000 });
+    const posts = await publishes(f.page);
+    assert.deepEqual(posts.map(post => post.policy), ["v1"]);
+    assert.ok(posts[0].bytes < photo.length / 2, `request ${posts[0].bytes} bytes`);
+    const stored = Buffer.from(await (await fetch(new URL("photo.png", (await link.getAttribute("href"))!))).arrayBuffer());
+    const meta = await sharp(stored).metadata();
+    assert.deepEqual([meta.width, meta.height], [1320, 1080]);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); await rm(folder, { recursive: true, force: true }); }
+});
+
+/** Every literal base64 `img src` in served HTML, decoded with its stored format. */
+async function embeddedImages(html: string) {
+  const { default: sharp } = await import("sharp");
+  return await Promise.all([...html.matchAll(/<img\b[^>]*?\ssrc="data:(image\/[a-z]+);base64,([^"]+)"/g)].map(async ([, type, base64]) => {
+    const bytes = Buffer.from(base64, "base64");
+    const meta = await sharp(bytes).metadata();
+    return { type, bytes, size: bytes.length, width: meta.width!, height: meta.height!, alpha: Boolean(meta.hasAlpha) };
+  }));
+}
+
+// The real Thai report (1.4 MB, nine embedded screenshots, zoom dialog) when present locally.
+// PAGE_SAMPLE_EVIDENCE names a JSON file that receives per-image sizes and formats.
+const sampleHtml = process.env.PAGE_SAMPLE_HTML;
+test("staff: the real sample page publishes, renders every screenshot and opens its zoom dialog", { timeout: 120_000, skip: !sampleHtml && "PAGE_SAMPLE_HTML is not set" }, async () => {
+  const { default: sharp } = await import("sharp");
+  const { faithfulPixels, fitImage } = await import("../../shared/image-optimization");
+  const { readFile, writeFile } = await import("node:fs/promises");
+  const f = await open("staff");
+  const publishes = await trackPublishes(f.context);
   try {
     const { dialog } = await openNewTicket(f, "staff", "en");
-    const link = await publishFrom(dialog, "en", "chooseHtmlFile", sampleHtml!);
+    const started = Date.now();
+    const link = await publishFrom(dialog, "en", "chooseHtmlFile", sampleHtml!, undefined, 90_000);
+    const publishMs = Date.now() - started;
+    const url = (await link.getAttribute("href"))!;
     const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
-    const popupErrors: string[] = [];
-    popup.on("pageerror", error => popupErrors.push(error.message));
+    const popupErrors = hostedPageErrors(popup);
     await popup.waitForLoadState("load");
     const shots = popup.locator("button.shot img");
     assert.equal(await shots.count(), 9);
@@ -1454,5 +1525,32 @@ test("staff: the real sample page publishes, renders every screenshot and opens 
     await popup.waitForFunction(() => !(document.getElementById("zoom") as HTMLDialogElement).open);
     assert.deepEqual(popupErrors, []);
     assert.deepEqual(f.errors, []);
+
+    const source = await readFile(sampleHtml!);
+    const served = Buffer.from(await (await fetch(url)).arrayBuffer());
+    const before = await embeddedImages(source.toString("utf8"));
+    const after = await embeddedImages(served.toString("utf8"));
+    assert.equal(after.length, before.length);
+    const images = await Promise.all(after.map(async (output, index) => {
+      const original = before[index];
+      const fitted = fitImage(original.width, original.height);
+      // Full HD bounds, aspect and alpha hold; pixels pass the same comparison the encoder used.
+      assert.deepEqual([output.width, output.height], [fitted.width, fitted.height], `image ${index} size`);
+      assert.equal(output.alpha && !original.alpha ? "alpha added" : "ok", "ok", `image ${index} alpha`);
+      const reference = await sharp(original.bytes).rotate().resize(fitted.width, fitted.height, { fit: "fill" }).ensureAlpha().raw().toBuffer();
+      const pixels = await sharp(output.bytes).ensureAlpha().raw().toBuffer();
+      return { index, from: original.type, to: output.type, beforeBytes: original.size, afterBytes: output.size,
+        width: output.width, height: output.height, faithful: faithfulPixels(reference, pixels) };
+    }));
+    assert.ok(images.every(image => image.faithful), "every stored image passes the pixel comparison");
+    const posts = await publishes(f.page);
+    assert.equal(posts.length, 1, "one publish request");
+    assert.equal(posts[0].policy, null, "originals within the limits go to the server pipeline");
+    assert.ok(posts[0].bytes >= source.length, "the original HTML is sent unchanged");
+    assert.ok(served.length < source.length, "the server stores a smaller page");
+    const evidence = { source: { bytes: source.length }, served: { bytes: served.length, savedPercent: +(100 * (1 - served.length / source.length)).toFixed(1) },
+      request: posts[0], publishMs, converted: images.filter(image => image.from !== image.to).length, images };
+    console.log("PAGE_SAMPLE_EVIDENCE " + JSON.stringify({ ...evidence, images: undefined }));
+    if (process.env.PAGE_SAMPLE_EVIDENCE) await writeFile(process.env.PAGE_SAMPLE_EVIDENCE, JSON.stringify(evidence, null, 2));
   } finally { await f.context.close(); }
 });

@@ -5,7 +5,8 @@ import type { Id } from "@convex/_generated/dataModel";
 import { pageFormData } from "../../../../shared/ticket-pages";
 
 export type TicketPage = NonNullable<ReturnType<typeof useTicketPages>["pages"]>[number];
-export type PageUpload = { ticket: string; requestId: string; entry: string; files: Array<{ path: string; blob: Blob }> };
+/** `prepared` files were optimized in the browser; otherwise the server converts the originals. */
+export type PageUpload = { ticket: string; requestId: string; entry: string; files: Array<{ path: string; blob: Blob }>; prepared: boolean };
 
 export function useTicketPages(id: Id<"tickets">) {
   return {
@@ -26,7 +27,7 @@ export async function publishTicketPage(siteUrl: string, token: string, upload: 
   try {
     response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(upload.ticket)}/pages`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "X-Ticket-Image-Policy": "v1", "Idempotency-Key": upload.requestId },
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": upload.requestId, ...(upload.prepared ? { "X-Ticket-Image-Policy": "v1" } : {}) },
       body: pageFormData(upload.entry, upload.files),
     });
   } catch { throw new Error("PAGE_PUBLISH_UNKNOWN"); }

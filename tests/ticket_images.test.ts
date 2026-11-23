@@ -106,3 +106,28 @@ test("a JPEG can shed metadata without a generation of quality loss", async () =
   assert.equal((await sharp(clean).metadata()).exif, undefined);
   assert.deepEqual(await sharp(source).raw().toBuffer(), await sharp(clean).raw().toBuffer());
 });
+
+test("embedded images convert once each, in bounded batches, leaving other markup untouched", async () => {
+  const { optimizeEmbeddedImages } = await import("../shared/html-images");
+  const png = async (width: number, height: number, color: string) =>
+    (await sharp({ create: { width, height, channels: 3, background: color } }).png().toBuffer()).toString("base64");
+  const small = await Promise.all(["#111", "#222", "#333", "#444", "#555"].map(color => png(40, 30, color)));
+  const large = await png(4000, 3200, "#666"); // 12.8 MP alone exceeds a batch's pixel budget
+  const sources = [...small, small[0], large];
+  const html = `<p>สรุป</p>${sources.map((data, index) => `<img alt="${index}" src="data:image/png;base64,${data}">`).join("")}<script>"data:image/png;base64,keep"</script>`;
+  let active = 0, peak = 0;
+  const calls: number[] = [];
+  const output = await optimizeEmbeddedImages(new File([html], "page.html", { type: "text/html" }), async image => {
+    active++; peak = Math.max(peak, active);
+    calls.push(image.size);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    return new File([new Uint8Array([1, 2, 3])], "out.webp", { type: "image/webp" });
+  });
+  const text = await output.text();
+  assert.equal(calls.length, 6, "duplicate sources convert once");
+  assert.equal(peak, 4);
+  assert.equal(text.match(/src="data:image\/webp;base64,AQID"/g)?.length, 7);
+  assert.ok(text.startsWith("<p>สรุป</p><img alt=\"0\" src="));
+  assert.ok(text.endsWith('<script>"data:image/png;base64,keep"</script>'));
+});

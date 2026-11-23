@@ -414,7 +414,7 @@ export const pages = internalJobAction({
 
     const site = process.env.CONVEX_SITE_URL!;
     const response = await fetch(`${site}/v1/tickets/${ref}/pages`, { method: "POST",
-      headers: { Authorization: `Bearer ${jwt}`, "Idempotency-Key": requestId },
+      headers: { Authorization: `Bearer ${jwt}`, "Idempotency-Key": requestId, "X-Ticket-Image-Policy": "v1" },
       body: pageFormData("index.html", Object.entries(files).map(([path, text]) => ({ path, blob: new Blob([text]) }))) });
     const page = await response.json() as { url: string; pageId: string };
     check(response.status === 201, "same-key retry over HTTP publishes");

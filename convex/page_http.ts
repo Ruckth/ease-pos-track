@@ -9,6 +9,7 @@ import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { errorCode } from "../shared/errors";
+import { localFixturesEnabled } from "./local_fixtures";
 import { pageFingerprintInput, isPageHtml, pageContentType, PAGE_LIMITS, pageSecurityHeaders, parseServedPath, sha256Hex, validatePageBundle, encodePagePath } from "../shared/ticket-pages";
 
 const STATUS: Record<string, number> = {
@@ -123,32 +124,40 @@ async function readBundle(request: Request) {
   return { entry: bundle.entry, files: sources };
 }
 
-async function prepareBundle(ctx: ActionCtx, request: Request, bundle: Awaited<ReturnType<typeof readBundle>>) {
+/**
+ * `X-Ticket-Image-Policy: v1` declares images already prepared by an official
+ * client: they are validated, not re-encoded. Without it, each raster and each
+ * literal base64 `img src` goes through the Sharp pipeline once.
+ */
+async function prepareBundle(ctx: ActionCtx, bundle: Awaited<ReturnType<typeof readBundle>>, prepared: boolean) {
   const files = [];
-  let totalBytes = 0;
-  const prepared = request.headers.get("x-ticket-image-policy") === "v1";
-  for (const file of bundle.files) {
-    let blob: Blob = file.blob;
-    let sha256 = file.sha256;
-    let rasterType: string | undefined;
-    const raster = pageContentType(file.path).startsWith("image/");
-    if (raster || isPageHtml(file.path)) {
-      const bytes = await blob.arrayBuffer();
-      if (raster || /data:image\//i.test(new TextDecoder().decode(bytes))) {
-        const output = await ctx.runAction(internal.page_image_actions.prepare, { path: file.path, bytes: await packImage(ctx, bytes), prepared });
-        rasterType = output.rasterType;
-        if (output.bytes) {
-          const result = await unpackImage(ctx, output.bytes);
-          blob = new Blob([result]);
-          sha256 = await sha256Hex(result);
-        }
-      }
-    }
-    totalBytes += blob.size;
-    if (totalBytes > PAGE_LIMITS.maxTotalBytes) throw reject("PAGE_TOO_LARGE");
-    files.push({ ...file, blob, size: blob.size, rasterType, sha256 });
+  // Each image file converts in its own Node action; a few run at once.
+  for (let start = 0; start < bundle.files.length; start += FILE_BATCH) {
+    files.push(...await Promise.all(bundle.files.slice(start, start + FILE_BATCH).map(file => prepareFile(ctx, file, prepared))));
+    if (files.reduce((total, file) => total + file.size, 0) > PAGE_LIMITS.maxTotalBytes) throw reject("PAGE_TOO_LARGE");
   }
   return { entry: bundle.entry, files };
+}
+
+const FILE_BATCH = 3;
+async function prepareFile(ctx: ActionCtx, file: Awaited<ReturnType<typeof readBundle>>["files"][number], prepared: boolean) {
+  let blob: Blob = file.blob;
+  let sha256 = file.sha256;
+  let rasterType: string | undefined;
+  const raster = pageContentType(file.path).startsWith("image/");
+  if (raster || isPageHtml(file.path)) {
+    const bytes = await blob.arrayBuffer();
+    if (raster || /data:image\//i.test(new TextDecoder().decode(bytes))) {
+      const output = await ctx.runAction(internal.page_image_actions.prepare, { path: file.path, bytes: await packImage(ctx, bytes), prepared });
+      rasterType = output.rasterType;
+      if (output.bytes) {
+        const result = await unpackImage(ctx, output.bytes);
+        blob = new Blob([result]);
+        sha256 = await sha256Hex(result);
+      }
+    }
+  }
+  return { ...file, blob, size: blob.size, rasterType, sha256 };
 }
 
 type PublishedPage = { _id: Id<"ticketPages">; ticket?: string; url: string; entryPath: string; fileCount: number; totalBytes: number; publishedAt: number };
@@ -188,12 +197,13 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     // body is read or hashed; reserve and commit check them again.
     const previous = await ctx.runMutation(internal.pages.authorize, { ticket, requestId });
     const source = await readBundle(request);
+    const prepared = request.headers.get("x-ticket-image-policy") === "v1";
     const sourceDigest = await sha256Hex(new TextEncoder().encode(pageFingerprintInput({
-      ticketId: previous.ticketId, entry: source.entry, files: source.files,
+      ticketId: previous.ticketId, entry: source.entry, files: source.files, ...(prepared ? {} : { imagePolicy: "server" as const }),
     })));
     if (previous.digest && previous.digest !== sourceDigest) throw reject("PAGE_REQUEST_CONFLICT");
     if (previous.published) return json(request, 200, published(previous.published, false, requestId));
-    const bundle = await prepareBundle(ctx, request, source);
+    const bundle = await prepareBundle(ctx, source, prepared);
     const manifest = bundle.files.map(({ path, size, sha256, rasterType }) => ({ path, size, sha256, rasterType }));
     const reservation = await ctx.runMutation(internal.pages.reserve, { ticket, requestId, entry: bundle.entry, manifest, sourceDigest });
     if (reservation.state === "published") {
@@ -219,7 +229,8 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     // Storage or transport failures and internal errors have an unknown outcome:
     // report them as retryable, never as a client mistake.
     if (!code || code === "INTERNAL_ERROR") {
-      console.error({ route: "pages:publish", errorClass: error instanceof Error ? error.constructor.name : typeof error });
+      console.error({ route: "pages:publish", errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        ...(localFixturesEnabled() && error instanceof Error ? { message: error.message } : {}) });
       return failure(request, "PAGE_PUBLISH_UNKNOWN");
     }
     return failure(request, code);

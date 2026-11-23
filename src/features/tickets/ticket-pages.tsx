@@ -1,5 +1,4 @@
 import { preparePageAsset } from "@/lib/optimize-image";
-import { PAGE_LIMITS, pageContentType } from "../../../shared/ticket-pages";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { localizeError, useI18n } from "@/lib/i18n";
@@ -8,10 +7,11 @@ import { Copy, ExternalLink, FileCode2, FolderOpen, Link2Off, Loader2, Upload, X
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { formatTicketNumber } from "../../../shared/ticket-numbers";
-import { defaultPageEntry, isHiddenPagePath, isPageHtml, validatePageBundle } from "../../../shared/ticket-pages";
+import { defaultPageEntry, isHiddenPagePath, isPageHtml } from "../../../shared/ticket-pages";
 import { publishTicketPage, useTicketPages, type TicketPage } from "./adapters/pages";
+import { publishPageSelection, type PageSelection } from "./page-publish";
 
-type Selection = { files: Array<{ path: string; blob: File }>; entry: string; requestId: string };
+type Selection = PageSelection & { requestId: string };
 
 function formatSize(bytes: number) {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -50,20 +50,14 @@ export function TicketPages({ ticket }: { ticket: Ticket }) {
     setError("");
     setPublishing(true);
     try {
-      validatePageBundle(selection.entry, selection.files.map(file => ({ path: file.path, size: 0 })));
-      const files = [];
-      let totalBytes = 0;
-      for (const file of selection.files) {
-        const blob = await preparePageAsset(file.blob, pageContentType(file.path));
-        totalBytes += blob.size;
-        if (totalBytes > PAGE_LIMITS.maxTotalBytes) throw new Error("PAGE_TOO_LARGE");
-        files.push({ path: file.path, size: blob.size, blob });
-      }
-      const bundle = validatePageBundle(selection.entry, files);
-      // The request id stays with this selection, so a retry never publishes twice.
-      const { url } = await publishTicketPage(target.siteUrl, accessToken, {
-        ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey), requestId: selection.requestId,
-        entry: bundle.entry, files: bundle.files,
+      // The request id and image policy stay with this selection, so a retry
+      // resends the same bytes and never publishes twice.
+      const { url } = await publishPageSelection(selection, {
+        prepare: preparePageAsset,
+        onPolicy: policy => setSelection(current => current?.requestId === selection.requestId ? { ...current, policy } : current),
+        send: (entry, files, prepared) => publishTicketPage(target.siteUrl, accessToken, {
+          ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey), requestId: selection.requestId, entry, files, prepared,
+        }),
       });
       setSelection(null);
       toast.success(t("pagePublished"), { action: { label: t("copyLink"), onClick: () => void copy(url) } });

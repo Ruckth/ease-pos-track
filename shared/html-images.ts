@@ -1,5 +1,20 @@
 import { inspectRaster } from "./image-optimization";
 
+/**
+ * Images converted together within one HTML document. A batch stays within a
+ * decoded-pixel budget (4 bytes each), so one very large image runs alone.
+ */
+const BATCH_IMAGES = 4;
+const BATCH_PIXELS = 12_000_000;
+
+async function dataUrl(file: File) {
+  const encoded = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < encoded.length; i += 8192)
+    binary += String.fromCharCode(...encoded.subarray(i, i + 8192));
+  return "data:" + file.type + ";base64," + btoa(binary);
+}
+
 /** Replace only literal img src attributes, using parser source offsets. Scripts,
  * CSS, ordinary URLs, markup whitespace and non-UTF-8 documents stay intact. */
 export async function optimizeEmbeddedImages(
@@ -19,8 +34,9 @@ export async function optimizeEmbeddedImages(
   const { parse } = await import("parse5");
   const tree = parse(source, { sourceCodeLocationInfo: true });
   const nodes: import("parse5").DefaultTreeAdapterTypes.Node[] = [tree];
-  const edits: Array<{ start: number; end: number; value: string }> = [];
-  const cache = new Map<string, string>();
+  const found: Array<{ src: string; start: number; end: number }> = [];
+  // Unique sources with their decoded size, budgeted before any encoder runs.
+  const images = new Map<string, { file: File; pixels: number }>();
   let pixels = 0;
   while (nodes.length) {
     const node = nodes.pop()!;
@@ -35,36 +51,35 @@ export async function optimizeEmbeddedImages(
         src,
       );
     if (!src || !loc || !match) continue;
-    let url = cache.get(src);
-    if (!url) {
-      const raw = atob(match[2]);
-      const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
-      const info = inspectRaster(bytes);
-      pixels += info.width * info.height;
-      if (pixels > 120_000_000 || cache.size >= 100)
-        throw new Error("PAGE_TOO_LARGE");
-      const extracted = new File([bytes], "embedded", {
-        type: match[1].toLowerCase(),
-      });
-      const out = await optimize(extracted);
-      if (out === extracted) {
-        cache.set(src, src);
-        continue;
-      }
-      const encoded = new Uint8Array(await out.arrayBuffer());
-      let binary = "";
-      for (let i = 0; i < encoded.length; i += 8192)
-        binary += String.fromCharCode(...encoded.subarray(i, i + 8192));
-      url = "data:" + out.type + ";base64," + btoa(binary);
-      cache.set(src, url);
-    }
-    if (url !== src)
-      edits.push({
-        start: loc.startOffset,
-        end: loc.endOffset,
-        value: 'src="' + url + '"',
-      });
+    found.push({ src, start: loc.startOffset, end: loc.endOffset });
+    if (images.has(src)) continue;
+    const bytes = Uint8Array.from(atob(match[2]), (c) => c.charCodeAt(0));
+    const info = inspectRaster(bytes);
+    pixels += info.width * info.height;
+    if (pixels > 120_000_000 || images.size >= 100)
+      throw new Error("PAGE_TOO_LARGE");
+    images.set(src, { file: new File([bytes], "embedded", { type: match[1].toLowerCase() }), pixels: info.width * info.height });
   }
+  // Images are independent: overlap their decoding and encoding in bounded batches.
+  const urls = new Map<string, string>();
+  const convert = async ([src, { file }]: [string, { file: File }]) => {
+    const out = await optimize(file);
+    urls.set(src, out === file ? src : await dataUrl(out));
+  };
+  let batch: Array<[string, { file: File; pixels: number }]> = [];
+  let batchPixels = 0;
+  for (const image of images) {
+    if (batch.length && (batch.length === BATCH_IMAGES || batchPixels + image[1].pixels > BATCH_PIXELS)) {
+      await Promise.all(batch.map(convert));
+      batch = []; batchPixels = 0;
+    }
+    batch.push(image);
+    batchPixels += image[1].pixels;
+  }
+  await Promise.all(batch.map(convert));
+  const edits = found
+    .filter(({ src }) => urls.get(src) !== src)
+    .map(({ src, start, end }) => ({ start, end, value: 'src="' + urls.get(src) + '"' }));
   if (!edits.length) return html;
   const chunks: string[] = [];
   let offset = 0;

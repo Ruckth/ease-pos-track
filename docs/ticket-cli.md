@@ -239,7 +239,7 @@ The CLI and the Ticket UI share one route on the deployment's HTTP host
 
 ```http
 POST /v1/tickets/{ticket}/pages
-Authorization: Bearer <staff or customer session token>
+Authorization: Bearer <Convex Auth access token (JWT) of a staff or customer session>
 Idempotency-Key: <stable request id>
 Content-Type: multipart/form-data
 
@@ -248,7 +248,22 @@ manifest = [{"part":"f0","path":"reports/index.html"},{"part":"f1","path":"asset
 f0, f1   = file bytes (each field exactly once)
 ```
 
-Official clients send `X-Ticket-Image-Policy: v1` after preparing images locally. Other API clients can send originals within the existing multipart limits and the server optimizes them. Prepared raster bytes are validated regardless of this hint. Paths in the HTML stay stable; the response MIME reflects the stored encoding. Literal base64 raster `img src` values in UTF-8 HTML can also be optimized. Hosted images use a private ETag with mandatory revalidation after checking that the page is active.
+The route verifies the access token like any browser call and forwards that
+identity to every internal step, so the live session and admission are checked
+again at reserve and commit.
+
+Image policy. Without `X-Ticket-Image-Policy`, the server converts each raster
+file and each literal base64 `img src` once with Sharp (fit within 1920 × 1080,
+then the smallest of a cleaned original, WebP, JPEG for opaque images and AVIF
+that passes the pixel comparison). The browser panel sends originals this way
+whenever they fit the 10 MiB page limit. A larger selection is prepared in the
+browser first (native canvas encoders) and sent with `X-Ticket-Image-Policy: v1`;
+if the server's converted output would exceed the limit, the first attempt
+falls back the same way. The CLI prepares images with the same Sharp pipeline
+and always sends `v1`. Prepared raster bytes are validated, not re-encoded. The
+policy is part of the request identity: a retry under the same
+`Idempotency-Key` must resend the same bytes with the same policy, and the
+browser panel keeps both with the selection. Paths in the HTML stay stable; the response MIME reflects the stored encoding. Literal base64 raster `img src` values in UTF-8 HTML can also be optimized. Hosted images use a private ETag with mandatory revalidation after checking that the page is active.
 
 `201` publishes, `200` replays. Errors are `{"ok":false,"code":…}`: `401`
 session, `403 ORIGIN_NOT_ALLOWED`, `404 TICKET_UNAVAILABLE`, `400` invalid

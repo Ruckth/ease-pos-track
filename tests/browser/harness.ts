@@ -90,7 +90,9 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
   // tsx preserves nested function names with this helper when Playwright
   // serializes an evaluate callback; it exists only in the isolated test page.
   await context.addInitScript("globalThis.__name = (fn) => fn;");
-  await context.addInitScript(({ token, refreshToken, keys, language }) => {
+  await context.addInitScript(({ token, refreshToken, keys, language, appOrigin }) => {
+    // Instrument the app only; hosted Ticket pages run sandboxed without storage.
+    if (location.origin !== appOrigin) return;
     // Let Convex Auth own rotation and sign-out across document navigations.
     if (!sessionStorage.getItem("browser-fixture-initialized")) {
       sessionStorage.setItem(keys.jwt, token);
@@ -115,7 +117,7 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
     };
     const abort = AbortController.prototype.abort;
     AbortController.prototype.abort = function (reason) { stats.aborts++; abort.call(this, reason); };
-  }, { token: credentials.token, refreshToken: credentials.refreshToken, keys, language });
+  }, { token: credentials.token, refreshToken: credentials.refreshToken, keys, language, appOrigin: new URL(baseURL).origin });
   await configure?.(context);
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -137,6 +139,15 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
     await context.close(); throw error;
   }
   return { context, page, title, errors, token: credentials.token, refreshToken: credentials.refreshToken, uploads: () => uploads };
+}
+/**
+ * Page errors from a sandboxed hosted page, without the probe Playwright's
+ * `serviceWorkers: "block"` injects (it cannot read `navigator.serviceWorker` there).
+ */
+export function hostedPageErrors(page: Page) {
+  const errors: string[] = [];
+  page.on("pageerror", error => { if (!/Service worker is disabled because the context is sandboxed/.test(error.message)) errors.push(error.message); });
+  return errors;
 }
 export async function stats(page: Page) { return page.evaluate(() => window.draftStats); }
 export async function files(page: Page, name = "draft.png") {

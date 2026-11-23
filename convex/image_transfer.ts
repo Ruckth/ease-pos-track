@@ -8,17 +8,22 @@ type Transfer = ArrayBuffer | Id<"imageChunks">[];
 
 // Node actions have a 5 MiB serialized argument/result limit, including base64.
 // Keep typical files inline. Database documents must each fit within 1 MiB.
+const CHUNK_BYTES = 512 * 1024;
+// Deployments cap bytes written per second (4 MiB on the local backend); larger
+// transfers are paced to about half of that so the page's own writes still fit.
+const CHUNK_INTERVAL_MS = 250;
+
 export async function packImage(
   ctx: ActionCtx,
   bytes: ArrayBuffer,
 ): Promise<Transfer> {
   if (bytes.byteLength <= 3 * 1024 * 1024) return bytes;
   const chunks: Id<"imageChunks">[] = [];
-  const size = 512 * 1024;
-  for (let start = 0; start < bytes.byteLength; start += size) {
+  for (let start = 0; start < bytes.byteLength; start += CHUNK_BYTES) {
+    if (start) await new Promise((resolve) => setTimeout(resolve, CHUNK_INTERVAL_MS));
     chunks.push(
       await ctx.runMutation(internal.image_chunks.put, {
-        bytes: bytes.slice(start, start + size),
+        bytes: bytes.slice(start, start + CHUNK_BYTES),
       }),
     );
   }

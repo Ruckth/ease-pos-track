@@ -108,11 +108,16 @@ export async function sha256Hex(bytes: ArrayBuffer | Uint8Array) {
 
 export type PageManifestEntry = { rasterType?: string; path: string; size: number; sha256: string };
 
-/** Canonical retry fingerprint: Ticket, entry and every path, size and content hash. */
-export function pageFingerprintInput(input: { ticketId: string; entry: string; files: PageManifestEntry[] }) {
+/**
+ * Canonical retry fingerprint: Ticket, entry and every path, size and content
+ * hash of the received files. Originals sent for server conversion carry
+ * `imagePolicy: "server"`, so the same bytes under the other policy (which
+ * stores them as prepared) can never replay as this request.
+ */
+export function pageFingerprintInput(input: { ticketId: string; entry: string; files: PageManifestEntry[]; imagePolicy?: "server" }) {
   const files = [...input.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
     .map(file => [file.path, file.size, file.sha256]);
-  return JSON.stringify({ v: 1, ticketId: input.ticketId, entry: input.entry, files });
+  return JSON.stringify({ v: 1, ticketId: input.ticketId, entry: input.entry, files, ...(input.imagePolicy ? { imagePolicy: input.imagePolicy } : {}) });
 }
 
 export function encodePagePath(path: string) {

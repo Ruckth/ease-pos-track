@@ -279,7 +279,8 @@ test("a blob stored before an interrupted record is adopted on retry by its priv
   expect((await f.t.run(ctx => ctx.db.system.get(orphan)))?.contentType).toBe(write.contentType);
   vi.advanceTimersByTime(1_000);
 
-  const retried = await f.publish(f.alice, f.aliceTicket.ref, form(files, "index.html"), key);
+  // The interrupted reservation was made for prepared files (no server image policy).
+  const retried = await f.publish(f.alice, f.aliceTicket.ref, form(files, "index.html"), key, { "X-Ticket-Image-Policy": "v1" });
   expect(retried.status).toBe(201);
   const page = await retried.json();
   expect(JSON.stringify(page)).not.toContain(write.marker);
@@ -382,6 +383,36 @@ test("raw API resizes image bytes, preserves the authored path, and rejects a fo
   const metadata=await sharp(out).metadata();
   expect([metadata.width,metadata.height,metadata.hasAlpha]).toEqual([1920,384,true]);
   expect(asset.headers.get("content-type")).toBe("image/"+metadata.format);
+});
+
+test("browser originals are converted once on the server; the image policy is part of the request identity", async () => {
+  const { default: sharp } = await import("sharp");
+  const f = await fixture();
+  const [w, h] = [1200, 800];
+  const raw = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw.set([x * 255 / w, y * 255 / h, 128], (y * w + x) * 3);
+  const jpeg = await sharp(raw, { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  const html = `<!doctype html><h1>สรุป</h1><img alt="shot" src="data:image/jpeg;base64,${jpeg.toString("base64")}">`;
+  const body = () => pageFormData("report.html", [{ path: "report.html", blob: new Blob([html]) }]);
+  const key = crypto.randomUUID();
+  const created = await f.publish(f.alice, f.aliceTicket.ref, body(), key, { Origin: APP });
+  expect(created.status).toBe(201);
+  const page = await created.json();
+  const served = await (await f.t.fetch(f.path(page.url))).text();
+  const [, type, base64] = /src="data:(image\/[a-z]+);base64,([^"]+)"/.exec(served)!;
+  const stored = Buffer.from(base64, "base64");
+  const meta = await sharp(stored).metadata();
+  // Authored markup and text stay; the image changes format only when smaller.
+  expect(served.startsWith("<!doctype html><h1>สรุป</h1><img alt=\"shot\" src=\"data:")).toBe(true);
+  expect(type).not.toBe("image/jpeg");
+  expect(type).toBe(meta.format === "heif" ? "image/avif" : "image/" + meta.format);
+  expect([meta.width, meta.height]).toEqual([w, h]);
+  expect(stored.length).toBeLessThan(jpeg.length);
+  expect(page.totalBytes).toBe(new TextEncoder().encode(served).length);
+  // The same originals declared as prepared are a different request under this key.
+  const prepared = await f.publish(f.alice, f.aliceTicket.ref, body(), key, { "X-Ticket-Image-Policy": "v1" });
+  expect([prepared.status, (await prepared.json()).code]).toEqual([409, "PAGE_REQUEST_CONFLICT"]);
+  expect((await f.publish(f.alice, f.aliceTicket.ref, body(), key)).status).toBe(200);
 });
 
 test("temporary image chunks are consumed once and abandoned chunks expire", async () => {
