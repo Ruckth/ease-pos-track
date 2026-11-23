@@ -273,6 +273,12 @@ export default defineSchema({
     files: v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string(), contentType: v.string(), storageId: v.id("_storage") })),
     // Blobs recorded after the row stopped staging, or duplicates of a staged path.
     discarded: v.array(v.id("_storage")),
+    // Ownership proof issued before each blob is stored: the blob carries the
+    // private marker in its storage content type until it is recorded above.
+    writes: v.optional(v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string(), marker: v.string(),
+      claimedAt: v.number(), scannedTo: v.number() }))),
+    // Set while unrecorded writes await reconciliation.
+    writeCheckAt: v.optional(v.number()),
     totalBytes: v.number(),
     state: v.union(v.literal("staging"), v.literal("published"), v.literal("revoked"), v.literal("abandoned")),
     shareKey: v.optional(v.string()),
@@ -287,7 +293,8 @@ export default defineSchema({
     .index("by_share_key", ["shareKey"])
     .index("by_ticket", ["ticketId", "state", "createdAt"])
     .index("by_state_expires", ["state", "expiresAt"])
-    .index("by_reclaim", ["reclaimAfter"]),
+    .index("by_reclaim", ["reclaimAfter"])
+    .index("by_write_check", ["writeCheckAt"]),
   uploadIntents: defineTable({
     sessionId: v.id("sessions"),
     secret: v.string(),

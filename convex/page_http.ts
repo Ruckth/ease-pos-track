@@ -14,12 +14,12 @@ const STATUS: Record<string, number> = {
   AUTH_REQUIRED: 401, SESSION_EXPIRED: 401, ORIGIN_NOT_ALLOWED: 403,
   TICKET_UNAVAILABLE: 404, PROJECT_NOT_FOUND: 404,
   PAGE_REQUEST_CONFLICT: 409, PAGE_REVOKED: 409, PAGE_LIMIT_REACHED: 409,
-  PAGE_UPLOAD_EXPIRED: 409, PAGE_UPLOAD_INCOMPLETE: 409,
+  PAGE_UPLOAD_EXPIRED: 409, PAGE_UPLOAD_INCOMPLETE: 409, PAGE_UPLOAD_BUSY: 409,
   PAGE_TOO_LARGE: 413, PAGE_HOST_NOT_CONFIGURED: 500, PAGE_PUBLISH_UNKNOWN: 503,
 };
 
 /** Outcomes a client resolves by retrying with the same Idempotency-Key. */
-const RETRYABLE = new Set(["PAGE_PUBLISH_UNKNOWN", "PAGE_UPLOAD_INCOMPLETE", "PAGE_UPLOAD_EXPIRED"]);
+const RETRYABLE = new Set(["PAGE_PUBLISH_UNKNOWN", "PAGE_UPLOAD_INCOMPLETE", "PAGE_UPLOAD_EXPIRED", "PAGE_UPLOAD_BUSY"]);
 
 /** Exact browser origins allowed to publish, from TICKET_APP_ORIGINS. */
 function allowedOrigins() {
@@ -95,7 +95,8 @@ async function readBundle(request: Request) {
   try { form = await new Response(body, { headers: { "content-type": type } }).formData(); }
   catch { throw reject("PAGE_FORM_INVALID"); }
   // Every field appears once: a repeated part could otherwise smuggle unhashed bytes.
-  const keys = [...form.keys()];
+  const keys: string[] = [];
+  form.forEach((_value, key) => { keys.push(key); });
   if (keys.length > PAGE_LIMITS.maxFiles + 2 || new Set(keys).size !== keys.length) throw reject("PAGE_FORM_INVALID");
   const entry = form.get("entry");
   const manifestText = form.get("manifest");
@@ -156,10 +157,12 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
       return json(request, 200, published(reservation.page, false, requestId));
     }
     pageId = reservation.pageId;
-    for (const file of bundle.files) {
-      if (reservation.staged.some(staged => staged.path === file.path && staged.sha256 === file.sha256)) continue;
-      const storageId = await ctx.storage.store(file.blob);
-      await ctx.runMutation(internal.pages.recordStaged, { pageId, path: file.path, sha256: file.sha256, size: file.size, storageId });
+    // Each write was claimed before storage; the blob carries its private marker
+    // until it is recorded, so an interruption here stays recoverable.
+    for (const write of reservation.writes) {
+      const file = bundle.files.find(item => item.path === write.path)!;
+      const storageId = await ctx.storage.store(new Blob([file.blob], { type: write.contentType }));
+      await ctx.runMutation(internal.pages.recordStaged, { pageId, marker: write.marker, path: file.path, sha256: file.sha256, size: file.size, storageId });
     }
     const page = await ctx.runMutation(internal.pages.commit, { token, pageId });
     return json(request, 201, published(page, true, requestId));

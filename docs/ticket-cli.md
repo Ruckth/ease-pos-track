@@ -255,9 +255,10 @@ or expired uploads are `409` with `"retryable":true`. Retry those with the same 
 
 Browser writes are accepted only from origins listed in the Convex environment
 variable `TICKET_APP_ORIGINS` (comma-separated, exact). Clients without an
-`Origin` header, such as the CLI, are unaffected. For `pnpm dev` set it once on
-the local backend: `pnpm convex:local env set TICKET_APP_ORIGINS http://localhost:<VITE_PORT>`.
-`pnpm test:browser` sets it itself.
+`Origin` header, such as the CLI, are unaffected. Locally, `pnpm dev` and
+`pnpm test:browser` set it on this checkout's local backend to exactly this
+checkout's Vite origins (`localhost` and `127.0.0.1` on its `VITE_PORT`); no
+manual step is needed. Shared deployments are configured separately.
 
 `GET /p/{key}/{path}` serves committed files only, rechecking publication,
 revocation and Ticket lifecycle on every request. Responses carry `no-store`,
@@ -266,8 +267,17 @@ opaque origin, no network access beyond inline code, `data:`/`blob:` media and
 files under the page's own `/p/{key}/` prefix). External fonts and scripts do not
 load; bundle them. `/p/{key}` redirects to the entry page.
 
-Staging and blobs: expiry (15 minutes) only marks abandoned uploads; deleting page
-blobs is part of the gated reclaim sweep and runs only with `MEDIA_CLEANUP_ENABLED=true`.
+Staging and blobs: before any byte is stored, the reservation records one
+claim per file with a private random marker; the stored blob carries it in its
+storage content type (served responses always use the validated path's type).
+Recording clears the claim. If a run stops between storing and recording, a
+same-key retry, or the five-minute reconciliation sweep, scans storage by
+creation time in bounded passes within the claim's 11-minute write window and
+attributes only the blob with that exact marker, size and hash. It is adopted
+while staging, otherwise recorded as discarded. Expiry (15 minutes) only marks
+abandoned uploads; deleting page blobs is part of the gated reclaim sweep and
+runs only with `MEDIA_CLEANUP_ENABLED=true`. Unrelated storage is never deleted.
+`pnpm convex:local run local_smoke:pages '{}'` checks this on the local backend.
 
 ## Output and error contract
 

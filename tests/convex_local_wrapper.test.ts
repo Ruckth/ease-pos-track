@@ -140,3 +140,11 @@ require("node:fs").writeFileSync("invoked", "yes");
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("local page publishing origins are exactly this checkout's Vite origins, set through the local wrapper", async () => {
+  const { localAppOrigins, portsForSlot } = await import("../scripts/worktree-ports.mjs");
+  assert.equal(localAppOrigins(portsForSlot(3)), "http://localhost:4033,http://127.0.0.1:4033");
+  const dev = readFileSync(resolve(import.meta.dirname, "../scripts/dev.mjs"), "utf8");
+  assert.ok(dev.includes('"scripts/convex-local.mjs", "env", "set", "TICKET_APP_ORIGINS", localAppOrigins(ports)'));
+  assert.ok(readFileSync(resolve(import.meta.dirname, "../scripts/test-browser.mjs"), "utf8").includes("TICKET_APP_ORIGINS: localAppOrigins()"));
+});

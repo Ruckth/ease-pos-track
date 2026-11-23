@@ -4,3 +4,4 @@ export const DEFAULT_PORTS: Ports;
 export function portsForSlot(slot: number): Ports;
 export function readPortsFile(dir?: string): Partial<Ports> | null;
 export function loadPorts(dir?: string): Ports;
+export function localAppOrigins(ports?: Ports): string;

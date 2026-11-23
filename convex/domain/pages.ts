@@ -18,6 +18,16 @@ import { requireUsableProject } from "./projects";
 
 export const STAGING_TTL_MS = 15 * 60 * 1000;
 export const PAGE_SWEEP_LIMIT = 10;
+/**
+ * A write claimed now can only land in storage while the publishing action runs
+ * (Convex actions stop after 10 minutes), so its blob is created inside this window.
+ */
+export const PAGE_WRITE_WINDOW_MS = 11 * 60 * 1000;
+/** Storage rows read per reconciliation pass; later passes resume from `scannedTo`. */
+export const PAGE_WRITE_SCAN = 100;
+/** Recent storage commits may still be settling; missing-blob conclusions wait this long. */
+const WRITE_SETTLE_MS = 5_000;
+const MAX_OPEN_WRITES = PAGE_LIMITS.maxFiles * 2;
 
 type Ctx = QueryCtx | MutationCtx;
 type AnyActor = Actor<Id<"customers">>;
@@ -40,6 +50,24 @@ function publicPage(ticket: Doc<"tickets"> | null, row: Doc<"ticketPages">) {
     publishedAt: row.publishedAt ?? row.createdAt,
     ...(ticket ? { ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey) } : {}),
   };
+}
+
+/** Private per-write marker carried in the stored blob's content type. Never served. */
+export function pageWriteType(marker: string) {
+  return `application/vnd.ticket-page-write; write=${marker}`;
+}
+
+function hexToBase64(hex: string) {
+  let binary = "";
+  for (let index = 0; index < hex.length; index += 2) binary += String.fromCharCode(parseInt(hex.slice(index, index + 2), 16));
+  return btoa(binary);
+}
+
+/** Lowercase hex: Blob types are lowercased, so the marker must survive that. */
+function makeWriteMarker() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function makeShareKey() {
@@ -68,6 +96,72 @@ async function requirePublishableTicket(ctx: MutationCtx, actor: AnyActor, id: I
   const doc = await requireWritableTicket(ctx, actor, id);
   await requireUsableProject(ctx, actor, doc.projectId);
   return doc;
+}
+
+type PageWrite = NonNullable<Doc<"ticketPages">["writes"]>[number];
+
+/**
+ * Claims one write per manifest file not yet recorded. The claim is durable
+ * before any byte is stored, so an interrupted upload stays attributable.
+ */
+async function claimWrites(ctx: MutationCtx, row: Doc<"ticketPages">, now: number) {
+  const open = row.writes ?? [];
+  const missing = row.manifest.filter(entry => !row.files.some(file => file.path === entry.path));
+  if (open.length + missing.length > MAX_OPEN_WRITES) throw new Error("PAGE_UPLOAD_BUSY");
+  const claimed: PageWrite[] = missing.map(entry => ({ ...entry, marker: makeWriteMarker(), claimedAt: now, scannedTo: now - 1_000 }));
+  await ctx.db.patch(row._id, { writes: [...open, ...claimed], writeCheckAt: row.writeCheckAt ?? now + PAGE_WRITE_WINDOW_MS });
+  return claimed.map(write => ({ path: write.path, marker: write.marker, contentType: pageWriteType(write.marker) }));
+}
+
+/**
+ * Resolves unrecorded writes from storage metadata. A blob is attributed only by
+ * its exact private marker; size and hash must also match before it is adopted.
+ * Found blobs are adopted while staging or else recorded as discarded for the
+ * gated reclaim. A write is dropped as never stored only after its whole window
+ * has been scanned. Reads at most PAGE_WRITE_SCAN storage rows per pass.
+ */
+export async function reconcilePageWrites(ctx: MutationCtx, pageId: Id<"ticketPages">) {
+  const row = await ctx.db.get(pageId);
+  const writes = row?.writes ?? [];
+  if (!row || writes.length === 0) return row;
+  const now = Date.now();
+  const settled = now - WRITE_SETTLE_MS;
+  const from = Math.min(...writes.map(write => write.scannedTo));
+  const until = Math.min(now, Math.max(...writes.map(write => write.claimedAt + PAGE_WRITE_WINDOW_MS)));
+  const blobs = await ctx.db.system.query("_storage")
+    .withIndex("by_creation_time", q => q.gt("_creationTime", from).lte("_creationTime", until)).take(PAGE_WRITE_SCAN);
+  const complete = blobs.length < PAGE_WRITE_SCAN;
+  const reached = complete ? Math.min(until, settled) : blobs[blobs.length - 1]._creationTime;
+  const byType = new Map(blobs.flatMap(blob => blob.contentType ? [[blob.contentType, blob] as const] : []));
+  const files = [...row.files];
+  const discarded = [...row.discarded];
+  const remaining: PageWrite[] = [];
+  for (const write of writes) {
+    const blob = byType.get(pageWriteType(write.marker));
+    const windowEnd = write.claimedAt + PAGE_WRITE_WINDOW_MS;
+    if (!blob) {
+      if (reached < windowEnd) remaining.push({ ...write, scannedTo: Math.max(write.scannedTo, reached) });
+      continue;
+    }
+    if (files.some(file => file.storageId === blob._id) || discarded.includes(blob._id)) continue;
+    const expected = row.manifest.find(entry => entry.path === write.path);
+    const usable = row.state === "staging" && expected?.sha256 === write.sha256 && expected.size === write.size
+      && blob.size === write.size && blob.sha256 === hexToBase64(write.sha256) && !files.some(file => file.path === write.path);
+    if (usable) files.push({ path: write.path, sha256: write.sha256, size: write.size, contentType: pageContentType(write.path)!, storageId: blob._id });
+    else discarded.push(blob._id);
+  }
+  await ctx.db.patch(row._id, {
+    files, discarded, writes: remaining, writeCheckAt: remaining.length ? now + 60_000 : undefined, updatedAt: now,
+    ...(discarded.length > row.discarded.length ? { reclaimAfter: row.reclaimAfter ?? now } : {}),
+  });
+  return (await ctx.db.get(row._id))!;
+}
+
+/** Due rows only: the normal path clears its claims when recording. */
+export async function reconcileDuePageWrites(ctx: MutationCtx) {
+  const rows = await ctx.db.query("ticketPages").withIndex("by_write_check", q => q.gte("writeCheckAt", 0).lte("writeCheckAt", Date.now())).take(PAGE_SWEEP_LIMIT);
+  for (const row of rows) await reconcilePageWrites(ctx, row._id);
+  return rows.length;
 }
 
 function stagedView(row: Doc<"ticketPages">) {
@@ -103,10 +197,12 @@ export const reservePage = mutationOperation({
       if (existing.ticketId !== ticket._id || existing.inputDigest !== inputDigest) throw new Error("PAGE_REQUEST_CONFLICT");
       if (existing.state === "published") return { state: "published" as const, pageId: existing._id, page: publicPage(ticket, existing) };
       if (existing.state === "revoked") throw new Error("PAGE_REVOKED");
-      // Retry of an interrupted or abandoned upload: keep recorded blobs, extend staging.
+      // Retry of an interrupted or abandoned upload: keep recorded blobs, extend staging,
+      // then adopt any blob an interrupted run stored but never recorded.
       await ctx.db.patch(existing._id, { state: "staging", sessionId: session._id, expiresAt: now + STAGING_TTL_MS,
         reclaimAfter: existing.discarded.length ? existing.reclaimAfter ?? now : undefined, updatedAt: now });
-      return { state: "staging" as const, pageId: existing._id, staged: stagedView(existing) };
+      const current = (await reconcilePageWrites(ctx, existing._id))!;
+      return { state: "staging" as const, pageId: existing._id, staged: stagedView(current), writes: await claimWrites(ctx, current, now) };
     }
     const published = await ctx.db.query("ticketPages").withIndex("by_ticket", q => q.eq("ticketId", ticket._id).eq("state", "published")).take(PAGE_LIMITS.maxPagesPerTicket);
     const staging = await ctx.db.query("ticketPages").withIndex("by_ticket", q => q.eq("ticketId", ticket._id).eq("state", "staging")).take(PAGE_LIMITS.maxPagesPerTicket);
@@ -116,7 +212,7 @@ export const reservePage = mutationOperation({
       inputDigest, entryPath: bundle.entry, manifest, files: [], discarded: [], totalBytes: bundle.totalBytes,
       state: "staging", expiresAt: now + STAGING_TTL_MS, createdAt: now, updatedAt: now,
     });
-    return { state: "staging" as const, pageId, staged: [] };
+    return { state: "staging" as const, pageId, staged: [], writes: await claimWrites(ctx, (await ctx.db.get(pageId))!, now) };
   },
 });
 
@@ -125,18 +221,23 @@ export const reservePage = mutationOperation({
  * recorded, even when the blob can no longer be used, so only the gated reclaim
  * sweep ever deletes page storage.
  */
-export async function recordStagedFile(ctx: MutationCtx, args: { pageId: Id<"ticketPages">; path: string; sha256: string; size: number; storageId: Id<"_storage"> }) {
+export async function recordStagedFile(ctx: MutationCtx, args: { pageId: Id<"ticketPages">; marker: string; path: string; sha256: string; size: number; storageId: Id<"_storage"> }) {
   const row = await ctx.db.get(args.pageId);
   if (!row) throw new Error("PAGE_UNAVAILABLE");
+  // Reconciliation may already have recorded this exact blob.
+  if (row.files.some(file => file.storageId === args.storageId) || row.discarded.includes(args.storageId)) return false;
   const now = Date.now();
+  const writes = (row.writes ?? []).filter(write => write.marker !== args.marker);
+  const claimed = writes.length < (row.writes ?? []).length;
+  const claim = { writes, writeCheckAt: writes.length ? row.writeCheckAt : undefined };
   const expected = row.manifest.find(file => file.path === args.path);
-  const usable = row.state === "staging" && expected && expected.sha256 === args.sha256 && expected.size === args.size
+  const usable = claimed && row.state === "staging" && expected && expected.sha256 === args.sha256 && expected.size === args.size
     && !row.files.some(file => file.path === args.path);
   if (!usable) {
-    await ctx.db.patch(row._id, { discarded: [...row.discarded, args.storageId], reclaimAfter: row.reclaimAfter ?? now, updatedAt: now });
+    await ctx.db.patch(row._id, { ...claim, discarded: [...row.discarded, args.storageId], reclaimAfter: row.reclaimAfter ?? now, updatedAt: now });
     return false;
   }
-  await ctx.db.patch(row._id, { files: [...row.files, { path: args.path, sha256: args.sha256, size: args.size,
+  await ctx.db.patch(row._id, { ...claim, files: [...row.files, { path: args.path, sha256: args.sha256, size: args.size,
     contentType: pageContentType(args.path)!, storageId: args.storageId }], updatedAt: now });
   return true;
 }
@@ -215,7 +316,8 @@ export async function expireStagingPages(ctx: MutationCtx) {
 
 /**
  * Deletes only blobs recorded on a page row, behind MEDIA_CLEANUP_ENABLED.
- * Published and staging rows lose only their discarded duplicates.
+ * Published and staging rows lose only their discarded duplicates. Unresolved
+ * writes stay on the row until reconciliation records or drops them.
  */
 export async function reclaimPageStorage(ctx: MutationCtx) {
   if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return 0;

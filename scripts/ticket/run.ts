@@ -172,7 +172,7 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
     toError: () => inputError("PAGE_NOT_FOUND", "The page does not exist on this Ticket or is no longer published."),
   },
   {
-    codes: ["PAGE_UPLOAD_EXPIRED", "PAGE_UPLOAD_INCOMPLETE", "PAGE_PUBLISH_UNKNOWN"],
+    codes: ["PAGE_UPLOAD_EXPIRED", "PAGE_UPLOAD_INCOMPLETE", "PAGE_UPLOAD_BUSY", "PAGE_PUBLISH_UNKNOWN"],
     toError: () => remoteError("The page upload did not finish. Retry with the same --request-id."),
   },
   {

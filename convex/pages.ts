@@ -12,7 +12,7 @@ export const reserve = internalActorMutation({ name: "pages:reserve", ...pages.r
 export const commit = internalActorMutation({ name: "pages:commit", ...pages.commitPage });
 export const recordStaged = internalJobMutation({
   name: "pages:recordStaged",
-  args: { pageId: v.id("ticketPages"), path: v.string(), sha256: v.string(), size: v.number(), storageId: v.id("_storage") },
+  args: { pageId: v.id("ticketPages"), marker: v.string(), path: v.string(), sha256: v.string(), size: v.number(), storageId: v.id("_storage") },
   handler: (ctx, args) => pages.recordStagedFile(ctx, args),
 });
 export const abandon = internalJobMutation({
@@ -24,4 +24,5 @@ export const resolve = internalJobQuery({
   handler: (ctx, args) => pages.resolveServedFile(ctx, args.shareKey, args.path),
 });
 export const expireStaging = internalJobMutation({ name: "pages:expireStaging", args: {}, handler: ctx => pages.expireStagingPages(ctx) });
+export const reconcileWrites = internalJobMutation({ name: "pages:reconcileWrites", args: {}, handler: ctx => pages.reconcileDuePageWrites(ctx) });
 export const reclaim = internalJobMutation({ name: "pages:reclaim", args: {}, handler: ctx => pages.reclaimPageStorage(ctx) });

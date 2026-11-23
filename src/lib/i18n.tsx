@@ -536,6 +536,7 @@ const errorKeys: Record<string, Key> = {
   PAGE_PUBLISH_UNKNOWN: "pagePublishRetry",
   PAGE_UPLOAD_INCOMPLETE: "pagePublishRetry",
   PAGE_UPLOAD_EXPIRED: "pagePublishRetry",
+  PAGE_UPLOAD_BUSY: "pagePublishRetry",
   PAGE_REQUEST_CONFLICT: "requestIdConflict",
   PAGE_REVOKED: "requestIdConflict",
   PAGE_HOST_NOT_CONFIGURED: "pageHostUnavailable",

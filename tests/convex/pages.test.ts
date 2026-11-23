@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import schema from "../../convex/schema";
-import { retireTicketPages } from "../../convex/domain/pages";
+import { PAGE_WRITE_SCAN, pageWriteType, reconcilePageWrites, retireTicketPages } from "../../convex/domain/pages";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import { pageFormData, sha256Hex } from "../../shared/ticket-pages";
 import { modules } from "./modules";
@@ -197,13 +197,11 @@ test("commit rechecks access; expiry records abandonment and only gated reclaim 
   const f = await fixture();
   const manifest = [{ path: "index.html", size: 3, sha256: await sha256Hex(new TextEncoder().encode("<p>")) }];
   const reserve = (requestId: string) => f.t.mutation(internal.pages.reserve, { token: f.alice, ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest });
-  const stage = async (pageId: Id<"ticketPages">) => {
-    const storageId = await f.t.run(ctx => ctx.storage.store(new Blob(["<p>"])));
-    await f.t.mutation(internal.pages.recordStaged, { pageId, path: "index.html", sha256: manifest[0].sha256, size: 3, storageId });
-  };
   const first = await reserve("commit-recheck");
   if (first.state !== "staging") throw new Error("expected staging");
-  await stage(first.pageId);
+  const [write] = first.writes;
+  const storageId = await f.t.run(ctx => ctx.storage.store(new Blob(["<p>"], { type: write.contentType })));
+  await f.t.mutation(internal.pages.recordStaged, { pageId: first.pageId, marker: write.marker, path: "index.html", sha256: manifest[0].sha256, size: 3, storageId });
   const members = await f.t.query(api.projects.listProjectMembers, { token: f.staff, projectId: f.seed.projects[0].id });
   const aliceId = members.find(member => member.email === "alice@local.test")!.customerId;
   await f.t.mutation(api.projects.removeProjectMember, { token: f.staff, projectId: f.seed.projects[0].id, customerId: aliceId });
@@ -230,4 +228,120 @@ test("commit rechecks access; expiry records abandonment and only gated reclaim 
   expect(await f.t.mutation(internal.pages.reclaim, {})).toBe(1);
   expect((await f.blobs()).map(blob => blob._id)).toEqual([unrelated]);
   expect((await f.rows())[0].files).toEqual([]);
+});
+
+async function manifestOf(files: Files) {
+  return Promise.all(Object.entries(files).map(async ([path, text]) => {
+    const bytes = new TextEncoder().encode(text);
+    return { path, size: bytes.byteLength, sha256: await sha256Hex(bytes) };
+  }));
+}
+
+/** Stores bytes exactly as the publishing action does, then "crashes" before recording. */
+async function interruptedWrite(f: Awaited<ReturnType<typeof fixture>>, files: Files, requestId: string) {
+  const reserved = await f.t.mutation(internal.pages.reserve, { token: f.alice, ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest: await manifestOf(files) });
+  if (reserved.state !== "staging") throw new Error("expected staging");
+  const write = reserved.writes.find(item => item.path === "index.html")!;
+  const orphan = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: write.contentType })));
+  // Same bytes that this page does not own: no marker, and a marker no claim issued.
+  const unrelated = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]])));
+  const forged = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: pageWriteType("not-a-claim") })));
+  return { reserved, write, orphan, unrelated, forged };
+}
+
+test("a blob stored before an interrupted record is adopted on retry by its private marker only", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  const files = { "index.html": "<p>recovered</p>", "style.css": "body{}" };
+  const key = crypto.randomUUID();
+  const { reserved, write, orphan, unrelated, forged } = await interruptedWrite(f, files, key);
+  expect(reserved.writes.map(item => item.path).sort()).toEqual(["index.html", "style.css"]);
+  expect(write.contentType).toBe(`application/vnd.ticket-page-write; write=${write.marker}`);
+  expect(write.marker).toMatch(/^[0-9a-f]{64}$/);
+  expect((await f.t.run(ctx => ctx.db.system.get(orphan)))?.contentType).toBe(write.contentType);
+  vi.advanceTimersByTime(1_000);
+
+  const retried = await f.publish(f.alice, f.aliceTicket.ref, form(files, "index.html"), key);
+  expect(retried.status).toBe(201);
+  const page = await retried.json();
+  expect(JSON.stringify(page)).not.toContain(write.marker);
+  const [row] = await f.rows();
+  expect(row.files.find(file => file.path === "index.html")?.storageId).toBe(orphan);
+  // The first run's style.css write was never stored; it stays claimed until its window closes.
+  const unstored = reserved.writes.find(item => item.path === "style.css")!;
+  expect([row.files.length, row.discarded, row.writes?.map(item => item.marker)]).toEqual([2, [], [unstored.marker]]);
+  // Only the missing file was stored again; the unrelated and forged blobs are untouched.
+  const blobs = (await f.blobs()).map(blob => blob._id);
+  expect(blobs.length).toBe(4);
+  expect(blobs).toEqual(expect.arrayContaining([orphan, unrelated, forged]));
+  expect(row.files.map(file => file.storageId)).not.toContain(unrelated);
+
+  // A late record from the interrupted run changes nothing.
+  expect(await f.t.mutation(internal.pages.recordStaged, { pageId: row._id, marker: write.marker, path: "index.html", sha256: write.marker, size: 0, storageId: orphan })).toBe(false);
+  expect((await f.rows())[0].discarded).toEqual([]);
+  // Serving uses the validated path type, never the stored marker.
+  const served = await f.t.fetch(new URL(page.url).pathname);
+  expect([served.headers.get("content-type"), await served.text()]).toEqual(["text/html; charset=utf-8", files["index.html"]]);
+  vi.advanceTimersByTime(12 * 60 * 1000);
+  expect(await f.t.mutation(internal.pages.reconcileWrites, {})).toBe(1);
+  const [settled] = await f.rows();
+  expect([settled.state, settled.writes, settled.writeCheckAt, settled.discarded, settled.files.length]).toEqual(["published", [], undefined, [], 2]);
+  expect((await f.blobs()).length).toBe(4);
+});
+
+test("an interrupted write on an abandoned upload is recorded by reconciliation and reclaimed only when enabled", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  const files = { "index.html": "<p>orphaned</p>", "style.css": "body{}" };
+  const { reserved, orphan, unrelated, forged } = await interruptedWrite(f, files, crypto.randomUUID());
+  vi.advanceTimersByTime(60_000);
+  // Inside the write window a never-stored file stays claimed; nothing is concluded early.
+  await f.t.run(ctx => reconcilePageWrites(ctx, reserved.pageId));
+  let [row] = await f.rows();
+  expect([row.files.map(file => file.storageId), row.writes?.map(write => write.path)]).toEqual([[orphan], ["style.css"]]);
+
+  vi.advanceTimersByTime(16 * 60 * 1000);
+  expect(await f.t.mutation(internal.pages.expireStaging, {})).toBe(1);
+  expect(await f.t.mutation(internal.pages.reconcileWrites, {})).toBe(1);
+  [row] = await f.rows();
+  expect([row.state, row.writes, row.writeCheckAt]).toEqual(["abandoned", [], undefined]);
+  expect(await f.t.mutation(internal.pages.reclaim, {})).toBe(0);
+  expect((await f.blobs()).length).toBe(3);
+
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true");
+  expect(await f.t.mutation(internal.pages.reclaim, {})).toBe(1);
+  expect((await f.blobs()).map(blob => blob._id).sort()).toEqual([unrelated, forged].sort());
+  expect((await f.rows())[0].files).toEqual([]);
+});
+
+test("a write never recorded on a terminal row becomes discarded ownership, never adopted", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  const files = { "index.html": "<p>late</p>" };
+  const { reserved, orphan, unrelated } = await interruptedWrite(f, files, crypto.randomUUID());
+  await f.t.mutation(internal.pages.abandon, { pageId: reserved.pageId });
+  vi.advanceTimersByTime(1_000);
+  await f.t.run(ctx => reconcilePageWrites(ctx, reserved.pageId));
+  const [row] = await f.rows();
+  expect([row.files, row.discarded, row.writes]).toEqual([[], [orphan], []]);
+  expect(row.reclaimAfter).toBeTypeOf("number");
+  expect(row.discarded).not.toContain(unrelated);
+});
+
+test("reconciliation reads a bounded number of storage rows per pass and resumes where it stopped", async () => {
+  vi.useFakeTimers();
+  const f = await fixture();
+  const files = { "index.html": "<p>busy</p>" };
+  const reserved = await f.t.mutation(internal.pages.reserve, { token: f.alice, ticket: f.aliceTicket.ref, requestId: crypto.randomUUID(), entry: "index.html", manifest: await manifestOf(files) });
+  if (reserved.state !== "staging") throw new Error("expected staging");
+  await f.t.run(async ctx => { for (let index = 0; index < PAGE_WRITE_SCAN + 20; index++) await ctx.storage.store(new Blob([`other ${index}`])); });
+  const orphan = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: reserved.writes[0].contentType })));
+  vi.advanceTimersByTime(1_000);
+  await f.t.run(ctx => reconcilePageWrites(ctx, reserved.pageId));
+  let [row] = await f.rows();
+  expect([row.files, row.writes?.length]).toEqual([[], 1]);
+  expect(row.writes![0].scannedTo).toBeGreaterThan(row.createdAt - 1_000);
+  await f.t.run(ctx => reconcilePageWrites(ctx, reserved.pageId));
+  [row] = await f.rows();
+  expect([row.files.map(file => file.storageId), row.writes]).toEqual([[orphan], []]);
 });
