@@ -11,9 +11,9 @@ import {
 } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
-import { Toaster } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { AppToaster } from "@/components/ui/sonner";
 import { CustomerJoinPage, CustomerRecoverPage, CustomerSignInPage, PendingIdentityPage, StaffInvitePage, StaffSignInPage } from "@/components/auth-screens";
 import { APP_PATHS, homePathForRole, loginPathForRole, normalizePathname } from "@/lib/app-routes";
 import { useI18n } from "@/lib/i18n";
@@ -205,7 +205,7 @@ export function AppRouter() {
 
   return (
     <>
-      <Toaster richColors theme={customerTheme ? "light" : "dark"} position="bottom-right" />
+      <AppToaster theme={customerTheme ? "light" : "dark"} />
       {auth === "loading" ? <Pending /> : <RouterProvider router={router} context={{ auth }} />}
     </>
   );
