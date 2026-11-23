@@ -200,6 +200,75 @@ If another actor changed the Ticket first, the mutation returns
 `VERSION_CONFLICT` with exit 5. Read the Ticket again and decide whether the new
 state should still be changed; do not blindly increment the version.
 
+## Hosted pages
+
+A Ticket can carry hosted HTML pages: one HTML file, or a folder with an HTML
+entry page and its CSS, JavaScript, images and fonts. Publishing returns one link;
+staff and the Ticket's customer see the same link on the Ticket, where they can
+open, copy or revoke it. Anyone with an active link can open the page.
+
+```bash
+pnpm ticket page publish POS-0007 ./report.html
+pnpm ticket page publish POS-0007 ./site --entry reports/index.html --request-id page-0007
+pnpm ticket page list POS-0007
+pnpm ticket page revoke POS-0007 --page <pageId>
+```
+
+```json
+{"ok":true,"deployment":"dev","ticket":"POS-0007","url":"https://<deployment>.convex.site/p/<key>/reports/index.html","pageId":"kh7…","entry":"reports/index.html","fileCount":7,"totalBytes":4521,"created":true,"requestId":"page-0007"}
+```
+
+- `--entry` is required when a folder has several HTML files and no root
+  `index.html` (`PAGE_ENTRY_REQUIRED`, exit 3). Hidden files are skipped;
+  symbolic links are refused.
+- Limits: 50 files, 10 MiB of file content, 20 published pages per Ticket.
+  Allowed types: `html htm css js mjs png jpg jpeg gif webp avif ico woff woff2 ttf otf`.
+- `--request-id` is the retry key. The same key and files return the original
+  link with `"created":false`; different files return `PAGE_REQUEST_CONFLICT`
+  (exit 5). After an interrupted run, retry with the reported key: files already
+  stored are not uploaded again and the link appears only once every file is in.
+- Publishing requires current write access to an active Ticket, checked before
+  the upload is read and again when the page is committed. Archive hides every
+  page of the Ticket; restore brings the same links back. Revocation is permanent.
+
+### HTTP API
+
+The CLI and the Ticket UI share one route on the deployment's HTTP host
+(`*.convex.site`; locally `http://127.0.0.1:<CONVEX_SITE_PORT>`):
+
+```http
+POST /v1/tickets/{ticket}/pages
+Authorization: Bearer <staff or customer session token>
+Idempotency-Key: <stable request id>
+Content-Type: multipart/form-data
+
+entry    = reports/index.html
+manifest = [{"part":"f0","path":"reports/index.html"},{"part":"f1","path":"assets/site.css"}]
+f0, f1   = file bytes (each field exactly once)
+```
+
+`201` publishes, `200` replays. Errors are `{"ok":false,"code":…}`: `401`
+session, `403 ORIGIN_NOT_ALLOWED`, `404 TICKET_UNAVAILABLE`, `400` invalid
+bundle, `409` conflict/revoked/limit, `413 PAGE_TOO_LARGE`. Unknown outcomes are
+`503 PAGE_PUBLISH_UNKNOWN` with `"retryable":true` and `Retry-After`; incomplete
+or expired uploads are `409` with `"retryable":true`. Retry those with the same key.
+
+Browser writes are accepted only from origins listed in the Convex environment
+variable `TICKET_APP_ORIGINS` (comma-separated, exact). Clients without an
+`Origin` header, such as the CLI, are unaffected. For `pnpm dev` set it once on
+the local backend: `pnpm convex:local env set TICKET_APP_ORIGINS http://localhost:<VITE_PORT>`.
+`pnpm test:browser` sets it itself.
+
+`GET /p/{key}/{path}` serves committed files only, rechecking publication,
+revocation and Ticket lifecycle on every request. Responses carry `no-store`,
+`nosniff`, `no-referrer`, `noindex` and a CSP sandbox (`sandbox allow-scripts`,
+opaque origin, no network access beyond inline code, `data:`/`blob:` media and
+files under the page's own `/p/{key}/` prefix). External fonts and scripts do not
+load; bundle them. `/p/{key}` redirects to the entry page.
+
+Staging and blobs: expiry (15 minutes) only marks abandoned uploads; deleting page
+blobs is part of the gated reclaim sweep and runs only with `MEDIA_CLEANUP_ENABLED=true`.
+
 ## Output and error contract
 
 Programmatic success is exactly one compact JSON object on stdout. Programmatic
@@ -269,6 +338,11 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 | `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
+| `scripts/ticket/pages.ts` | Reads a page file or folder from disk for `page publish`. |
+| `shared/ticket-pages.ts` | Page limits, path rules, media types, form body and serving headers. |
+| `convex/page_http.ts` | Publish and serve HTTP routes. |
+| `convex/domain/pages.ts` | Page reservation, staging, commit, revoke, expiry and reclaim. |
+| `src/features/tickets/ticket-pages.tsx` | Ticket dialog panel for staff and customers. |
 
 Verify changes with:
 
@@ -314,6 +388,10 @@ pnpm convex:local run local_smoke:run '{}'
 pnpm convex:local run local_smoke:media '{}'
 pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
 ```
+
+The CLI smoke also publishes `tests/fixtures/ticket-page` (nested entry, CSS,
+script, images, font) and a single file, then checks replay, conflict, served
+headers, nested assets and revocation against this checkout's backend.
 
 The internal seed requires explicit fixture opt-in and a loopback deployment URL, and is repeatable. It creates Projects `POS` and `APP`,
 customers `alice@local.test` and `bob@local.test` (password `LocalCustomer123!`),

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { ConvexHttpClient } from "convex/browser";
@@ -28,7 +29,9 @@ async function open(role: "staff" | "customer", language: Language = "en", confi
   // tsx preserves nested function names with this helper when Playwright
   // serializes an evaluate callback; it exists only in the isolated test page.
   await context.addInitScript("globalThis.__name = (fn) => fn;");
-  await context.addInitScript(({ token, language }) => {
+  await context.addInitScript(({ token, language, appOrigin }) => {
+    // Instrument the app only; hosted pages run sandboxed without storage.
+    if (location.origin !== appOrigin) return;
     sessionStorage.setItem("ease-pos-tracking-session", token);
     localStorage.setItem("ease-pos-tracking-language", language);
     const stats = { created: [] as string[], revoked: [] as string[], stops: [] as string[], streams: [] as string[], aborts: 0 };
@@ -48,7 +51,7 @@ async function open(role: "staff" | "customer", language: Language = "en", confi
     };
     const abort = AbortController.prototype.abort;
     AbortController.prototype.abort = function (reason) { stats.aborts++; abort.call(this, reason); };
-  }, { token: credentials.token, language });
+  }, { token: credentials.token, language, appOrigin: new URL(baseURL).origin });
   await configure?.(context);
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -395,3 +398,112 @@ for (const language of ["en", "th"] as const) {
     } finally { await f.context.close(); }
   });
 }
+
+const pageFixture = path.resolve(import.meta.dirname, "../fixtures/ticket-page");
+/** Creates a text-only Ticket through the real composer and opens its detail dialog. */
+async function openNewTicket(f: Awaited<ReturnType<typeof open>>, role: "staff" | "customer", language: Language) {
+  const name = `Pages ${role} ${crypto.randomUUID()}`;
+  await f.title.fill(name);
+  if (role === "customer") {
+    await f.page.getByRole("button", { name: copy(language, "next"), exact: true }).click();
+    await f.page.getByRole("button", { name: copy(language, "skipForNow"), exact: true }).click();
+  }
+  await f.page.getByRole("button", { name: copy(language, role === "staff" ? "submit" : "submitTicket"), exact: true }).click();
+  await f.page.getByRole("dialog").waitFor({ state: "hidden" });
+  const matches = await convex.query(api.tickets.searchTickets, { token: f.token, projectId: seed.projects.find(p => p.key === "POS")!.id, search: name, lifecycle: "active" });
+  const created = matches.matches.find(item => item.title === name)!;
+  const ref = `${created.projectKey}-${String(created.ticketNumber).padStart(4, "0")}`;
+  if (role === "staff") await f.page.getByPlaceholder(copy(language, "search"), { exact: true }).fill(name);
+  await f.page.getByRole("button", { name: copy(language, "viewTicket", { ticket: ref }), exact: true }).click();
+  const dialog = f.page.getByRole("dialog");
+  await dialog.getByRole("heading", { name: copy(language, "pagesTitle"), exact: true }).waitFor();
+  return { dialog, ref };
+}
+async function publishFrom(dialog: ReturnType<Page["getByRole"]>, language: Language, input: "choosePageFolder" | "chooseHtmlFile", source: string, entry?: string) {
+  await dialog.getByLabel(copy(language, input), { exact: true }).setInputFiles(source);
+  if (entry) await dialog.getByLabel(copy(language, "pageEntry"), { exact: true }).selectOption(entry);
+  await dialog.getByRole("button", { name: copy(language, "publishPage"), exact: true }).click();
+  const link = dialog.getByRole("link", { name: copy(language, "openPageNamed", { name: entry ?? path.basename(source) }), exact: true });
+  await link.waitFor();
+  return link;
+}
+
+for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
+  test(`${role} ${language}: publish a folder page with nested assets, open it isolated, copy, revoke; publish a single file`, async () => {
+    const f = await open(role, language);
+    const responses = new Map<string, { status: number; type: string | null }>();
+    f.context.on("response", response => { if (response.url().includes("/p/")) responses.set(new URL(response.url()).pathname, { status: response.status(), type: response.headers()["content-type"] ?? null }); });
+    try {
+      await f.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
+      const { dialog } = await openNewTicket(f, role, language);
+      await dialog.getByText(copy(language, "pagesEmpty"), { exact: true }).waitFor();
+      const link = await publishFrom(dialog, language, "choosePageFolder", pageFixture, "reports/summary.html");
+      const url = (await link.getAttribute("href"))!;
+      assert.match(url, /\/p\/[A-Za-z0-9_-]{43}\/reports\/summary\.html$/);
+      assert.equal(await link.getAttribute("rel"), "noopener noreferrer");
+
+      const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
+      const popupErrors: string[] = [];
+      popup.on("pageerror", error => popupErrors.push(error.message));
+      await popup.getByText("Inline script ran", { exact: true }).waitFor();
+      await popup.getByText("External script ran", { exact: true }).waitFor();
+      await popup.waitForFunction(() => (document.getElementById("shot") as HTMLImageElement).naturalWidth === 8);
+      await popup.waitForFunction(() => document.fonts.status === "loaded");
+      const prefix = new URL(url).pathname.replace(/reports\/summary\.html$/, "");
+      const assets = [["assets/site.css", "text/css"], ["assets/app.js", "text/javascript"], ["assets/img/dot.png", "image/png"], ["assets/img/bg.png", "image/png"], ["assets/fonts/fixture.woff2", "font/woff2"]];
+      // CSS backgrounds and fonts load asynchronously after the scripts run.
+      for (let waited = 0; assets.some(([file]) => !responses.has(prefix + file)) && waited < 5000; waited += 50) await popup.waitForTimeout(50);
+      for (const [file, type] of assets) {
+        assert.equal(responses.get(prefix + file)?.status, 200, file);
+        assert.match(responses.get(prefix + file)?.type ?? "", new RegExp(`^${type}`), file);
+      }
+      // The page runs in an opaque-origin sandbox: no app storage and no opener.
+      assert.deepEqual(await popup.evaluate(() => {
+        let storage = "readable";
+        try { void sessionStorage.length; } catch { storage = "blocked"; }
+        return { storage, opener: window.opener === null, origin: window.origin };
+      }), { storage: "blocked", opener: true, origin: "null" });
+      await popup.locator("#details").click();
+      await popup.getByRole("heading", { name: "Fixture details", exact: true }).waitFor();
+      assert.deepEqual(popupErrors, []);
+
+      await dialog.getByRole("button", { name: copy(language, "copyLinkNamed", { name: "reports/summary.html" }), exact: true }).click();
+      await f.page.waitForFunction(async expected => await navigator.clipboard.readText() === expected, url);
+
+      await dialog.getByRole("button", { name: copy(language, "revokeLinkNamed", { name: "reports/summary.html" }), exact: true }).click();
+      await f.page.getByRole("alertdialog").getByRole("button", { name: copy(language, "revokeLink"), exact: true }).click();
+      await dialog.getByText(copy(language, "pagesEmpty"), { exact: true }).waitFor();
+      assert.equal((await popup.goto(url))?.status(), 404);
+      assert.equal((await popup.goto(new URL("../assets/img/dot.png", url).href))?.status(), 404);
+
+      const single = await publishFrom(dialog, language, "chooseHtmlFile", path.join(pageFixture, "reports/details.html"));
+      assert.match((await single.getAttribute("href"))!, /\/details\.html$/);
+      assert.equal(await dialog.getByLabel(copy(language, "pageEntry"), { exact: true }).count(), 0);
+      assert.equal(f.uploads(), 0);
+      assert.deepEqual(f.errors, []);
+    } finally { await f.context.close(); }
+  });
+}
+
+// The real Thai report (1.4 MB, nine embedded screenshots, zoom dialog) when present locally.
+const sampleHtml = process.env.PAGE_SAMPLE_HTML;
+test("staff: the real sample page publishes, renders every screenshot and opens its zoom dialog", { skip: !sampleHtml && "PAGE_SAMPLE_HTML is not set" }, async () => {
+  const f = await open("staff");
+  try {
+    const { dialog } = await openNewTicket(f, "staff", "en");
+    const link = await publishFrom(dialog, "en", "chooseHtmlFile", sampleHtml!);
+    const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
+    const popupErrors: string[] = [];
+    popup.on("pageerror", error => popupErrors.push(error.message));
+    await popup.waitForLoadState("load");
+    const shots = popup.locator("button.shot img");
+    assert.equal(await shots.count(), 9);
+    await popup.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>("button.shot img")].every(image => image.complete && image.naturalWidth > 0));
+    await popup.locator("button.shot").first().click();
+    await popup.waitForFunction(() => (document.getElementById("zoom") as HTMLDialogElement).open);
+    await popup.locator("#zclose").click();
+    await popup.waitForFunction(() => !(document.getElementById("zoom") as HTMLDialogElement).open);
+    assert.deepEqual(popupErrors, []);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); }
+});

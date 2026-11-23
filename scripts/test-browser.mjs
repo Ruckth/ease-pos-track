@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { loadPorts } from "./worktree-ports.mjs";
 function local(args, capture = false) {
   const result = spawnSync("pnpm", ["convex:local", ...args], { stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit", encoding: "utf8", env: process.env });
   if (result.status !== 0) throw new Error(`Local browser command failed (${result.status ?? 1})`, { cause: result.error });
@@ -10,7 +11,7 @@ function local(args, capture = false) {
 }
 local(["env", "set", "MEDIA_CLEANUP_ENABLED", "false"]);
 local([]);
-for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", APP_PASSWORD: "LocalStaff123!", CUSTOMER_PASSWORD_PEPPER: "local-only-fixture-pepper", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) local(["env", "set", key, value]);
+for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", APP_PASSWORD: "LocalStaff123!", CUSTOMER_PASSWORD_PEPPER: "local-only-fixture-pepper", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture", TICKET_APP_ORIGINS: `http://127.0.0.1:${loadPorts().VITE_PORT}` })) local(["env", "set", key, value]);
 const seed = JSON.parse(local(["run", "seed:run", '{"largeDataset":true}'], true));
 process.env.BROWSER_FIXTURE = JSON.stringify(seed);
 const directory = mkdtempSync(path.join(tmpdir(), "ticket-browser-"));

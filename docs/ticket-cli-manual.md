@@ -150,7 +150,22 @@ pnpm ticket get TKT-0007 --include-archived
 pnpm ticket restore TKT-0007 --expected-version 5
 ```
 
-## 9. Use production carefully
+## 9. Publish a page on a Ticket
+
+Share an HTML file, or a folder with an HTML page and its files, as one link:
+
+```bash
+pnpm ticket page publish TKT-0007 ./report.html
+pnpm ticket page publish TKT-0007 ./site --entry index.html
+pnpm ticket page list TKT-0007
+pnpm ticket page revoke TKT-0007 --page <pageId>
+```
+
+The result includes the `url`. Anyone with the link can open the page until it
+is revoked. If publishing stops partway, run it again with the printed
+`--request-id`.
+
+## 10. Use production carefully
 
 Production is never selected automatically. Sign in explicitly:
 
@@ -167,7 +182,7 @@ pnpm ticket get TKT-0007 --prod
 
 Without `--prod`, a command always uses development.
 
-## 10. Sign out
+## 11. Sign out
 
 ```bash
 pnpm ticket logout
