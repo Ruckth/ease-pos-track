@@ -13,11 +13,11 @@ globalThis.fetch = async (_request, init) => {
   const { path, args } = JSON.parse(String(init?.body));
   let value: unknown;
   switch (path) {
-    case "auth:startSignInWithGoogle":
+    case "auth:startSignInWithClerk":
       assert.match(args[0].redirectTo, /^http:\/\/127\.0\.0\.1:\d+\/$/);
       value = { redirect: "https://accounts.google.com/o/oauth2/v2/auth?fixture", state: "fixture-state" };
       break;
-    case "auth:completeSignInWithGoogle":
+    case "auth:completeSignInWithClerk":
       assert.equal(args[0].state, "fixture-state");
       value = args[0].code === "fixture-code" ? { status: "complete", tokens } : { status: "error", userError: { error: "INVALID_CODE" } };
       break;

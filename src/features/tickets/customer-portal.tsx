@@ -29,7 +29,7 @@ import { CustomerAccountDialog } from "@/components/account-dialogs";
 import { useWorkspaceNavigation } from "./use-workspace-navigation";
 
 export function CustomerPortal({ viewer, onLogout }: {
-  viewer: { username: string; displayName: string; needsRecoveryCode: boolean }; onLogout: () => Promise<void>;
+  viewer: { username: string; displayName: string; clerkManaged?: boolean; needsRecoveryCode: boolean }; onLogout: () => Promise<void>;
 }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const { t } = useI18n();
@@ -112,7 +112,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         </div>
       </div>
     </header>
-    <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} hasRecoveryCode={!viewer.needsRecoveryCode} />
+    <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
     <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
       {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
         <span>{t("recoveryCodeNeeded")}</span>

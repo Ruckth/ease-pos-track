@@ -13,6 +13,7 @@ import type * as annotation_state from "../annotation_state.js";
 import type * as annotations from "../annotations.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as clerk_profile from "../clerk_profile.js";
 import type * as conversations from "../conversations.js";
 import type * as crons from "../crons.js";
 import type * as domain_conversation from "../domain/conversation.js";
@@ -83,6 +84,7 @@ declare const fullApi: ApiFromModules<{
   annotations: typeof annotations;
   auth: typeof auth;
   authz: typeof authz;
+  clerk_profile: typeof clerk_profile;
   conversations: typeof conversations;
   crons: typeof crons;
   "domain/conversation": typeof domain_conversation;
@@ -172,5 +174,5 @@ export declare const components: {
   auth: import("@convex-dev/auth/_generated/component.js").ComponentApi<"auth">;
   authPassword: import("@convex-dev/auth/components/password/_generated/component.js").ComponentApi<"authPassword">;
   authUsername: import("@convex-dev/auth/components/username/_generated/component.js").ComponentApi<"authUsername">;
-  authGoogle: import("@convex-dev/auth/components/google/_generated/component.js").ComponentApi<"authGoogle">;
+  authClerk: import("@convex-dev/auth/components/oauth/_generated/component.js").ComponentApi<"authClerk">;
 };

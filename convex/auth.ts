@@ -6,7 +6,9 @@
 import { v } from "convex/values";
 import type { FunctionReturnType } from "convex/server";
 import { setupConvexAuth, type AuthCore } from "@convex-dev/auth/server";
-import { setupGoogle } from "@convex-dev/auth/methods/google/server";
+import { setupOauth } from "@convex-dev/auth/methods/oauth/server";
+import { localFixturesEnabled } from "./local_fixtures";
+import { clerkProfile } from "./clerk_profile";
 import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
@@ -65,7 +67,7 @@ const admittingCore: AuthCore<"users"> = {
     return {
       authMutation: ((fn: { handler: (ctx: never, args: { code: string; state: string }) => Promise<unknown> }) =>
         authMethodMutation(builders, "google-complete")({
-          name: "auth:completeSignInWithGoogle",
+          name: "auth:completeSignInWithClerk",
           args: { code: v.string(), state: v.string() },
           handler: async (ctx, args: { code: string; state: string }) => {
             const result = await fn.handler(ctx as never, args) as { status: string; tokens?: { accessToken: string; userId: string } };
@@ -77,23 +79,32 @@ const admittingCore: AuthCore<"users"> = {
   },
 };
 
-const google = setupGoogle(admittingCore, {
-  component: components.authGoogle,
-  allowedRedirectOrigins: allowedRedirectOrigins(),
-}).attachUserCallbacks({
+// The reserved invalid host lets local unit tests load the module. A deployed
+// sign-in requires the operator-configured Clerk Frontend API origin.
+const issuer = new URL(process.env.CLERK_ISSUER_URL ?? "https://clerk.invalid").origin;
+const clerk: ReturnType<typeof setupOauth<"clerk", ReturnType<typeof clerkProfile>, "users">> = setupOauth(admittingCore, "clerk", {
+  authorizationEndpoint: issuer + "/oauth/authorize",
+  tokenEndpoint: issuer + "/oauth/token",
+  issuer,
+  scopes: ["openid", "profile", "email"],
+  profile: claims => clerkProfile(issuer, claims),
+}, {
   createUser: internal.identity.createGoogleUser,
   onSignIn: internal.identity.syncGoogleProfile,
+}, {
+  component: components.authClerk,
+  allowedRedirectOrigins: allowedRedirectOrigins(),
 });
 
-export const completeSignInWithGoogle = google.completeSignInWithGoogle;
+export const completeSignInWithClerk = clerk.completeSignIn;
 
 /** Records the one-use flow beside the stock authorization request. */
-export const startSignInWithGoogle = wrapPackageMutation("google-start", google.startSignInWithGoogle, {
-  name: "auth:startSignInWithGoogle",
+export const startSignInWithClerk = wrapPackageMutation("google-start", clerk.startSignIn, {
+  name: "auth:startSignInWithClerk",
   args: { redirectTo: v.string() },
   handler: async (ctx, args) => {
     const target = new URL(args.redirectTo);
-    if (!["/", "/staff/login", "/staff/invite"].includes(target.pathname)
+    if (!["/", "/staff/login", "/staff/invite", "/customer/login", "/customer/join", "/customer/recover"].includes(target.pathname)
       || args.redirectTo !== target.origin + target.pathname) throw new Error("INVALID_INPUT");
     const started = await ctx.runInner(args) as { redirect: string; state: string };
     await recordGoogleFlow(ctx, started.state);
@@ -163,6 +174,7 @@ export const signUpWithInvitation = authMethodMutation(password, "customer-sign-
   name: "auth:signUpWithInvitation",
   args: { invitation: v.string(), username: v.string(), displayName: v.string(), password: v.string() },
   handler: async (ctx, args) => {
+    if (process.env.CLERK_ISSUER_URL && !localFixturesEnabled()) throw new Error("ACCESS_UNAVAILABLE");
     const pilot = await identityRecoveryAdmission(ctx);
     // Staff and existing customers switch account or use the join path.
     if (await ctx.auth.getUserIdentity()) return failure("SIGN_OUT_REQUIRED");
@@ -253,7 +265,7 @@ export const recoverWithCode = publicIdentityMutation("customer-recover")({
     const customer = await ctx.db.query("customers").withIndex("by_username", (q) => q.eq("username", username)).unique();
     // Match the high-entropy proof before consulting any budget debited by guesses.
     const matches = await recoveryCodeMatches(customer, args.recoveryCode);
-    if (!matches || customer?.status !== "active" || !customerCredentialIsCurrent(customer, pilot)) {
+    if (!matches || customer?.clerkManaged || customer?.status !== "active" || !customerCredentialIsCurrent(customer, pilot)) {
       const rpcKey = "recover:invalid-rpc";
       if (!await budgetExhausted(ctx, rpcKey)) {
         const selectorKey = recoveryAttemptKey(await customerCredentialSelector(username));
@@ -297,7 +309,7 @@ export const signInLocalFixture = authMethodMutation(fixture, "local-fixture")({
     }
     const staff = await ctx.db.query("staff").withIndex("by_email", (q) => q.eq("email", (args.email ?? "").trim().toLowerCase())).unique();
     if (!staff || staff.status !== "active") return failure("INVALID_CREDENTIALS");
-    const tokens = await ctx.convexAuth.completeSignIn({ userId: staff.userId, profile: {}, authenticatedBy: components.authGoogle });
+    const tokens = await ctx.convexAuth.completeSignIn({ userId: staff.userId, profile: {}, authenticatedBy: components.authClerk });
     await admitSession(ctx, tokens, { principal: "staff", staff }, "google");
     return { status: "complete" as const, tokens };
   },

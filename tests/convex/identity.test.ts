@@ -72,7 +72,7 @@ async function saveRecoveryCode(t: IdentityTest, token: string) {
 test("Google start refuses invitation secrets in return URLs before creating a flow", async () => {
   const t = identityTest();
   for (const suffix of ["#invite=fixture", "?invite=fixture", "/fixture"]) {
-    await expect(t.mutation(api.auth.startSignInWithGoogle, { redirectTo: "http://localhost:5173/staff/invite" + suffix }))
+    await expect(t.mutation(api.auth.startSignInWithClerk, { redirectTo: "http://localhost:5173/staff/invite" + suffix }))
       .rejects.toThrow("INVALID_INPUT");
   }
   expect(await t.run(ctx => ctx.db.query("googleFlows").collect())).toHaveLength(0);

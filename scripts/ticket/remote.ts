@@ -97,11 +97,11 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async startGoogle(url: string, redirectTo: string) {
-    return await this.client(url).mutation(api.auth.startSignInWithGoogle, { redirectTo });
+    return await this.client(url).mutation(api.auth.startSignInWithClerk, { redirectTo });
   }
 
   async completeGoogle(url: string, code: string, state: string) {
-    const result = await this.client(url).mutation(api.auth.completeSignInWithGoogle, { code, state });
+    const result = await this.client(url).mutation(api.auth.completeSignInWithClerk, { code, state });
     return result.status === "complete" ? result.tokens : null;
   }
 

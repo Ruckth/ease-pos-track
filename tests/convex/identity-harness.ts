@@ -12,7 +12,7 @@ import { makeFunctionReference, type FunctionArgs, type FunctionReference, type 
 import authCore from "@convex-dev/auth/test";
 import passwordComponent from "@convex-dev/auth/components/password/test";
 import usernameComponent from "@convex-dev/auth/components/username/test";
-import googleComponent from "@convex-dev/auth/components/google/test";
+import clerkComponent from "@convex-dev/auth/components/oauth/test";
 import type { Id } from "../../convex/_generated/dataModel";
 import schema from "../../convex/schema";
 import { modules } from "./modules";
@@ -25,7 +25,7 @@ export function identityTest(testModules: Modules = modules) {
   authCore.registerCore(t);
   passwordComponent.registerPassword(t);
   usernameComponent.registerUsername(t);
-  googleComponent.registerGoogleOauth(t);
+  clerkComponent.registerOauth(t, "authClerk");
   const route = <K extends "query" | "mutation" | "action">(kind: K) =>
     (ref: FunctionReference<K>, args: Record<string, unknown> = {}) => {
       const { token, ...rest } = args;

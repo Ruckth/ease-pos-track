@@ -24,8 +24,8 @@ const FIXTURE_TTL = { accessTokenTtlSeconds: 3600, refreshInactivityTimeoutSecon
 export async function ensureFixtureStaff(ctx: MutationCtx, input: typeof LOCAL_STAFF[number]) {
   const existing = await ctx.db.query("staff").withIndex("by_email", (q) => q.eq("email", input.email)).unique();
   if (existing) {
-    if (existing.googleSubject === input.subject && !await ctx.runQuery(components.authGoogle.provider.getUserIdByAccount, { providerAccountId: input.subject })) {
-      await ctx.runMutation(components.authGoogle.provider._internal_dangerous_createAccount, { providerAccountId: input.subject, userId: existing.userId });
+    if (existing.googleSubject === input.subject && !await ctx.runQuery(components.authClerk.provider.getUserIdByAccount, { providerAccountId: input.subject })) {
+      await ctx.runMutation(components.authClerk.provider._internal_dangerous_createAccount, { providerAccountId: input.subject, userId: existing.userId });
     }
     return existing;
   }
@@ -38,7 +38,7 @@ export async function ensureFixtureStaff(ctx: MutationCtx, input: typeof LOCAL_S
     status: "active", generation: 1, validAfter: now, createdAt: now, updatedAt: now,
   });
   await ctx.db.patch(userId, { staffId });
-  await ctx.runMutation(components.authGoogle.provider._internal_dangerous_createAccount, { providerAccountId: input.subject, userId });
+  await ctx.runMutation(components.authClerk.provider._internal_dangerous_createAccount, { providerAccountId: input.subject, userId });
   return (await ctx.db.get(staffId))!;
 }
 

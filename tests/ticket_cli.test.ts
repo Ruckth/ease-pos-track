@@ -801,8 +801,8 @@ test("every CLI transport call satisfies the real registered argument validators
     if (method === "createTextTicket") return { ticket: ticket(), created: true, requestId: "request" };
     if (method === "refreshSession") return { kind: "noSession" };
     if (method === "viewer") return null;
-    if (method === "startSignInWithGoogle") return { redirect: "https://accounts.google.com/", state: "state" };
-    if (method === "completeSignInWithGoogle" || method === "signInLocalFixture") return { status: "error", userError: { error: "INVALID_CODE" } };
+    if (method === "startSignInWithClerk") return { redirect: "https://accounts.google.com/", state: "state" };
+    if (method === "completeSignInWithClerk" || method === "signInLocalFixture") return { status: "error", userError: { error: "INVALID_CODE" } };
     if (method === "createUploadIntent") return { intentId: "intent-id", secret: "secret", uploadedFiles: [] };
     if (method === "recordUploadedFile") return { state: "recorded" };
     if (method === "listProjects") return [{ _id: ticket().projectId, key: "TKT" }];

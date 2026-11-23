@@ -67,9 +67,9 @@ export const currentInvitation = () => invitation;
 const RETURN_KEY = "track-ease.staff-sign-in-return";
 
 /** Google's redirect URL carries no query, so the return target waits per tab. */
-export function stashReturnTarget(target: string | null) {
+export function stashReturnTarget(target: string | null, role: "customer" | "staff" = "staff") {
   try {
-    const href = safeReturnTarget(target, "staff");
+    const href = safeReturnTarget(target, role);
     if (href) sessionStorage.setItem(RETURN_KEY, href);
     else sessionStorage.removeItem(RETURN_KEY);
   } catch { /* storage unavailable: sign-in still lands on the role home */ }

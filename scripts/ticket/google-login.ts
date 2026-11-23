@@ -15,7 +15,7 @@ const ERROR_PARAM = "convexAuthError";
 function openInBrowser(url: string) {
   if (platform() === "darwin") spawn("/usr/bin/open", [url], { stdio: "ignore", detached: true }).unref();
   // Only the provider URL is printed; it carries no credential.
-  process.stderr.write(`Continue signing in with Google in your browser:\n${url}\n`);
+  process.stderr.write(`Continue signing in with Clerk in your browser:\n${url}\n`);
 }
 
 export async function googleLoopbackSignIn(

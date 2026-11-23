@@ -370,7 +370,7 @@ export const t3DoctorRoute = {
 } as const;
 
 /**
- * Application HTTP routes. The Google callback (/oauth/google/callback) and the
+ * Application HTTP routes. The Google callback (/oauth/clerk/callback) and the
  * deployment JWKS are component- and platform-owned, mounted from
  * convex.config.ts, and never registered here.
  */

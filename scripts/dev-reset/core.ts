@@ -75,7 +75,7 @@ export function resetReadiness(env: Record<string, string>, local: boolean) {
     || (local ? has("TICKET_DEPLOYMENT_MODE") && env.TICKET_DEPLOYMENT_MODE !== "legacy" : env.TICKET_DEPLOYMENT_MODE !== "legacy")) {
     return "RESET_LEGACY_MODE_REQUIRED";
   }
-  if (!env.AUTH_GOOGLE_CLIENT_ID || !env.AUTH_GOOGLE_CLIENT_SECRET) return "RESET_IDENTITY_SETTINGS_REQUIRED";
+  if (!env.CLERK_OAUTH_CLIENT_ID || !env.CLERK_OAUTH_CLIENT_SECRET) return "RESET_IDENTITY_SETTINGS_REQUIRED";
   // Local rehearsal configures its own fixture subject; development uses the operator's.
   if (!local && (!env.OWNER_BOOTSTRAP_GOOGLE_SUBJECT?.trim()
     || !(env.AUTH_REDIRECT_ORIGINS ?? "").split(",").map(origin => origin.trim()).includes(OWNER_SIGN_IN_ORIGIN))) {

@@ -132,9 +132,9 @@ export const installBrowserStaffAccounts = internalJobMutation({
     const email = `browser-replacement-${suffix}@local.test`;
     const subject = `replacement-${suffix}`;
     const userId = await ctx.runMutation(internal.identity.createGoogleUser, {
-      method: { name: "google", profile: { id: subject, email, emailVerified: true } },
+      method: { name: "clerk", profile: { id: subject, email, emailVerified: true } },
     });
-    await ctx.runMutation(components.authGoogle.provider._internal_dangerous_createAccount, { providerAccountId: subject, userId });
+    await ctx.runMutation(components.authClerk.provider._internal_dangerous_createAccount, { providerAccountId: subject, userId });
     const { tokens } = await mintFixtureSession(ctx, { principal: "pending", userId });
     return { ownerEmail, memberEmail, memberId: member._id, candidate: { email, subject, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } };
   },

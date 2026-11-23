@@ -110,14 +110,16 @@ function ChangePasswordForm() {
   </form>;
 }
 
-export function CustomerAccountDialog({ open, onOpenChange, username, hasRecoveryCode }: {
-  open: boolean; onOpenChange: (open: boolean) => void; username: string; hasRecoveryCode: boolean;
+export function CustomerAccountDialog({ open, onOpenChange, username, hasRecoveryCode, clerkManaged }: {
+  open: boolean; onOpenChange: (open: boolean) => void; username: string; hasRecoveryCode: boolean; clerkManaged?: boolean;
 }) {
   const { t } = useI18n();
   return <Dialog open={open} onOpenChange={onOpenChange} title={t("accountTitle")} description={t("accountSignedInAs", { username })}>
     <div className="space-y-6">
-      <RecoveryCodePanel hasCode={hasRecoveryCode} />
-      <ChangePasswordForm />
+      {clerkManaged ? <p>{t("clerkAccountRecovery")}</p> : <>
+        <RecoveryCodePanel hasCode={hasRecoveryCode} />
+        <ChangePasswordForm />
+      </>}
       <PrivacyNoticeLink />
     </div>
   </Dialog>;
