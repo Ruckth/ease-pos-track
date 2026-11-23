@@ -932,7 +932,7 @@ test("the page transport sends one bounded multipart request with bearer and ide
     const result = await new ConvexTicketRemote().publishPage("https://fixture.convex.cloud", "staff", { ticket: "TKT-0007", requestId: "r", bundle });
     assert.equal(result.pageId, "p");
     assert.equal(sent?.url, "https://fixture.convex.site/v1/tickets/TKT-0007/pages");
-    assert.deepEqual(sent?.init.headers, { Authorization: "Bearer staff", "Idempotency-Key": "r" });
+    assert.deepEqual(sent?.init.headers, { Authorization: "Bearer staff", "X-Ticket-Image-Policy": "v1", "Idempotency-Key": "r" });
     const form = sent?.init.body as FormData;
     assert.equal(form.get("entry"), "a b.html");
     assert.deepEqual(JSON.parse(String(form.get("manifest"))), [{ part: "f0", path: "a b.html" }, { part: "f1", path: "img/x.png" }]);

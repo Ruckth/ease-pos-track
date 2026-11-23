@@ -3,12 +3,13 @@
  * through internal mutations; serving resolves every request against the
  * committed row before reading bytes. Neither route writes the database itself.
  */
+import { packImage, unpackImage } from "./image_transfer";
 import { ConvexError } from "convex/values";
 import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { errorCode } from "../shared/errors";
-import { PAGE_LIMITS, pageSecurityHeaders, parseServedPath, sha256Hex, validatePageBundle, encodePagePath } from "../shared/ticket-pages";
+import { pageFingerprintInput, isPageHtml, pageContentType, PAGE_LIMITS, pageSecurityHeaders, parseServedPath, sha256Hex, validatePageBundle, encodePagePath } from "../shared/ticket-pages";
 
 const STATUS: Record<string, number> = {
   AUTH_REQUIRED: 401, SESSION_EXPIRED: 401, ORIGIN_NOT_ALLOWED: 403,
@@ -31,7 +32,7 @@ function corsHeaders(request: Request): Record<string, string> {
   return origin && allowedOrigins().includes(origin) ? {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, content-type, idempotency-key",
+    "Access-Control-Allow-Headers": "authorization, content-type, idempotency-key, x-ticket-image-policy",
     "Access-Control-Max-Age": "600",
     Vary: "Origin",
   } : { Vary: "Origin" };
@@ -115,8 +116,39 @@ async function readBundle(request: Request) {
   });
   if (keys.some(key => key !== "entry" && key !== "manifest" && !parts.has(key))) throw reject("PAGE_FORM_INVALID");
   const bundle = validatePageBundle(entry, files);
-  const hashed = await Promise.all(bundle.files.map(async file => ({ ...file, sha256: await sha256Hex(await file.blob.arrayBuffer()) })));
-  return { entry: bundle.entry, files: hashed };
+  const sources = [];
+  for (const file of bundle.files) {
+    sources.push({ ...file, sha256: await sha256Hex(await file.blob.arrayBuffer()) });
+  }
+  return { entry: bundle.entry, files: sources };
+}
+
+async function prepareBundle(ctx: ActionCtx, request: Request, bundle: Awaited<ReturnType<typeof readBundle>>) {
+  const files = [];
+  let totalBytes = 0;
+  const prepared = request.headers.get("x-ticket-image-policy") === "v1";
+  for (const file of bundle.files) {
+    let blob: Blob = file.blob;
+    let sha256 = file.sha256;
+    let rasterType: string | undefined;
+    const raster = pageContentType(file.path).startsWith("image/");
+    if (raster || isPageHtml(file.path)) {
+      const bytes = await blob.arrayBuffer();
+      if (raster || /data:image\//i.test(new TextDecoder().decode(bytes))) {
+        const output = await ctx.runAction(internal.page_image_actions.prepare, { path: file.path, bytes: await packImage(ctx, bytes), prepared });
+        rasterType = output.rasterType;
+        if (output.bytes) {
+          const result = await unpackImage(ctx, output.bytes);
+          blob = new Blob([result]);
+          sha256 = await sha256Hex(result);
+        }
+      }
+    }
+    totalBytes += blob.size;
+    if (totalBytes > PAGE_LIMITS.maxTotalBytes) throw reject("PAGE_TOO_LARGE");
+    files.push({ ...file, blob, size: blob.size, rasterType, sha256 });
+  }
+  return { entry: bundle.entry, files };
 }
 
 type PublishedPage = { _id: Id<"ticketPages">; ticket?: string; url: string; entryPath: string; fileCount: number; totalBytes: number; publishedAt: number };
@@ -149,10 +181,16 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     try { ticket = decodeURIComponent(match[1]); } catch { throw reject("TICKET_UNAVAILABLE"); }
     // Session, Ticket write access, Project access and lifecycle come before any
     // body is read or hashed; reserve and commit check them again.
-    await ctx.runMutation(internal.pages.authorize, { token, ticket });
-    const bundle = await readBundle(request);
-    const manifest = bundle.files.map(({ path, size, sha256 }) => ({ path, size, sha256 }));
-    const reservation = await ctx.runMutation(internal.pages.reserve, { token, ticket, requestId, entry: bundle.entry, manifest });
+    const previous = await ctx.runMutation(internal.pages.authorize, { token, ticket, requestId });
+    const source = await readBundle(request);
+    const sourceDigest = await sha256Hex(new TextEncoder().encode(pageFingerprintInput({
+      ticketId: previous.ticketId, entry: source.entry, files: source.files,
+    })));
+    if (previous.digest && previous.digest !== sourceDigest) throw reject("PAGE_REQUEST_CONFLICT");
+    if (previous.published) return json(request, 200, published(previous.published, false, requestId));
+    const bundle = await prepareBundle(ctx, request, source);
+    const manifest = bundle.files.map(({ path, size, sha256, rasterType }) => ({ path, size, sha256, rasterType }));
+    const reservation = await ctx.runMutation(internal.pages.reserve, { token, ticket, requestId, entry: bundle.entry, manifest, sourceDigest });
     if (reservation.state === "published") {
       return json(request, 200, published(reservation.page, false, requestId));
     }
@@ -199,6 +237,14 @@ export async function servePage(ctx: ActionCtx, request: Request) {
     return new Response(null, { status: 302, headers: { ...headers, Location: `/p/${parsed.shareKey}/${encodePagePath(resolved.redirect)}` } });
   }
   if (!resolved.storageId || !resolved.contentType) return unavailable(headers);
+  if (resolved.contentType.startsWith("image/") && resolved.sha256) {
+    const tag = '"' + resolved.sha256 + '"';
+    headers["ETag"] = tag;
+    headers["Cache-Control"] = "private, no-cache, must-revalidate";
+    if (request.headers.get("if-none-match")?.split(",").some(value => value.trim().replace(/^W\//, "") === tag)) {
+      return new Response(null, {status:304, headers});
+    }
+  }
   const blob = await ctx.storage.get(resolved.storageId);
   if (!blob) return unavailable(headers);
   return new Response(blob, { status: 200, headers: { ...headers, "Content-Type": resolved.contentType } });

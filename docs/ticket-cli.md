@@ -100,7 +100,7 @@ returned; concurrent writes between pages do not form a single database snapshot
 
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
-attach up to 10 original image files. Each source may be a local path or an HTTPS
+attach up to 10 image files. Each source may be a local path or an HTTPS
 URL:
 
 ```bash
@@ -144,15 +144,14 @@ pnpm ticket get TKT-0007
 pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/detail.webp --expected-version 0 --request-id attach-images-0007
 ```
 
-Local files and downloaded HTTPS images are uploaded without resizing or
-re-encoding. Images must be non-empty, no larger than 8 MB each, and the Ticket
+Local files and downloaded HTTPS images are prepared before upload (up to 20 MiB and 40 megapixels per source). Still images fit inside 1920 × 1080 without upscaling. The CLI chooses a compact faithful encoding and preserves alpha. The uploaded image must be at most 8 MiB, and the Ticket
 may contain at most 10 images in total. The upload intent is bound to the durable
 actor and retry key; an interrupted retry, including after sign-in, reuses files
 already recorded by the intent instead of uploading or attaching them twice.
 Recording requires the validated staff session that acquired the intent; this
 direct provider adapter is a deliberate staff capability. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
-`create --dry-run` reads or downloads each image and reports its original name,
+`create --dry-run` reads or downloads each image and prints its prepared name,
 size, and type, but does not upload it or contact the deployment.
 Attachment receipts use their own operation scope and compare the target Ticket
 and ordered media keys. A replay returns the committed attachment's version and
@@ -247,6 +246,8 @@ manifest = [{"part":"f0","path":"reports/index.html"},{"part":"f1","path":"asset
 f0, f1   = file bytes (each field exactly once)
 ```
 
+Official clients send `X-Ticket-Image-Policy: v1` after preparing images locally. Other API clients can send originals within the existing multipart limits and the server optimizes them. Prepared raster bytes are validated regardless of this hint. Paths in the HTML stay stable; the response MIME reflects the stored encoding. Literal base64 raster `img src` values in UTF-8 HTML can also be optimized. Hosted images use a private ETag with mandatory revalidation after checking that the page is active.
+
 `201` publishes, `200` replays. Errors are `{"ok":false,"code":…}`: `401`
 session, `403 ORIGIN_NOT_ALLOWED`, `404 TICKET_UNAVAILABLE`, `400` invalid
 bundle, `409` conflict/revoked/limit, `413 PAGE_TOO_LARGE`. Unknown outcomes are
@@ -261,7 +262,7 @@ checkout's Vite origins (`localhost` and `127.0.0.1` on its `VITE_PORT`); no
 manual step is needed. Shared deployments are configured separately.
 
 `GET /p/{key}/{path}` serves committed files only, rechecking publication,
-revocation and Ticket lifecycle on every request. Responses carry `no-store`,
+revocation and Ticket lifecycle on every request. HTML and unavailable responses carry `no-store`. Served files carry
 `nosniff`, `no-referrer`, `noindex` and a CSP sandbox (`sandbox allow-scripts`,
 opaque origin, no network access beyond inline code, `data:`/`blob:` media and
 files under the page's own `/p/{key}/` prefix). External fonts and scripts do not

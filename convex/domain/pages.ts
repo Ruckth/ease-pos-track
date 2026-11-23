@@ -32,7 +32,7 @@ const MAX_OPEN_WRITES = PAGE_LIMITS.maxFiles * 2;
 type Ctx = QueryCtx | MutationCtx;
 type AnyActor = Actor<Id<"customers">>;
 
-const manifestValidator = v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string() }));
+const manifestValidator = v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string(), rasterType: v.optional(v.string()) }));
 
 export function siteUrl() {
   const url = process.env.CONVEX_SITE_URL;
@@ -108,7 +108,7 @@ async function claimWrites(ctx: MutationCtx, row: Doc<"ticketPages">, now: numbe
   const open = row.writes ?? [];
   const missing = row.manifest.filter(entry => !row.files.some(file => file.path === entry.path));
   if (open.length + missing.length > MAX_OPEN_WRITES) throw new Error("PAGE_UPLOAD_BUSY");
-  const claimed: PageWrite[] = missing.map(entry => ({ ...entry, marker: makeWriteMarker(), claimedAt: now, scannedTo: now - 1_000 }));
+  const claimed: PageWrite[] = missing.map(({path, size, sha256}) => ({ path, size, sha256, marker: makeWriteMarker(), claimedAt: now, scannedTo: now - 1_000 }));
   await ctx.db.patch(row._id, { writes: [...open, ...claimed], writeCheckAt: row.writeCheckAt ?? now + PAGE_WRITE_WINDOW_MS });
   return claimed.map(write => ({ path: write.path, marker: write.marker, contentType: pageWriteType(write.marker) }));
 }
@@ -147,7 +147,7 @@ export async function reconcilePageWrites(ctx: MutationCtx, pageId: Id<"ticketPa
     const expected = row.manifest.find(entry => entry.path === write.path);
     const usable = row.state === "staging" && expected?.sha256 === write.sha256 && expected.size === write.size
       && blob.size === write.size && blob.sha256 === hexToBase64(write.sha256) && !files.some(file => file.path === write.path);
-    if (usable) files.push({ path: write.path, sha256: write.sha256, size: write.size, contentType: pageContentType(write.path)!, storageId: blob._id });
+    if (usable) files.push({ path: write.path, sha256: write.sha256, size: write.size, contentType: expected?.rasterType ?? pageContentType(write.path)!, storageId: blob._id });
     else discarded.push(blob._id);
   }
   await ctx.db.patch(row._id, {
@@ -170,16 +170,19 @@ function stagedView(row: Doc<"ticketPages">) {
 
 /** Runs before the HTTP route reads or hashes any request body. */
 export const authorizePublish = mutationOperation({
-  args: { token: v.string(), ticket: v.string() },
+  args: { token: v.string(), ticket: v.string(), requestId: v.string() },
   handler: async (ctx, args) => {
-    const located = await ticketByReference(ctx, args.ticket);
-    await requirePublishableTicket(ctx, ctx.actor, located._id);
-    return null;
+    const ticket = await ticketByReference(ctx, args.ticket);
+    await requirePublishableTicket(ctx, ctx.actor, ticket._id);
+    const requestId=normalizeRequestId(args.requestId);
+    const row=await ctx.db.query("ticketPages").withIndex("by_request",q=>q.eq("requestId",requestId)).unique();
+    if (row && !sameActor(row,ctx.actor)) throw new Error("TICKET_UNAVAILABLE");
+    return { ticketId:ticket._id, digest:row?.inputDigest, published:row?.state==="published" ? publicPage(ticket,row) : null };
   },
 });
 
 export const reservePage = mutationOperation({
-  args: { token: v.string(), ticket: v.string(), requestId: v.string(), entry: v.string(), manifest: manifestValidator },
+  args: { token: v.string(), ticket: v.string(), requestId: v.string(), entry: v.string(), manifest: manifestValidator, sourceDigest:v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { actor, session } = ctx;
     const requestId = normalizeRequestId(args.requestId);
@@ -187,8 +190,8 @@ export const reservePage = mutationOperation({
     const ticket = await requirePublishableTicket(ctx, actor, located._id);
     const bundle = validatePageBundle(args.entry, args.manifest);
     if (bundle.files.some(file => !/^[0-9a-f]{64}$/.test(file.sha256))) throw new Error("PAGE_FILE_INVALID");
-    const manifest: PageManifestEntry[] = bundle.files.map(({ path, size, sha256 }) => ({ path, size, sha256 }));
-    const inputDigest = await sha256Hex(new TextEncoder().encode(pageFingerprintInput({ ticketId: ticket._id, entry: bundle.entry, files: manifest })));
+    const manifest: PageManifestEntry[] = bundle.files.map(({ path, size, sha256, rasterType }) => ({ path, size, sha256, rasterType }));
+    const inputDigest = args.sourceDigest ?? await sha256Hex(new TextEncoder().encode(pageFingerprintInput({ ticketId: ticket._id, entry: bundle.entry, files: manifest })));
     const now = Date.now();
     const existing = await ctx.db.query("ticketPages").withIndex("by_request", q => q.eq("requestId", requestId)).unique();
     if (existing) {
@@ -238,7 +241,7 @@ export async function recordStagedFile(ctx: MutationCtx, args: { pageId: Id<"tic
     return false;
   }
   await ctx.db.patch(row._id, { ...claim, files: [...row.files, { path: args.path, sha256: args.sha256, size: args.size,
-    contentType: pageContentType(args.path)!, storageId: args.storageId }], updatedAt: now });
+    contentType: expected.rasterType ?? pageContentType(args.path)!, storageId: args.storageId }], updatedAt: now });
   return true;
 }
 
@@ -303,7 +306,7 @@ export async function resolveServedFile(ctx: QueryCtx, shareKey: string, path: s
   if (!ticket || ticket.lifecycle !== "active") return null;
   if (path === undefined) return { redirect: row.entryPath };
   const file = row.files.find(item => item.path === path);
-  return file ? { storageId: file.storageId, contentType: file.contentType } : null;
+  return file ? { storageId: file.storageId, contentType: file.contentType, sha256: file.sha256 } : null;
 }
 
 /** Expiry only records the reservation as abandoned; it never deletes bytes. */

@@ -485,6 +485,28 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
   });
 }
 
+test("publishing an HTML screenshot fits Full HD and preserves transparent pixels", async () => {
+  const { default: sharp } = await import("sharp");
+  const source = await sharp({ create: { width: 3000, height: 300, channels: 4, background: "#1495ac80" } }).png().toBuffer();
+  const html = '<img alt="Ticket screenshot" src="data:image/png;base64,' + source.toString("base64") + '">';
+  const f = await open("staff");
+  try {
+    const { dialog } = await openNewTicket(f, "staff", "en");
+    await dialog.getByLabel(copy("en", "chooseHtmlFile"), { exact: true }).setInputFiles({
+      name: "screenshot.html", mimeType: "text/html", buffer: Buffer.from(html),
+    });
+    await dialog.getByRole("button", { name: copy("en", "publishPage"), exact: true }).click();
+    const link = dialog.getByRole("link", { name: copy("en", "openPageNamed", { name: "screenshot.html" }), exact: true });
+    const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
+    const image = popup.getByAltText("Ticket screenshot");
+    await image.evaluate(async element => { await (element as HTMLImageElement).decode(); });
+    const data = await image.getAttribute("src");
+    assert(data);
+    const pixels = await sharp(Buffer.from(data.split(",")[1], "base64")).raw().toBuffer({ resolveWithObject: true });
+    assert.deepEqual([pixels.info.width, pixels.info.height, pixels.info.channels, pixels.data[3]], [1920, 192, 4, 128]);
+  } finally { await f.context.close(); }
+});
+
 // The real Thai report (1.4 MB, nine embedded screenshots, zoom dialog) when present locally.
 const sampleHtml = process.env.PAGE_SAMPLE_HTML;
 test("staff: the real sample page publishes, renders every screenshot and opens its zoom dialog", { skip: !sampleHtml && "PAGE_SAMPLE_HTML is not set" }, async () => {

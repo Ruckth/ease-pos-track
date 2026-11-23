@@ -23,7 +23,7 @@ export async function publishTicketPage(siteUrl: string, token: string, upload: 
   try {
     response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(upload.ticket)}/pages`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": upload.requestId },
+      headers: { Authorization: `Bearer ${token}`,  "X-Ticket-Image-Policy": "v1", "Idempotency-Key": upload.requestId },
       body: pageFormData(upload.entry, upload.files),
     });
   } catch { throw new Error("PAGE_PUBLISH_UNKNOWN"); }

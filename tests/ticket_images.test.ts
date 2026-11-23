@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,26 +7,25 @@ import test from "node:test";
 import { prepareTicketImages } from "../scripts/ticket/images";
 import { TicketCliError } from "../scripts/ticket/errors";
 
-test("image inputs load original local files and HTTPS links without transforming them", async () => {
+test("image inputs decode local files and HTTPS links and preserve the displayed dimensions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ticket-images-"));
   try {
     const localPath = join(directory, "local.png");
-    const localBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const localBytes = await sharp({create:{width:320,height:150,channels:4,background:"#0000"}}).png().toBuffer();
     await writeFile(localPath, localBytes);
-    const remoteBytes = Buffer.from([0xff, 0xd8, 0xff, 4, 5, 6]);
+    const remoteBytes = await sharp(localBytes).jpeg().toBuffer();
 
     const images = await prepareTicketImages(
       [localPath, "https://images.example.com/remote.jpg"],
-      async () => new Response(remoteBytes, { status: 200, headers: { "content-type": "image/jpeg" } }),
+      async () => new Response(new Uint8Array(remoteBytes), { status: 200, headers: { "content-type": "image/jpeg" } }),
     );
 
     assert.equal(images.length, 2);
-    assert.deepEqual(Buffer.from(await images[0].arrayBuffer()), localBytes);
-    assert.equal(images[0].name, "local.png");
-    assert.equal(images[0].type, "image/png");
-    assert.deepEqual(Buffer.from(await images[1].arrayBuffer()), remoteBytes);
-    assert.equal(images[1].name, "remote.jpg");
-    assert.equal(images[1].type, "image/jpeg");
+    for (const image of images) {
+      const meta=await sharp(await image.arrayBuffer()).metadata();
+      assert.deepEqual([meta.width,meta.height],[320,150]);
+      assert.equal(image.type, "image/"+meta.format);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -58,4 +58,51 @@ test("the staff upload adapter uses an injected provider and never exposes provi
   await assert.rejects(failed.upload([file]), error => error instanceof TicketCliError && !/secret-key|private.invalid|Ticket content/.test(error.message));
   const misconfigured = new UploadThingTicketImages("fake-token", () => { throw new Error("secret config"); });
   await assert.rejects(misconfigured.upload([file]), error => error instanceof TicketCliError && error.code === "UPLOAD_NOT_CONFIGURED" && !error.message.includes("secret config"));
+});
+
+test("normalization fits Full HD, respects EXIF rotation and removes capture metadata", async () => {
+  const { optimizeImage } = await import("../shared/node/optimize-image");
+  const input = await sharp({create:{width:3000,height:1500,channels:3,background:"#489"}})
+    .jpeg().withMetadata({orientation:6}).toBuffer();
+  const result=await optimizeImage(new File([new Uint8Array(input)],"camera.jpg",{type:"image/jpeg"}));
+  const meta=await sharp(await result.arrayBuffer()).metadata();
+  assert.deepEqual([meta.width,meta.height],[540,1080]);
+  assert.equal(meta.exif,undefined);
+  assert.equal(meta.orientation,undefined);
+});
+
+test("small text and transparent edges survive the selected encoding",async()=>{
+  const { optimizeImage }=await import("../shared/node/optimize-image");
+  const {faithfulPixels}=await import("../shared/image-optimization");
+  const svg=Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="100"><text x="3" y="26" font-size="12" fill="#12579a">Ticket POS-0007 / Total 1,234.50</text><path d="M0 40h319" stroke="#fe9300"/></svg>');
+  const png=await sharp(svg).png().toBuffer();
+  const output=await optimizeImage(new File([new Uint8Array(png)],"ui.png",{type:"image/png"}));
+  assert.notEqual(output.type,"image/jpeg");
+  const reference=await sharp(png).ensureAlpha().raw().toBuffer();
+  const candidate=await sharp(await output.arrayBuffer()).ensureAlpha().raw().toBuffer();
+  assert(faithfulPixels(reference,candidate));
+  assert(output.size<=png.byteLength);
+});
+
+test("provider callback validates decoded pixels and metadata from bounded provider bytes",async()=>{
+  const {validStoredImage}=await import("../server/validate-upload-image");
+  const image=sharp({create:{width:20,height:10,channels:3,background:"#587"}});
+  const check=async(bytes:Buffer,type:string) => validStoredImage({key:"owned",ufsUrl:"https://demo.ufs.sh/f/owned",size:bytes.length,type},async()=>new Response(new Uint8Array(bytes)));
+  const png=await image.clone().png().toBuffer();
+  assert(await check(png,"image/png"));
+  assert.equal(await check(png,"image/webp"),false);
+  assert.equal(await check(png.subarray(0,24),"image/png"),false);
+  assert.equal(await check(await image.clone().withMetadata().jpeg().toBuffer(),"image/jpeg"),false);
+});
+
+test("a JPEG can shed metadata without a generation of quality loss", async () => {
+  const { jpegWithoutMetadata, cleanJpeg, inspectRaster } = await import("../shared/image-optimization");
+  const source = await sharp({ create: { width: 140, height: 60, channels: 3, background: "#418761" } })
+    .jpeg().withMetadata({ orientation: 1 }).toBuffer();
+  const clean = jpegWithoutMetadata(new Uint8Array(source));
+  assert(clean);
+  assert(clean.length < source.length && cleanJpeg(clean));
+  assert.deepEqual(inspectRaster(clean), { type: "image/jpeg", width: 140, height: 60 });
+  assert.equal((await sharp(clean).metadata()).exif, undefined);
+  assert.deepEqual(await sharp(source).raw().toBuffer(), await sharp(clean).raw().toBuffer());
 });

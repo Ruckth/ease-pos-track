@@ -8,7 +8,7 @@ type Result = FunctionReturnType<typeof api.uploads.recordUploadedFile>;
 
 /** The provider callback supplies metadata; browser input supplies only the intent. */
 export function recordUploadHandler(record: (receipt: Receipt) => Promise<Result>, callbackToken: string | undefined) {
-  return async (input: Pick<Receipt, "intentId" | "secret" | "file">) => {
+  return async (input: Pick<Receipt, "intentId" | "secret" | "file" | "rejectedImage">) => {
     if (!callbackToken) {
       console.error("UPLOAD_CALLBACK_NOT_CONFIGURED");
       throw new Error("UPLOAD_CALLBACK_NOT_CONFIGURED");

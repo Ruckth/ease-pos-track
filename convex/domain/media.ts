@@ -37,7 +37,7 @@ export async function reserveIntentAssets(ctx: MutationCtx, intent: Doc<"uploadI
 }
 
 /** Only trusted callers reach here. Indexed key reads serialize competing claims. */
-export async function recordUpload(ctx: MutationCtx, intent: Doc<"uploadIntents">, file: Media, trustedCallback = false) {
+export async function recordUpload(ctx: MutationCtx, intent: Doc<"uploadIntents">, file: Media, trustedCallback = false, rejectedImage = false) {
   if (!file.key.trim()) throw new Error("INVALID_MEDIA_REFERENCE");
   const existing = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", file.key)).unique();
   if (existing) {
@@ -53,7 +53,7 @@ export async function recordUpload(ctx: MutationCtx, intent: Doc<"uploadIntents"
   let valid = true;
   try { validateMediaItems([file]); }
   catch { valid = false; }
-  const accepted = valid && intent.status === "pending" && intent.expiresAt > Date.now() && recordedCount < expectedCount;
+  const accepted = !rejectedImage && valid && intent.status === "pending" && intent.expiresAt > Date.now() && recordedCount < expectedCount;
   if (!accepted && !trustedCallback) throw new Error("UPLOAD_INTENT_INVALID");
   const now = Date.now();
   const id = await ctx.db.insert("mediaAssets", {

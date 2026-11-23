@@ -25,12 +25,12 @@ const bundle = {
   "reports/summary.html": '<!doctype html><link rel="stylesheet" href="../assets/site.css"><img src="../assets/img/dot.png"><script src="../assets/app.js"></script>',
   "assets/site.css": '@font-face{font-family:F;src:url(fonts/f.woff2)} body{background:url(img/dot.png)}',
   "assets/app.js": 'document.body.dataset.ran = "yes";',
-  "assets/img/dot.png": "\x89PNG fixture",
+  "assets/img/dot.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGPQqDiBFTEMLQkAAtVaAcSRe60AAAAASUVORK5CYII=",
   "assets/fonts/f.woff2": "wOF2 fixture",
 };
 type Files = Record<string, string>;
 const form = (files: Files = bundle, entry = "reports/summary.html") =>
-  pageFormData(entry, Object.entries(files).map(([path, text]) => ({ path, blob: new Blob([text]) })));
+  pageFormData(entry, Object.entries(files).map(([path, text]) => ({ path, blob: new Blob([path === "assets/img/dot.png" ? Uint8Array.from(atob(text),c=>c.charCodeAt(0)) : text]) })));
 
 async function fixture() {
   const t = convexTest(schema, modules);
@@ -139,6 +139,8 @@ test("serving checks publication, lifecycle and revocation on every HTML and ass
     expect(html.headers.get(name), name).toBe(value);
   }
   expect((await f.t.fetch(asset)).headers.get("content-type")).toBe("image/png");
+  const tag=(await f.t.fetch(asset)).headers.get("etag")!;
+  expect((await f.t.fetch(asset,{headers:{"If-None-Match":tag}})).status).toBe(304);
   const fontResponse = await f.t.fetch(font);
   expect([fontResponse.status, fontResponse.headers.get("content-type"), fontResponse.headers.get("access-control-allow-origin")]).toEqual([200, "font/woff2", "*"]);
   const bare = await f.t.fetch(entry.replace(/\/reports\/summary\.html$/, ""), { redirect: "manual" });
@@ -163,6 +165,7 @@ test("serving checks publication, lifecycle and revocation on every HTML and ass
   expect(await f.t.mutation(api.pages.revokeTicketPage, { token: f.staff, pageId: page.pageId })).toEqual({ revoked: false });
   for (const path of [entry, asset, font]) expect((await f.t.fetch(path)).status, path).toBe(404);
   expect(await f.t.query(api.pages.listTicketPages, { token: f.alice, id: f.aliceTicket.id })).toEqual([]);
+  expect((await f.t.fetch(asset,{headers:{"If-None-Match":tag}})).status).toBe(404);
   const reused = await f.publish(f.alice, f.aliceTicket.ref, form(), page.requestId);
   expect([reused.status, (await reused.json()).code]).toEqual([409, "PAGE_REVOKED"]);
 });
@@ -344,4 +347,37 @@ test("reconciliation reads a bounded number of storage rows per pass and resumes
   await f.t.run(ctx => reconcilePageWrites(ctx, reserved.pageId));
   [row] = await f.rows();
   expect([row.files.map(file => file.storageId), row.writes]).toEqual([[orphan], []]);
+});
+
+test("raw API resizes image bytes, preserves the authored path, and rejects a forged prepared claim", async () => {
+  const {default:sharp}=await import("sharp");
+  const f=await fixture();
+  const source=await sharp({create:{width:2500,height:500,channels:4,background:"#237c9a80"}}).png().toBuffer();
+  const body=()=>pageFormData("index.html",[
+    {path:"index.html",blob:new Blob(['<img src="picture.png">'])},
+    {path:"picture.png",blob:new Blob([new Uint8Array(source)])},
+  ]);
+  const failed=await f.publish(f.alice,f.aliceTicket.ref,body(),crypto.randomUUID(),{"X-Ticket-Image-Policy":"v1"});
+  expect(failed.status).toBe(400);
+  const published=await f.publish(f.alice,f.aliceTicket.ref,body());
+  expect(published.status).toBe(201);
+  const {url}=await published.json();
+  const asset=await f.t.fetch(f.path(new URL("picture.png",url).href));
+  const out=Buffer.from(await asset.arrayBuffer());
+  const metadata=await sharp(out).metadata();
+  expect([metadata.width,metadata.height,metadata.hasAlpha]).toEqual([1920,384,true]);
+  expect(asset.headers.get("content-type")).toBe("image/"+metadata.format);
+});
+
+test("temporary image chunks are consumed once and abandoned chunks expire", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema, modules);
+  const bytes = Uint8Array.of(1, 2, 3).buffer;
+  const makeChunk = () => t.mutation(internal.image_chunks.put, { bytes });
+  const taken = await makeChunk();
+  const abandoned = await makeChunk();
+  expect(new Uint8Array(await t.mutation(internal.image_chunks.take, { id: taken }))).toEqual(new Uint8Array(bytes));
+  expect(await t.run(ctx => ctx.db.get(taken))).toBeNull();
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(await t.run(ctx => ctx.db.get(abandoned))).toBeNull();
 });

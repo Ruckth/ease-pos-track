@@ -1,3 +1,5 @@
+import { optimizeImage } from "../../shared/node/optimize-image";
+import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { UTApi } from "uploadthing/server";
@@ -34,9 +36,9 @@ const IMAGE_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-function assertImageSize(size: number) {
-  if (size <= 0 || size > MAX_TICKET_IMAGE_BYTES) {
-    throw inputError("IMAGE_SIZE_INVALID", "Each --image must be larger than zero and no more than 8 MB.");
+function assertImageSize(size: number, limit = IMAGE_SOURCE_BYTES) {
+  if (size <= 0 || size > limit) {
+    throw inputError("IMAGE_SIZE_INVALID", "Each --image must be larger than zero and within the configured file size limit.");
   }
 }
 
@@ -90,25 +92,40 @@ async function remoteImage(source: string, index: number, fetcher: typeof fetch)
   const type = imageType(finalUrl.pathname, response.headers.get("content-type"));
   const declaredSize = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredSize) && declaredSize > 0) assertImageSize(declaredSize);
-  const bytes = await response.arrayBuffer();
-  assertImageSize(bytes.byteLength);
+  if (!response.body) throw inputError("IMAGE_SIZE_INVALID", "Empty image response.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > IMAGE_SOURCE_BYTES) { await reader.cancel(); assertImageSize(size); }
+    chunks.push(new Uint8Array(value));
+  }
+  assertImageSize(size);
   const name = remoteName(finalUrl, type, index);
-  return new File([bytes], name, { type });
+  return new File(chunks, name, { type });
 }
 
-/** Resolve local paths and HTTPS links into original, untransformed image files. */
+/** Resolve local paths and HTTPS links into bounded, optimized image files. */
 export async function prepareTicketImages(sources: string[], fetcher: typeof fetch = fetch) {
   if (sources.length > MAX_TICKET_IMAGES) {
     throw inputError("IMAGE_LIMIT_EXCEEDED", `At most ${MAX_TICKET_IMAGES} --image values are allowed.`);
   }
-  return await Promise.all(sources.map((rawSource, index) => {
+  const images: File[] = [];
+  for (const [index, rawSource] of sources.entries()) {
     const source = rawSource.trim();
     if (!source) throw inputError("INVALID_IMAGE_SOURCE", "--image cannot be blank.");
-    return source.includes("://") ? remoteImage(source, index, fetcher) : localImage(source);
-  }));
+    const original = await (source.includes("://") ? remoteImage(source, index, fetcher) : localImage(source));
+    const image = await optimizeImage(original).catch(() => { throw inputError("IMAGE_INVALID","Image decoding failed or the source exceeds the supported dimensions."); });
+    assertImageSize(image.size, MAX_TICKET_IMAGE_BYTES);
+    images.push(image);
+  }
+  return images;
 }
 
-/** Upload prepared originals with the server SDK; links and paths share one store. */
+/** Upload prepared images with the server SDK; links and paths share one store. */
 export class UploadThingTicketImages implements TicketImages {
   private readonly provider?: UploadProvider;
   constructor(token: string | undefined, providerFactory: (token: string) => UploadProvider = token => new UTApi({ token })) {

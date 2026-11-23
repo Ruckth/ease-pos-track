@@ -42,7 +42,7 @@ function extension(path: string) {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-/** The served media type, decided by the file extension only. */
+/** Default media type for a bundle path. Validated image bytes can override it. */
 export function pageContentType(path: string) {
   return TYPES[extension(path)];
 }
@@ -106,7 +106,7 @@ export async function sha256Hex(bytes: ArrayBuffer | Uint8Array) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export type PageManifestEntry = { path: string; size: number; sha256: string };
+export type PageManifestEntry = { rasterType?: string; path: string; size: number; sha256: string };
 
 /** Canonical retry fingerprint: Ticket, entry and every path, size and content hash. */
 export function pageFingerprintInput(input: { ticketId: string; entry: string; files: PageManifestEntry[] }) {

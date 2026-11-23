@@ -211,7 +211,7 @@ export class ConvexTicketRemote implements TicketRemote {
     const { siteUrl } = await this.client(url).query(api.pages.publishTarget, { token });
     const form = pageFormData(input.bundle.entry, input.bundle.files.map(file => ({ path: file.path, blob: new Blob([file.bytes as BlobPart]) })));
     const response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(input.ticket)}/pages`, {
-      method: "POST", headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": input.requestId }, body: form,
+      method: "POST", headers: { Authorization: `Bearer ${token}`,  "X-Ticket-Image-Policy": "v1", "Idempotency-Key": input.requestId }, body: form,
     });
     const body = await response.json().catch(() => null) as ({ ok: true } & TicketPagePublishResult) | { ok: false; code?: string } | null;
     if (!response.ok || !body?.ok) throw new ConvexError({ code: body && !body.ok && body.code ? body.code : "PAGE_PUBLISH_UNKNOWN" });

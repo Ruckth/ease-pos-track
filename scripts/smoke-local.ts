@@ -1,4 +1,6 @@
 /** Exercises the real CLI orchestration/adapter without Keychain, provider I/O or remote targets. */
+import { pageFormData } from "../shared/ticket-pages";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { runTicketCli, type TicketCliDeps } from "./ticket/run";
@@ -73,7 +75,7 @@ assert.equal(entry.status, 200);
 assert.match(entry.headers.get("content-security-policy") ?? "", /^sandbox allow-scripts;/);
 assert.equal(entry.headers.get("cache-control"), "no-store");
 const asset = await fetch(new URL("../assets/img/dot.png", published.url));
-assert.equal(asset.headers.get("content-type"), "image/png");
+assert.match(asset.headers.get("content-type") ?? "", /^image\/(png|webp|avif|jpeg)$/);
 const single = await command(["page", "publish", created.ticket, `${pageFixture}/reports/details.html`]);
 assert.match(single.url, /\/details\.html$/);
 const listed = await command(["page", "list", created.ticket]);
@@ -82,9 +84,23 @@ assert.equal((await command(["page", "revoke", created.ticket, "--page", publish
 assert.equal((await fetch(published.url)).status, 404);
 assert.equal((await fetch(new URL("../assets/img/dot.png", published.url))).status, 404);
 assert.equal((await command(["page", "list", created.ticket])).count, 1);
+// Exercise both sides of the Node action transport limit on the real backend.
+const padding = " ".repeat(5 * 1024 * 1024);
+const png = await readFile(pageFixture + "/assets/img/dot.png");
+const html = new Blob(['<!--', padding, '--><img src="data:image/png;base64,', png.toString("base64"), '">']);
+const session = await deps.credentials.get("dev");
+assert(session);
+const large = await fetch(new URL("/v1/tickets/" + created.ticket + "/pages", published.url), {
+  method: "POST",
+  headers: { Authorization: "Bearer " + session.token, "Idempotency-Key": randomUUID() },
+  body: pageFormData("large.html", [{ path: "large.html", blob: html }]),
+});
+const result = await large.json();
+assert.equal(large.status, 201, result.code);
+assert((await (await fetch(result.url)).text()).includes(padding));
 await command(["logout"]);
 console.log(JSON.stringify({ ok: true, target: url, checks: ["login", "whoami", "create", "retry", "retry after edit", "content and Project conflict exit 5", "detail", "edit", "status", "archive", "restore",
-  "page entry required", "page folder publish", "page replay", "page conflict exit 5", "page headers", "nested asset", "single-file page", "page list", "page revoke stops HTML and assets", "logout", "single JSON result"] }));
+  "page entry required", "page folder publish", "page replay", "page conflict exit 5", "page headers", "nested asset", "single-file page", "page list", "page revoke stops HTML and assets", "large HTML round trip", "logout", "single JSON result"] }));
 
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,3 +1,6 @@
+import { optimizeEmbeddedImages } from "../../shared/html-images";
+import { optimizeImage } from "../../shared/node/optimize-image";
+import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
 /**
  * Reads one page bundle from disk: a single HTML file, or a folder whose paths
  * stay relative to it. Hidden files are skipped and symbolic links are refused,
@@ -5,7 +8,7 @@
  */
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { PAGE_LIMITS, defaultPageEntry, isHiddenPagePath, validatePageBundle } from "../../shared/ticket-pages";
+import { PAGE_LIMITS, pageContentType, defaultPageEntry, isHiddenPagePath, validatePageBundle } from "../../shared/ticket-pages";
 import { inputError, mapInputError } from "./errors";
 
 export type PageBundle = { entry: string; files: Array<{ path: string; size: number; bytes: Uint8Array }>; totalBytes: number };
@@ -35,13 +38,26 @@ export async function readPageBundle(source: string, entry?: string): Promise<Pa
   if (chosen === undefined) {
     throw inputError("PAGE_ENTRY_REQUIRED", "The folder has several HTML files; pass --entry with the starting page's relative path.");
   }
-  const sizes = await Promise.all(paths.map(async path => ({ path, size: (await lstat(join(root, path))).size })));
-  let bundle;
-  try { bundle = validatePageBundle(chosen, sizes); }
-  catch (error) { throw mapInputError(error); }
-  const files = await Promise.all(bundle.files.map(async (file, index) => {
-    const bytes = new Uint8Array(await readFile(join(root, sizes[index].path)));
-    return { path: file.path, size: bytes.byteLength, bytes };
-  }));
-  return { entry: bundle.entry, files, totalBytes: files.reduce((sum, file) => sum + file.size, 0) };
+  const entries = paths.map(path => ({ path, size: 0 }));
+  try { validatePageBundle(chosen, entries); } catch (error) { throw mapInputError(error); }
+  const files: PageBundle["files"] = [];
+  let totalBytes = 0;
+  for (const path of paths) {
+    const absolute = join(root, path);
+    const type = pageContentType(path);
+    const raster = type.startsWith("image/");
+    const html = type.startsWith("text/html");
+    const limit = raster ? IMAGE_SOURCE_BYTES : PAGE_LIMITS.maxTotalBytes;
+    if ((await lstat(absolute)).size > limit) throw mapInputError(new Error("PAGE_TOO_LARGE"));
+    let bytes = new Uint8Array(await readFile(absolute));
+    if (raster || html) {
+      const input = new File([bytes], basename(path), { type });
+      const image = await (raster ? optimizeImage(input) : optimizeEmbeddedImages(input, optimizeImage));
+      bytes = new Uint8Array(await image.arrayBuffer());
+    }
+    totalBytes += bytes.length;
+    if (totalBytes > PAGE_LIMITS.maxTotalBytes) throw mapInputError(new Error("PAGE_TOO_LARGE"));
+    files.push({ path, bytes, size: bytes.length });
+  }
+  return { entry: chosen, files, totalBytes };
 }

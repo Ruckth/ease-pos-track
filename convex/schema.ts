@@ -98,9 +98,10 @@ const uploadIntentStatus = v.union(
   v.literal("cleaned"),
 );
 
-const pageManifestEntry = v.object({ path: v.string(), size: v.number(), sha256: v.string() });
+const pageManifestEntry = v.object({ rasterType: v.optional(v.string()), path: v.string(), size: v.number(), sha256: v.string() });
 
 export default defineSchema({
+  imageChunks: defineTable({ bytes: v.bytes() }),
   projects: defineTable({
     name: v.string(),
     // Immutable once created: it prefixes every Ticket reference in the Project.

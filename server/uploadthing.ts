@@ -1,3 +1,4 @@
+import { validStoredImage } from "./validate-upload-image.js";
 import type { OurFileRouter, UploadIntentInput } from "../shared/upload-router.js";
 import { ConvexHttpClient } from "convex/browser";
 import { createUploadthing, UploadThingError } from "uploadthing/server";
@@ -84,7 +85,9 @@ export function createUploadRouter(convex: ConvexHttpClient, callbackToken: stri
       // See the parser note above: Vercel's non-strict API check also erases the
       // properties of UploadThing's Effect Schema-derived UploadedFileData type.
       const uploaded = file as unknown as CompletedUpload;
+      const rejectedImage = uploaded.type.startsWith("image/") && !await validStoredImage(uploaded);
       await record({
+        ...(rejectedImage ? { rejectedImage: true } : {}),
         intentId: metadata.intentId as Id<"uploadIntents">,
         secret: metadata.secret,
         file: {

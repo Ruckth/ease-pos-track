@@ -1,3 +1,5 @@
+import { preparePageAsset } from "@/lib/optimize-image";
+import { PAGE_LIMITS, pageContentType } from "../../../shared/ticket-pages";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { localizeError, useI18n } from "@/lib/i18n";
@@ -45,11 +47,18 @@ export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }
   async function publish() {
     if (!selection || !target) return;
     setError("");
-    let bundle;
-    try { bundle = validatePageBundle(selection.entry, selection.files.map(file => ({ path: file.path, size: file.blob.size, blob: file.blob }))); }
-    catch (invalid) { setError(localizeError(invalid, t)); return; }
     setPublishing(true);
     try {
+      validatePageBundle(selection.entry, selection.files.map(file => ({ path: file.path, size: 0 })));
+      const files = [];
+      let totalBytes = 0;
+      for (const file of selection.files) {
+        const blob = await preparePageAsset(file.blob, pageContentType(file.path));
+        totalBytes += blob.size;
+        if (totalBytes > PAGE_LIMITS.maxTotalBytes) throw new Error("PAGE_TOO_LARGE");
+        files.push({ path: file.path, size: blob.size, blob });
+      }
+      const bundle = validatePageBundle(selection.entry, files);
       // The request id stays with this selection, so a retry never publishes twice.
       const { url } = await publishTicketPage(target.siteUrl, token, {
         ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey), requestId: selection.requestId,
