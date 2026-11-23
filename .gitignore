@@ -16,3 +16,6 @@ package-lock.json
 yarn.lock
 bun.lockb
 bun.lock
+
+# Browser evidence and visual pilot output (never committed).
+test-results/

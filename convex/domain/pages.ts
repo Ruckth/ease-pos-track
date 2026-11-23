@@ -15,6 +15,7 @@ import { PAGE_LIMITS, pageContentType, pageFingerprintInput, pageUrl, sha256Hex,
 import { mutationOperation, queryOperation } from "./operation";
 import { readableTicket, requireWritableTicket } from "./operations";
 import { requireUsableProject } from "./projects";
+import { mediaCleanupEnabled, requireLegacyAccess } from "../pilot_access";
 
 export const STAGING_TTL_MS = 15 * 60 * 1000;
 export const PAGE_SWEEP_LIMIT = 10;
@@ -93,6 +94,8 @@ async function ticketByReference(ctx: Ctx, reference: string) {
 
 /** Current Ticket write access, active lifecycle and Project access. */
 async function requirePublishableTicket(ctx: MutationCtx, actor: AnyActor, id: Id<"tickets">) {
+  // Hosted pages store blobs like media: pilot deployments keep them disabled.
+  await requireLegacyAccess(ctx);
   const doc = await requireWritableTicket(ctx, actor, id);
   await requireUsableProject(ctx, actor, doc.projectId);
   return doc;
@@ -170,7 +173,7 @@ function stagedView(row: Doc<"ticketPages">) {
 
 /** Runs before the HTTP route reads or hashes any request body. */
 export const authorizePublish = mutationOperation({
-  args: { token: v.string(), ticket: v.string(), requestId: v.string() },
+  args: { ticket: v.string(), requestId: v.string() },
   handler: async (ctx, args) => {
     const ticket = await ticketByReference(ctx, args.ticket);
     await requirePublishableTicket(ctx, ctx.actor, ticket._id);
@@ -182,7 +185,7 @@ export const authorizePublish = mutationOperation({
 });
 
 export const reservePage = mutationOperation({
-  args: { token: v.string(), ticket: v.string(), requestId: v.string(), entry: v.string(), manifest: manifestValidator, sourceDigest:v.optional(v.string()) },
+  args: { ticket: v.string(), requestId: v.string(), entry: v.string(), manifest: manifestValidator, sourceDigest:v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { actor, session } = ctx;
     const requestId = normalizeRequestId(args.requestId);
@@ -246,7 +249,7 @@ export async function recordStagedFile(ctx: MutationCtx, args: { pageId: Id<"tic
 }
 
 export const commitPage = mutationOperation({
-  args: { token: v.string(), pageId: v.id("ticketPages") },
+  args: { pageId: v.id("ticketPages") },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.pageId);
     if (!row || !sameActor(row, ctx.actor)) throw new Error("TICKET_UNAVAILABLE");
@@ -273,7 +276,7 @@ export async function abandonPage(ctx: MutationCtx, pageId: Id<"ticketPages">) {
 }
 
 export const listTicketPages = queryOperation({
-  args: { token: v.string(), id: v.id("tickets") },
+  args: { id: v.id("tickets") },
   handler: async (ctx, args) => {
     const ticket = await readableTicket(ctx, ctx.actor, args.id);
     if (!ticket) return [];
@@ -284,7 +287,7 @@ export const listTicketPages = queryOperation({
 });
 
 export const revokeTicketPage = mutationOperation({
-  args: { token: v.string(), pageId: v.id("ticketPages") },
+  args: { pageId: v.id("ticketPages") },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.pageId);
     const ticket = row ? await readableTicket(ctx, ctx.actor, row.ticketId) : null;
@@ -318,12 +321,12 @@ export async function expireStagingPages(ctx: MutationCtx) {
 }
 
 /**
- * Deletes only blobs recorded on a page row, behind MEDIA_CLEANUP_ENABLED.
+ * Deletes only blobs recorded on a page row, behind MEDIA_CLEANUP_ENABLED (legacy deployments only).
  * Published and staging rows lose only their discarded duplicates. Unresolved
  * writes stay on the row until reconciliation records or drops them.
  */
 export async function reclaimPageStorage(ctx: MutationCtx) {
-  if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return 0;
+  if (!await mediaCleanupEnabled(ctx)) return 0;
   const now = Date.now();
   const rows = await ctx.db.query("ticketPages").withIndex("by_reclaim", q => q.gte("reclaimAfter", 0).lte("reclaimAfter", now)).take(PAGE_SWEEP_LIMIT);
   for (const row of rows) {

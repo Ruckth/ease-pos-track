@@ -55,6 +55,7 @@ export function DescriptionWithTags({
 export function AnnotationList({
   annotations,
   deletedAnnotations,
+  readOnly = false,
   onFocus,
   onUpdate,
   onDelete,
@@ -62,6 +63,7 @@ export function AnnotationList({
 }: {
   annotations: Annotation[];
   deletedAnnotations: Annotation[];
+  readOnly?: boolean;
   onFocus: (annotation: Annotation) => void;
   onUpdate: (annotationId: string, text: string) => Promise<void>;
   onDelete: (annotationId: string) => Promise<void>;
@@ -92,7 +94,7 @@ export function AnnotationList({
             <button
               type="button"
               onClick={() => onFocus(annotation)}
-              aria-label={t("showComment", { label: annotation.label })}
+              aria-label={`${t("showComment", { label: annotation.label })} · ${annotation.text}`}
               className={labelChipClass(false, true)}
             >
               {annotation.label}
@@ -140,6 +142,7 @@ export function AnnotationList({
                 )}
               </p>
             </div>
+            {!readOnly && <>
             <button
               type="button"
               aria-label={t("editComment", { label: annotation.label })}
@@ -176,10 +179,11 @@ export function AnnotationList({
                 <Trash2 className="size-4" />
               )}
             </button>
+            </>}
           </li>
         ))}
       </ul>
-      {deleted.length > 0 ? (
+      {!readOnly && deleted.length > 0 ? (
         <div className="space-y-1.5 pt-2">
           <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{t("recentlyDeleted")}</p>
           <ul className="space-y-1.5">

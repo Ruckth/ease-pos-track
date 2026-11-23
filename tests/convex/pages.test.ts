@@ -1,4 +1,5 @@
 import { convexTest } from "convex-test";
+import { identityTest } from "./identity-harness";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -33,22 +34,24 @@ const form = (files: Files = bundle, entry = "reports/summary.html") =>
   pageFormData(entry, Object.entries(files).map(([path, text]) => ({ path, blob: new Blob([path === "assets/img/dot.png" ? Uint8Array.from(atob(text),c=>c.charCodeAt(0)) : text]) })));
 
 async function fixture() {
-  const t = convexTest(schema, modules);
-  const seed = await t.mutation(internal.seed.install, {
-    passwordAlgorithm: "fixture", passwordSalt: "fixture", passwordHash: "fixture", passwordIterations: 1,
-  });
+  const t = identityTest(modules);
+  const seed = await t.mutation(internal.seed.install, {});
   const [staff, alice, bob] = seed.sessions;
   const tickets = await t.run(async ctx => Promise.all(seed.tickets.map(async id => (await ctx.db.get(id))!)));
   const ref = (index: number) => formatTicketNumber(tickets[index].ticketNumber, tickets[index].projectKey);
   const aliceTicket = { id: seed.tickets[1], ref: ref(1) };
   const publish = (token: string | null, ticket: string, body: BodyInit, key: string | null = crypto.randomUUID(), headers: Record<string, string> = {}) =>
-    t.fetch(`/v1/tickets/${ticket}/pages`, { method: "POST", body, headers: {
+    // convex-test delivers the verified JWT subject through withIdentity.
+    (token ? t.raw.withIdentity({ subject: token }) : t.raw).fetch(`/v1/tickets/${ticket}/pages`, { method: "POST", body, headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(key ? { "Idempotency-Key": key } : {}), ...headers,
     } });
   const rows = () => t.run(ctx => ctx.db.query("ticketPages").collect());
   const blobs = () => t.run(ctx => ctx.db.system.query("_storage").collect());
   const path = (url: string) => new URL(url).pathname;
-  return { t, seed, staff, alice, bob, aliceTicket, ref, publish, rows, blobs, path };
+  const as = (session: string) => t.raw.withIdentity({ subject: session });
+  const aliceId = async () => (await t.query(api.projects.listProjectMembers, { token: staff, projectId: seed.projects[0].id }))
+    .find(member => member.username === "alice")!.customerId;
+  return { t, seed, staff, alice, bob, aliceTicket, ref, publish, rows, blobs, path, as, aliceId };
 }
 
 test("authority is checked before the body is read; nothing is reserved or stored on rejection", async () => {
@@ -70,8 +73,7 @@ test("authority is checked before the body is read; nothing is reserved or store
   const noKey = await f.publish(f.alice, f.aliceTicket.ref, form(), null);
   expect(noKey.status).toBe(400);
   // A customer who lost Project membership is denied the same way.
-  const members = await f.t.query(api.projects.listProjectMembers, { token: f.staff, projectId: f.seed.projects[0].id });
-  const aliceId = members.find(member => member.email === "alice@local.test")!.customerId;
+  const aliceId = await f.aliceId();
   await f.t.mutation(api.projects.removeProjectMember, { token: f.staff, projectId: f.seed.projects[0].id, customerId: aliceId });
   const removed = await f.publish(f.alice, f.aliceTicket.ref, form());
   expect([removed.status, (await removed.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
@@ -199,17 +201,16 @@ test("commit rechecks access; expiry records abandonment and only gated reclaim 
   vi.useFakeTimers();
   const f = await fixture();
   const manifest = [{ path: "index.html", size: 3, sha256: await sha256Hex(new TextEncoder().encode("<p>")) }];
-  const reserve = (requestId: string) => f.t.mutation(internal.pages.reserve, { token: f.alice, ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest });
+  const reserve = (requestId: string) => f.as(f.alice).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest });
   const first = await reserve("commit-recheck");
   if (first.state !== "staging") throw new Error("expected staging");
   const [write] = first.writes;
   const storageId = await f.t.run(ctx => ctx.storage.store(new Blob(["<p>"], { type: write.contentType })));
   await f.t.mutation(internal.pages.recordStaged, { pageId: first.pageId, marker: write.marker, path: "index.html", sha256: manifest[0].sha256, size: 3, storageId });
-  const members = await f.t.query(api.projects.listProjectMembers, { token: f.staff, projectId: f.seed.projects[0].id });
-  const aliceId = members.find(member => member.email === "alice@local.test")!.customerId;
+  const aliceId = await f.aliceId();
   await f.t.mutation(api.projects.removeProjectMember, { token: f.staff, projectId: f.seed.projects[0].id, customerId: aliceId });
-  await expect(f.t.mutation(internal.pages.commit, { token: f.alice, pageId: first.pageId })).rejects.toThrow("TICKET_UNAVAILABLE");
-  await f.t.mutation(api.projects.addProjectMember, { token: f.staff, projectId: f.seed.projects[0].id, email: "alice@local.test" });
+  await expect(f.as(f.alice).mutation(internal.pages.commit, { pageId: first.pageId })).rejects.toThrow("TICKET_UNAVAILABLE");
+  await f.t.run(ctx => ctx.db.insert("projectMembers", { projectId: f.seed.projects[0].id, customerId: aliceId, createdAt: Date.now() }));
 
   vi.advanceTimersByTime(16 * 60 * 1000);
   expect(await f.t.mutation(internal.pages.expireStaging, {})).toBe(1);
@@ -221,7 +222,7 @@ test("commit rechecks access; expiry records abandonment and only gated reclaim 
   const resumed = await reserve("commit-recheck");
   expect(resumed).toMatchObject({ state: "staging", staged: [{ path: "index.html" }] });
   if (resumed.state !== "staging") throw new Error("expected staging");
-  expect(await f.t.mutation(internal.pages.commit, { token: f.alice, pageId: resumed.pageId })).toMatchObject({ entryPath: "index.html" });
+  expect(await f.as(f.alice).mutation(internal.pages.commit, { pageId: resumed.pageId })).toMatchObject({ entryPath: "index.html" });
 
   // Purge retires pages; enabled reclaim deletes only blobs recorded on retired rows.
   const unrelated = await f.t.run(ctx => ctx.storage.store(new Blob(["unrelated"])));
@@ -242,7 +243,7 @@ async function manifestOf(files: Files) {
 
 /** Stores bytes exactly as the publishing action does, then "crashes" before recording. */
 async function interruptedWrite(f: Awaited<ReturnType<typeof fixture>>, files: Files, requestId: string) {
-  const reserved = await f.t.mutation(internal.pages.reserve, { token: f.alice, ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest: await manifestOf(files) });
+  const reserved = await f.as(f.alice).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest: await manifestOf(files) });
   if (reserved.state !== "staging") throw new Error("expected staging");
   const write = reserved.writes.find(item => item.path === "index.html")!;
   const orphan = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: write.contentType })));
@@ -335,7 +336,7 @@ test("reconciliation reads a bounded number of storage rows per pass and resumes
   vi.useFakeTimers();
   const f = await fixture();
   const files = { "index.html": "<p>busy</p>" };
-  const reserved = await f.t.mutation(internal.pages.reserve, { token: f.alice, ticket: f.aliceTicket.ref, requestId: crypto.randomUUID(), entry: "index.html", manifest: await manifestOf(files) });
+  const reserved = await f.as(f.alice).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId: crypto.randomUUID(), entry: "index.html", manifest: await manifestOf(files) });
   if (reserved.state !== "staging") throw new Error("expected staging");
   await f.t.run(async ctx => { for (let index = 0; index < PAGE_WRITE_SCAN + 20; index++) await ctx.storage.store(new Blob([`other ${index}`])); });
   const orphan = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: reserved.writes[0].contentType })));

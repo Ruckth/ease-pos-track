@@ -1,6 +1,7 @@
 import type { Doc, Id } from "@convex/_generated/dataModel";
 import type { TicketDetail } from "../../shared/ticket-contracts";
 
+export type TicketTag = Pick<Doc<"ticketTags">, "_id" | "name" | "color">;
 export type Ticket = TicketDetail;
 export type TicketStatus = Ticket["status"];
 export type MediaItem = Ticket["media"][number];

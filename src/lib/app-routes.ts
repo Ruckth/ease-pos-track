@@ -4,20 +4,27 @@ export const APP_PATHS = {
   root: "/",
   staffHome: "/staff",
   staffLogin: "/staff/login",
+  staffInvite: "/staff/invite",
+  /** Signed T3 kits link here (`settingsUrl`); keep both in step. */
+  staffT3Settings: "/staff/settings/t3",
   customerHome: "/customer",
   customerLogin: "/customer/login",
-  customerRegister: "/customer/register",
+  customerJoin: "/customer/join",
+  customerRecover: "/customer/recover",
 } as const;
 
-type RouteSession = "loading" | "signed-out" | SessionRole;
+type RouteSession = "loading" | "signed-out" | "pending" | SessionRole;
 
 type AppRoute =
   | { page: "loading" }
   | { page: "redirect"; to: string }
   | { page: "staff-login" }
+  | { page: "staff-invite" }
+  | { page: "pending-identity" }
   | { page: "customer-login" }
-  | { page: "customer-register" }
-  | { page: "staff-home" }
+  | { page: "customer-join" }
+  | { page: "customer-recover" }
+  | { page: "staff-home"; settings?: "t3" }
   | { page: "customer-home" };
 
 export function homePathForRole(role: SessionRole) {
@@ -28,7 +35,7 @@ export function loginPathForRole(role: SessionRole) {
   return role === "staff" ? APP_PATHS.staffLogin : APP_PATHS.customerLogin;
 }
 
-function normalizePathname(pathname: string) {
+export function normalizePathname(pathname: string) {
   if (!pathname.startsWith("/")) return `/${pathname}`;
   if (pathname.length > 1 && pathname.endsWith("/")) return pathname.slice(0, -1);
   return pathname;
@@ -36,13 +43,19 @@ function normalizePathname(pathname: string) {
 
 /**
  * Resolves every URL and session combination to one renderable page or one
- * canonical redirect. Authentication role remains the authority; a URL never
- * grants access to the other role's workspace.
+ * canonical redirect. The server-validated principal remains the authority; a
+ * URL never grants access to the other role's workspace.
  */
 export function resolveAppRoute(pathname: string, session: RouteSession): AppRoute {
   if (session === "loading") return { page: "loading" };
 
   const path = normalizePathname(pathname);
+  // The join page itself explains when the active account must switch.
+  if (path === APP_PATHS.customerJoin) return { page: "customer-join" };
+  if (session === "pending") {
+    return path === APP_PATHS.staffInvite ? { page: "staff-invite" } : { page: "pending-identity" };
+  }
+  if (session === "staff" && path === APP_PATHS.staffT3Settings) return { page: "staff-home", settings: "t3" };
   if (session === "staff" || session === "customer") {
     const home = homePathForRole(session);
     if (path !== home) return { page: "redirect", to: home };
@@ -52,10 +65,12 @@ export function resolveAppRoute(pathname: string, session: RouteSession): AppRou
   switch (path) {
     case APP_PATHS.staffLogin:
       return { page: "staff-login" };
+    case APP_PATHS.staffInvite:
+      return { page: "staff-invite" };
     case APP_PATHS.customerLogin:
       return { page: "customer-login" };
-    case APP_PATHS.customerRegister:
-      return { page: "customer-register" };
+    case APP_PATHS.customerRecover:
+      return { page: "customer-recover" };
     case APP_PATHS.customerHome:
       return { page: "redirect", to: APP_PATHS.customerLogin };
     case APP_PATHS.staffHome:

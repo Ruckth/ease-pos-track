@@ -148,3 +148,44 @@ test("local page publishing origins are exactly this checkout's Vite origins, se
   assert.ok(dev.includes('"scripts/convex-local.mjs", "env", "set", "TICKET_APP_ORIGINS", localAppOrigins(ports)'));
   assert.ok(readFileSync(resolve(import.meta.dirname, "../scripts/test-browser.mjs"), "utf8").includes("TICKET_APP_ORIGINS: localAppOrigins()"));
 });
+
+test("local wrapper uses the checkout's anonymous deployment identity after agent-mode setup", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-local-identity-"));
+  try {
+    const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
+    writeFileSync(join(dir, ".env.convex-local"), "CONVEX_DEPLOYMENT=anonymous:anonymous-track-ease-pos\n");
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}
+const fs = require("node:fs");
+const selected = fs.readFileSync(".env.convex-local", "utf8").trim();
+if (selected !== "CONVEX_DEPLOYMENT=anonymous:anonymous-agent") { console.error("wrong local identity"); process.exit(7); }
+console.log("[]");
+`, { mode: 0o755 });
+    const result = spawnSync(process.execPath, [wrapper, "run", "_system/cli/tables", "{}"], {
+      cwd: dir, encoding: "utf8", env: { ...process.env, PATH: join(dir, "bin") },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("local wrapper refuses malformed backend configuration before invoking the CLI", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-invalid-local-identity-"));
+  try {
+    const wrapper = resolve(import.meta.dirname, "../scripts/convex-local.mjs");
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, "bin/convex"), `#!${process.execPath}\nrequire("node:fs").writeFileSync("invoked", "yes");\n`, { mode: 0o755 });
+    for (const config of ["malformed", JSON.stringify({ deploymentName: "dev:shared-cloud" })]) {
+      writeFileSync(join(dir, ".convex/local/default/config.json"), config);
+      const refused = spawnSync(process.execPath, [wrapper, "run", "probe:noop"], {
+        cwd: dir, env: { ...process.env, PATH: join(dir, "bin") }, encoding: "utf8",
+      });
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /LOCAL_DEPLOYMENT_REFUSED/);
+      assert.equal(existsSync(join(dir, "invoked")), false);
+      assert.equal(existsSync(join(dir, ".env.convex-local")), false);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -28,9 +28,9 @@ function selectionFrom(list: FileList, folder: boolean): Selection {
  * Hosted pages on one Ticket: publish an HTML file or folder, then open, copy or
  * revoke each link. Anyone with an active link can open the page.
  */
-export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }) {
+export function TicketPages({ ticket }: { ticket: Ticket }) {
   const { t, formatDate } = useI18n();
-  const { pages, target, revoke } = useTicketPages(token, ticket._id);
+  const { pages, target, revoke, accessToken } = useTicketPages(ticket._id);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
@@ -46,6 +46,7 @@ export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }
 
   async function publish() {
     if (!selection || !target) return;
+    if (!accessToken) { setError(localizeError(new Error("SESSION_EXPIRED"), t)); return; }
     setError("");
     setPublishing(true);
     try {
@@ -60,7 +61,7 @@ export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }
       }
       const bundle = validatePageBundle(selection.entry, files);
       // The request id stays with this selection, so a retry never publishes twice.
-      const { url } = await publishTicketPage(target.siteUrl, token, {
+      const { url } = await publishTicketPage(target.siteUrl, accessToken, {
         ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey), requestId: selection.requestId,
         entry: bundle.entry, files: bundle.files,
       });
@@ -84,25 +85,21 @@ export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }
 
   async function confirmRevoke(page: TicketPage) {
     try {
-      await revoke({ token, pageId: page._id });
+      await revoke({ pageId: page._id });
       toast.success(t("linkRevoked"));
     } catch (failed) {
       setError(localizeError(failed, t));
     }
   }
 
-  if (!active && !pages?.length) return null;
   return (
-    <section aria-labelledby={`${entryId}-title`} className="space-y-3 rounded-md border bg-muted/20 p-3">
-      <div>
-        <h3 id={`${entryId}-title`} className="text-sm font-semibold">{t("pagesTitle")}</h3>
-        <p className="mt-1 text-sm leading-5 text-muted-foreground">{t("pagesHint")}</p>
-      </div>
+    <div className="space-y-3">
+      <p className="text-sm leading-5 text-muted-foreground">{t("pagesHint")}</p>
 
       {pages?.length ? (
-        <ul className="space-y-2">
+        <ul className="divide-y">
           {pages.map(page => (
-            <li key={page._id} className="space-y-2 rounded-md border bg-background px-3 py-2.5">
+            <li key={page._id} className="space-y-2 py-2.5">
               <div className="min-w-0">
                 <p className="truncate font-mono text-sm font-medium" title={page.entryPath}>{page.entryPath}</p>
                 <p className="text-xs leading-5 text-muted-foreground">
@@ -130,7 +127,7 @@ export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }
       {active ? (
         <div className="space-y-3">
           {selection ? (
-            <div className="space-y-3 rounded-md border bg-background p-3">
+            <div className="space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm">{t("pageSelection", { count: selection.files.length, size: formatSize(selection.files.reduce((sum, file) => sum + file.blob.size, 0)) })}</p>
                 <Button type="button" variant="ghost" size="sm" disabled={publishing} aria-label={t("clearPageSelection")} onClick={() => { setSelection(null); setError(""); }}>
@@ -179,6 +176,6 @@ export function TicketPages({ ticket, token }: { ticket: Ticket; token: string }
         confirmLabel={t("revokeLink")}
         onConfirm={() => { if (revoking) void confirmRevoke(revoking); }}
       />
-    </section>
+    </div>
   );
 }

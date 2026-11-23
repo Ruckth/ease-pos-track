@@ -2,19 +2,20 @@
 import { pageFormData } from "../shared/ticket-pages";
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
+import { loadPorts } from "./worktree-ports.mjs";
 import { randomUUID } from "node:crypto";
 import { runTicketCli, type TicketCliDeps } from "./ticket/run";
 import { ConvexTicketRemote } from "./ticket/remote";
 import type { TicketConfig } from "./ticket/config";
 import type { StoredCredential } from "./ticket/keychain";
-import { loadPorts } from "./worktree-ports.mjs";
 
 const url = `http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`;
 const pageFixture = "tests/fixtures/ticket-page";
 let configuration: TicketConfig = { version: 1, clientId: "local-cli-smoke-client", deployments: { dev: { url } } };
 let credential: StoredCredential | null = null;
+const remote = new ConvexTicketRemote();
 const deps: TicketCliDeps = {
-  remote: new ConvexTicketRemote(),
+  remote,
   config: {
     load: async () => configuration,
     save: async value => { configuration = value; },
@@ -23,13 +24,15 @@ const deps: TicketCliDeps = {
     get: async () => credential,
     set: async (_target, value) => { credential = value; },
     delete: async () => { credential = null; },
+    exclusive: fn => fn(),
   },
   images: {
     prepare: async () => { throw new Error("Text-only smoke cannot prepare uploads"); },
     upload: async () => { throw new Error("Text-only smoke cannot call a provider"); },
   },
   env: {}, now: Date.now, newRequestId: randomUUID,
-  readPassword: async () => "LocalStaff123!",
+  // The local test provider stands in for Google on the disposable backend.
+  signIn: async target => await remote.signInLocalFixture(target, "owner@local.test"),
 };
 
 async function command(args: string[], exitCode = 0) {
@@ -88,11 +91,12 @@ assert.equal((await command(["page", "list", created.ticket])).count, 1);
 const padding = " ".repeat(5 * 1024 * 1024);
 const png = await readFile(pageFixture + "/assets/img/dot.png");
 const html = new Blob(['<!--', padding, '--><img src="data:image/png;base64,', png.toString("base64"), '">']);
-const session = await deps.credentials.get("dev");
+// A separate fixture session supplies the Convex Auth JWT the HTTP route verifies.
+const session = await remote.signInLocalFixture(url, "owner@local.test");
 assert(session);
 const large = await fetch(new URL("/v1/tickets/" + created.ticket + "/pages", published.url), {
   method: "POST",
-  headers: { Authorization: "Bearer " + session.token, "Idempotency-Key": randomUUID() },
+  headers: { Authorization: "Bearer " + session.accessToken, "Idempotency-Key": randomUUID() },
   body: pageFormData("large.html", [{ path: "large.html", blob: html }]),
 });
 const result = await large.json();

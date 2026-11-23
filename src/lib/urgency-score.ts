@@ -10,9 +10,9 @@ export function urgencyBand(score: number | undefined): UrgencyBand {
 }
 
 export const urgencyTone: Record<UrgencyBand, string> = {
-  unscored: "border-slate-300 bg-slate-50 text-slate-600",
-  low: "border-emerald-300 bg-emerald-50 text-emerald-800",
-  medium: "border-amber-300 bg-amber-50 text-amber-800",
-  high: "border-orange-300 bg-orange-50 text-orange-800",
-  critical: "border-red-300 bg-red-50 text-red-800",
+  unscored: "border-slate-300 bg-slate-50 text-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:border-slate-700",
+  low: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-700",
+  medium: "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-700",
+  high: "border-orange-300 bg-orange-50 text-orange-800 dark:bg-orange-950 dark:text-orange-200 dark:border-orange-700",
+  critical: "border-red-300 bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200 dark:border-red-700",
 };

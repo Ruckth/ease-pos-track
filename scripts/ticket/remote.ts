@@ -21,11 +21,13 @@ import { toStoredTicketStatus, type TicketStatus } from "./status";
 export type TicketDocument = TicketDetail;
 
 export type CurrentSession = {
-  role: "staff" | "customer";
-  expiresAt: number;
-  customerId: string | null;
+  role: "staff" | "customer" | "pending";
+  name: string | null;
   email: string | null;
 };
+
+/** A Convex Auth session: short-lived access JWT plus the rotating refresh token. */
+export type SessionTokens = { accessToken: string; refreshToken: string; refreshTokenExpiresAt: number };
 
 type TicketCreateInput = { title: string; description: string; requestId: string; projectKey?: string };
 type TicketCreateResult = { ticket: TicketDocument; created: boolean; requestId: string };
@@ -50,9 +52,15 @@ export type TicketPagePublishInput = { ticket: string; requestId: string; bundle
 export type TicketPagePublishResult = TicketPage & { created: boolean; requestId: string };
 
 export interface TicketRemote {
-  login(url: string, password: string, clientId: string): Promise<{ token: string; expiresAt: number }>;
+  /** Named staff sign-in: Google start/complete through the same guarded adapter as the browser. */
+  startGoogle(url: string, redirectTo: string): Promise<{ redirect: string; state: string }>;
+  completeGoogle(url: string, code: string, state: string): Promise<SessionTokens | null>;
+  /** Disposable local backend only (LOCAL_FIXTURES_ENABLED on a loopback deployment). */
+  signInLocalFixture(url: string, email: string): Promise<SessionTokens | null>;
+  /** Rotates the refresh token; null when the session no longer exists. */
+  refresh(url: string, refreshToken: string): Promise<SessionTokens | null>;
   currentSession(url: string, token: string): Promise<CurrentSession | null>;
-  logout(url: string, token: string): Promise<void>;
+  logout(url: string, refreshToken: string): Promise<void>;
   list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean): Promise<TicketDocument[]>;
   get(url: string, token: string, ref: TicketRef, includeArchived: boolean): Promise<TicketDocument | null>;
   create(url: string, token: string, input: TicketCreateInput): Promise<TicketCreateResult>;
@@ -81,32 +89,47 @@ const ARCHIVING: ArchivedVisibility = { before: false, after: true };
 const RESTORING: ArchivedVisibility = { before: true, after: false };
 
 export class ConvexTicketRemote implements TicketRemote {
-  private readonly clients = new Map<string, ConvexHttpClient>();
-
-  /** One client per deployment URL; `ConvexHttpClient` carries no session state. */
-  private client(url: string) {
-    const existing = this.clients.get(url);
-    if (existing) return existing;
+  /** A fresh client per call: the access JWT travels only as its auth header. */
+  private client(url: string, accessToken?: string) {
     const client = new ConvexHttpClient(url, { logger: false, skipConvexDeploymentUrlCheck: true });
-    this.clients.set(url, client);
+    if (accessToken) client.setAuth(accessToken);
     return client;
   }
 
-  async login(url: string, password: string, clientId: string) {
-    return await this.client(url).mutation(api.auth.login, { password, clientId });
+  async startGoogle(url: string, redirectTo: string) {
+    return await this.client(url).mutation(api.auth.startSignInWithGoogle, { redirectTo });
   }
 
-  async currentSession(url: string, token: string) {
-    return await this.client(url).query(api.auth.currentSession, { token });
+  async completeGoogle(url: string, code: string, state: string) {
+    const result = await this.client(url).mutation(api.auth.completeSignInWithGoogle, { code, state });
+    return result.status === "complete" ? result.tokens : null;
   }
 
-  async logout(url: string, token: string) {
-    await this.client(url).mutation(api.auth.logout, { token });
+  async signInLocalFixture(url: string, email: string) {
+    const result = await this.client(url).mutation(api.auth.signInLocalFixture, { email });
+    return result.status === "complete" ? result.tokens : null;
+  }
+
+  async refresh(url: string, refreshToken: string) {
+    const result = await this.client(url).mutation(api.auth.refreshSession, { refreshToken });
+    return result.kind === "rotated" ? result.tokens : null;
+  }
+
+  async currentSession(url: string, token: string): Promise<CurrentSession | null> {
+    const viewer = await this.client(url, token).query(api.identity.viewer, {});
+    if (!viewer) return null;
+    if (viewer.kind === "staff") return { role: "staff", name: viewer.name, email: viewer.email };
+    if (viewer.kind === "customer") return { role: "customer", name: viewer.displayName, email: null };
+    return { role: "pending", name: viewer.name, email: viewer.email };
+  }
+
+  async logout(url: string, refreshToken: string) {
+    await this.client(url).mutation(api.auth.signOut, { refreshToken });
   }
 
   async list(url: string, token: string, projectKey: string | undefined, includeArchived: boolean) {
-    const client = this.client(url);
-    const projects = await client.query(api.projects.listProjects, { token });
+    const client = this.client(url, token);
+    const projects = await client.query(api.projects.listProjects, {});
     const scoped = projectKey === undefined ? projects : projects.filter(project => project.key === projectKey.trim().toUpperCase());
     if (projectKey !== undefined && scoped.length === 0) throw new ConvexError({ code: "PROJECT_NOT_FOUND" });
     const tickets: TicketDocument[] = [];
@@ -114,7 +137,7 @@ export class ConvexTicketRemote implements TicketRemote {
       for (const lifecycle of (includeArchived ? ["active", "archived"] : ["active"]) as Array<"active" | "archived">) {
         let cursor: string | null = null;
         for (;;) {
-          const result: FunctionReturnType<typeof api.tickets.pageTicketDetails> = await client.query(api.tickets.pageTicketDetails, { token, projectId: project._id, lifecycle, paginationOpts: { numItems: 50, cursor } });
+          const result: FunctionReturnType<typeof api.tickets.pageTicketDetails> = await client.query(api.tickets.pageTicketDetails, { projectId: project._id, lifecycle, paginationOpts: { numItems: 50, cursor } });
           tickets.push(...result.page);
           if (result.isDone) break;
           cursor = result.continueCursor;
@@ -125,40 +148,34 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async get(url: string, token: string, ref: TicketRef, includeArchived: boolean) {
-    return await this.client(url).query(api.tickets.getTicketByTicketNumber, {
-      token,
-      projectKey: ref.projectKey,
+    return await this.client(url, token).query(api.tickets.getTicketByTicketNumber, { projectKey: ref.projectKey,
       ticketNumber: ref.ticketNumber,
       includeDeleted: includeArchived,
     });
   }
 
   async create(url: string, token: string, input: TicketCreateInput) {
-    return await this.client(url).mutation(api.tickets.createTextTicket, { token, title: input.title, description: input.description, requestId: input.requestId, projectKey: input.projectKey });
+    return await this.client(url, token).mutation(api.tickets.createTextTicket, { title: input.title, description: input.description, requestId: input.requestId, projectKey: input.projectKey });
   }
 
   async createUploadIntent(url: string, token: string, input: { requestId: string; files: Array<{ name: string; size: number; type: string }> }) {
-    return await this.client(url).mutation(api.uploads.createUploadIntent, {
-      token,
-      idempotencyKey: input.requestId,
+    return await this.client(url, token).mutation(api.uploads.createUploadIntent, { idempotencyKey: input.requestId,
       files: input.files,
     });
   }
 
   async recordUploadedFile(url: string, input: TicketUploadCredentials & { token: string; file: TicketMediaItem }) {
-    const result = await this.client(url).mutation(api.uploads.recordUploadedFile, { token: input.token, intentId: input.intentId, secret: input.secret, file: input.file });
+    const result = await this.client(url, input.token).mutation(api.uploads.recordUploadedFile, { intentId: input.intentId, secret: input.secret, file: input.file });
     if (result.state === "queued") throw new ConvexError({ code: "UPLOAD_INTENT_INVALID" });
   }
 
   async cancelUploadIntent(url: string, token: string, input: TicketUploadCredentials) {
-    const result = await this.client(url).mutation(api.uploads.cancelUploadIntent, { token, intentId: input.intentId, secret: input.secret });
+    const result = await this.client(url, token).mutation(api.uploads.cancelUploadIntent, { intentId: input.intentId, secret: input.secret });
     if (result.state === "failed") throw new ConvexError({ code: "UPLOAD_CLEANUP_FAILED", jobIds: result.jobIds });
   }
 
   async attachImages(url: string, token: string, input: TicketAttachInput) {
-    await this.client(url).mutation(api.tickets.attachTicketMedia, {
-      token,
-      id: input.id,
+    await this.client(url, token).mutation(api.tickets.attachTicketMedia, { id: input.id,
       media: input.media,
       uploadIntentId: input.intentId,
       uploadIntentSecret: input.secret,
@@ -170,9 +187,7 @@ export class ConvexTicketRemote implements TicketRemote {
   async update(url: string, token: string, input: TicketUpdateInput) {
     // Omitted fields keep their stored value; the mutation replaces both.
     return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.tickets.editTicket, {
-        token,
-        id: current._id,
+      await this.client(url, token).mutation(api.tickets.editTicket, { id: current._id,
         title: input.title ?? current.title,
         description: input.description ?? current.description,
         expectedVersion: input.expectedVersion,
@@ -182,9 +197,7 @@ export class ConvexTicketRemote implements TicketRemote {
 
   async changeStatus(url: string, token: string, input: TicketStatusInput) {
     return await this.write(url, token, input.ref, WITHIN_ACTIVE, async (current) => {
-      await this.client(url).mutation(api.tickets.updateTicketStatus, {
-        token,
-        id: current._id,
+      await this.client(url, token).mutation(api.tickets.updateTicketStatus, { id: current._id,
         status: toStoredTicketStatus(input.status),
         expectedVersion: input.expectedVersion,
       });
@@ -193,13 +206,13 @@ export class ConvexTicketRemote implements TicketRemote {
 
   async archive(url: string, token: string, ref: TicketRef, expectedVersion: number) {
     return await this.write(url, token, ref, ARCHIVING, async (current) => {
-      await this.client(url).mutation(api.tickets.archiveTicket, { token, id: current._id, expectedVersion });
+      await this.client(url, token).mutation(api.tickets.archiveTicket, { id: current._id, expectedVersion });
     });
   }
 
   async restore(url: string, token: string, ref: TicketRef, expectedVersion: number) {
     return await this.write(url, token, ref, RESTORING, async (current) => {
-      await this.client(url).mutation(api.tickets.restoreTicket, { token, id: current._id, expectedVersion });
+      await this.client(url, token).mutation(api.tickets.restoreTicket, { id: current._id, expectedVersion });
     });
   }
 
@@ -208,10 +221,10 @@ export class ConvexTicketRemote implements TicketRemote {
    * read from the deployment, so local and hosted backends need no extra setting.
    */
   async publishPage(url: string, token: string, input: TicketPagePublishInput) {
-    const { siteUrl } = await this.client(url).query(api.pages.publishTarget, { token });
+    const { siteUrl } = await this.client(url, token).query(api.pages.publishTarget, {});
     const form = pageFormData(input.bundle.entry, input.bundle.files.map(file => ({ path: file.path, blob: new Blob([file.bytes as BlobPart]) })));
     const response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(input.ticket)}/pages`, {
-      method: "POST", headers: { Authorization: `Bearer ${token}`,  "X-Ticket-Image-Policy": "v1", "Idempotency-Key": input.requestId }, body: form,
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "X-Ticket-Image-Policy": "v1", "Idempotency-Key": input.requestId }, body: form,
     });
     const body = await response.json().catch(() => null) as ({ ok: true } & TicketPagePublishResult) | { ok: false; code?: string } | null;
     if (!response.ok || !body?.ok) throw new ConvexError({ code: body && !body.ok && body.code ? body.code : "PAGE_PUBLISH_UNKNOWN" });
@@ -220,12 +233,12 @@ export class ConvexTicketRemote implements TicketRemote {
   }
 
   async listPages(url: string, token: string, id: TicketDocument["_id"]) {
-    const pages = await this.client(url).query(api.pages.listTicketPages, { token, id });
+    const pages = await this.client(url, token).query(api.pages.listTicketPages, { id });
     return pages.map(page => ({ pageId: page._id, url: page.url, entry: page.entryPath, fileCount: page.fileCount, totalBytes: page.totalBytes, publishedAt: page.publishedAt }));
   }
 
   async revokePage(url: string, token: string, pageId: string) {
-    const result = await this.client(url).mutation(api.pages.revokeTicketPage, { token, pageId: pageId as Id<"ticketPages"> });
+    const result = await this.client(url, token).mutation(api.pages.revokeTicketPage, { pageId: pageId as Id<"ticketPages"> });
     return result.revoked;
   }
 

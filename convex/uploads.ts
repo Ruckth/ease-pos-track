@@ -1,9 +1,12 @@
 import { validateFiles, sameFiles, fileSignature, MAX_MEDIA_FILES } from "../shared/media-policy";
-import { actorMutation, actorQuery, trustedCallbackMutation, requireCallbackCredential } from "./functions";
+import { actorMutation, actorQuery, trustedCallbackMutation, requireCallbackCredential, legacyUploadTransportQuery, internalJobMutation } from "./functions";
 import { v } from "convex/values";
 import { mediaItemValidator, pendingFileValidator } from "./schema";
+import { requireClosedPilot, requireCurrentPilotEpoch, requireLegacyMedia } from "./pilot_access";
 import { actorFields } from "./authz";
 import { requireOwnedUploadIntent, recordUpload, reserveIntentAssets } from "./domain/media";
+
+export const legacyTransportAvailable = legacyUploadTransportQuery();
 
 const INTENT_TTL_MS = 30 * 60 * 1000;
 
@@ -16,11 +19,11 @@ function makeSecret() {
 export const createUploadIntent = actorMutation({
   name: "uploads:createUploadIntent",
   args: {
-    token: v.string(),
     idempotencyKey: v.string(),
     files: v.array(pendingFileValidator),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const { session, actor } = ctx;
     const idempotencyKey = args.idempotencyKey.trim();
     if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
@@ -30,7 +33,8 @@ export const createUploadIntent = actorMutation({
 
     const existing = await ctx.db
       .query("uploadIntents")
-      .withIndex("by_idempotency", (q) => q.eq("actorRole", actor.role).eq("actorCustomerId", actor.customerId).eq("idempotencyKey", idempotencyKey))
+      .withIndex("by_idempotency", (q) => q.eq("actorRole", actor.role).eq("actorCustomerId", actor.customerId)
+        .eq("actorStaffId", actor.staffId).eq("idempotencyKey", idempotencyKey))
       .order("desc")
       .first();
     const reusable = existing && (existing.status === "attached" || (existing.status === "pending" && existing.expiresAt > Date.now()));
@@ -70,13 +74,13 @@ export const createUploadIntent = actorMutation({
 export const validateUploadIntent = actorQuery({
   name: "uploads:validateUploadIntent",
   args: {
-    token: v.string(),
     callbackToken: v.string(),
     intentId: v.id("uploadIntents"),
     secret: v.string(),
     files: v.array(pendingFileValidator),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     requireCallbackCredential(args.callbackToken);
     const { actor } = ctx;
     const intent = await ctx.db.get(args.intentId);
@@ -87,6 +91,7 @@ export const validateUploadIntent = actorQuery({
       intent
       && intent.actorRole === actor.role
       && intent.actorCustomerId === actor.customerId
+      && intent.actorStaffId === actor.staffId
       && intent.secret === args.secret
       && intent.status === "pending"
       && intent.expiresAt > Date.now()
@@ -100,7 +105,6 @@ export const validateUploadIntent = actorQuery({
 export const recordUploadedFile = trustedCallbackMutation({
   name: "uploads:recordUploadedFile",
   args: {
-    token: v.optional(v.string()),
     callbackToken: v.optional(v.string()),
     intentId: v.id("uploadIntents"),
     secret: v.string(),
@@ -108,24 +112,25 @@ export const recordUploadedFile = trustedCallbackMutation({
     rejectedImage: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const intent = await ctx.db.get(args.intentId);
     if (!intent || intent.secret !== args.secret) {
       throw new Error("UPLOAD_INTENT_INVALID");
     }
     if (ctx.staffSessionId && intent.sessionId !== ctx.staffSessionId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
     if (args.rejectedImage && ctx.staffSessionId) throw new Error("TRUSTED_CALLBACK_REQUIRED");
-    return await recordUpload(ctx, intent, args.file, !ctx.staffSessionId, args.rejectedImage);
+    return await recordUpload(ctx, intent, args.file, ctx.staffSessionId ? "staff" : "callback", args.rejectedImage);
   },
 });
 
 export const cancelUploadIntent = actorMutation({
   name: "uploads:cancelUploadIntent",
   args: {
-    token: v.string(),
     intentId: v.string(),
     secret: v.string(),
   },
   handler: async (ctx, args) => {
+    requireLegacyMedia();
     const intentId = ctx.db.normalizeId("uploadIntents", args.intentId);
     if (!intentId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
     const intent = requireOwnedUploadIntent(await ctx.db.get(intentId), ctx.actor, args.secret);
@@ -140,5 +145,24 @@ export const cancelUploadIntent = actorMutation({
     // for other assets newly cancelled in this transaction.
     if (jobs.some(job => job?.state === "failed")) return { state: "failed" as const, jobIds };
     return { state: jobs.some(job => job?.state !== "completed") ? "queued" as const : "completed" as const, jobIds };
+  },
+});
+
+/** Operator reconciliation of a known late outcome. Public callback credentials
+ * have no authority here. Keep the original intent and reserve any orphan.
+ */
+export const reconcileLateCallback = internalJobMutation({
+  name: "uploads:reconcileLateCallback",
+  args: {
+    epoch: v.string(),
+    intentId: v.id("uploadIntents"),
+    intentSecret: v.string(),
+    file: mediaItemValidator,
+  },
+  handler: async (ctx, args) => {
+    requireCurrentPilotEpoch(args.epoch, requireClosedPilot().epoch);
+    const intent = await ctx.db.get(args.intentId);
+    if (!intent || intent.secret !== args.intentSecret) throw new Error("UPLOAD_INTENT_INVALID");
+    return await recordUpload(ctx, intent, args.file, "history");
   },
 });

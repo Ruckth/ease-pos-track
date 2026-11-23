@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // `pnpm agent:new <name> [base]`: give an agent its own worktree and branch,
-// ready to run. Creates ../track-ease-pos-worktrees/<name> on branch
+// ready to run. Creates ../<checkout>-worktrees/<name> on branch
 // agent/<name> from [base] (default: the current HEAD), then runs agent:setup.
 import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";

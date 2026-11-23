@@ -5,7 +5,7 @@ import * as pages from "./domain/pages";
 export const listTicketPages = actorQuery({ name: "pages:listTicketPages", ...pages.listTicketPages });
 export const revokeTicketPage = actorMutation({ name: "pages:revokeTicketPage", ...pages.revokeTicketPage });
 /** The page host for clients that publish through the HTTP route. */
-export const publishTarget = actorQuery({ name: "pages:publishTarget", args: { token: v.string() }, handler: () => ({ siteUrl: pages.siteUrl() }) });
+export const publishTarget = actorQuery({ name: "pages:publishTarget", args: {}, handler: () => ({ siteUrl: pages.siteUrl() }) });
 
 export const authorize = internalActorMutation({ name: "pages:authorize", ...pages.authorizePublish });
 export const reserve = internalActorMutation({ name: "pages:reserve", ...pages.reservePage });

@@ -1,19 +1,20 @@
-import { activeProjects, publicProject, projectByKey, requireUsableProject } from "./domain/projects";
-import { actorQuery, staffMutation, staffQuery } from "./functions";
+import { activeProjects, publicProject, projectByKey } from "./domain/projects";
+import { actorQuery, internalJobMutation, ownerMutation, staffQuery } from "./functions";
 /**
  * Projects group Tickets. Each Project has its own Ticket numbering, and
- * customers only see the Projects staff have added them to.
+ * customers only see the Projects they joined by invitation. The Owner
+ * administers Projects and membership.
  */
 
+import { activeDeploymentProject, hasLegacyAccess, requireLegacyAccess, requirePilotAdmission } from "./pilot_access";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { validateCustomerEmail } from "./customer_validation";
 import { normalizeProjectKey, validateProjectName } from "../shared/ticket-numbers";
 
 /** Projects the signed-in actor can use, by name. */
 export const listProjects = actorQuery({
   name: "projects:listProjects",
-  args: { token: v.string() },
+  args: {},
   handler: async (ctx, args) => {
     const { actor } = ctx;
     let projects: Doc<"projects">[];
@@ -24,17 +25,21 @@ export const listProjects = actorQuery({
         .query("projectMembers")
         .withIndex("by_customer", (q) => q.eq("customerId", actor.customerId))
         .collect();
-      const rows = await Promise.all(memberships.map((row) => ctx.db.get(row.projectId)));
+      const allowed = await hasLegacyAccess(ctx) ? null : (await requirePilotAdmission(ctx)).projectIds;
+      const rows = await Promise.all(memberships.filter(row => !allowed || allowed.includes(row.projectId))
+        .map(row => ctx.db.get(row.projectId)));
       projects = rows.filter((project): project is Doc<"projects"> => project !== null && project.archivedAt === undefined);
     }
     return projects.sort((a, b) => a.name.localeCompare(b.name)).map(publicProject);
   },
 });
 
-export const createProject = staffMutation({
+export const createProject = ownerMutation({
   name: "projects:createProject",
-  args: { token: v.string(), name: v.string(), key: v.string() },
+  args: { name: v.string(), key: v.string() },
   handler: async (ctx, args) => {
+    // The pilot Project set is fixed by its reviewed release manifest.
+    await requireLegacyAccess(ctx);
     const name = validateProjectName(args.name);
     const key = normalizeProjectKey(args.key);
     if (await projectByKey(ctx, key)) throw new Error("PROJECT_KEY_TAKEN");
@@ -46,54 +51,49 @@ export const createProject = staffMutation({
 
 export const listProjectMembers = staffQuery({
   name: "projects:listProjectMembers",
-  args: { token: v.string(), projectId: v.id("projects") },
+  args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
+    // A named pilot manages membership only inside its Project allowlist.
+    if (!await activeDeploymentProject(ctx, args.projectId)) throw new Error("PROJECT_NOT_FOUND");
     const rows = await ctx.db
       .query("projectMembers")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
     const members = await Promise.all(rows.map(async (row) => {
       const customer = await ctx.db.get(row.customerId);
-      return customer ? { customerId: customer._id, email: customer.email } : null;
+      return customer ? { customerId: customer._id, username: customer.username, displayName: customer.displayName, status: customer.status } : null;
     }));
     return members
       .filter((member) => member !== null)
-      .sort((a, b) => a.email.localeCompare(b.email));
+      .sort((a, b) => a.username.localeCompare(b.username));
   },
 });
 
-/** Adds a customer, by the email they signed up with. Adding twice is a no-op. */
-export const addProjectMember = staffMutation({
-  name: "projects:addProjectMember",
-  args: { token: v.string(), projectId: v.id("projects"), email: v.string() },
-  handler: async (ctx, args) => {
-    const { actor } = ctx;
-    const project = await requireUsableProject(ctx, actor, args.projectId);
-    const email = validateCustomerEmail(args.email);
-    const customer = await ctx.db
-      .query("customers")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .unique();
-    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
-    const existing = await ctx.db
-      .query("projectMembers")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id).eq("customerId", customer._id))
-      .unique();
-    if (!existing) {
-      await ctx.db.insert("projectMembers", { projectId: project._id, customerId: customer._id, createdAt: Date.now() });
-    }
-    return { customerId: customer._id, email: customer.email };
-  },
-});
-
-export const removeProjectMember = staffMutation({
+export const removeProjectMember = ownerMutation({
   name: "projects:removeProjectMember",
-  args: { token: v.string(), projectId: v.id("projects"), customerId: v.id("customers") },
+  args: { projectId: v.id("projects"), customerId: v.id("customers") },
   handler: async (ctx, args) => {
+    if (!await activeDeploymentProject(ctx, args.projectId)) throw new Error("PROJECT_NOT_FOUND");
     const row = await ctx.db
       .query("projectMembers")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId).eq("customerId", args.customerId))
       .unique();
     if (row) await ctx.db.delete(row._id);
+  },
+});
+
+/** All operator archive/restore writes advance the inbox visibility interval. */
+export const setArchived = internalJobMutation({
+  name: "projects:setArchived",
+  args: { projectId: v.id("projects"), archived: v.boolean() },
+  handler: async (ctx, { projectId, archived }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project) throw new Error("PROJECT_NOT_FOUND");
+    if ((project.archivedAt !== undefined) === archived) return;
+    const now = Date.now();
+    await ctx.db.patch(projectId, {
+      archivedAt: archived ? now : undefined, updatedAt: now,
+      inboxVisibilityVersion: (project.inboxVisibilityVersion ?? 0) + 1,
+    });
   },
 });

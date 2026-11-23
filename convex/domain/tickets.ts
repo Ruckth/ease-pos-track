@@ -2,14 +2,17 @@
 
 import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
+import { notifyIntake } from "./staff_inbox";
+import { recordCustomerUpdate } from "./inbox";
 import { newTicketOwnership } from "../authz";
 import { validateAnnotationBudget, type AnnotationRecord } from "../annotation_state";
+import { requireLegacyMedia } from "../pilot_access";
 import { requireCurrentVersion } from "../../shared/ticket-state";
 
 export type MediaItem = Doc<"tickets">["media"][number];
 
 /** Each Project numbers its Tickets independently, from 1. */
-function projectCounterName(projectId: Id<"projects">) {
+export function projectCounterName(projectId: Id<"projects">) {
   return `project:${projectId}`;
 }
 
@@ -37,6 +40,7 @@ export function ticketState(doc: Doc<"tickets">) {
     version: doc.version,
     lifecycle: doc.lifecycle,
     mediaCount: doc.media.length,
+    ...(doc.tagIds === undefined ? {} : { tagIds: doc.tagIds }),
     annotationCount: doc.annotations.length,
     ...(doc.archivedAt === undefined ? {} : { archivedAt: doc.archivedAt }),
   };
@@ -48,9 +52,10 @@ export function ticketState(doc: Doc<"tickets">) {
  * weakening attribution.
  */
 type TicketAuthor = {
-  sessionId: Id<"sessions">;
+  sessionId: Id<"sessionAdmissions">;
   actorRole: "staff" | "customer";
   actorCustomerId?: Id<"customers">;
+  actorStaffId?: Id<"staff">;
   createdVia?: "codex";
 };
 
@@ -64,6 +69,7 @@ function requireSessionAuthor(author: TicketAuthor) {
     sessionId: author.sessionId,
     actorRole: author.actorRole,
     ...(author.actorCustomerId === undefined ? {} : { actorCustomerId: author.actorCustomerId }),
+    ...(author.actorStaffId === undefined ? {} : { actorStaffId: author.actorStaffId }),
   };
 }
 
@@ -86,10 +92,11 @@ type TicketState = ReturnType<typeof ticketState>;
 
 /** Ticket fields that versioned state mutations may change. */
 type TicketChanges = Partial<
-  Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "media" | "annotations" | "archivedAt" | "lifecycle">
+  Pick<Doc<"tickets">, "title" | "description" | "status" | "urgencyScore" | "media" | "annotations" | "archivedAt" | "lifecycle" | "tagIds">
 >;
 
 type TicketChangeAction =
+  | "tags_changed"
   | "media_attached"
   | "edited"
   | "edit_undone"
@@ -150,12 +157,21 @@ export async function applyTicketChange(
     now: number;
   },
 ) {
+  if (input.changes.media !== undefined || input.changes.annotations !== undefined) requireLegacyMedia();
   if (input.changes.annotations) validateAnnotationBudget(input.changes.annotations);
   const plan = planTicketChange(input);
   if (input.changes.title !== undefined || input.changes.description !== undefined) {
     Object.assign(plan.patch, { searchText: `${plan.after.title} ${plan.after.description}` });
   }
-  await ctx.db.patch(input.doc._id, plan.patch);
+  if (input.doc.routingClassification && (input.changes.title !== undefined || input.changes.description !== undefined
+    || input.changes.media !== undefined || input.changes.annotations !== undefined)) {
+    Object.assign(plan.patch, { routingClassification: {
+      ...input.doc.routingClassification, reviewed: false,
+    } });
+  }
+  const visibilityVersion = (input.doc.inboxVisibilityVersion ?? 0)
+    + Number(plan.before.lifecycle !== plan.after.lifecycle);
+  await ctx.db.patch(input.doc._id, { ...plan.patch, inboxVisibilityVersion: visibilityVersion });
   if (plan.before.status !== plan.after.status || plan.before.lifecycle !== plan.after.lifecycle) {
     if (plan.before.lifecycle === "active") await changeTotal(ctx, input.doc.projectId, plan.before.status, -1);
     if (plan.after.lifecycle === "active") await changeTotal(ctx, input.doc.projectId, plan.after.status, 1);
@@ -169,6 +185,9 @@ export async function applyTicketChange(
     ...(input.sourceEventId === undefined ? {} : { sourceEventId: input.sourceEventId }),
     createdAt: plan.updatedAt,
   });
+  if (plan.after.lifecycle === "active" && (plan.before.status !== plan.after.status || input.action === "restored")) {
+    await recordCustomerUpdate(ctx, input.doc, eventId, plan.after.status, visibilityVersion, input.action === "restored");
+  }
   return { eventId, version: plan.version };
 }
 
@@ -180,9 +199,10 @@ export async function recordAnnotationEvent(
     action: "created" | "updated" | "deleted" | "restored" | "update_undone";
     before?: AnnotationRecord;
     after?: AnnotationRecord;
-    sessionId: Id<"sessions">;
+    sessionId: Id<"sessionAdmissions">;
     actorRole: "staff" | "customer";
     actorCustomerId?: Id<"customers">;
+    actorStaffId?: Id<"staff">;
     createdAt: number;
   },
 ) {
@@ -196,6 +216,7 @@ type NewTicket = {
   description: string;
   media: MediaItem[];
   annotations?: AnnotationRecord[];
+  routingClassification?: Doc<"tickets">["routingClassification"];
   /** Derived from the actor by `newTicketOwnership`; never taken from a client. */
   ownership: ReturnType<typeof newTicketOwnership<Id<"customers">>>;
   author: TicketAuthor;
@@ -209,6 +230,7 @@ type NewTicket = {
  */
 export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
   const annotations = input.annotations ?? [];
+  if (input.media.length || annotations.length) requireLegacyMedia();
   validateAnnotationBudget(annotations);
   const ticketNumber = await allocateTicketNumber(ctx, input.project._id);
   const ticketId = await ctx.db.insert("tickets", {
@@ -223,6 +245,7 @@ export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
     media: input.media,
     annotations,
     version: 0,
+    ...(input.routingClassification ? { routingClassification: input.routingClassification } : {}),
     ...input.ownership,
     ...(input.author.createdVia === undefined ? {} : { createdVia: input.author.createdVia }),
     createdAt: input.now,
@@ -239,6 +262,7 @@ export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
     ...input.author,
     createdAt: input.now,
   });
+  await notifyIntake(ctx, created);
   for (const annotation of annotations) {
     await recordAnnotationEvent(ctx, {
       ticketId,

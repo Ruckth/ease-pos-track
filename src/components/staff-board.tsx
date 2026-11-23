@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { useSelectedTicket } from "@/features/tickets/adapter";
@@ -13,9 +13,11 @@ import {
   KanbanItemHandle,
   KanbanOverlay,
 } from "@/components/reui/kanban";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { useExplorerCopy } from "@/lib/explorer-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TicketCard } from "@/components/ticket-card";
+import { TicketCard, type OpenTicket } from "@/components/ticket-card";
 import { statusMeta } from "@/components/ticket-status";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
@@ -34,27 +36,8 @@ import {
 import type { TicketStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 
-/**
- * Tailwind's `lg` breakpoint, the width at which the board becomes multi-column.
- *
- * Below it the five columns cannot sit side by side, so dragging between them is
- * impossible; the board switches to status tabs showing one column at a time and
- * cards are advanced with their status button instead. The breakpoint is read in
- * JS rather than with `lg:hidden` because both layouts must never be mounted at
- * once: duplicate column and card ids would break dnd-kit.
- */
-const MULTI_COLUMN_QUERY = "(min-width: 1024px)";
-
-function subscribeToViewport(onChange: () => void) {
-  const query = window.matchMedia(MULTI_COLUMN_QUERY);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-
-const isMultiColumnViewport = () => window.matchMedia(MULTI_COLUMN_QUERY).matches;
-
-/** No `window` while rendering on the server; assume the wide layout. */
-const isMultiColumnOnServer = () => true;
+type LaneCounts = Partial<Record<TicketStatus, number>>;
+type LanePage = { status: string; loadMore: (count: number) => void };
 
 /**
  * The staff board.
@@ -66,24 +49,82 @@ const isMultiColumnOnServer = () => true;
  * applied locally first, then persisted with the ticket's expected version. A
  * rejected move removes its overlay; authoritative pages stay untouched.
  */
-export function StaffBoard({ items, projectId, token, totals, pages, onSelect, onMoveCard }: {
+export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCard, shownByLane, loadedByLane, chosenStatus, onChooseStatus, constrained, busy, visibleStatuses = BOARD_COLUMNS }: {
   items: TicketSummary[];
+  visibleStatuses?: readonly TicketStatus[];
   projectId: Id<"projects">;
-  token: string;
   totals: Partial<Record<TicketStatus, number>>;
-  pages: Record<TicketStatus, { status: string; loadMore: (count: number) => void }>;
-  onSelect: (id: Id<"tickets">) => void;
+  pages?: Record<TicketStatus, LanePage>;
+  shownByLane?: LaneCounts;
+  loadedByLane?: LaneCounts;
+  chosenStatus: TicketStatus;
+  onChooseStatus: (status: TicketStatus) => void;
+  constrained: boolean;
+  busy?: ReadonlySet<string>;
+  onSelect: OpenTicket;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
 }) {
   const { t } = useI18n();
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
-  const columns = reconcileColumns(projectId, items, pending);
-  const multiColumn = useSyncExternalStore(subscribeToViewport, isMultiColumnViewport, isMultiColumnOnServer);
-  const [visibleStatus, setVisibleStatus] = useState<TicketStatus>(BOARD_COLUMNS[0]);
-  const tabsId = useId();
-  const panelId = `${tabsId}-panel`;
-  const tabId = (status: TicketStatus) => `${tabsId}-${status}`;
+  const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
+  const enableDrag = useMediaQuery("(min-width: 1024px)");
+  const c = useExplorerCopy();
+  const boardId = useId();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [hasOverflow, setHasOverflow] = useState(false);
+  const preferredStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
+  const [currentStatus, setCurrentStatus] = useState(preferredStatus);
+  const scrollTarget = useRef<number | null>(null);
+
+  const scrollToStatus = useCallback((status: TicketStatus) => {
+    const viewport = viewportRef.current;
+    const lane = document.getElementById(`${boardId}-${status}`);
+    if (!viewport || !lane) return;
+    setCurrentStatus(status);
+    const start = viewport.getBoundingClientRect().left;
+    const laneStart = lane.getBoundingClientRect().left - start + viewport.scrollLeft;
+    const target = Math.max(0, Math.min(laneStart, viewport.scrollWidth - viewport.clientWidth));
+    scrollTarget.current = target;
+    viewport.scrollTo({ left: target, behavior: "instant" });
+  }, [boardId]);
+
+  function syncStatusFromScroll(viewport: HTMLDivElement) {
+    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+    if (maxScroll <= 1 || (scrollTarget.current !== null && Math.abs(viewport.scrollLeft - scrollTarget.current) <= 1)) return;
+    scrollTarget.current = null;
+    if (maxScroll - viewport.scrollLeft <= 1) {
+      setCurrentStatus(visibleStatuses[visibleStatuses.length - 1]);
+      return;
+    }
+    const start = viewport.getBoundingClientRect().left;
+    let nearest = visibleStatuses[0];
+    let closest = Infinity;
+    for (const status of visibleStatuses) {
+      const lane = document.getElementById(`${boardId}-${status}`);
+      if (!lane) continue;
+      const distance = Math.abs(lane.getBoundingClientRect().left - start);
+      if (distance >= closest) continue;
+      closest = distance;
+      nearest = status;
+    }
+    setCurrentStatus(nearest);
+  }
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const updateOverflow = () => setHasOverflow(viewport.scrollWidth - viewport.clientWidth > 1);
+    updateOverflow();
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [visibleStatuses]);
+
+  useLayoutEffect(() => {
+    if (hasOverflow) scrollToStatus(preferredStatus);
+  }, [hasOverflow, preferredStatus, scrollToStatus, visibleStatuses]);
+
   const draggedRef = useRef<TicketSummary | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -92,10 +133,23 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   }, [items, projectId, pending]);
 
   const observe = useCallback((operationId: string, row: TicketSummary | null) => {
-    setPending(current => observeMove(current, operationId, row));
-  }, []);
+    setPending(current => {
+      const next = observeMove(current, operationId, row);
+      if (!row || next[row._id]?.operationId !== operationId || !next[row._id].observed) return next;
+      if (row.lifecycle === "active" && visibleStatuses.includes(row.status)) return next;
+      const remaining = { ...next };
+      delete remaining[row._id];
+      return remaining;
+    });
+  }, [visibleStatuses]);
 
   async function move(item: TicketSummary, status: TicketStatus) {
+    // Filtered results are bounded by the current query. Only its subscription
+    // can decide whether a moved Ticket still belongs in that result set.
+    if (constrained) {
+      await onMoveCard(item, status);
+      return;
+    }
     if (pendingRef.current[item._id] && !pendingRef.current[item._id].observed) return;
     if (pendingMoveCount(pendingRef.current) >= 10) {
       toast.info(t("pendingMoveLimit"));
@@ -111,6 +165,7 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
 
   return (
     <Kanban
+      className="min-w-0"
       value={columns}
       onValueChange={() => undefined}
       getItemValue={(item) => item._id}
@@ -123,45 +178,60 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
         if (item && status) void move(item, status);
       }}
     >
-      {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} token={token} entry={entry} onObserve={observe} />)}
-      {multiColumn ? null : (
-        <StatusTabs
-          totals={totals}
-          value={visibleStatus}
-          onValueChange={setVisibleStatus}
-          panelId={panelId}
-          tabId={tabId}
-        />
-      )}
-      <KanbanBoard
-        className="grid auto-rows-fr gap-4 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-5"
-        {...(multiColumn ? {} : { id: panelId, role: "tabpanel", "aria-labelledby": tabId(visibleStatus) })}
-      >
-        {(multiColumn ? BOARD_COLUMNS : [visibleStatus]).map((status) => (
-          <BoardColumn
-            key={status}
-            status={status}
-            items={columns[status]}
-            initialHighest={initialHighest}
-            onSelect={onSelect}
-            onMoveCard={(id, status) => {
-              const item = columns[status].find(row => row._id === id) ?? Object.values(columns).flat().find(row => row._id === id);
-              if (item) void move(item, status);
-            }}
-            total={totals[status] ?? 0}
-            page={pages[status]}
-            draggable={multiColumn}
-          />
-        ))}
-      </KanbanBoard>
-      <KanbanOverlay>
+      {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} entry={entry} onObserve={observe} />)}
+      {hasOverflow && <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label={t("boardStatusTabs")}>
+        {visibleStatuses.map(status => {
+          const meta = statusMeta(status);
+          const Icon = meta.icon;
+          return <Button key={status} type="button" variant={status === currentStatus ? "secondary" : "outline"} size="sm"
+            className="min-h-11"
+            aria-pressed={status === currentStatus}
+            aria-controls={`${boardId}-${status}`}
+            onClick={() => {
+              scrollToStatus(status);
+              onChooseStatus(status);
+            }}>
+            <Icon aria-hidden="true" />
+            {t(meta.labelKey)}
+          </Button>;
+        })}
+      </div>}
+      <div ref={viewportRef} className="min-w-0 max-w-full snap-x snap-proximity overflow-x-auto rounded-xl pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        role="region" aria-label={c.board} tabIndex={hasOverflow ? 0 : undefined}
+        onScroll={event => syncStatusFromScroll(event.currentTarget)}>
+        <KanbanBoard
+          className={cn("items-start gap-3", visibleStatuses.length === 1
+            ? "grid-cols-1 sm:grid-cols-1"
+            : "grid-cols-[repeat(var(--lane-count),minmax(85%,1fr))] sm:grid-cols-[repeat(var(--lane-count),minmax(min(85%,13rem),1fr))]")}
+          style={{ "--lane-count": visibleStatuses.length } as CSSProperties}
+        >
+          {visibleStatuses.map(status => (
+            <BoardColumn
+              key={status}
+              id={`${boardId}-${status}`}
+              status={status}
+              items={columns[status]}
+              initialHighest={initialHighest}
+              onSelect={onSelect}
+              onMoveCard={move}
+              total={totals[status]}
+              shown={shownByLane?.[status]}
+              loaded={loadedByLane?.[status]}
+              busy={busy}
+              page={pages?.[status]}
+              draggable={enableDrag}
+            />
+          ))}
+        </KanbanBoard>
+      </div>
+      <KanbanOverlay className="hidden lg:block">
         {({ value, variant }) => {
           if (variant === "column") return null;
           const dragged = BOARD_COLUMNS.flatMap((status) => columns[status]).find((item) => item._id === value);
           if (!dragged) return null;
           return (
             <div className="w-72 max-w-[90vw] rotate-1 opacity-95">
-              <TicketCard item={dragged} onSelect={() => undefined} />
+              <TicketCard item={dragged} inLane onSelect={() => undefined} />
             </div>
           );
         }}
@@ -170,113 +240,59 @@ export function StaffBoard({ items, projectId, token, totals, pages, onSelect, o
   );
 }
 
-/**
- * The mobile status switcher: one tab per column, the selected one being the only
- * column rendered. Roving tabindex plus arrow keys, per the ARIA tabs pattern.
- */
-function StatusTabs({
-  totals,
-  value,
-  onValueChange,
-  panelId,
-  tabId,
-}: {
-  totals: Partial<Record<TicketStatus, number>>;
-  value: TicketStatus;
-  onValueChange: (status: TicketStatus) => void;
-  panelId: string;
-  tabId: (status: TicketStatus) => string;
-}) {
-  const { t } = useI18n();
-  const tabRefs = useRef<Partial<Record<TicketStatus, HTMLButtonElement | null>>>({});
-
-  return (
-    <div role="tablist" aria-label={t("boardStatusTabs")} className="mb-4 grid grid-cols-2 gap-1 rounded-lg border bg-card p-1 sm:grid-cols-3">
-      {BOARD_COLUMNS.map((status, index) => {
-        const meta = statusMeta(status);
-        const Icon = meta.icon;
-        const label = t(meta.labelKey);
-        const selected = status === value;
-        return (
-          <button
-            key={status}
-            ref={(node) => {
-              tabRefs.current[status] = node;
-            }}
-            type="button"
-            role="tab"
-            id={tabId(status)}
-            aria-controls={panelId}
-            aria-selected={selected}
-            tabIndex={selected ? 0 : -1}
-            aria-label={t("boardColumnCards", { count: totals[status] ?? 0, status: label })}
-            onClick={() => onValueChange(status)}
-            onKeyDown={(event) => {
-              const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-              if (step === 0) return;
-              event.preventDefault();
-              const next = BOARD_COLUMNS[(index + step + BOARD_COLUMNS.length) % BOARD_COLUMNS.length];
-              onValueChange(next);
-              tabRefs.current[next]?.focus();
-            }}
-            className={cn(
-              "flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              selected ? cn("border", meta.tone) : "text-muted-foreground hover:bg-accent",
-            )}
-          >
-            <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">{label}</span>
-            <span className="tabular-nums">{totals[status] ?? 0}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function BoardColumn({
+  id,
   status,
   items,
   onSelect,
   onMoveCard,
   draggable,
   total,
+  shown,
+  loaded,
+  busy,
   page,
   initialHighest,
 }: {
+  id: string;
   status: TicketStatus;
   items: TicketSummary[];
-  onSelect: (id: Id<"tickets">) => void;
-  onMoveCard: (id: Id<"tickets">, status: TicketStatus) => void;
-  /** False below `lg`, where one column is shown at a time and no card can be dragged. */
+  onSelect: OpenTicket;
+  onMoveCard: (item: TicketSummary, status: TicketStatus) => void;
+  /** Direct status actions are available even when the drag handle is hidden. */
   draggable: boolean;
-  total: number;
-  page: { status: string; loadMore: (count: number) => void };
+  total?: number;
+  shown?: number;
+  loaded?: number;
+  busy?: ReadonlySet<string>;
+  page?: LanePage;
   initialHighest: number;
 }) {
   const { t } = useI18n();
   const meta = statusMeta(status);
   const Icon = meta.icon;
   const label = t(meta.labelKey);
+  const count = shown ?? total ?? items.length;
+  const c = useExplorerCopy();
 
   return (
-    <KanbanColumn value={status} draggable={false} className="min-w-0 rounded-lg border bg-card">
-      {/* Below `lg` the selected tab already names the column and shows its count. */}
-      {draggable ? (
-        <div className={cn("flex items-center justify-between rounded-t-lg border-b px-3 py-3", meta.tone)}>
-          <div className="flex min-w-0 items-center gap-2">
-            <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <h2 className="truncate text-sm font-semibold">{label}</h2>
-          </div>
-          <Badge variant="outline" className="bg-white/70" aria-label={t("boardColumnCards", { count: total, status: label })}>
-            {total}
-          </Badge>
+    <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane relative min-w-0 snap-start overflow-hidden">
+      <div className="flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 px-3.5 pb-1 pt-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className={cn("size-[1.125rem] shrink-0", meta.text)} aria-hidden="true" />
+          <h2 className="break-words text-xs font-semibold uppercase leading-5 tracking-wide">{label}</h2>
         </div>
-      ) : null}
-      <KanbanColumnContent value={status} className="min-h-24 space-y-3 p-3">
+        <Badge variant="outline" className="rounded-full border-border/50 bg-card/50 px-1.5 font-medium tabular-nums text-muted-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
+          {count}
+        </Badge>
+      </div>
+      <KanbanColumnContent value={status} className="min-h-40 space-y-2.5 p-2.5">
+        {shown !== undefined && loaded !== undefined && <p className="text-xs text-muted-foreground">
+          {c.matching(shown, loaded)}{total !== undefined && ` · ${c.laneTotal(total)}`}
+        </p>}
         {items.length === 0 ? (
-          <div className="grid min-h-24 place-items-center rounded-md border border-dashed text-sm text-muted-foreground">
-            {t("empty")}
+          <div className="grid min-h-32 place-items-center rounded-xl border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+            {shown === undefined ? t("empty") : c.loadedEmpty}
           </div>
         ) : (
           items.map((item) => (
@@ -284,8 +300,10 @@ function BoardColumn({
               {isNewArrival(item, initialHighest) ? <p className="mb-1 text-xs text-muted-foreground">{t("liveArrival")}</p> : null}
               <TicketCard
                 item={item}
+                inLane
                 onSelect={onSelect}
-                onMove={(id, next) => void onMoveCard(id, next)}
+                busy={busy?.has(item._id)}
+                onMove={(_id, next) => void onMoveCard(item, next)}
                 handle={
                   draggable ? (
                     <KanbanItemHandle
@@ -293,9 +311,9 @@ function BoardColumn({
                         <Button
                           {...props}
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="icon"
-                          className="size-9 touch-none bg-background/90"
+                          className="-mr-2 -mt-2 size-11 shrink-0 cursor-grab touch-none text-muted-foreground hover:bg-transparent hover:text-foreground active:cursor-grabbing"
                           aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber, item.projectKey) })}
                         >
                           <GripVertical />
@@ -308,17 +326,17 @@ function BoardColumn({
             </KanbanItem>
           ))
         )}
-        {page.status === "CanLoadMore" || page.status === "LoadingMore" ? <Button type="button" variant="outline" className="w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
+        {page && (page.status === "CanLoadMore" || page.status === "LoadingMore") ? <Button type="button" variant="outline" className="min-h-11 w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
       </KanbanColumnContent>
     </KanbanColumn>
   );
 }
 
-function MoveObservation({ token, entry, onObserve }: {
-  token: string; entry: PendingMoves<TicketSummary>[string];
+function MoveObservation({ entry, onObserve }: {
+  entry: PendingMoves<TicketSummary>[string];
   onObserve: (operationId: string, row: TicketSummary | null) => void;
 }) {
-  const row = useSelectedTicket(token, entry.ticket._id);
+  const row = useSelectedTicket(entry.ticket._id);
   useEffect(() => {
     if (row === undefined) return;
     if (!row) { onObserve(entry.operationId, null); return; }

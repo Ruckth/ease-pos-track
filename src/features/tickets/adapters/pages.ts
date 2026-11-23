@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
+import { useAccessToken } from "@/app/adapter";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { pageFormData } from "../../../../shared/ticket-pages";
@@ -6,11 +7,13 @@ import { pageFormData } from "../../../../shared/ticket-pages";
 export type TicketPage = NonNullable<ReturnType<typeof useTicketPages>["pages"]>[number];
 export type PageUpload = { ticket: string; requestId: string; entry: string; files: Array<{ path: string; blob: Blob }> };
 
-export function useTicketPages(token: string, id: Id<"tickets">) {
+export function useTicketPages(id: Id<"tickets">) {
   return {
-    pages: useQuery(api.pages.listTicketPages, { token, id }),
-    target: useQuery(api.pages.publishTarget, { token }),
+    pages: useQuery(api.pages.listTicketPages, { id }),
+    target: useQuery(api.pages.publishTarget, {}),
     revoke: useMutation(api.pages.revokeTicketPage),
+    // The page route authenticates the same Convex Auth JWT the client sends.
+    accessToken: useAccessToken(),
   };
 }
 
@@ -23,7 +26,7 @@ export async function publishTicketPage(siteUrl: string, token: string, upload: 
   try {
     response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(upload.ticket)}/pages`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`,  "X-Ticket-Image-Policy": "v1", "Idempotency-Key": upload.requestId },
+      headers: { Authorization: `Bearer ${token}`, "X-Ticket-Image-Policy": "v1", "Idempotency-Key": upload.requestId },
       body: pageFormData(upload.entry, upload.files),
     });
   } catch { throw new Error("PAGE_PUBLISH_UNKNOWN"); }

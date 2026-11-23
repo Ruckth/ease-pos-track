@@ -3,12 +3,13 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { internalJobMutation, actorQuery, staffQuery, staffMutation } from "./functions";
+import { internalJobMutation, internalJobQuery, actorQuery, staffQuery, ownerMutation } from "./functions";
 import { JOB_POLICY, SWEEP_LIMIT, AUDIT_BATCH, ARCHIVE_RETENTION_MS, createMediaJob, currentAttempt, logSettlement, patchMediaJob, emptyJobCounts } from "./domain/media_jobs";
 import { MAX_MEDIA_FILES } from "../shared/media-policy";
 import { reserveIntentAssets, requireOwnedUploadIntent } from "./domain/media";
 import { tombstoneTicketRequests } from "./domain/requests";
 import { retireTicketPages } from "./domain/pages";
+import { hasLegacyAccess, mediaCleanupEnabled, requireLegacyAccess } from "./pilot_access";
 
 const fenceArgs = { jobId: v.id("mediaJobs"), attempt: v.number(), leaseId: v.string() };
 
@@ -27,8 +28,9 @@ async function purgeAssets(ctx: MutationCtx, ticket: Doc<"tickets">) {
 
 export const progress = actorQuery({
   name: "retention:progress",
-  args: { token: v.string(), intentId: v.id("uploadIntents"), secret: v.string(), jobId: v.id("mediaJobs") },
+  args: { intentId: v.id("uploadIntents"), secret: v.string(), jobId: v.id("mediaJobs") },
   handler: async (ctx, args) => {
+    await requireLegacyAccess(ctx);
     requireOwnedUploadIntent(await ctx.db.get(args.intentId), ctx.actor, args.secret);
     const job = await ctx.db.get(args.jobId);
     if (!job || job.intentId !== args.intentId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
@@ -40,6 +42,7 @@ export const progress = actorQuery({
 export const claim = internalJobMutation({
   name: "retention:claim", args: { jobId: v.id("mediaJobs") },
   handler: async (ctx, args): Promise<(Doc<"mediaJobs"> & { verifyKeys: string[] }) | null> => {
+    if (!await hasLegacyAccess(ctx)) return null;
     const job = await ctx.db.get(args.jobId);
     if (!job) return null;
     const now = Date.now();
@@ -70,11 +73,21 @@ export const claim = internalJobMutation({
   },
 });
 
+export const mayStartProviderCall = internalJobQuery({
+  name: "retention:mayStartProviderCall", args: fenceArgs,
+  handler: async (ctx, args) => {
+    if (!await mediaCleanupEnabled(ctx)) return false;
+    const job = await ctx.db.get(args.jobId);
+    return Boolean(job && currentAttempt(job, args));
+  },
+});
+
 export const checkpoint = internalJobMutation({
   name: "retention:checkpoint", args: { ...fenceArgs, key: v.string(), outcome: v.union(
     v.literal("deleted"), v.literal("absent_verified"), v.literal("failed_retryable"), v.literal("failed_permanent"),
     v.literal("unknown"), v.literal("not_configured"), v.literal("ownership_unverified")) },
   handler: async (ctx, args) => {
+    if (!await hasLegacyAccess(ctx)) return false;
     const job = await ctx.db.get(args.jobId);
     if (!job || !currentAttempt(job, args) || job.phase !== "delete_media" || !job.keys.includes(args.key)) return false;
     if (job.completedKeys.includes(args.key)) return true;
@@ -104,6 +117,7 @@ export const checkpoint = internalJobMutation({
 export const advance = internalJobMutation({
   name: "retention:advance", args: fenceArgs,
   handler: async (ctx, args) => {
+    if (!await hasLegacyAccess(ctx)) return false;
     const job = await ctx.db.get(args.jobId);
     if (!job || !currentAttempt(job, args)) return false;
     const now = Date.now();
@@ -123,12 +137,26 @@ export const advance = internalJobMutation({
       await ctx.db.delete(ticket._id);
       phase = "delete_events";
     } else if (phase === "delete_events") {
-      const events = await ctx.db.query("ticketEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      const annotations = await ctx.db.query("annotationEvents").withIndex("by_ticket", q => q.eq("ticketId", job.ticketId!)).take(AUDIT_BATCH);
-      for (const event of [...events, ...annotations]) await ctx.db.delete(event._id);
+      const { ticketId } = job;
+      if (job.kind !== "ticket_purge" || !ticketId) { await failJob(ctx, job, "ownership_conflict"); return false; }
+      const events = await ctx.db.query("ticketEvents").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const annotations = await ctx.db.query("annotationEvents").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const messages = await ctx.db.query("ticketMessages").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const assignments = await ctx.db.query("ticketAssignmentEvents").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const suggestions = await ctx.db.query("ticketRoutingSuggestions").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const customerInbox = await ctx.db.query("customerInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const staffInbox = await ctx.db.query("staffInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const suggestionRequests = await ctx.db.query("ticketRoutingSuggestionRequests").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const batches = [events, annotations, messages, assignments, suggestions, customerInbox, staffInbox];
+      for (const row of batches.flat()) await ctx.db.delete(row._id);
+      // Keep caller-scoped request IDs reserved while clearing every result and Ticket reference.
+      // Replacing the row also removes it from the next Ticket-scoped batch.
+      for (const { _id, source, caller, requestId, inputDigest } of suggestionRequests) {
+        await ctx.db.replace(_id, { source, caller, requestId, inputDigest, outcome: "unavailable" });
+      }
       // Hosted pages stop serving with the Ticket row; their blobs join the gated reclaim sweep.
-      const pagesRetired = await retireTicketPages(ctx, job.ticketId!);
-      if (events.length < AUDIT_BATCH && annotations.length < AUDIT_BATCH && pagesRetired) phase = "complete";
+      const pagesRetired = await retireTicketPages(ctx, ticketId);
+      if (pagesRetired && [...batches, suggestionRequests].every(batch => batch.length < AUDIT_BATCH)) phase = "complete";
     }
     if (phase === "complete") {
       await patchMediaJob(ctx, job, { state: "completed", phase, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
@@ -153,7 +181,7 @@ export const advance = internalJobMutation({
 export const recover = internalJobMutation({
   name: "retention:recover", args: {},
   handler: async ctx => {
-    if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return 0;
+    if (!await mediaCleanupEnabled(ctx)) return 0;
     const now = Date.now();
     const pending = await ctx.db.query("mediaJobs").withIndex("by_available", q => q.eq("state", "pending").lte("availableAt", now)).take(SWEEP_LIMIT);
     const expired = await ctx.db.query("mediaJobs").withIndex("by_lease", q => q.eq("state", "running").lte("leaseExpiresAt", now)).take(SWEEP_LIMIT);
@@ -165,6 +193,7 @@ export const recover = internalJobMutation({
 export const expireIntents = internalJobMutation({
   name: "retention:expireIntents", args: {},
   handler: async ctx => {
+    if (!await hasLegacyAccess(ctx)) return 0;
     const intents = await ctx.db.query("uploadIntents").withIndex("by_expires_at", q => q.eq("status", "pending").lte("expiresAt", Date.now())).take(SWEEP_LIMIT);
     for (const intent of intents) {
       // Accepted pending uploads are bounded by the 10 image + 3 video budget.
@@ -180,7 +209,7 @@ export const expireIntents = internalJobMutation({
 export const claimPurges = internalJobMutation({
   name: "retention:claimPurges", args: {},
   handler: async ctx => {
-    if (process.env.MEDIA_CLEANUP_ENABLED !== "true") return 0;
+    if (!await mediaCleanupEnabled(ctx)) return 0;
     const now = Date.now();
     const tickets = await ctx.db.query("tickets").withIndex("by_lifecycle_archive", q => q.eq("lifecycle", "archived").eq("purgeBlocked", undefined).lte("archivedAt", now - ARCHIVE_RETENTION_MS)).take(SWEEP_LIMIT);
     for (const ticket of tickets) {
@@ -206,6 +235,7 @@ export const requeue = internalJobMutation({
 });
 
 async function requeueJob(ctx: MutationCtx, jobId: Doc<"mediaJobs">["_id"]) {
+  await requireLegacyAccess(ctx);
   const job = await ctx.db.get(jobId);
   if (!job || job.state !== "failed") return false;
   const now = Date.now();
@@ -234,14 +264,15 @@ async function requeueJob(ctx: MutationCtx, jobId: Doc<"mediaJobs">["_id"]) {
   return true;
 }
 
-export const requeueFailed = staffMutation({
-  name: "retention:requeueFailed", args: { token: v.string(), jobId: v.id("mediaJobs") },
+export const requeueFailed = ownerMutation({
+  name: "retention:requeueFailed", args: { jobId: v.id("mediaJobs") },
   handler: (ctx, args) => requeueJob(ctx, args.jobId),
 });
 
 export const health = staffQuery({
-  name: "retention:health", args: { token: v.string() },
+  name: "retention:health", args: {},
   handler: async ctx => {
+    await requireLegacyAccess(ctx);
     const counts = emptyJobCounts();
     for (const key of Object.keys(counts)) {
       const counter = await ctx.db.query("mediaJobCounters").withIndex("by_key", q => q.eq("key", key)).unique();
@@ -256,9 +287,10 @@ export const health = staffQuery({
 
 export const diagnostics = staffQuery({
   name: "retention:diagnostics",
-  args: { token: v.string(), view: v.union(v.literal("failed"), v.literal("pending"), v.literal("expired")), paginationOpts: paginationOptsValidator },
+  args: { view: v.union(v.literal("failed"), v.literal("pending"), v.literal("expired")), paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     const now = Date.now();
+    await requireLegacyAccess(ctx);
     const pagination = { ...args.paginationOpts, numItems: Math.max(1, Math.min(25, args.paginationOpts.numItems)) };
     const result = await (args.view === "expired"
       ? ctx.db.query("mediaJobs").withIndex("by_lease", q => q.eq("state", "running").lte("leaseExpiresAt", now))

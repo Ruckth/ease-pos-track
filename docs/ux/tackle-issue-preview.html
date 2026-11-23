@@ -1,0 +1,1360 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light" />
+    <title>Tackle Issue · Workspace preview</title>
+    <style>
+      :root {
+        --ink: #182129;
+        --muted: #526071;
+        --blue: #1057a7;
+        --line: #cbd3dd;
+        --surface: #fff;
+        --page: #f5f7fa;
+        font:
+          15px/1.5 Inter,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        color: var(--ink);
+        background: var(--page);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+      button,
+      select {
+        cursor: pointer;
+      }
+      button,
+      select,
+      input {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+      }
+      button,
+      select {
+        min-height: 44px;
+        padding: 0.45rem 0.7rem;
+      }
+      button {
+        font-weight: 600;
+      }
+      button:hover,
+      select:hover {
+        border-color: #899aae;
+        background: #f4f7fb;
+      }
+      :focus-visible {
+        outline: 3px solid var(--blue);
+        outline-offset: 2px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      a {
+        color: var(--blue);
+        text-underline-offset: 3px;
+      }
+      .skip,
+      .sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      .skip:focus {
+        position: fixed;
+        z-index: 4;
+        top: 0.5rem;
+        left: 0.5rem;
+        width: auto;
+        height: auto;
+        clip-path: none;
+        padding: 0.7rem;
+        background: white;
+      }
+      #shell {
+        min-height: 100dvh;
+        display: grid;
+        grid-template-columns: 14rem minmax(0, 1fr);
+      }
+      aside {
+        background: white;
+        border-right: 1px solid var(--line);
+        padding: 1.5rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.45rem;
+      }
+      .brand {
+        font-size: 1.08rem;
+        font-weight: 720;
+        letter-spacing: -0.03em;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        background: var(--blue);
+        color: white;
+        border-radius: 8px;
+      }
+      .icon {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        stroke-width: 1.7;
+        fill: none;
+        flex: none;
+      }
+      .mark .icon {
+        width: 22px;
+        height: 22px;
+      }
+      .sidebar-fields {
+        display: grid;
+        gap: 0.25rem;
+      }
+      .sidebar-fields select {
+        width: 100%;
+      }
+      label,
+      .caption {
+        font-size: 0.82rem;
+        color: var(--muted);
+        font-weight: 570;
+      }
+      label select,
+      label input {
+        font-size: 0.93rem;
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .nav {
+        display: grid;
+        gap: 3px;
+      }
+      .nav button,
+      .icon-label {
+        display: inline-flex;
+        gap: 0.45rem;
+        align-items: center;
+      }
+      .nav button {
+        background: transparent;
+        border: 0;
+        justify-content: flex-start;
+      }
+      .nav button[aria-pressed="true"] {
+        background: #e7effb;
+        color: var(--blue);
+      }
+      .foot {
+        margin-top: auto;
+      }
+      .foot a {
+        display: block;
+        font-size: 0.85rem;
+        margin-top: 1rem;
+      }
+      main {
+        min-width: 0;
+        max-width: 100rem;
+        width: 100%;
+        margin: 0 auto;
+        padding: 1.65rem clamp(1rem, 2vw, 2rem) 3rem;
+      }
+      header,
+      .toolbar,
+      .row,
+      .views,
+      .filterbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      header {
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        font-size: 1.65rem;
+        letter-spacing: -0.04em;
+        line-height: 1.2;
+      }
+      .primary,
+      .primary:hover {
+        background: var(--blue);
+        color: white;
+        border-color: var(--blue);
+      }
+      .toolbar {
+        align-items: end;
+      }
+      .search {
+        flex: 1;
+        min-width: min(100%, 12rem);
+      }
+      .field {
+        display: grid;
+        gap: 0.2rem;
+      }
+      .search input {
+        min-width: 0;
+        width: 100%;
+        height: 44px;
+        padding: 0.4rem 0.75rem;
+      }
+      .views {
+        padding: 2px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: #eef1f5;
+        gap: 2px;
+      }
+      .views button {
+        border: 0;
+        background: none;
+      }
+      .views button[aria-pressed="true"] {
+        background: white;
+        box-shadow: 0 1px 4px #17223726;
+        color: var(--blue);
+      }
+      .filterbar {
+        margin: 0.8rem 0;
+      }
+      .filterbar button[aria-pressed="true"] {
+        background: #e7effb;
+        color: var(--blue);
+        border-color: var(--blue);
+      }
+      .quiet {
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+      .scope {
+        margin: 0.65rem 0;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(var(--columns), minmax(13.5rem, 1fr));
+        overflow-x: auto;
+        gap: 0.65rem;
+        align-items: start;
+        padding-bottom: 0.6rem;
+      }
+      .lane {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        overflow: hidden;
+      }
+      .lane h2 {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        background: var(--tint);
+        color: var(--tone);
+        border-bottom: 1px solid var(--line);
+        padding: 0.65rem 0.7rem;
+        font-size: 0.91rem;
+        min-height: 48px;
+      }
+      .lane h2 small {
+        margin-left: auto;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--tone);
+        display: inline-block;
+      }
+      .lane-body,
+      .stack {
+        display: grid;
+        gap: 0.45rem;
+      }
+      .lane-body {
+        padding: 0.5rem;
+      }
+      .tile {
+        min-width: 0;
+        padding: 0.6rem 0.7rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+      }
+      .open {
+        min-height: 44px;
+        width: 100%;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        text-align: left;
+        overflow-wrap: anywhere;
+        display: block;
+      }
+      .id {
+        font:
+          12px/1.6 ui-monospace,
+          monospace;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .title {
+        display: block;
+        font-size: 0.94rem;
+        font-weight: 650;
+        line-height: 1.45;
+      }
+      .row {
+        margin-top: 0.3rem;
+        justify-content: space-between;
+        gap: 0.35rem;
+      }
+      .row button,
+      .action {
+        font-size: 0.83rem;
+      }
+      .badge {
+        display: inline-block;
+        white-space: normal;
+        padding: 0.12rem 0.4rem;
+        border-radius: 0.4rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: var(--tint);
+        color: var(--tone);
+      }
+      .empty {
+        padding: 1.1rem 0.6rem;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+      .empty-project {
+        background: white;
+        border: 1px dashed var(--line);
+        border-radius: 9px;
+        text-align: center;
+        padding: 2.3rem 1rem;
+      }
+      .empty-project p {
+        margin-bottom: 0.75rem;
+      }
+      .lane-select,
+      .sort-field {
+        margin: 0.6rem 0;
+        max-width: 100%;
+      }
+      .sort-field {
+        width: max-content;
+      }
+      .small-list {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: white;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid var(--line);
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      th {
+        color: var(--muted);
+        background: #f0f3f7;
+        font-size: 0.83rem;
+      }
+      td:first-child {
+        width: 43%;
+      }
+      .table-title {
+        background: none;
+      }
+      .detail {
+        margin: auto;
+        width: min(95vw, 31rem);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 1.35rem;
+        box-shadow: 0 16px 70px #101a2433;
+      }
+      .detail::backdrop {
+        background: #17223766;
+      }
+      .detail h2 {
+        font-size: 1.3rem;
+        line-height: 1.25;
+        margin: 0.4rem 0 1rem;
+        overflow-wrap: anywhere;
+      }
+      .detail form {
+        display: grid;
+        gap: 0.85rem;
+      }
+      .detail input {
+        min-height: 44px;
+        padding: 0.5rem 0.7rem;
+      }
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.9rem;
+      }
+      .detail p {
+        margin: 0.45rem 0;
+      }
+      .notice {
+        position: fixed;
+        bottom: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1d2c34;
+        color: white;
+        border-radius: 8px;
+        padding: 0.6rem 1rem;
+        max-width: calc(100vw - 1rem);
+        z-index: 3;
+      }
+      .notice:empty {
+        display: none;
+      }
+      @media (max-width: 79.99rem) {
+        #shell {
+          display: block;
+        }
+        aside {
+          display: flex;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+          padding: 0.55rem 1rem;
+          gap: 0.35rem 0.85rem;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .sidebar-fields {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          max-width: 100%;
+        }
+        .sidebar-fields select {
+          width: auto;
+          max-width: 100%;
+          min-width: 0;
+        }
+        .foot {
+          margin: 0 0 0 auto;
+        }
+        .foot a {
+          display: none;
+        }
+        .nav {
+          display: flex;
+        }
+        .brand {
+          margin-right: 0.2rem;
+        }
+        main {
+          padding-top: 1.1rem;
+        }
+      }
+      @media (max-width: 47.99rem) {
+        aside {
+          padding: 0.45rem 0.7rem;
+        }
+        .brand {
+          order: 0;
+        }
+        .nav {
+          order: 3;
+        }
+        .nav button {
+          font-size: 0.82rem;
+          padding: 0.35rem 0.45rem;
+          min-width: 44px;
+        }
+        .sidebar-fields {
+          order: 2;
+          flex: 1 1 9rem;
+        }
+        .sidebar-fields > span {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+        }
+        .foot {
+          order: 1;
+          margin-left: auto;
+          flex: none;
+        }
+        .foot select {
+          max-width: 5.9rem;
+        }
+        aside::after {
+          content: "";
+          width: 100%;
+          order: 1;
+          height: 0;
+        }
+        .sidebar-fields select {
+          width: 100%;
+        }
+        main {
+          padding: 0.9rem 0.65rem max(1.5rem, env(safe-area-inset-bottom));
+        }
+        header {
+          margin-bottom: 0.65rem;
+        }
+        .search {
+          flex-basis: 100%;
+        }
+        .views button,
+        .toolbar select {
+          padding-inline: 0.55rem;
+        }
+        .views {
+          flex-wrap: nowrap;
+        }
+        .filterbar {
+          margin: 0.55rem 0;
+        }
+        .scope {
+          margin: 0.5rem 0;
+        }
+        .detail {
+          width: 100%;
+          max-width: 100%;
+          max-height: 100dvh;
+          border-radius: 0;
+          margin: auto 0 0;
+        }
+        .sort-field {
+          width: 100%;
+        }
+      }
+      @media (max-width: 63.99rem) {
+        .board {
+          grid-template-columns: minmax(0, 1fr);
+          overflow: visible;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a id="skip" class="skip" href="#results">Skip to Tickets</a>
+    <div id="shell">
+      <aside id="nav"></aside>
+      <main>
+        <div id="controls"></div>
+        <section id="results" tabindex="-1"></section>
+      </main>
+    </div>
+    <dialog id="dialog" class="detail"></dialog>
+    <div id="notice" class="notice" role="status"></div>
+    <script>
+      "use strict";
+      // This workspace runs from a file. Its sample Projects and changes live in this page.
+      const en = {
+        project: "Project",
+        tickets: "Tickets",
+        archive: "Archive",
+        lang: "Language",
+        plan: "Workspace plan",
+        queue: "Queue",
+        board: "Board",
+        table: "Table",
+        view: "Ticket view",
+        search: "Search",
+        scope: "Status",
+        all: "All Tickets",
+        active: "Active Tickets",
+        newTicket: "New Ticket",
+        high: "High or critical",
+        clear: "Clear filters",
+        empty: "No Tickets in this view.",
+        noTickets: "No Tickets in this Project yet.",
+        noMatch: "No Tickets match these filters.",
+        skip: "Skip to Tickets",
+        action: "Action",
+        urgency: "Urgency",
+        title: "Title",
+        sort: "Sort",
+        lowFirst: "Urgency · ascending",
+        highFirst: "Urgency · descending",
+        byTitle: "Title · A–Z",
+        byNumber: "Ticket number · descending",
+        lane: "Board lane",
+        close: "Close",
+        submit: "Submit",
+        restore: "Restore",
+        sample: "Offline preview · Changes last until this page is reloaded.",
+        sampleProject: "Training",
+        list: "shown",
+        unscored: "Unscored",
+        bands: ["Low", "Medium", "High", "Critical"],
+        statuses: [
+          "New",
+          "Acknowledged",
+          "In progress",
+          "Waiting for customer",
+          "Resolved",
+        ],
+        actions: [
+          "Acknowledge",
+          "Start work",
+          "Resolve",
+          "Resume work",
+          "Reopen",
+        ],
+      };
+      const th = {
+        project: "โครงการ",
+        tickets: "Ticket",
+        archive: "เก็บถาวร",
+        lang: "ภาษา",
+        plan: "แผนเวิร์กสเปซ",
+        queue: "คิว",
+        board: "บอร์ด",
+        table: "ตาราง",
+        view: "มุมมอง Ticket",
+        search: "ค้นหา",
+        scope: "สถานะ",
+        all: "Ticket ทั้งหมด",
+        active: "Ticket ที่เปิดอยู่",
+        newTicket: "สร้าง Ticket",
+        high: "เร่งด่วนสูงหรือวิกฤต",
+        clear: "ล้างตัวกรอง",
+        empty: "ไม่มี Ticket ในมุมมองนี้",
+        noTickets: "ยังไม่มี Ticket ในโครงการนี้",
+        noMatch: "ไม่พบ Ticket ที่ตรงกับตัวกรอง",
+        skip: "ข้ามไปยัง Ticket",
+        action: "การดำเนินการ",
+        urgency: "ความเร่งด่วน",
+        title: "หัวข้อ",
+        sort: "เรียงตาม",
+        lowFirst: "ความเร่งด่วน · น้อยไปมาก",
+        highFirst: "ความเร่งด่วน · มากไปน้อย",
+        byTitle: "หัวข้อ · ตามตัวอักษร",
+        byNumber: "หมายเลข Ticket · มากไปน้อย",
+        lane: "สถานะบนบอร์ด",
+        close: "ปิด",
+        submit: "ส่ง Ticket",
+        restore: "กู้คืน",
+        sample: "ตัวอย่างออฟไลน์ · การเปลี่ยนแปลงจะอยู่จนกว่าจะโหลดหน้านี้ใหม่",
+        sampleProject: "ฝึกอบรม",
+        list: "รายการที่แสดง",
+        unscored: "ยังไม่ระบุ",
+        bands: ["ต่ำ", "ปานกลาง", "สูง", "วิกฤต"],
+        statuses: [
+          "ใหม่",
+          "รับเรื่องแล้ว",
+          "กำลังดำเนินการ",
+          "รอข้อมูลลูกค้า",
+          "แก้ไขแล้ว",
+        ],
+        actions: [
+          "รับทราบ",
+          "เริ่มดำเนินการ",
+          "แก้ไขแล้ว",
+          "ดำเนินการต่อ",
+          "เปิดอีกครั้ง",
+        ],
+      };
+      const facts = [
+        [
+          142,
+          0,
+          91,
+          "Receipt printer stops after checkout",
+          "เครื่องพิมพ์ใบเสร็จหยุดหลังชำระเงิน",
+        ],
+        [
+          141,
+          0,
+          51,
+          "Refund amount differs on split payments",
+          "ยอดคืนเงินไม่ตรงเมื่อแยกชำระ",
+        ],
+        [
+          140,
+          1,
+          75,
+          "Stock count stays unchanged after a sale",
+          "จำนวนสต็อกไม่เปลี่ยนหลังการขาย",
+        ],
+        [
+          139,
+          2,
+          50,
+          "Shift closing total includes voided items",
+          "ยอดปิดกะรวมรายการที่ยกเลิก",
+        ],
+        [
+          138,
+          3,
+          null,
+          "Confirm terminal serial number",
+          "ยืนยันหมายเลขเครื่องชำระเงิน",
+        ],
+        [
+          137,
+          4,
+          25,
+          "Tax receipt shows the previous branch name",
+          "ใบกำกับภาษีแสดงชื่อสาขาเดิม",
+        ],
+        [
+          136,
+          1,
+          76,
+          "Kitchen display skips takeaway orders",
+          "จอครัวข้ามรายการสั่งกลับบ้าน",
+        ],
+        [
+          135,
+          2,
+          26,
+          "Barcode lookup is slow on mobile",
+          "ค้นหาบาร์โค้ดช้าบนมือถือ",
+        ],
+        [
+          128,
+          4,
+          39,
+          "Replace the counter tablet stand",
+          "เปลี่ยนขาตั้งแท็บเล็ตที่เคาน์เตอร์",
+        ],
+      ];
+      const db = {
+        EASE: facts.map(([id, status, score, title, thai]) => ({
+          id,
+          status,
+          score,
+          title,
+          thai,
+          archived: id === 128,
+        })),
+        LAB: [],
+      };
+      const state = {
+        project: "EASE",
+        lang: "en",
+        view: "board",
+        scope: "all",
+        lane: 0,
+        sort: "number",
+        query: "",
+        high: false,
+        archive: false,
+      };
+      const statusColors = [
+        ["#eaf6ff", "#075885"],
+        ["#eef1ff", "#393997"],
+        ["#fff5de", "#864000"],
+        ["#f4eeff", "#603599"],
+        ["#e9f8ef", "#16623b"],
+      ];
+      const scoreColors = [
+        ["#eef3f8", "#3e5267"],
+        ["#eaf3fd", "#245589"],
+        ["#fff1da", "#804500"],
+        ["#ffeded", "#942833"],
+      ];
+      const destinations = [1, 2, 4, 2, 2];
+      const compact = matchMedia("(max-width:47.99rem)"),
+        singleLane = matchMedia("(max-width:63.99rem)");
+      const $ = (s) => document.querySelector(s),
+        copy = () => (state.lang === "th" ? th : en);
+      const escapeHtml = (value) =>
+        String(value).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      const ref = (id) => state.project + "-" + String(id).padStart(4, "0");
+      const title = (item) => (state.lang === "th" ? item.thai : item.title);
+      const option = (value, name, selected) =>
+        '<option value="' +
+        value +
+        '"' +
+        (String(value) === String(selected) ? " selected" : "") +
+        ">" +
+        escapeHtml(name) +
+        "</option>";
+      const paths = {
+        brand:
+          '<path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z"/><path d="m8 12 2.5 2.5 5-5"/>',
+        tickets:
+          '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8m-8 5h5"/>',
+        archive:
+          '<rect x="3" y="5" width="18" height="4" rx="1"/><path d="M5 9v10h14V9m-10 4h6"/>',
+        board:
+          '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/>',
+        table:
+          '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18m-11 0v11"/>',
+        queue: '<path d="M8 6h13M8 12h13M8 18h13M3 6h1m-1 6h1m-1 6h1"/>',
+      };
+      const icon = (name) =>
+        '<svg aria-hidden="true" class="icon" viewBox="0 0 24 24">' +
+        paths[name] +
+        "</svg>";
+      const tone = (pair) =>
+        'style="--tint:' + pair[0] + ";--tone:" + pair[1] + '"';
+      function scopeRows() {
+        return db[state.project].filter(
+          (x) =>
+            x.archived === state.archive &&
+            (state.archive ||
+              state.scope === "all" ||
+              (state.scope === "active"
+                ? x.status !== 4
+                : x.status === Number(state.scope))),
+        );
+      }
+      function matches() {
+        const query = state.query.trim().toLocaleLowerCase(state.lang);
+        return scopeRows().filter(
+          (x) =>
+            (!state.high || (x.score >= 51 && x.score <= 100)) &&
+            (!query ||
+              [ref(x.id), x.title, x.thai].some((v) =>
+                v.toLocaleLowerCase(state.lang).includes(query),
+              )),
+        );
+      }
+      function available() {
+        return state.scope === "all"
+          ? [0, 1, 2, 3, 4]
+          : state.scope === "active"
+            ? [0, 1, 2, 3]
+            : [Number(state.scope)];
+      }
+      function paintControls() {
+        const t = copy();
+        document.documentElement.lang = state.lang;
+        $("#skip").textContent = t.skip;
+        $("#nav").innerHTML =
+          '<div class="brand"><span class="mark">' +
+          icon("brand") +
+          "</span>Tackle Issue</div>" +
+          '<label class="sidebar-fields"><span>' +
+          t.project +
+          '</span><select id="project">' +
+          option("EASE", "Ease (EASE)", state.project) +
+          option("LAB", t.sampleProject + " (LAB)", state.project) +
+          "</select></label>" +
+          '<nav class="nav" aria-label="' +
+          t.project +
+          '">' +
+          ["tickets", "archive"]
+            .map(
+              (area, i) =>
+                '<button id="' +
+                area +
+                '" aria-pressed="' +
+                (state.archive === Boolean(i)) +
+                '">' +
+                icon(area) +
+                t[area] +
+                "</button>",
+            )
+            .join("") +
+          "</nav>" +
+          '<div class="foot sidebar-fields"><label class="sr" for="language">' +
+          t.lang +
+          '</label><select id="language">' +
+          option("en", "English", state.lang) +
+          option("th", "ไทย", state.lang) +
+          '</select><a href="tackle-issue-plan.html">' +
+          t.plan +
+          "</a></div>";
+        $("#controls").innerHTML =
+          "<header><h1>" +
+          (state.archive ? t.archive : t.tickets) +
+          '</h1><button id="new-ticket" class="primary">＋ ' +
+          t.newTicket +
+          "</button></header>" +
+          '<div class="toolbar"><label class="field search">' +
+          t.search +
+          '<input id="search" type="search" maxlength="200" autocomplete="off" placeholder="' +
+          t.search +
+          '"></label>' +
+          (state.archive
+            ? ""
+            : '<label class="field">' +
+              t.scope +
+              '<select id="scope">' +
+              option("all", t.all, state.scope) +
+              option("active", t.active, state.scope) +
+              t.statuses.map((s, i) => option(i, s, state.scope)).join("") +
+              "</select></label>") +
+          '<div class="views" role="group" aria-label="' +
+          t.view +
+          '">' +
+          (state.archive ? ["queue", "table"] : ["queue", "board", "table"])
+            .map(
+              (v) =>
+                '<button id="view-' +
+                v +
+                '" class="icon-label" aria-pressed="' +
+                (state.view === v) +
+                '">' +
+                icon(v) +
+                t[v] +
+                "</button>",
+            )
+            .join("") +
+          "</div></div>" +
+          '<div class="filterbar"><button id="priority" aria-pressed="' +
+          state.high +
+          '">' +
+          t.high +
+          "</button></div>";
+        $("#search").value = state.query;
+      }
+      function urgency(item) {
+        const t = copy(),
+          score = item.score;
+        if (score === null)
+          return '<span class="quiet">' + t.unscored + "</span>";
+        const level = score <= 25 ? 0 : score <= 50 ? 1 : score <= 75 ? 2 : 3;
+        return (
+          '<span class="badge" ' +
+          tone(scoreColors[level]) +
+          ">" +
+          t.bands[level] +
+          " · " +
+          score +
+          "</span>"
+        );
+      }
+      function action(item) {
+        const label = item.archived
+          ? copy().restore
+          : copy().actions[item.status];
+        return (
+          '<button class="action" id="act-' +
+          item.id +
+          '" data-move="' +
+          item.id +
+          '" aria-label="' +
+          label +
+          " · " +
+          ref(item.id) +
+          '">' +
+          label +
+          "</button>"
+        );
+      }
+      function openButton(item, showStatus) {
+        return (
+          '<button class="open" id="open-' +
+          item.id +
+          '" data-open="' +
+          item.id +
+          '"><span class="id">' +
+          ref(item.id) +
+          (showStatus ? " · " + copy().statuses[item.status] : "") +
+          '</span><span class="title">' +
+          escapeHtml(title(item)) +
+          "</span></button>"
+        );
+      }
+      function tile(item, inLane) {
+        return (
+          '<article class="tile">' +
+          openButton(item, !inLane) +
+          '<div class="row">' +
+          urgency(item) +
+          action(item) +
+          "</div></article>"
+        );
+      }
+      function board(rows) {
+        const t = copy(),
+          lanes = available();
+        if (!lanes.includes(state.lane)) state.lane = lanes[0];
+        const shown = singleLane.matches ? [state.lane] : lanes;
+        return (
+          (singleLane.matches
+            ? '<label class="field lane-select">' +
+              t.lane +
+              '<select id="lane">' +
+              lanes
+                .map((i) =>
+                  option(
+                    i,
+                    t.statuses[i] +
+                      " · " +
+                      rows.filter((x) => x.status === i).length,
+                    state.lane,
+                  ),
+                )
+                .join("") +
+              "</select></label>"
+            : "") +
+          '<div class="board" style="--columns:' +
+          shown.length +
+          '">' +
+          shown
+            .map((i) => {
+              const list = rows.filter((x) => x.status === i);
+              return (
+                '<section class="lane" ' +
+                tone(statusColors[i]) +
+                '><h2><span class="dot"></span>' +
+                t.statuses[i] +
+                "<small>" +
+                list.length +
+                '</small></h2><div class="lane-body">' +
+                (list.map((x) => tile(x, true)).join("") ||
+                  '<p class="empty">' + t.empty + "</p>") +
+                "</div></section>"
+              );
+            })
+            .join("") +
+          "</div>"
+        );
+      }
+      function table(rows) {
+        const t = copy();
+        const sorted = [...rows].sort((a, b) => {
+          if (state.sort === "title")
+            return title(a).localeCompare(title(b), state.lang) || b.id - a.id;
+          if (state.sort === "number") return b.id - a.id;
+          if (a.score === null || b.score === null)
+            return a.score === b.score
+              ? b.id - a.id
+              : a.score === null
+                ? 1
+                : -1;
+          return (
+            (state.sort === "low" ? a.score - b.score : b.score - a.score) ||
+            b.id - a.id
+          );
+        });
+        const order =
+          '<label class="sort-field field">' +
+          t.sort +
+          '<select id="sort">' +
+          [
+            ["number", t.byNumber],
+            ["high", t.highFirst],
+            ["low", t.lowFirst],
+            ["title", t.byTitle],
+          ]
+            .map(([k, v]) => option(k, v, state.sort))
+            .join("") +
+          "</select></label>";
+        if (compact.matches)
+          return (
+            order +
+            '<div class="small-list">' +
+            sorted.map((x) => tile(x, false)).join("") +
+            "</div>"
+          );
+        return (
+          order +
+          '<div class="table-wrap"><table><thead><tr>' +
+          [t.title, t.scope, t.urgency, t.action]
+            .map(
+              (s, i) =>
+                '<th scope="col"' +
+                (i === 2 && ["low", "high"].includes(state.sort)
+                  ? ' aria-sort="' +
+                    (state.sort === "high" ? "descending" : "ascending") +
+                    '"'
+                  : i === 0 && state.sort === "title"
+                    ? ' aria-sort="ascending"'
+                    : "") +
+                ">" +
+                s +
+                "</th>",
+            )
+            .join("") +
+          "</tr></thead><tbody>" +
+          sorted
+            .map(
+              (x) =>
+                "<tr><td>" +
+                openButton(x, false) +
+                '</td><td><span class="badge" ' +
+                tone(statusColors[x.status]) +
+                ">" +
+                t.statuses[x.status] +
+                "</span></td><td>" +
+                urgency(x) +
+                "</td><td>" +
+                action(x) +
+                "</td></tr>",
+            )
+            .join("") +
+          "</tbody></table></div>"
+        );
+      }
+      function paintResults() {
+        const t = copy(),
+          rows = matches(),
+          emptyDb =
+            !db[state.project].some((x) => !x.archived) && !state.archive;
+        const count =
+          '<p class="scope quiet" aria-live="polite">' +
+          rows.length +
+          " " +
+          t.list +
+          "</p>";
+        const empty =
+          '<div class="empty-project"><p>' +
+          (emptyDb
+            ? t.noTickets
+            : state.high || state.query
+              ? t.noMatch
+              : t.empty) +
+          "</p>" +
+          (emptyDb
+            ? '<button id="empty-new">' + t.newTicket + "</button>"
+            : state.high || state.query
+              ? '<button id="clear">' + t.clear + "</button>"
+              : "") +
+          "</div>";
+        const content =
+          state.view === "board"
+            ? board(rows)
+            : state.view === "table"
+              ? table(rows)
+              : '<div class="stack">' +
+                rows.map((x) => tile(x, false)).join("") +
+                "</div>";
+        $("#results").innerHTML =
+          count +
+          (!rows.length ? empty : "") +
+          (rows.length || state.view === "board" ? content : "") +
+          '<p class="quiet" style="margin-top:1.3rem">' +
+          t.sample +
+          "</p>";
+      }
+      function restoreFocus(id) {
+        const target = id && document.getElementById(id);
+        (target || $("#results")).focus({ preventScroll: true });
+      }
+      function render(focusId) {
+        paintControls();
+        paintResults();
+        if (focusId) restoreFocus(focusId);
+      }
+      function resetCriteria() {
+        Object.assign(state, { scope: "all", lane: 0, query: "", high: false });
+      }
+      let noticeTimer;
+      function announce(msg) {
+        clearTimeout(noticeTimer);
+        $("#notice").textContent = msg;
+        noticeTimer = setTimeout(() => {
+          $("#notice").textContent = "";
+        }, 3600);
+      }
+      document.addEventListener("input", (event) => {
+        if (event.target.id === "search") {
+          state.query = event.target.value;
+          const rows = matches();
+          if (
+            state.query &&
+            rows.length &&
+            !rows.some((x) => x.status === state.lane)
+          )
+            state.lane = rows[0].status;
+          paintResults();
+        }
+      });
+      document.addEventListener("change", (event) => {
+        const { id, value } = event.target;
+        if (id === "language") {
+          state.lang = value;
+          $("#notice").textContent = "";
+          render(id);
+        }
+        if (id === "project") {
+          state.project = value;
+          resetCriteria();
+          render(id);
+        }
+        if (id === "scope") {
+          state.scope = value;
+          render(id);
+        }
+        if (id === "lane" || id === "sort") {
+          state[id] = id === "lane" ? Number(value) : value;
+          paintResults();
+          restoreFocus(id);
+        }
+      });
+      let opener = "";
+      function showDialog(item) {
+        const t = copy(),
+          el = $("#dialog");
+        opener = document.activeElement?.id || "results";
+        el.setAttribute("aria-labelledby", "dialog-title");
+        el.innerHTML = item
+          ? '<span class="id">' +
+            ref(item.id) +
+            '</span><h2 id="dialog-title">' +
+            escapeHtml(title(item)) +
+            "</h2><p>" +
+            t.scope +
+            " · " +
+            t.statuses[item.status] +
+            "</p><p>" +
+            t.urgency +
+            " · " +
+            urgency(item) +
+            '</p><form method="dialog" class="dialog-actions"><button autofocus>' +
+            t.close +
+            "</button></form>"
+          : '<h2 id="dialog-title">' +
+            t.newTicket +
+            '</h2><form id="compose"><label class="field">' +
+            t.title +
+            '<input id="draft-title" maxlength="180" required autofocus></label><div class="dialog-actions"><button type="button" id="cancel">' +
+            t.close +
+            '</button><button class="primary">' +
+            t.submit +
+            "</button></div></form>";
+        el.showModal();
+      }
+      $("#dialog").addEventListener("close", () => restoreFocus(opener));
+      document.addEventListener("submit", (event) => {
+        if (event.target.id !== "compose") return;
+        event.preventDefault();
+        const input = $("#draft-title"),
+          value = input.value.trim();
+        if (!value) {
+          input.value = "";
+          input.reportValidity();
+          return;
+        }
+        const id = Math.max(0, ...db[state.project].map((x) => x.id)) + 1;
+        db[state.project].push({
+          id,
+          status: 0,
+          score: null,
+          title: value,
+          thai: value,
+          archived: false,
+        });
+        resetCriteria();
+        state.archive = false;
+        opener = "open-" + id;
+        $("#dialog").close();
+        render();
+        announce(ref(id) + " · " + copy().statuses[0]);
+      });
+      document.addEventListener("click", (event) => {
+        const el = event.target.closest("button");
+        if (!el) return;
+        const id = el.id;
+        if (id === "new-ticket" || id === "empty-new") showDialog();
+        if (id === "cancel") $("#dialog").close();
+        if (id.startsWith("view-")) {
+          state.view = id.slice(5);
+          render(id);
+        }
+        if (id === "tickets" || id === "archive") {
+          state.archive = id === "archive";
+          if (state.archive && state.view === "board") state.view = "table";
+          resetCriteria();
+          render(id);
+        }
+        if (id === "priority") {
+          state.high = !state.high;
+          render(id);
+        }
+        if (id === "clear") {
+          state.query = "";
+          state.high = false;
+          render("search");
+        }
+        if (el.dataset.open)
+          showDialog(
+            db[state.project].find((x) => x.id === Number(el.dataset.open)),
+          );
+        if (el.dataset.move) {
+          const item = db[state.project].find(
+            (x) => x.id === Number(el.dataset.move),
+          );
+          if (item.archived) item.archived = false;
+          else item.status = destinations[item.status];
+          render(id);
+          announce(ref(item.id) + " · " + copy().statuses[item.status]);
+        }
+      });
+      for (const media of [compact, singleLane])
+        media.addEventListener("change", () => {
+          const id = document.activeElement?.id;
+          paintResults();
+          if (id && !document.getElementById(id)) restoreFocus("results");
+        });
+      render();
+    </script>
+  </body>
+</html>

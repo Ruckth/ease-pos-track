@@ -12,7 +12,7 @@ import { errorCode } from "../shared/errors";
 import { pageFingerprintInput, isPageHtml, pageContentType, PAGE_LIMITS, pageSecurityHeaders, parseServedPath, sha256Hex, validatePageBundle, encodePagePath } from "../shared/ticket-pages";
 
 const STATUS: Record<string, number> = {
-  AUTH_REQUIRED: 401, SESSION_EXPIRED: 401, ORIGIN_NOT_ALLOWED: 403,
+  AUTH_REQUIRED: 401, SESSION_EXPIRED: 401, ORIGIN_NOT_ALLOWED: 403, LEGACY_ACCESS_DISABLED: 403,
   TICKET_UNAVAILABLE: 404, PROJECT_NOT_FOUND: 404,
   PAGE_REQUEST_CONFLICT: 409, PAGE_REVOKED: 409, PAGE_LIMIT_REACHED: 409,
   PAGE_UPLOAD_EXPIRED: 409, PAGE_UPLOAD_INCOMPLETE: 409, PAGE_UPLOAD_BUSY: 409,
@@ -157,10 +157,15 @@ function published(page: PublishedPage, created: boolean, requestId: string) {
     fileCount: page.fileCount, totalBytes: page.totalBytes, publishedAt: page.publishedAt, created, requestId: requestId.trim() };
 }
 
-function bearer(request: Request) {
-  const match = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
-  if (!match) throw reject("AUTH_REQUIRED");
-  return match[1];
+/**
+ * Convex verifies the `Authorization: Bearer` Convex Auth JWT and forwards the
+ * identity to every internal mutation below, which rechecks the live session.
+ */
+async function requireIdentity(ctx: ActionCtx, request: Request) {
+  if (!/^Bearer\s+\S+$/i.test(request.headers.get("authorization") ?? "")) throw reject("AUTH_REQUIRED");
+  let identity: unknown;
+  try { identity = await ctx.auth.getUserIdentity(); } catch { throw reject("SESSION_EXPIRED"); }
+  if (!identity) throw reject("SESSION_EXPIRED");
 }
 
 /**
@@ -174,14 +179,14 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     if (!originAllowed(request)) throw reject("ORIGIN_NOT_ALLOWED");
     const match = /^\/v1\/tickets\/([^/]+)\/pages\/?$/.exec(new URL(request.url).pathname);
     if (!match) return json(request, 404, { ok: false, code: "NOT_FOUND" });
-    const token = bearer(request);
+    await requireIdentity(ctx, request);
     const requestId = request.headers.get("idempotency-key");
     if (!requestId) throw reject("REQUIRED_REQUEST_ID");
     let ticket: string;
     try { ticket = decodeURIComponent(match[1]); } catch { throw reject("TICKET_UNAVAILABLE"); }
     // Session, Ticket write access, Project access and lifecycle come before any
     // body is read or hashed; reserve and commit check them again.
-    const previous = await ctx.runMutation(internal.pages.authorize, { token, ticket, requestId });
+    const previous = await ctx.runMutation(internal.pages.authorize, { ticket, requestId });
     const source = await readBundle(request);
     const sourceDigest = await sha256Hex(new TextEncoder().encode(pageFingerprintInput({
       ticketId: previous.ticketId, entry: source.entry, files: source.files,
@@ -190,7 +195,7 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     if (previous.published) return json(request, 200, published(previous.published, false, requestId));
     const bundle = await prepareBundle(ctx, request, source);
     const manifest = bundle.files.map(({ path, size, sha256, rasterType }) => ({ path, size, sha256, rasterType }));
-    const reservation = await ctx.runMutation(internal.pages.reserve, { token, ticket, requestId, entry: bundle.entry, manifest, sourceDigest });
+    const reservation = await ctx.runMutation(internal.pages.reserve, { ticket, requestId, entry: bundle.entry, manifest, sourceDigest });
     if (reservation.state === "published") {
       return json(request, 200, published(reservation.page, false, requestId));
     }
@@ -202,7 +207,7 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
       const storageId = await ctx.storage.store(new Blob([file.blob], { type: write.contentType }));
       await ctx.runMutation(internal.pages.recordStaged, { pageId, marker: write.marker, path: file.path, sha256: file.sha256, size: file.size, storageId });
     }
-    const page = await ctx.runMutation(internal.pages.commit, { token, pageId });
+    const page = await ctx.runMutation(internal.pages.commit, { pageId });
     return json(request, 201, published(page, true, requestId));
   } catch (error) {
     const code = error instanceof PublishError ? error.message : errorCode(error);

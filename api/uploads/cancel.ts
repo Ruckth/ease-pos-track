@@ -1,4 +1,3 @@
-import { createServerRuntime } from "../../server/runtime.js";
+import { createMediaEndpoints } from "../../server/media-transport.js";
 
-const runtime = createServerRuntime();
-export const POST = runtime.cancelUpload;
+export const POST = createMediaEndpoints().cancelUpload;

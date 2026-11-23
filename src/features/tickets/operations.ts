@@ -29,25 +29,25 @@ export class TicketOperationFailure extends Error {
 }
 
 /** Captures the version of the user's intent. Conflicts are never silently retried. */
-export function ticketOperations(adapter: TicketAdapter, token: string, notices: {
+export function ticketOperations(adapter: TicketAdapter, notices: {
   success: (message: OperationMessage, undo?: () => Promise<unknown>) => void;
 }) {
   async function run<T>(call: () => Promise<T>): Promise<T> {
     try { return await call(); } catch (error) { throw new TicketOperationFailure(error); }
   }
-  const target = (item: TicketTarget) => ({ token, id: item._id, expectedVersion: item.version });
+  const target = (item: TicketTarget) => ({ id: item._id, expectedVersion: item.version });
   async function announce<T extends { version: number; eventId?: string | null }>(call: () => Promise<T>, message: OperationMessage, undo: (result: T) => Promise<unknown>) {
     const result = await run(call);
     if (result.eventId) notices.success(message, () => run(() => undo(result)));
     return result;
   }
   return {
-    edit: (item: TicketTarget, title: string, description: string) => announce(() => adapter.edit({ ...target(item), title, description }), "ticketUpdated", result => adapter.undoEdit({ token, eventId: result.eventId!, expectedVersion: result.version })),
-    status: (item: TicketTarget, status: TicketStatus) => announce(() => adapter.status({ ...target(item), status }), "statusUpdated", result => adapter.undoStatus({ token, eventId: result.eventId!, expectedVersion: result.version })),
-    urgency: (item: TicketTarget, urgencyScore: number | undefined) => announce(() => adapter.urgency({ ...target(item), urgencyScore }), "urgencySaved", result => adapter.undoUrgency({ token, eventId: result.eventId!, expectedVersion: result.version })),
+    edit: (item: TicketTarget, title: string, description: string) => announce(() => adapter.edit({ ...target(item), title, description }), "ticketUpdated", result => adapter.undoEdit({ eventId: result.eventId!, expectedVersion: result.version })),
+    status: (item: TicketTarget, status: TicketStatus) => announce(() => adapter.status({ ...target(item), status }), "statusUpdated", result => adapter.undoStatus({ eventId: result.eventId!, expectedVersion: result.version })),
+    urgency: (item: TicketTarget, urgencyScore: number | undefined) => announce(() => adapter.urgency({ ...target(item), urgencyScore }), "urgencySaved", result => adapter.undoUrgency({ eventId: result.eventId!, expectedVersion: result.version })),
     async archive(item: TicketTarget, customer = false) {
       const result = await run(() => adapter.archive(target(item)));
-      notices.success(customer ? "ticketDeleted" : "ticketArchived", customer ? undefined : () => run(() => adapter.restore({ token, id: item._id, expectedVersion: result.version })));
+      notices.success(customer ? "ticketDeleted" : "ticketArchived", customer ? undefined : () => run(() => adapter.restore({ id: item._id, expectedVersion: result.version })));
       return result;
     },
     async restore(item: TicketTarget) {
@@ -56,10 +56,10 @@ export function ticketOperations(adapter: TicketAdapter, token: string, notices:
       return result;
     },
     addAnnotation: (item: TicketTarget, input: AnnotationDraftInput) => run(() => adapter.addAnnotation({ ...target(item), ...input })),
-    updateAnnotation: (item: TicketTarget, input: AnnotationUpdateInput) => announce(() => adapter.updateAnnotation({ ...target(item), ...input }), "commentUpdated", result => adapter.undoAnnotation({ token, eventId: result.eventId!, expectedVersion: result.version })),
+    updateAnnotation: (item: TicketTarget, input: AnnotationUpdateInput) => announce(() => adapter.updateAnnotation({ ...target(item), ...input }), "commentUpdated", result => adapter.undoAnnotation({ eventId: result.eventId!, expectedVersion: result.version })),
     async removeAnnotation(item: TicketTarget, annotationId: string) {
       const result = await run(() => adapter.removeAnnotation({ ...target(item), annotationId }));
-      notices.success("commentDeleted", () => run(() => adapter.restoreAnnotation({ token, id: item._id, annotationId, expectedVersion: result.version })));
+      notices.success("commentDeleted", () => run(() => adapter.restoreAnnotation({ id: item._id, annotationId, expectedVersion: result.version })));
     },
     async restoreAnnotation(item: TicketTarget, annotationId: string) {
       await run(() => adapter.restoreAnnotation({ ...target(item), annotationId }));

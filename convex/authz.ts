@@ -1,31 +1,23 @@
 /** Role and resource rules shared by domain operations. */
 
-type ActorRole = "staff" | "customer";
+export type StaffRole = "owner" | "staff";
 
-export type Actor<CustomerId extends string = string> =
-  | { role: "staff"; customerId?: undefined }
-  | { role: "customer"; customerId: CustomerId };
-
-type SessionLike<CustomerId extends string = string> = {
-  role?: ActorRole;
-  customerId?: CustomerId;
-};
+/**
+ * The live principal behind a protected call. Admission-derived actors always
+ * carry the durable staffId or customerId; pure rule tests may omit staffId.
+ */
+export type Actor<CustomerId extends string = string, StaffId extends string = string> =
+  | { role: "staff"; staffId?: StaffId; staffRole?: StaffRole; customerId?: undefined }
+  | { role: "customer"; customerId: CustomerId; staffId?: undefined };
 
 type OwnedDocument<CustomerId extends string = string> = {
   ownerCustomerId?: CustomerId;
 };
 
-/** Invalid sessions never gain staff privileges. */
-export function actorFromSession<CustomerId extends string>(
-  session: SessionLike<CustomerId>,
-): Actor<CustomerId> {
-  if (session.role === "customer") {
-    // A customer session without a customer link is unusable, never staff.
-    if (!session.customerId) throw new Error("SESSION_EXPIRED");
-    return { role: "customer", customerId: session.customerId };
-  }
-  if (session.role !== "staff") throw new Error("SESSION_EXPIRED");
-  return { role: "staff" };
+/** A staff actor whose current role is Owner. */
+export function assertOwnerActor(actor: Actor<string>) {
+  if (actor.role !== "staff") throw new Error("STAFF_ONLY");
+  if (actor.staffRole !== "owner") throw new Error("OWNER_ONLY");
 }
 
 function isStaffActor(actor: Actor<string>) {
@@ -107,9 +99,9 @@ export function canUseProject(
   return isStaffActor(actor) || isMember;
 }
 
-/** Actor columns stamped on audit events and upload intents. */
-export function actorFields<CustomerId extends string>(actor: Actor<CustomerId>) {
+/** Actor columns stamped on audit events, receipts and upload intents. */
+export function actorFields<CustomerId extends string, StaffId extends string>(actor: Actor<CustomerId, StaffId>) {
   return actor.role === "customer"
     ? { actorRole: "customer" as const, actorCustomerId: actor.customerId }
-    : { actorRole: "staff" as const };
+    : { actorRole: "staff" as const, ...(actor.staffId === undefined ? {} : { actorStaffId: actor.staffId }) };
 }

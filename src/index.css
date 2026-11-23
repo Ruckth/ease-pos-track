@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: 210 25% 97%;
+    --background: 216 53% 96%;
     --foreground: 220 24% 12%;
     --card: 0 0% 100%;
     --card-foreground: 220 24% 12%;
@@ -21,18 +21,248 @@
     --destructive: 0 72% 46%;
     --destructive-foreground: 0 0% 100%;
     --border: 216 20% 84%;
-    --input: 216 20% 84%;
+    --input: 216 14% 48%;
     --ring: 213 83% 38%;
-    --radius: 8px;
+    --radius: 10px;
+    color-scheme: light;
+    --ticket-paper: 255 252 255;
+    --aurora-glow-a: rgb(194 166 252 / 45%);
+    --aurora-glow-b: rgb(255 197 155 / 45%);
+    --aurora-glow-c: rgb(249 169 214 / 34%);
+    --glass-fill: 250 253 255;
+    --glass-rim: rgb(255 255 255 / 86%);
+    --glass-glint: rgb(255 255 255 / 72%);
+    --glass-shadow: rgb(49 70 114 / 12%);
+    /* Flat surfaces: fills and soft elevation group content instead of outlines. */
+    --field: 216 33% 93%;
+    --surface-shadow: 0 1px 2px rgb(36 49 73 / 6%), 0 4px 16px -8px rgb(36 49 73 / 22%);
+    --surface-shadow-raised: 0 0 0 1px rgb(36 49 73 / 7%), 0 14px 36px -10px rgb(36 49 73 / 32%);
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    --background: 222 42% 10%;
+    --foreground: 210 37% 96%;
+    --card: 218 32% 17%;
+    --card-foreground: 210 37% 96%;
+    --popover: 220 32% 15%;
+    --popover-foreground: 210 37% 96%;
+    --primary: 191 80% 69%;
+    --primary-foreground: 217 54% 11%;
+    --secondary: 215 29% 24%;
+    --secondary-foreground: 207 39% 94%;
+    --muted: 218 27% 22%;
+    --muted-foreground: 216 23% 75%;
+    --accent: 211 31% 27%;
+    --accent-foreground: 210 44% 97%;
+    --destructive: 353 88% 74%;
+    --destructive-foreground: 345 55% 12%;
+    --border: 215 24% 32%;
+    --input: 216 18% 60%;
+    --ring: 187 82% 71%;
+    --ticket-paper: 42 42 64;
+    --aurora-glow-a: rgb(126 97 190 / 42%);
+    --aurora-glow-b: rgb(167 95 105 / 34%);
+    --aurora-glow-c: rgb(88 94 161 / 32%);
+    --glass-fill: 25 37 57;
+    --glass-rim: rgb(169 200 232 / 25%);
+    --glass-glint: rgb(218 242 255 / 10%);
+    --glass-shadow: rgb(2 7 19 / 27%);
+    --field: 218 27% 23%;
+    --surface-shadow: 0 1px 2px rgb(2 7 19 / 30%), 0 6px 18px -8px rgb(2 7 19 / 55%);
+    --surface-shadow-raised: 0 0 0 1px rgb(169 200 232 / 10%), 0 16px 36px -10px rgb(2 7 19 / 75%);
   }
 
   * {
     @apply border-border;
   }
 
+  /* Menus and popovers appear without the fade/zoom under reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"] {
+      animation: none !important;
+    }
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+}
+
+@layer components {
+  /*
+   * Flat, low-border base. Surfaces use fills and soft elevation; borders stay
+   * transparent so forced-colors mode still draws every boundary. Structured
+   * data keeps its own dividers and focus keeps a high-contrast ring.
+   */
+  .aurora-canvas {
+    background-color: hsl(var(--background));
+  }
+
+  .aurora-panel, .aurora-toolbar, .aurora-ticket {
+    border: 1px solid transparent;
+    box-shadow: var(--surface-shadow);
+  }
+
+  .aurora-panel, .aurora-toolbar {
+    background-color: hsl(var(--card));
+    border-radius: 1rem;
+  }
+
+  .aurora-ticket {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border-radius: 0.75rem;
+  }
+
+  .ticket-lane {
+    background-color: hsl(var(--muted) / 0.55);
+    border: 1px solid transparent;
+    border-radius: 1.125rem;
+  }
+
+  .ticket-surface {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border: 1px solid transparent;
+    border-radius: 0.875rem;
+    box-shadow: var(--surface-shadow);
+  }
+
+  .ticket-surface-selected {
+    background-color: color-mix(in srgb, hsl(var(--primary)) 8%, hsl(var(--card)));
+    box-shadow: inset 0 0 0 2px hsl(var(--primary) / 0.7), var(--surface-shadow);
+  }
+
+  .ticket-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.5rem;
+    background-color: color-mix(in srgb, currentColor 8%, transparent);
+  }
+
+  .aurora-control {
+    border: 1px solid transparent;
+    background-color: hsl(var(--field));
+  }
+
+  select.aurora-control {
+    border-bottom-color: hsl(var(--input));
+  }
+
+  /* Elevated glass recipe kept for a later explicit appearance choice; unused by default. */
+  .surface-glass {
+    background-color: rgb(var(--glass-fill));
+    border: 1px solid var(--glass-rim);
+    box-shadow: inset 0 1px var(--glass-glint), 0 6px 20px -7px var(--glass-shadow);
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .surface-glass {
+      background-color: rgb(var(--glass-fill) / 0.64);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+    }
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .ticket-surface:has([data-ticket-id]), button.ticket-surface {
+      transition: background-color 140ms ease, box-shadow 140ms ease;
+    }
+  }
+
+  @media (hover: hover) {
+    .ticket-surface:has([data-ticket-id]):hover, button.ticket-surface:hover {
+      background-color: color-mix(in srgb, hsl(var(--primary)) 5%, hsl(var(--card)));
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .surface-glass {
+      background-color: rgb(var(--glass-fill));
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .ticket-surface-selected {
+      border-color: Highlight;
+      border-width: 2px;
+    }
+  }
+
+  /* Notifications: neutral surface, severity in the icon colour only. */
+  :root [data-sonner-toaster][data-sonner-theme] {
+    --normal-bg: hsl(var(--popover));
+    --normal-border: transparent;
+    --normal-text: hsl(var(--popover-foreground));
+    --border-radius: 0.75rem;
+    font-family: inherit;
+  }
+
+  :root [data-sonner-toast].app-toast {
+    box-shadow: var(--surface-shadow-raised);
+    gap: 0.625rem;
+  }
+
+  :root [data-sonner-toast] .app-toast-description {
+    color: hsl(var(--muted-foreground));
+  }
+
+  :root [data-sonner-toast] [data-button].app-toast-action {
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    border-radius: 0.375rem;
+    background-color: hsl(var(--field));
+    color: hsl(var(--foreground));
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+
+  @media (pointer: coarse) {
+    :root [data-sonner-toast] [data-button].app-toast-action {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
+  }
+
+  :root [data-sonner-toast] [data-button].app-toast-action:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  .app-toast-success [data-icon] { color: rgb(4 120 87); }
+  .app-toast-error [data-icon] { color: hsl(var(--destructive)); }
+  .app-toast-warning [data-icon] { color: rgb(180 83 9); }
+  .app-toast-info [data-icon] { color: hsl(var(--primary)); }
+  .dark .app-toast-success [data-icon] { color: rgb(110 231 183); }
+  .dark .app-toast-warning [data-icon] { color: rgb(252 211 77); }
+
+  /* Opaque token colors keep annotations readable without backdrop-filter. */
+  .annotation-glass-marker {
+    background-color: hsl(var(--primary));
+  }
+
+  .annotation-glass-popover {
+    background-color: hsl(var(--popover));
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .annotation-glass-marker {
+      background-color: hsl(var(--primary) / 0.82);
+      -webkit-backdrop-filter: blur(8px) saturate(1.2);
+      backdrop-filter: blur(8px) saturate(1.2);
+    }
+
+    .annotation-glass-popover {
+      background-color: hsl(var(--popover) / 0.88);
+      -webkit-backdrop-filter: blur(16px) saturate(1.15);
+      backdrop-filter: blur(16px) saturate(1.15);
+    }
   }
 }

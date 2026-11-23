@@ -1,11 +1,11 @@
 import { httpRouter } from "convex/server";
-import { pageHttpAction } from "./functions";
+import { pageHttp } from "./functions";
 import { publishPage, publishPreflight, servePage } from "./page_http";
+import { doctorRoute } from "./t3_doctor";
 
 const http = httpRouter();
-
-http.route({ pathPrefix: "/v1/tickets/", method: "POST", handler: pageHttpAction("page-publish", publishPage) });
-http.route({ pathPrefix: "/v1/tickets/", method: "OPTIONS", handler: pageHttpAction("page-publish", publishPreflight) });
-http.route({ pathPrefix: "/p/", method: "GET", handler: pageHttpAction("page-serve", servePage) });
-
+http.route(doctorRoute);
+http.route(pageHttp("publish", publishPage));
+http.route(pageHttp("preflight", publishPreflight));
+http.route(pageHttp("serve", servePage));
 export default http;
