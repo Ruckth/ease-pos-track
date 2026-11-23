@@ -1,31 +1,30 @@
-import { TicketCreatedDate } from "@/components/ticket-created-date";
 import { TicketInbox } from "./ticket-inbox";
 import { errorCode } from "../../../shared/errors";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
 import { ProductWordmark } from "@/components/product-wordmark";
 import { queueNeighbors } from "@/lib/staff-ticket-queue";
-import { LanguageSelector } from "@/components/auth-screens";
+import { LanguageMenuGroup } from "@/components/language-menu";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
-import { statusMeta } from "@/components/ticket-status";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { CustomerTicketWizard } from "./customer-ticket-wizard";
 import { useI18n } from "@/lib/i18n";
-import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { Images, Loader2, LogOut, MapPin, Plus, Search, UserRound } from "lucide-react";
+import { ChevronDown, Loader2, LogOut, Plus, Search, UserRound } from "lucide-react";
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { TicketSummary } from "../../../shared/ticket-contracts";
 import { useCustomerTickets, useWorkspaceTicket } from "./adapter";
 import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
 import { customerQueue, customerQueueCounts } from "./customer-queue";
 import { useComposer } from "./use-composer";
-import { useWorkspaceMenu } from "./use-workspace-menu";
+import { CustomerTicketRow } from "./customer-ticket-row";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, useMenuAction,
+} from "@/components/ui/dropdown-menu";
 import { CustomerAccountDialog } from "@/components/account-dialogs";
 import { useWorkspaceNavigation } from "./use-workspace-navigation";
 
@@ -33,11 +32,11 @@ export function CustomerPortal({ viewer, onLogout }: {
   viewer: { username: string; displayName: string; needsRecoveryCode: boolean }; onLogout: () => Promise<void>;
 }) {
   const [accountOpen, setAccountOpen] = useState(false);
-  const { language, setLanguage, t } = useI18n();
+  const { t } = useI18n();
   const navigation = useWorkspaceNavigation("customer");
   const { projects, current: project, select: selectProject } = useCurrentProject(navigation.project, navigation.selectProject);
   const composer = useComposer(project, onLogout);
-  const toolsMenu = useWorkspaceMenu();
+  const toolsMenu = useMenuAction();
   const projectId = project?._id;
   const ticket = project && (!navigation.project || navigation.project === project.key) ? navigation.ticket : null;
   const selected = useWorkspaceTicket(ticket, projectId);
@@ -89,31 +88,38 @@ export function CustomerPortal({ viewer, onLogout }: {
 
   return <main className="aurora-canvas min-h-screen px-3 pt-3 sm:px-5">
     <header className="aurora-toolbar relative z-30 mx-auto max-w-6xl">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-3 py-2.5 sm:px-5 sm:py-3">
         <ProductWordmark />
-        <div className="flex flex-wrap items-center max-w-full gap-2 [&>select]:min-h-11 sm:[&>select]:w-auto [&>span]:min-h-11">
-          {projects && project ? <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} /> : null}
-          {project && <TicketInbox role="customer" key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
-          <details {...toolsMenu.props} className="relative">
-            <summary className="aurora-control flex min-h-11 cursor-pointer list-none items-center rounded-lg border px-3 text-sm font-medium text-foreground transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("customerQueueMore")}</summary>
-            <div className="absolute right-0 z-30 mt-1.5 grid w-60 max-w-[calc(100vw-3rem)] gap-3 rounded-xl border bg-popover p-3.5 text-popover-foreground shadow-lg">
-              <p className="break-all text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
-              <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => { toolsMenu.close(); setAccountOpen(true); }}><UserRound aria-hidden="true" />{t("accountTitle")}</Button>
-              <div className="[&_button]:min-h-11"><LanguageSelector language={language} onChange={setLanguage} /></div>
-              <Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={() => { toolsMenu.close(); void composer.signOut(); }}><LogOut />{t("signOut")}</Button>
-            </div>
-          </details>
+        {projects && project ? <div className="order-last min-w-0 max-w-full basis-full sm:order-none sm:basis-auto sm:flex-1">
+          <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} />
+        </div> : null}
+        <div className="ml-auto flex items-center gap-2">
+          {project && <TicketInbox role="customer" compact key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
+          <DropdownMenu {...toolsMenu.root}>
+            <DropdownMenuTrigger render={<Button type="button" variant="outline" className="min-h-11 min-w-11 gap-1.5 rounded-lg px-3" />}
+              aria-label={t("customerQueueMore")} title={t("customerQueueMore")}>
+              <UserRound aria-hidden="true" /><span className="hidden sm:inline">{t("customerQueueMore")}</span><ChevronDown className="hidden text-muted-foreground sm:block" aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <p className="break-all px-2.5 py-1.5 text-xs text-muted-foreground">{viewer.displayName} · {viewer.username}</p>
+              <DropdownMenuItem onClick={() => toolsMenu.run(() => setAccountOpen(true))}><UserRound aria-hidden="true" />{t("accountTitle")}</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <LanguageMenuGroup />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => toolsMenu.run(() => { void composer.signOut(); })}><LogOut aria-hidden="true" />{t("signOut")}</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>
     <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} hasRecoveryCode={!viewer.needsRecoveryCode} />
     <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
-      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/90 bg-amber-50/95 px-4 py-3 text-sm text-amber-950 shadow-sm dark:bg-amber-950/30 dark:text-amber-100">
+      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
         <span>{t("recoveryCodeNeeded")}</span>
         <Button className="min-h-11 rounded-lg" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
       </div> : null}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
-        <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
+        <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
         <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
         <Button className="min-h-11 rounded-lg" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
           <Plus />{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
@@ -194,16 +200,16 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
     <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
-      <label className="min-w-40 flex-1 space-y-1 text-sm font-medium text-foreground">
+      <label className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto">
         <span>{t("customerQueueSearch")}</span>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input className="aurora-control min-h-11 rounded-lg bg-card/85 pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
+          <Input className="min-h-11 rounded-lg pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
         </div>
       </label>
       <label className="grid gap-1 text-sm font-medium text-foreground">
         <span>{t("ticketStatus")}</span>
-        <select className="aurora-control min-h-11 max-w-full rounded-lg border px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={filter} onChange={event => onFilter(event.target.value)}>
+        <select className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={filter} onChange={event => onFilter(event.target.value)}>
           {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
         </select>
       </label>
@@ -213,37 +219,8 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
       : <div>
         <div className="flex flex-wrap justify-between gap-2 px-1 pb-2 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
         {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
-          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="aurora-control min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
+          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
       </div>}
     {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
   </section>;
-}
-
-function CustomerTicketRow({ item, selected, onSelect }: { item: TicketSummary; selected: boolean; onSelect: (id: Id<"tickets">) => void }) {
-  const { t } = useI18n();
-  const meta = statusMeta(item.status);
-  const StatusIcon = meta.icon;
-  const label = formatTicketNumber(item.ticketNumber, item.projectKey);
-  return <button type="button" data-ticket-id={item._id}
-    className={cn(
-      "ticket-surface flex min-h-20 w-full flex-col gap-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      item.status === "waiting" && "border-l-[3px] border-l-violet-500",
-      selected && "border-primary/70 bg-primary/5",
-    )}
-    aria-label={[t("viewTicket", { ticket: label }), item.title, t(meta.labelKey)].join(", ")} aria-current={selected ? "true" : undefined} onClick={() => onSelect(item._id)}>
-    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
-      <span className={cn("ticket-chip font-medium", meta.text)}>
-        <StatusIcon className="size-3.5" aria-hidden />
-        {item.status === "waiting" ? t("customerQueueWaiting") : t(meta.labelKey)}
-      </span>
-      <span className="ml-auto font-mono">{label}</span>
-    </span>
-    <span className="break-words text-base font-semibold leading-snug text-foreground">{item.title}</span>
-    {item.excerpt ? <span className="line-clamp-1 text-sm text-muted-foreground">{item.excerpt}</span> : null}
-    <span className="mt-1 flex w-full flex-wrap items-center gap-3 border-t border-border/50 pt-2 text-xs text-muted-foreground">
-      <TicketCreatedDate timestamp={item.createdAt} />
-      {item.mediaCount ? <span className="inline-flex items-center gap-1"><Images className="size-3" aria-hidden="true" />{t("reviewMedia", { count: item.mediaCount })}</span> : null}
-      {item.annotationCount ? <span className="inline-flex items-center gap-1"><MapPin className="size-3" aria-hidden="true" />{t("reviewPins", { count: item.annotationCount })}</span> : null}
-    </span>
-  </button>;
 }

@@ -11,12 +11,12 @@ import { useCustomerInbox, useStaffInbox } from "./adapters/inbox";
 
 type Props = { projectId: Id<"projects">; projectKey: string; openTicket: (id: Id<"tickets">) => void };
 
-export function TicketInbox(props: Props & { role: "customer" | "staff" }) {
+export function TicketInbox(props: Props & { role: "customer" | "staff"; /** Icon-only below 640 px; the name stays in aria-label. */ compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const { t } = useI18n();
   return <>
-    <Button variant="outline" className="min-h-11" aria-haspopup="dialog" onClick={() => setOpen(true)}>
-      <Inbox aria-hidden />{t("ticketInbox")}
+    <Button variant="outline" className={props.compact ? "min-h-11 min-w-11 px-3 sm:px-4" : "min-h-11"} aria-haspopup="dialog" aria-label={props.compact ? t("ticketInbox") : undefined} onClick={() => setOpen(true)}>
+      <Inbox aria-hidden /><span className={props.compact ? "hidden sm:inline" : undefined}>{t("ticketInbox")}</span>
     </Button>
     <Dialog open={open} onOpenChange={setOpen} title={t("ticketInbox")} description={props.projectKey}>
       {open && (props.role === "staff"

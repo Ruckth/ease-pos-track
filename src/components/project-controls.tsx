@@ -1,10 +1,14 @@
 import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useProjects, useCreateProject, useProjectMembers } from "@/app/adapter";
 import { toast } from "sonner";
-import { FolderKanban, Loader2, Plus, Trash2, Users } from "lucide-react";
+import { ChevronDown, FolderKanban, Loader2, Plus, Trash2 } from "lucide-react";
 import type { Id } from "../../convex/_generated/dataModel";
 import { suggestProjectKey } from "../../shared/ticket-numbers";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuTrigger, useMenuAction,
+} from "@/components/ui/dropdown-menu";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
@@ -37,9 +41,12 @@ export function useCurrentProject(
   return { projects, current, select };
 }
 
-const selectClassName = "min-h-11 min-w-0 w-full max-w-56 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const projectLabel = (project: ProjectSummary) => `${project.name} (${project.key})`;
 
-/** A plain select of Projects. Hidden behind a label when there is only one. */
+/**
+ * The open Project. With several Projects it is a single-choice menu; with one
+ * it is a plain label. Create Project, when offered, is a separate action.
+ */
 export function ProjectSwitcher({
   projects,
   current,
@@ -52,33 +59,44 @@ export function ProjectSwitcher({
   onCreate?: () => void;
 }) {
   const { t } = useI18n();
+  const menu = useMenuAction();
   if (projects.length === 1) {
     return (
-      <span className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm font-medium" title={current.name}>
+      <span className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium" title={projectLabel(current)}>
         <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{current.name} ({current.key})</span>
+        <span className="truncate">{projectLabel(current)}</span>
       </span>
     );
   }
   return (
-    <select
-      className={selectClassName}
-      aria-label={t("chooseProject")}
-      value={current.key}
-      onChange={(event) => event.target.value ? onSelect(event.target.value) : onCreate?.()}
-    >
-      {projects.map((project) => (
-        <option key={project._id} value={project.key}>{project.name} ({project.key})</option>
-      ))}
-      {onCreate && <option value="">{t("newProject")}…</option>}
-    </select>
+    <DropdownMenu {...menu.root}>
+      <DropdownMenuTrigger render={<Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left" />}
+        aria-label={`${t("chooseProject")}: ${projectLabel(current)}`} title={projectLabel(current)}>
+        <FolderKanban className="text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 truncate">{projectLabel(current)}</span>
+        <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-max min-w-[max(var(--anchor-width),12rem)] max-w-[min(22rem,var(--available-width))]">
+        <DropdownMenuRadioGroup value={current.key} onValueChange={value => onSelect(String(value))}>
+          {projects.map(project => (
+            <DropdownMenuRadioItem key={project._id} value={project.key} closeOnClick className="whitespace-normal break-words">
+              {projectLabel(project)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        {onCreate ? <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => menu.run(onCreate)}><Plus aria-hidden="true" />{t("newProject")}…</DropdownMenuItem>
+        </> : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 export function NoProjects({ action }: { action?: ReactNode }) {
   const { t } = useI18n();
   return (
-    <div className="grid min-h-72 place-items-center rounded-lg border bg-card p-8 text-center">
+    <div className="aurora-panel grid min-h-72 place-items-center p-8 text-center">
       <div className="max-w-sm">
         <FolderKanban className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden="true" />
         <h2 className="text-base font-semibold">{t("noProjectsTitle")}</h2>
@@ -215,7 +233,7 @@ export function ProjectMembersDialog({
         <Button type="button" className="min-h-11" disabled={busy || !eligible} onClick={() => void onInvite()}>
           {busy ? <Loader2 className="animate-spin" /> : <Plus />}{t("createInviteLink")}
         </Button>
-        {link ? <div className="space-y-2 rounded-md border p-3" role="status">
+        {link ? <div className="space-y-2 rounded-lg bg-muted/50 p-3" role="status">
           <output className="block break-all rounded bg-muted p-2 font-mono text-xs">{link}</output>
           <Button type="button" variant="outline" className="min-h-11" onClick={() => void navigator.clipboard.writeText(link).then(() => toast.success(t("linkCopied")), () => undefined)}>{t("copyLink")}</Button>
         </div> : null}
@@ -233,7 +251,7 @@ export function ProjectMembersDialog({
         ) : members.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("noMembers")}</p>
         ) : (
-          <ul className="divide-y rounded-md border">
+          <ul className="divide-y divide-border/60 overflow-hidden rounded-lg bg-muted/40">
             {members.map((member) => (
               <li key={member.customerId} className="flex items-center justify-between gap-3 px-3 py-2">
                 <span className="min-w-0 truncate text-sm">
@@ -260,37 +278,5 @@ export function ProjectMembersDialog({
         )}
       </div>
     </Dialog>
-  );
-}
-
-/** Staff header controls: switch Project, add one, manage its customers. */
-export function StaffProjectControls({
-  projects,
-  current,
-  onSelect,
-  onCreate,
-}: {
-  projects: ProjectSummary[];
-  current: ProjectSummary | null;
-  onSelect: (key: string) => void;
-  onCreate: () => void;
-}) {
-  const { t } = useI18n();
-  const [membersOpen, setMembersOpen] = useState(false);
-  return (
-    <div className="flex items-center gap-1.5">
-      {current ? <ProjectSwitcher projects={projects} current={current} onSelect={onSelect} /> : null}
-      <Button type="button" variant="outline" size="icon" aria-label={t("newProject")} title={t("newProject")} onClick={onCreate}>
-        <Plus />
-      </Button>
-      {current ? (
-        <>
-          <Button type="button" variant="outline" size="icon" aria-label={t("projectMembers")} title={t("projectMembers")} onClick={() => setMembersOpen(true)}>
-            <Users />
-          </Button>
-          <ProjectMembersDialog project={current} owner open={membersOpen} onOpenChange={setMembersOpen} />
-        </>
-      ) : null}
-    </div>
   );
 }
