@@ -82,7 +82,7 @@ export async function prepareRaster(file: File) {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) throw new Error("IMAGE_INVALID");
+  if (!ctx || !("getImageData" in ctx)) throw new Error("IMAGE_INVALID");
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(image, 0, 0, width, height);
   if ("close" in image) image.close();
