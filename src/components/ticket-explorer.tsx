@@ -143,13 +143,13 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
         const open = event.currentTarget.open;
         setFiltersOpen(open);
       }}>
-        <summary className="aurora-control flex w-fit min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring md:min-h-8">
+        <summary className="aurora-control flex w-fit min-h-11 cursor-pointer list-none items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring md:min-h-8">
           <ListFilter aria-hidden className="size-4" />{t("queueFilters")}{rules > 0 ? ` (${rules})` : ""}
         </summary>
         {filtersOpen && <div className="aurora-panel mt-1.5 space-y-2 rounded-xl p-2">{filters}<p className="text-xs text-muted-foreground">{c.loadedScope}</p></div>}
       </details> : <div className="min-w-0 basis-full md:flex-1">{filters}</div>}
       {(search || filtering) && <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" onClick={reset}>{c.clearAll}</Button>}
-      {!workspace && <div className="flex rounded-md border bg-card p-1" role="group" aria-label={c.view}>
+      {!workspace && <div className="flex rounded-md border border-transparent bg-field p-1" role="group" aria-label={c.view}>
         <Button size="sm" variant={view === "board" ? "secondary" : "ghost"} aria-pressed={view === "board"} onClick={() => setLocalView("board")}><Columns3 />{c.board}</Button>
         <Button size="sm" variant={view === "table" ? "secondary" : "ghost"} aria-pressed={view === "table"} onClick={() => setLocalView("table")}><Table2 />{c.table}</Button>
       </div>}

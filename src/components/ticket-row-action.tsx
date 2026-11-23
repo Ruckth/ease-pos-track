@@ -18,7 +18,7 @@ export function TicketRowAction({ item, busy, onMove, onRestore }: {
   const label = t(archived ? "restore" : action.label);
   const reference = formatTicketNumber(item.ticketNumber, item.projectKey);
   return <Button type="button" variant="outline" size="sm"
-    className="ml-auto min-h-11 bg-transparent px-2.5 text-xs md:h-8 md:min-h-8" disabled={busy} aria-label={`${label} · ${reference}`}
+    className="ml-auto min-h-11 px-2.5 text-xs md:h-8 md:min-h-8" disabled={busy} aria-label={`${label} · ${reference}`}
     onClick={() => archived ? onRestore?.(item._id) : onMove?.(item._id, action.status)}>
     {label}
   </Button>;
