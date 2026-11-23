@@ -1,5 +1,5 @@
 import { convexTest } from "convex-test";
-import { identityTest } from "./identity-harness";
+import { fixtures, identityTest } from "./identity-harness";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -122,6 +122,20 @@ test("customer publishes a nested folder; replay returns the original link; chan
   expect((await f.t.query(api.pages.listTicketPages, { token: f.staff, id: f.aliceTicket.id })).map(row => row.url)).toEqual([page.url]);
   expect((await f.t.query(api.pages.listTicketPages, { token: f.alice, id: f.aliceTicket.id })).length).toBe(1);
   expect(await f.t.query(api.pages.listTicketPages, { token: f.bob, id: f.aliceTicket.id })).toEqual([]);
+});
+
+test("named staff publish; a replay belongs to that staff member only", async () => {
+  const f = await fixture();
+  const key = crypto.randomUUID();
+  const created = await f.publish(f.staff, f.aliceTicket.ref, form(), key);
+  expect(created.status).toBe(201);
+  const [row] = await f.rows();
+  expect([row.actorRole, row.actorCustomerId]).toEqual(["staff", undefined]);
+  expect(row.actorStaffId).toBeDefined();
+  expect((await f.publish(f.staff, f.aliceTicket.ref, form(), key)).status).toBe(200);
+  const colleague = await f.t.mutation(fixtures.staff, { email: "colleague@local.test" });
+  const foreign = await f.publish(colleague.session, f.aliceTicket.ref, form(), key);
+  expect([foreign.status, (await foreign.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
 });
 
 test("serving checks publication, lifecycle and revocation on every HTML and asset read", async () => {

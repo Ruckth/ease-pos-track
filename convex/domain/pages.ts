@@ -79,8 +79,10 @@ function makeShareKey() {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** Replays belong to the same durable principal: one customer, or one named staff member. */
 function sameActor(row: Doc<"ticketPages">, actor: AnyActor) {
-  return row.actorRole === actor.role && row.actorCustomerId === actor.customerId;
+  const fields: { actorRole: string; actorCustomerId?: string; actorStaffId?: string } = actorFields(actor);
+  return row.actorRole === fields.actorRole && row.actorCustomerId === fields.actorCustomerId && row.actorStaffId === fields.actorStaffId;
 }
 
 async function ticketByReference(ctx: Ctx, reference: string) {

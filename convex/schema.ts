@@ -500,6 +500,7 @@ export default defineSchema({
     requestId: v.string(),
     actorRole,
     actorCustomerId: v.optional(v.id("customers")),
+    actorStaffId: v.optional(v.id("staff")),
     sessionId: sessionReference,
     inputDigest: v.string(),
     entryPath: v.string(),
