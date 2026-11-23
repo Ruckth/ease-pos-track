@@ -71,11 +71,20 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 const env = { ...process.env };
 for (const key of Object.keys(env)) if (key.startsWith("CONVEX_")) delete env[key];
 env.CONVEX_AGENT_MODE = "anonymous";
+// Agent mode names a fresh worktree's backend `anonymous-agent`; `run` and `env`
+// must select that same project-local backend instead of failing to find one.
+let envFile = ENV_FILE;
+try {
+  if (JSON.parse(readFileSync(".convex/local/default/config.json", "utf8")).deploymentName === "anonymous-agent") {
+    envFile = ".convex/local/agent.env";
+    writeFileSync(envFile, "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\n");
+  }
+} catch { /* No local backend yet: the CLI creates one. */ }
 // The installed CLI auto-starts local backends for `run`, but not snapshot/env
 // commands. A read-only system query subscription holds the backend open. This
 // works with incompatible/empty schemas and never pushes application code.
 if (!["dev", "run"].includes(args[0]) && !args.includes("--help")) {
-  keeper = spawn("convex", ["run", "_system/cli/tables", '{"paginationOpts":{"numItems":1,"cursor":null}}', "--watch", "--env-file", ENV_FILE], { stdio: ["ignore", "pipe", "pipe"], env, shell: false });
+  keeper = spawn("convex", ["run", "_system/cli/tables", '{"paginationOpts":{"numItems":1,"cursor":null}}', "--watch", "--env-file", envFile], { stdio: ["ignore", "pipe", "pipe"], env, shell: false });
   try {
     await new Promise((ready, reject) => {
       const timeout = setTimeout(() => reject(new Error("Local backend startup timed out.")), 30_000);
@@ -85,7 +94,7 @@ if (!["dev", "run"].includes(args[0]) && !args.includes("--help")) {
     });
   } catch (error) { await stopKeeper(); console.error(error.message); restore(); process.exit(1); }
 }
-child = spawn("convex", [...args, "--env-file", ENV_FILE], { stdio: "inherit", env, shell: false });
+child = spawn("convex", [...args, "--env-file", envFile], { stdio: "inherit", env, shell: false });
 child.on("error", async (error) => {
   console.error(error.message);
   await stopKeeper();

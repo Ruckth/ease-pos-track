@@ -181,6 +181,34 @@ export const COMMAND_REGISTRY = [
     arguments: [TICKET_ARGUMENT],
     options: [EXPECTED_VERSION, PROD],
   },
+  {
+    name: "page publish",
+    summary: "Publish an HTML file or folder as a hosted page on a Ticket and print its link.",
+    authentication: "staff",
+    interactive: false,
+    arguments: [TICKET_ARGUMENT, { name: "path", description: "An HTML file, or a folder containing the entry HTML and its assets.", required: true }],
+    options: [
+      { name: "--entry", value: "relative-path", description: "Entry HTML inside the folder; required when it is ambiguous." },
+      { name: "--request-id", value: "id", description: "Retry key; generated when omitted. Reuse it to retry the same page." },
+      PROD,
+    ],
+  },
+  {
+    name: "page list",
+    summary: "List the published pages on a Ticket.",
+    authentication: "staff",
+    interactive: false,
+    arguments: [TICKET_ARGUMENT],
+    options: [PROD],
+  },
+  {
+    name: "page revoke",
+    summary: "Revoke a published page link so its HTML and assets stop opening.",
+    authentication: "staff",
+    interactive: false,
+    arguments: [TICKET_ARGUMENT],
+    options: [{ name: "--page", value: "page-id", description: "Page id from page publish or page list.", required: true }, PROD],
+  },
 ] as const satisfies readonly TicketCommandDefinition[];
 
 type RegisteredCommandName = (typeof COMMAND_REGISTRY)[number]["name"];

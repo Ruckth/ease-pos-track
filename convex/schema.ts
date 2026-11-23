@@ -98,6 +98,8 @@ const uploadIntentStatus = v.union(
   v.literal("cleaned"),
 );
 
+const pageManifestEntry = v.object({ path: v.string(), size: v.number(), sha256: v.string() });
+
 export default defineSchema({
   projects: defineTable({
     name: v.string(),
@@ -256,6 +258,36 @@ export default defineSchema({
     key: v.string(),
     count: v.number(),
   }).index("by_key", ["key"]),
+  // A hosted page published from a Ticket. Bytes live in Convex File Storage;
+  // `files` is the durable ownership record of every blob this row staged.
+  ticketPages: defineTable({
+    ticketId: v.id("tickets"),
+    projectId: v.id("projects"),
+    requestId: v.string(),
+    actorRole,
+    actorCustomerId: v.optional(v.id("customers")),
+    sessionId: v.id("sessions"),
+    inputDigest: v.string(),
+    entryPath: v.string(),
+    manifest: v.array(pageManifestEntry),
+    files: v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string(), contentType: v.string(), storageId: v.id("_storage") })),
+    // Blobs recorded after the row stopped staging, or duplicates of a staged path.
+    discarded: v.array(v.id("_storage")),
+    totalBytes: v.number(),
+    state: v.union(v.literal("staging"), v.literal("published"), v.literal("revoked"), v.literal("abandoned")),
+    shareKey: v.optional(v.string()),
+    expiresAt: v.number(),
+    // Set while blobs await the gated reclaim sweep.
+    reclaimAfter: v.optional(v.number()),
+    publishedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_request", ["requestId"])
+    .index("by_share_key", ["shareKey"])
+    .index("by_ticket", ["ticketId", "state", "createdAt"])
+    .index("by_state_expires", ["state", "expiresAt"])
+    .index("by_reclaim", ["reclaimAfter"]),
   uploadIntents: defineTable({
     sessionId: v.id("sessions"),
     secret: v.string(),

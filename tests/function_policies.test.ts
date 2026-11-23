@@ -3,7 +3,7 @@ import { httpRouter } from "convex/server";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
-import { publicAuthMutation, publicAuthQuery, trustedCallbackMutation } from "../convex/functions";
+import { pageHttpAction, publicAuthMutation, publicAuthQuery, trustedCallbackMutation } from "../convex/functions";
 import { v } from "convex/values";
 import { mutationGeneric, queryGeneric, actionGeneric, internalMutationGeneric, internalQueryGeneric, internalActionGeneric, httpActionGeneric } from "./fixtures/raw-registration";
 
@@ -37,5 +37,18 @@ test("policy manifest rejects new public auth/callback exports and wrong purpose
 test("HTTP routes cannot hide an untagged handler inside the router", () => {
   const router = httpRouter();
   router.route({ path: "/bypass", method: "GET", handler: httpActionGeneric(async () => new Response()) });
-  assert.deepEqual(routeViolations("http.ts", router), ["http.ts:GET /bypass: untagged HTTP route"]);
+  assert.deepEqual(routeViolations("http.ts", router, {}), ["http.ts:GET /bypass: untagged HTTP route"]);
+});
+
+test("HTTP routes are enumerated: page serving cannot be relabelled, widened or dropped", () => {
+  const handler = async () => new Response();
+  const router = httpRouter();
+  router.route({ pathPrefix: "/p/", method: "GET", handler: pageHttpAction("page-publish", handler) });
+  router.route({ pathPrefix: "/v1/tickets/", method: "PUT", handler: pageHttpAction("page-publish", handler) });
+  assert.deepEqual(routeViolations("http.ts", router).sort(), [
+    "http.ts: missing HTTP route OPTIONS /v1/tickets/*",
+    "http.ts: missing HTTP route POST /v1/tickets/*",
+    "http.ts:GET /p/*: unexpected policy httpAction:page-publish",
+    "http.ts:PUT /v1/tickets/*: unexpected policy httpAction:page-publish",
+  ]);
 });

@@ -36,7 +36,7 @@ import {
  * Loads a ticket the actor may read, or null. Denied and non-existent tickets are
  * indistinguishable, so the portal cannot be used to probe for ticket ids.
  */
-async function readableTicket(
+export async function readableTicket(
   ctx: QueryCtx | MutationCtx,
   actor: Actor<Id<"customers">>,
   id: Id<"tickets">,
@@ -74,7 +74,7 @@ function publicTicketEvent(event: Doc<"ticketEvents">) {
 }
 
 /** Loads an active ticket the actor is allowed to change. */
-async function requireWritableTicket(
+export async function requireWritableTicket(
   ctx: MutationCtx,
   actor: Actor<Id<"customers">>,
   id: Id<"tickets">,

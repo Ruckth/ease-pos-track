@@ -1,6 +1,6 @@
 /** The only module allowed to register Convex functions. */
 import { v, ConvexError, type ObjectType, type PropertyValidators } from "convex/values";
-import { query, mutation, action, internalQuery, internalMutation, internalAction } from "./_generated/server";
+import { query, mutation, action, internalQuery, internalMutation, internalAction, httpAction } from "./_generated/server";
 import type { QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
 import { requireActor } from "./session_auth";
 import { constantTimeEquals } from "./password";
@@ -184,4 +184,26 @@ export function internalJobAction<A extends PropertyValidators, R>(definition: D
     args: v.object(definition.args),
     handler: (ctx, args) => guarded(definition.name, () => definition.handler(ctx, args)),
   }), "internalJobAction");
+}
+
+/** Internal session-checked mutation for server-side callers that carry a bearer token. */
+export function internalActorMutation<A extends PropertyValidators & { token: typeof tokenValidator }, R>(
+  definition: Definition<MutationCtx & Access, A, R>,
+) {
+  return tagged(internalMutation({
+    args: v.object(definition.args),
+    handler: (ctx, args) => guarded(definition.name, async () => {
+      const access = await requireActor(ctx, args.token);
+      return await definition.handler(Object.assign(ctx, access), args);
+    }),
+  }), "internalActorMutation");
+}
+
+/**
+ * HTTP routes name their purpose. `page-publish` authenticates a bearer session
+ * through internal actor mutations; `page-serve` is the capability-URL reader.
+ */
+type HttpPurpose = "page-publish" | "page-serve";
+export function pageHttpAction(purpose: HttpPurpose, handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
+  return tagged(httpAction(handler), `httpAction:${purpose}`);
 }

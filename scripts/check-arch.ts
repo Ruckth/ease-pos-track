@@ -154,9 +154,24 @@ export function violations(module: string, exports: Record<string, unknown>) {
 }
 
 
-export function routeViolations(module: string, router: { getRoutes(): (readonly [string, string, object])[] }) {
-  return router.getRoutes().flatMap(([path, method, handler]) => registrationPolicy(handler)
-    ? [] : [`${module}:${method} ${path}: untagged HTTP route`]);
+/** Every HTTP route is enumerated with its purpose; a new or relabelled route fails. */
+const httpRoutes: Record<string, string> = {
+  "POST /v1/tickets/*": "httpAction:page-publish",
+  "OPTIONS /v1/tickets/*": "httpAction:page-publish",
+  "GET /p/*": "httpAction:page-serve",
+};
+
+export function routeViolations(module: string, router: { getRoutes(): (readonly [string, string, object])[] }, manifest: Record<string, string> = httpRoutes) {
+  const routes = router.getRoutes();
+  const errors = routes.flatMap(([path, method, handler]) => {
+    const policy = registrationPolicy(handler);
+    if (!policy) return [`${module}:${method} ${path}: untagged HTTP route`];
+    return manifest[`${method} ${path}`] === policy ? [] : [`${module}:${method} ${path}: unexpected policy ${policy}`];
+  });
+  for (const route of Object.keys(manifest)) {
+    if (!routes.some(([path, method]) => `${method} ${path}` === route)) errors.push(`${module}: missing HTTP route ${route}`);
+  }
+  return errors;
 }
 
 // Tests own dynamic module loading; application scripts follow the literal-import rule too.

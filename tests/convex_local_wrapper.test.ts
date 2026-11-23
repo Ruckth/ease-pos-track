@@ -39,6 +39,13 @@ fs.writeFileSync(".env.local", "CLI_SELECTED_LOCAL=true");
     assert.deepEqual(JSON.parse(readFileSync(join(dir, "args.json"), "utf8")).args, [
       "dev", "--once", "--typecheck", "disable", "--local-cloud-port", "4010", "--local-site-port", "4011", "--env-file", ".env.convex-local",
     ]);
+
+    // An agent-mode backend in this checkout is selected for run/env as well.
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
+    assert.equal(spawnSync("pnpm", ["convex:local", "run", "seed:run", "{}"], { cwd: dir, encoding: "utf8" }).status, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, "args.json"), "utf8")).args.slice(-2), ["--env-file", ".convex/local/agent.env"]);
+    assert.equal(readFileSync(join(dir, ".convex/local/agent.env"), "utf8"), "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\n");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

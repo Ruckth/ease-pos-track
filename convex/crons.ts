@@ -10,4 +10,9 @@ crons.interval("recover media jobs", { minutes: 1 }, internal.retention.recover)
 crons.interval("expire abandoned uploads", { minutes: 5 }, internal.retention.expireIntents);
 crons.interval("claim archived Tickets", { hours: 1 }, internal.retention.claimPurges);
 
+// Expiry only records abandoned page uploads; reclaim deletes recorded page
+// blobs and is gated by MEDIA_CLEANUP_ENABLED.
+crons.interval("expire page uploads", { minutes: 5 }, internal.pages.expireStaging);
+crons.interval("reclaim page storage", { minutes: 5 }, internal.pages.reclaim);
+
 export default crons;
