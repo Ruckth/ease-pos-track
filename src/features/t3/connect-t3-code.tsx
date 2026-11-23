@@ -7,7 +7,7 @@ import { T3_DAY_MS, T3_MAX_KEY_DAYS, t3HostPattern, t3ProofIntent, t3ProviderNam
 import { useT3Connection, type ConnectionChange, type RequestT3Proof } from "./adapters/connection";
 import { connectionCopy } from "./connection-copy";
 
-const selectClass = "min-h-10 w-full rounded-md border bg-background px-3 text-sm";
+const selectClass = "min-h-10 w-full rounded-md border border-transparent border-b-input bg-field px-3 text-sm";
 
 function errorCode(error: unknown) {
   if (typeof error !== "object" || error === null || !("data" in error)) return "";
@@ -109,7 +109,7 @@ export function ConnectT3Code({ requestProof }: { requestProof: RequestT3Proof }
       {settings && <p className="mt-1 break-all text-sm text-muted-foreground">{settings.account}</p>}
     </header>
     {!settings ? <p role="status">{copy.loading}</p> : settings.issuing && release ? (
-      <form className="grid gap-4 rounded-xl border p-4" onSubmit={event => {
+      <form className="grid gap-4 rounded-xl border border-transparent bg-muted/40 p-4" onSubmit={event => {
         event.preventDefault();
         if (busy || !project || !combination || !t3HostPattern.test(hostId) || !machineLabel.trim()) return;
         setIntent({ kind: "issue", projectId: project._id, hostId, machineLabel, days: Number(days), releaseId: release.id, combinationId: combination.id });
@@ -166,7 +166,7 @@ export function ConnectT3Code({ requestProof }: { requestProof: RequestT3Proof }
       {keys.status === "LoadingFirstPage" ? <p role="status">{copy.loading}</p> : !keys.results.length && <p>{copy.empty}</p>}
       <ul className="grid gap-2">
         {keys.results.map(key => {
-          return <li key={key.keyId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+          return <li key={key.keyId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-transparent bg-muted/40 p-3">
             <div className="min-w-0 break-words text-sm">
               <p className="font-medium">{key.machineLabel} · {key.project ?? copy.unknown}</p>
               {team && <p className="break-all">{key.account ?? key.staffId}</p>}
@@ -219,7 +219,7 @@ export function ConnectT3Code({ requestProof }: { requestProof: RequestT3Proof }
       </form>}
     </Dialog>
     <Dialog open={Boolean(bearer)} onOpenChange={open => { if (!open) setBearer(""); }} title={copy.secret} description={copy.secretHint}>
-      <output className="mb-4 block break-all rounded-md border p-3 font-mono text-sm" onCopy={event => event.preventDefault()}>{bearer}</output>
+      <output className="mb-4 block break-all rounded-md border border-transparent bg-muted/40 p-3 font-mono text-sm" onCopy={event => event.preventDefault()}>{bearer}</output>
       <Button type="button" onClick={() => setBearer("")}>{copy.done}</Button>
     </Dialog>
   </section>;

@@ -224,13 +224,13 @@ export function MediaUploadField({
               <ImagePlus /> {t("addMore")}
             </Button>
           </div>
-          {positionIndex >= 0 && <fieldset id={positionId} className="flex flex-wrap gap-1 rounded-md border p-2"
+          {positionIndex >= 0 && <fieldset id={positionId} className="flex flex-wrap gap-1 rounded-md border border-transparent bg-muted/40 p-2"
             onKeyDown={event => {
               if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePosition(items[positionIndex].id); }
             }}>
             <legend className="px-1 text-sm">{t("filePosition", { name: items[positionIndex].file.name })}</legend>
             {items.map((file, index) => <button type="button" key={file.id} autoFocus={index === positionIndex}
-              aria-pressed={index === positionIndex} className="min-h-11 min-w-11 rounded-md border px-2 aria-pressed:bg-muted focus-visible:ring-2"
+              aria-pressed={index === positionIndex} className="min-h-11 min-w-11 rounded-md border border-transparent bg-muted/40 px-2 aria-pressed:bg-muted focus-visible:ring-2"
               onClick={() => placeFile(positionIndex, index)}>{index + 1}</button>)}
           </fieldset>}
           <Sortable

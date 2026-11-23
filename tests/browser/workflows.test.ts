@@ -5,7 +5,7 @@ import type { BrowserContext, Page } from "playwright";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { capture, newContext, redact } from "../../scripts/browser-evidence";
-import { authStorageKeys, baseURL, convex, copy, files, localIdentityAdmin, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
+import { authStorageKeys, baseURL, chooseProject, convex, copy, files, localIdentityAdmin, openHeaderMenu, projectSwitcher, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -105,16 +105,16 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     // Exercise inline Queue details and restore that view on returning to POS.
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     if (role === "staff") await page.getByRole("button", { name: "Queue", exact: true }).click();
-    await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
+    await chooseProject(page, "APP");
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
     await page.getByRole("dialog").getByText("Customer App (APP)", { exact: true }).waitFor();
     assert.equal(await title.inputValue(), "");
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
-    await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("POS");
+    await chooseProject(page, "POS");
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
     await title.fill(name);
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
-    await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
+    await chooseProject(page, "APP");
     await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
     assert.equal(await title.inputValue(), name);
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
@@ -281,8 +281,17 @@ test("losing captured Project access leaves the customer draft discardable", asy
   try {
     await title.fill("Captured POS draft");
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    // Before revocation both named choices are present in the Project menu.
+    await projectSwitcher(page).click();
+    await page.getByRole("menuitemradio").nth(1).waitFor();
+    assert.deepEqual((await page.getByRole("menuitemradio").allInnerTexts()).sort(), ["Customer App (APP)", "Point of Sale (POS)"]);
+    await page.keyboard.press("Escape");
+    await page.getByRole("menu").waitFor({ state: "hidden" });
     await convex.mutation(api.projects.removeProjectMember, { token: seed.sessions[0], projectId, customerId });
-    await page.waitForFunction(() => !document.querySelector('select[aria-label="Choose Project"] option[value="POS"]'));
+    // One Project left: a plain label replaces the menu and the URL follows it.
+    await page.locator("header").getByText("Customer App (APP)", { exact: true }).waitFor();
+    await page.waitForURL(url => url.searchParams.get("project") === "APP");
+    assert.equal(await projectSwitcher(page).count(), 0);
     await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
     assert.equal(await title.inputValue(), "Captured POS draft");
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
@@ -306,8 +315,8 @@ for (const language of ["en", "th"] as const) {
     const f = await open("staff", language);
     try {
       await f.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
-      await f.page.locator("summary").filter({ hasText: copy(language, "queueMore") }).click();
-      await f.page.getByRole("button", { name: copy(language, "healthTitle"), exact: true }).click();
+      await openHeaderMenu(f.page, copy(language, "queueMore"));
+      await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       await dialog.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
       assert.equal(await dialog.getByRole("table", { name: copy(language, "healthCounts") }).count(), 1);
@@ -409,8 +418,8 @@ for (const language of ["en", "th"] as const) {
     });
     try {
       await f.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
-      await f.page.locator("summary").filter({ hasText: copy(language, "queueMore") }).click();
-      await f.page.getByRole("button", { name: copy(language, "healthTitle"), exact: true }).click();
+      await openHeaderMenu(f.page, copy(language, "queueMore"));
+      await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       const requeue = dialog.getByRole("button", { name: copy(language, "healthRequeue"), exact: true });
       const prompts: string[] = [];
@@ -507,7 +516,6 @@ test("staff sign-in offers Google, and the local test provider admits a seeded O
 
 test("staff restores each Project’s view and returns to the Ticket trigger", async () => {
   const { page, context } = await open("staff");
-  const switcher = page.getByRole("combobox", { name: "Choose Project" });
   const views = page.getByRole("group", { name: "Ticket view" });
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
@@ -527,10 +535,10 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
     await statusFilter.selectOption("active");
     await views.getByRole("button", { name: "Table", exact: true }).click();
     assert.equal(await statusFilter.inputValue(), "active");
-    await switcher.selectOption("APP");
+    await chooseProject(page, "APP");
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
     await views.getByRole("button", { name: "Board", exact: true }).click();
-    await switcher.selectOption("POS");
+    await chooseProject(page, "POS");
     assert.equal(await views.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
     const row = page.locator("button[data-ticket-id]:visible").first();
     const id = await row.getAttribute("data-ticket-id");
@@ -542,7 +550,7 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
     await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
     await page.waitForFunction(id => document.activeElement?.getAttribute("data-ticket-id") === id, id);
     assert.equal(await views.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
-    await switcher.selectOption("APP");
+    await chooseProject(page, "APP");
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
   } finally { await context.close(); }
 });
@@ -603,19 +611,18 @@ test("a status check finishing in another Project is shown once on return", asyn
       page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket"),
       page.getByRole("button", { name: `Acknowledge · ${number}`, exact: true }).click(),
     ]);
-    const switcher = page.getByRole("combobox", { name: "Choose Project" });
-    await switcher.selectOption("APP");
+    await chooseProject(page, "APP");
     const finished = page.waitForEvent("requestfinished", req => req.url().endsWith("/api/query"));
     release();
     await finished;
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const notice = page.getByText(`${number} · Latest saved version · New`, { exact: true });
     assert.equal(await notice.count(), 0);
-    await switcher.selectOption("POS");
+    await chooseProject(page, "POS");
     await notice.waitFor();
-    await switcher.selectOption("APP");
+    await chooseProject(page, "APP");
     await notice.waitFor({ state: "hidden" });
-    await switcher.selectOption("POS");
+    await chooseProject(page, "POS");
     assert.equal(await notice.count(), 0);
     assert.equal(writes, 1);
   } finally { release(); await context.close(); }
@@ -766,12 +773,15 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await queueHeading.waitFor();
       await checkWidths(page.getByRole("main"));
 
-      const menu = page.locator("header summary");
-      await menu.click();
-      const signOut = page.getByRole("button", { name: copy(language, "signOut"), exact: true });
+      await openHeaderMenu(page, copy(language, role === "staff" ? "queueMore" : "customerQueueMore"));
+      const signOut = page.getByRole("menuitem", { name: copy(language, "signOut"), exact: true });
       await signOut.waitFor();
-      await queueHeading.dispatchEvent("pointerdown", { pointerType: "touch" });
+      // A trusted press outside the menu dismisses it (Base UI ignores synthetic events).
+      // Menus keep an 8 px viewport inset, so x = 4 is always outside the popup.
+      const heading = (await queueHeading.boundingBox())!;
+      await page.mouse.click(4, heading.y + heading.height / 2);
       await signOut.waitFor({ state: "hidden" });
+      assert.equal(await page.getByRole("menu").count(), 0);
 
       if (role === "staff") {
         const acknowledge = page.getByRole("button", { name: new RegExp(`^${copy(language, "queueAcknowledge")} ·`) }).first();
@@ -836,8 +846,8 @@ test("a customer joins from an invitation link, saves a recovery code, then reco
     assert.equal(await page.getByRole("button", { name: "New Ticket", exact: true }).count(), 0);
     await page.getByRole("button", { name: copy("en", "recoveryCodeSaved"), exact: true }).press("Enter");
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().waitFor();
-    await page.locator("summary").filter({ hasText: copy("en", "customerQueueMore") }).click();
-    await page.getByRole("button", { name: copy("en", "accountTitle"), exact: true }).click();
+    await openHeaderMenu(page, copy("en", "customerQueueMore"));
+    await page.getByRole("menuitem", { name: copy("en", "accountTitle"), exact: true }).click();
     const account = page.getByRole("dialog", { name: copy("en", "accountTitle"), exact: true });
     assert.equal(await account.getByRole("link", { name: copy("en", "pilotPrivacyNotice") }).getAttribute("href"), "https://privacy.example.test/en");
     // The invitation is single use.
@@ -1004,8 +1014,8 @@ test("Owner verifies staff invitation creation and reissue, then replaces and re
     await candidate.page.getByText(fixture.candidate.email, { exact: true }).waitFor();
     assert.equal(candidate.page.url().includes(fixture.candidate.subject), false);
     const { page } = authority;
-    await page.locator("summary").filter({ hasText: copy("en", "queueMore") }).press("Enter");
-    await page.getByRole("button", { name: copy("en", "teamTitle"), exact: true }).press("Enter");
+    await openHeaderMenu(page, copy("en", "queueMore"), "Enter");
+    await page.getByRole("menuitem", { name: copy("en", "teamTitle"), exact: true }).press("Enter");
     const team = page.getByRole("dialog", { name: copy("en", "teamTitle"), exact: true });
     const codeField = team.getByRole("textbox", { name: copy("en", "verificationCode"), exact: true });
     async function confirm(purpose: string, testError = false) {
@@ -1186,8 +1196,8 @@ test("active text draft confirms before sign-out without upload traffic", async 
     await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
 
-    const menu = page.locator("summary").filter({ hasText: copy("en", "customerQueueMore") });
-    const signOut = page.getByRole("button", { name: copy("en", "signOut"), exact: true });
+    const menu = page.locator("header").getByRole("button", { name: copy("en", "customerQueueMore"), exact: true });
+    const signOut = page.getByRole("menuitem", { name: copy("en", "signOut"), exact: true });
     await menu.click();
     await Promise.all([
       page.waitForEvent("dialog").then(async dialog => {
@@ -1264,7 +1274,7 @@ test("sign-out waits for the active draft to cancel with a live session", { time
   });
   try {
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
-    await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption("APP");
+    await chooseProject(page, "APP");
     await page.waitForURL(url => url.searchParams.get("project") === "APP");
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
     await title.fill("Sign-out during upload intent creation");
@@ -1285,7 +1295,8 @@ test("sign-out waits for the active draft to cancel with a live session", { time
     assert.deepEqual(events, []);
     // The modal traps pointer input. Dispatch the workspace action directly to
     // exercise a sign-out arriving while the upload intent response is in flight.
-    const signOut = page.locator("header details button", { hasText: copy("en", "signOut") });
+    // The staff overflow menu stays mounted while closed, so the item is wired.
+    const signOut = page.locator('[role="menu"] [role="menuitem"]', { hasText: copy("en", "signOut") });
     await Promise.all([
       page.waitForEvent("dialog").then(async dialog => {
         assert.equal(dialog.message(), copy("en", "leaveTicketDraft"));

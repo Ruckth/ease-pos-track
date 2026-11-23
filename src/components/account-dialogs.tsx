@@ -154,13 +154,13 @@ function GoogleBindingForm({ member, ownAccount, onRequest, onCancel }: {
     });
   }
 
-  return <form className="space-y-3 rounded-md border p-3" aria-labelledby="google-binding-heading" onSubmit={onSubmit} autoComplete="off">
+  return <form className="space-y-3 rounded-md border border-transparent bg-muted/40 p-3" aria-labelledby="google-binding-heading" onSubmit={onSubmit} autoComplete="off">
     <h3 id="google-binding-heading" className="break-words font-medium" tabIndex={-1} ref={focusMessage}>
       {t("staffGoogleAccountFor", { email: member.email })}
     </h3>
     {ownAccount ? <p className="text-sm">{t("googleIndependentOwner")}</p> : null}
     <label className="block text-sm font-medium" htmlFor="google-binding-action">{t("googleBindingAction")}</label>
-    <select id="google-binding-action" className="h-11 rounded-md border bg-background px-2 text-sm"
+    <select id="google-binding-action" className="h-11 rounded-md border border-transparent border-b-input bg-field px-2 text-sm"
       value={kind} onChange={event => setKind(event.target.value === "replace" ? "replace" : "revoke")}>
       {!ownAccount ? <option value="replace">{t("googleBindingReplace")}</option> : null}
       {!member.googleBindingRevoked ? <option value="revoke">{t("googleBindingRevoke")}</option> : null}
@@ -271,14 +271,14 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
         <div className="flex flex-wrap gap-2">
           <Input id="invite-staff-email" type="email" autoComplete="off" required maxLength={254} placeholder={t("inviteEmail")} className="h-11 min-w-0 flex-1" value={email} onChange={event => setEmail(event.target.value)} />
           <label className="sr-only" htmlFor="invite-staff-role">{t("staffInviteRole", { role: "" })}</label>
-          <select id="invite-staff-role" className="h-11 rounded-md border bg-background px-2 text-sm" value={role} onChange={event => setRole(event.target.value as "staff" | "owner")}>
+          <select id="invite-staff-role" className="h-11 rounded-md border border-transparent border-b-input bg-field px-2 text-sm" value={role} onChange={event => setRole(event.target.value as "staff" | "owner")}>
             <option value="staff">{t("roleStaff")}</option>
             <option value="owner">{t("roleOwner")}</option>
           </select>
           <Button className="min-h-11" disabled={busy || !email.trim()}>{t("inviteStaff")}</Button>
         </div>
       </form>
-      {link ? <div className="space-y-2 rounded-md border p-3" role="status" tabIndex={-1} ref={focusMessage}>
+      {link ? <div className="space-y-2 rounded-md border border-transparent bg-muted/40 p-3" role="status" tabIndex={-1} ref={focusMessage}>
         <p className="text-sm">{t("inviteCreated", { email: link.email })}</p>
         <output className="block break-all rounded bg-muted p-2 font-mono text-xs">{link.url}</output>
         <Button type="button" variant="outline" className="min-h-11" onClick={() => void copy(link.url, t("linkCopied"))}><Copy aria-hidden="true" />{t("copyLink")}</Button>
@@ -286,7 +286,7 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
       {bindingMember ? <GoogleBindingForm key={bindingMember.staffId} member={bindingMember}
         ownAccount={bindingMember.staffId === ownerStaffId} onRequest={input => requestBindingChange(bindingMember, input)}
         onCancel={() => { setBindingMember(null); returnFocus.current?.focus(); }} /> : null}
-      {pending ? <form className="space-y-2 rounded-md border p-3" aria-labelledby="team-confirm-heading" onSubmit={event => void onConfirm(event)}>
+      {pending ? <form className="space-y-2 rounded-md border border-transparent bg-muted/40 p-3" aria-labelledby="team-confirm-heading" onSubmit={event => void onConfirm(event)}>
         <h3 id="team-confirm-heading" className="break-words font-medium">{pending.action}</h3>
         {pending.review ? <dl className="space-y-1 break-all text-sm">
           {pending.review.map(({ label, value }) => <div key={label}><dt className="font-medium">{label}</dt><dd>{value}</dd></div>)}
@@ -307,7 +307,7 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
       {error ? <p role="alert" tabIndex={-1} ref={focusMessage} className="text-sm text-destructive">{error}</p> : null}
       <section aria-labelledby="team-heading">
         <h3 id="team-heading" className="mb-2 font-medium">{t("teamTitle")}</h3>
-        {admin.team === undefined ? <Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} /> : <ul className="divide-y rounded-md border">
+        {admin.team === undefined ? <Loader2 className="mx-auto animate-spin" aria-label={t("loadingWorkspace")} /> : <ul className="divide-y divide-border/60 overflow-hidden rounded-md border border-transparent bg-muted/40">
           {staff.map(member => <li key={member.staffId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
             <span className="min-w-0 text-sm">
               <span className="font-medium">{member.name}</span> <span className="text-muted-foreground">{member.email}</span>
@@ -338,7 +338,7 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
       </section>
       {admin.team?.invitations.length ? <section aria-labelledby="pending-invites-heading">
         <h3 id="pending-invites-heading" className="mb-2 font-medium">{t("pendingInvites")}</h3>
-        <ul className="divide-y rounded-md border">
+        <ul className="divide-y divide-border/60 overflow-hidden rounded-md border border-transparent bg-muted/40">
           {admin.team.invitations.map(invite => <li key={invite.invitationId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
             <span>{invite.email} · {t(invite.role === "owner" ? "roleOwner" : "roleStaff")}{invite.expired ? ` · ${t("expired")}` : ""}</span>
             <span className="flex gap-1">

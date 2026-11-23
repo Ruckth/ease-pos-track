@@ -83,7 +83,7 @@ export function RoutingAvailability({ projectId, settings }: {
     } catch (err) { setError(localizeError(err, t)); }
     finally { setBusy(false); }
   }
-  return <form className="space-y-2 rounded-lg border p-3" onSubmit={save}>
+  return <form className="space-y-2 rounded-lg border border-transparent bg-muted/40 p-3" onSubmit={save}>
     <h3 className="font-medium">{copy.availability}</h3>
     {settings.owner && <StaffChoice label={copy.override} people={settings.people} value={staffId} exclude={[settings.staffId]}
       onChange={id => {
@@ -121,11 +121,11 @@ function CodeFields<T extends Pick<Vocabulary, "code" | "en" | "th">>({ value, o
 
 function VocabularyEditor({ title, value, onChange }: { title: string; value: Vocabulary[]; onChange: (next: Vocabulary[]) => void }) {
   const { copy } = useRoutingCopy();
-  return <fieldset className="min-w-0 space-y-3 rounded-lg border p-3">
+  return <fieldset className="min-w-0 space-y-3 rounded-lg border border-transparent bg-muted/40 p-3">
     <legend className="px-1 text-sm font-medium">{title}</legend>
     {value.map((item, index) => {
       const change = (next: Vocabulary) => onChange(value.map((current, i) => i === index ? next : current));
-      return <div className="space-y-2 border-b pb-2" key={index}>
+      return <div className="space-y-2 pb-1" key={index}>
         <CodeFields value={item} onChange={change} extra={<label className="grid gap-1 text-sm">{copy.meaning}
           <Input className="min-h-11" required maxLength={140} value={item.meaning}
             onChange={event => change({ ...item, meaning: event.target.value })} />
@@ -140,11 +140,11 @@ function VocabularyEditor({ title, value, onChange }: { title: string; value: Vo
 
 function AreaEditor({ value, people, onChange }: { value: Area[]; people: Person[]; onChange: (next: Area[]) => void }) {
   const { copy } = useRoutingCopy();
-  return <fieldset className="min-w-0 space-y-3 rounded-lg border p-3">
+  return <fieldset className="min-w-0 space-y-3 rounded-lg border border-transparent bg-muted/40 p-3">
     <legend className="px-1 text-sm font-medium">{copy.areas}</legend>
     {value.map((item, index) => {
       const change = (next: Area) => onChange(value.map((current, i) => i === index ? next : current));
-      return <div className="space-y-2 border-b pb-2" key={index}>
+      return <div className="space-y-2 pb-1" key={index}>
         <CodeFields value={item} onChange={change} extra={<><label className="grid gap-1 text-sm">{copy.meaning}
           <Input className="min-h-11" maxLength={140} value={item.meaning ?? ""}
             onChange={event => change({ ...item, meaning: event.target.value || undefined })} />
@@ -166,9 +166,9 @@ function AreaEditor({ value, people, onChange }: { value: Area[]; people: Person
 
 function RulesEditor({ policy, onChange }: { policy: Policy; onChange: (rules: Policy["rules"]) => void }) {
   const { copy, language } = useRoutingCopy();
-  return <fieldset className="min-w-0 space-y-3 rounded-lg border p-3">
+  return <fieldset className="min-w-0 space-y-3 rounded-lg border border-transparent bg-muted/40 p-3">
     <legend className="px-1 text-sm font-medium">{copy.rules}</legend>
-    {policy.rules.map((item, index) => <div className="space-y-1 border-b pb-2" key={index}>
+    {policy.rules.map((item, index) => <div className="space-y-1 pb-1" key={index}>
       <div className="grid gap-2 sm:grid-cols-3">
         {([
           { field: "product", choices: policy.products }, { field: "symptom", choices: policy.symptoms },
@@ -220,7 +220,7 @@ export function RoutingSettingsForm({ projectId, settings }: {
 
   return <div className="space-y-3">
     <form className="space-y-3" onSubmit={save}>
-      <fieldset className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+      <fieldset className="grid gap-3 rounded-lg border border-transparent bg-muted/40 p-3 sm:grid-cols-2">
         <legend className="px-1 text-sm font-medium">{copy.intake}</legend>
         <Roster label={copy.intake} people={settings.people} value={draft.intake} exclude={draft.backup ? [draft.backup] : []}
           onChange={intake => setDraft({ ...draft, intake })} />

@@ -18,7 +18,7 @@ function ConversationDisclosure(props: Props) {
   const [open, setOpen] = useState(props.ticket.status === "waiting");
   // Preserve the draft while collapsing this section. Subscribe only after first opening it.
   const [visited, setVisited] = useState(open);
-  return <section className="space-y-2 rounded-lg border p-3">
+  return <section className="space-y-2 rounded-lg border border-transparent bg-muted/40 p-3">
     <button type="button" className="min-h-10 w-full text-left font-semibold underline-offset-4 hover:underline"
       aria-expanded={open} onClick={() => { setVisited(true); setOpen(!open); }}>
       {t(props.role === "staff" && props.ticket.status !== "done" && !open ? "askCustomer" : "ticketConversation")}

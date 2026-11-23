@@ -62,7 +62,7 @@ export function TicketDetailPanel(props: PanelProps) {
   const close = props.onClose;
   if (!ticketId) return null;
   const title = ticket ? formatTicketNumber(ticket.ticketNumber, ticket.projectKey) : t("ticket");
-  const navigation = <nav aria-label={t("ticket")} className="flex flex-wrap items-center justify-between gap-1 border-b pb-2">
+  const navigation = <nav aria-label={t("ticket")} className="flex flex-wrap items-center justify-between gap-1 border-b border-border/50 pb-2">
     {inline && <Button type="button" variant="ghost" className="min-h-11 px-2" onClick={close}><ArrowLeft />{t("detailBack")}</Button>}
     <div className="ml-auto flex flex-wrap gap-1">
       {props.onToggleFocus && <Button type="button" variant="ghost" className="hidden min-h-11 px-2 lg:inline-flex" aria-pressed={props.focusMode} onClick={props.onToggleFocus}>
@@ -220,7 +220,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
         <div className="space-y-4">
           {props.role === "staff" && <>
             <label className="flex flex-wrap items-center justify-between gap-2 text-sm">{t("detailStatus")}
-              <select className="min-h-11 rounded-md border bg-background px-2" value={ticket.status} disabled={props.statusBusy} onChange={event => {
+              <select className="min-h-11 rounded-md border border-transparent border-b-input bg-field px-2" value={ticket.status} disabled={props.statusBusy} onChange={event => {
                 const status = statuses.find(value => value.value === event.target.value);
                 if (status) props.onMove(ticket._id, status.value);
               }}>{statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}</select>

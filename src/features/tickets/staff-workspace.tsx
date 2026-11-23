@@ -220,7 +220,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
             <div className={`aurora-toolbar relative z-20 md:sticky md:top-2 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
               <label className="relative min-w-0 grow basis-full sm:basis-52">
                 <span className="sr-only">{t("search")}</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input className="aurora-control min-h-11 rounded-lg pl-9 md:min-h-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
+                <Input className="min-h-11 rounded-lg pl-9 md:min-h-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
               </label>
               {!showArchived && <label className="min-w-0"><span className="sr-only">{t("ticketStatus")}</span>
                 <select className={selectClass} value={filter} onChange={event => {
@@ -242,7 +242,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
               </label>}
               <StaffViewSwitcher archived={showArchived} view={listView} onSelect={view => withSearch(() => { void nav.setView(view); })} />
             </div>
-            <div id="staff-ticket-results" tabIndex={-1} className={split && !single ? "lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start lg:gap-4" : undefined}>
+            <div id="staff-ticket-results" data-dialog-return-focus tabIndex={-1} className={split && !single ? "lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start lg:gap-4" : undefined}>
               <div className={single ? "hidden" : split ? "hidden lg:block" : "min-w-0"}>
             {data.invalidSearch ? <p role="alert" className="text-sm text-destructive">{t("searchLimit")}</p> : <TicketExplorer
               key={project._id} projectId={project._id} items={showArchived ? emptyTickets : data.items} archivedItems={showArchived ? data.items : emptyTickets}

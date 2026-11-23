@@ -107,7 +107,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       </div>}
       <Button type="button" className="min-h-11" variant="ghost" disabled={isUploading} aria-expanded={preview} aria-controls={`${titleId}-preview`}
         onClick={() => setPreview(value => !value)}>{t(preview ? "composerHidePreview" : "composerPreview")}</Button>
-      {preview ? <section id={`${titleId}-preview`} aria-label={t("composerPreview")} className="space-y-2 rounded-lg border bg-muted/30 p-4">
+      {preview ? <section id={`${titleId}-preview`} aria-label={t("composerPreview")} className="space-y-2 rounded-lg border border-transparent bg-muted/40 p-4">
         <h3 className="break-words font-semibold">{title.trim() || t("composerUntitled")}</h3>
         <p className="whitespace-pre-wrap break-words text-sm">{description.trim() || t("noDescription")}</p>
         {mediaEnabled && <p className="text-sm text-muted-foreground">{t("reviewMedia", { count: items.length })} · {t("reviewPins", { count: annotations.length })}</p>}
@@ -117,7 +117,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       </div> : null}
       {(title || description || items.length > 0) && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
       {error && !titleInvalid ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <div className="sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:bg-transparent sm:px-0 sm:pb-0">
+      <div className="sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap gap-2 border-t border-border/60 bg-card px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
         <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t(role === "staff" ? "submit" : "submitTicket")}</Button>
         {mediaEnabled && isUploading ? <Button type="button" variant="outline" className="min-h-11" onClick={() => owner.cancel()}>{t("cancelUpload")}</Button> : null}
       </div>

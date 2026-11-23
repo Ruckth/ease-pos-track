@@ -92,7 +92,7 @@ function AssignmentEditor({ ticket, assignment, settings }: {
         <Button variant="outline" disabled={busy || (area === (assignment.value?.area ?? "") && assignee === (assignment.value?.assignee ?? "")
           && held === (assignment.value?.held ?? false))}>{copy.saveAssignment}</Button>
       </form>
-      <details className="rounded-md border p-3">
+      <details className="rounded-md border border-transparent bg-muted/40 p-3">
           <summary className="cursor-pointer text-sm font-medium">{copy.reviewClassification}</summary>
           <form className="mt-3 space-y-2" onSubmit={event => {
             event.preventDefault();
@@ -123,7 +123,7 @@ function AssignmentEditor({ ticket, assignment, settings }: {
     {assignment.events.length > 0 && <details className="text-sm">
       <summary className="cursor-pointer py-2 font-medium">{copy.history}</summary>
       <ul className="space-y-2 text-muted-foreground">
-        {assignment.events.map(event => <li key={event.id} className="rounded-md border p-2">
+        {assignment.events.map(event => <li key={event.id} className="rounded-md border border-transparent bg-muted/40 p-2">
           <span className="font-medium text-foreground">{event.assignee ?? copy.unassigned}</span>
           {event.area && ` · ${settings.policy.areas.find(item => item.code === event.area)?.[language] ?? event.area}`}
           {event.held && ` · ${copy.held}`}

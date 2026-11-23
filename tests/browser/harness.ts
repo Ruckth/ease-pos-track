@@ -1,6 +1,6 @@
 // Shared browser fixtures: local-only sessions, instrumented draft resources
 // and blocked provider traffic. Used by the workflow suite and exploration.
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "playwright";
 import { readFileSync } from "node:fs";
 import { ConvexHttpClient } from "convex/browser";
 import { getFunctionName, type FunctionArgs, type FunctionReference, type FunctionReturnType } from "convex/server";
@@ -73,8 +73,8 @@ export type Language = "en" | "th";
 export type DraftStats = { created: string[]; revoked: string[]; streams: string[]; stops: string[]; aborts: number };
 declare global { interface Window { draftStats: DraftStats } }
 export function copy(language: Language, key: keyof typeof translations.en, values?: Record<string, string | number>) { return translate(language, key, values); }
-export async function open(browser: Browser, role: "staff" | "customer", language: Language = "en", configure?: (context: BrowserContext) => Promise<void>) {
-  const context = await newContext(browser, { permissions: ["camera"], viewport: { width: 1280, height: 900 } });
+export async function open(browser: Browser, role: "staff" | "customer", language: Language = "en", configure?: (context: BrowserContext) => Promise<void>, device: Pick<BrowserContextOptions, "hasTouch" | "isMobile" | "viewport"> = {}) {
+  const context = await newContext(browser, { permissions: ["camera"], viewport: { width: 1280, height: 900 }, ...device });
   let uploads = 0;
   await context.route(/\/api\/uploadthing|https:\/\/[^/]*(?:uploadthing|ufs\.sh)/, async route => { uploads++; await route.abort(); });
   const signedIn = role === "staff"
@@ -146,4 +146,20 @@ export async function files(page: Page, name = "draft.png") {
     return canvas.toDataURL("image/png").split(",")[1];
   });
   await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
+}
+/** The multi-Project switcher trigger: a menu button named for the open Project. */
+export function projectSwitcher(page: Page, language: Language = "en") {
+  return page.getByRole("button", { name: new RegExp(`^${copy(language, "chooseProject")}:`) });
+}
+/** Opens the Project menu and selects the Project with this key as a radio choice. */
+export async function chooseProject(page: Page, key: string, language: Language = "en") {
+  await projectSwitcher(page, language).click();
+  await page.getByRole("menuitemradio", { name: new RegExp(`\\(${key}\\)$`) }).click();
+  await page.getByRole("menu").waitFor({ state: "hidden" });
+}
+/** Opens a named header menu (staff "More options", customer "Account and language"). */
+export async function openHeaderMenu(page: Page, name: string, method: "click" | "Enter" = "click") {
+  const trigger = page.locator("header").getByRole("button", { name, exact: true });
+  if (method === "click") await trigger.click(); else await trigger.press("Enter");
+  await page.getByRole("menu").waitFor();
 }
