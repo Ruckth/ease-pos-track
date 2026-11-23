@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { localDeploymentName } from "./dev-reset-target.mjs";
+import { localAppOrigins } from "./worktree-ports.mjs";
 import { EVIDENCE_DIR, log, readManifest, reset, sanitize, updateManifest } from "./browser-evidence.ts";
 
 const SUITES = ["workflows", "explore"];
@@ -94,7 +95,7 @@ try {
   if (flag !== "false") throw new StageError(`MEDIA_CLEANUP_ENABLED must be "false" on the local backend, found "${flag}"`);
   // Local-only identity: the test provider stands in for Google, and the local
   // identity sender records codes instead of sending them.
-  for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", IDENTITY_SENDER: "local", IDENTITY_CODE_KEY: "local-only-identity-code-key-0123456789abcdef", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture" })) {
+  for (const [key, value] of Object.entries({ LOCAL_FIXTURES_ENABLED: "true", IDENTITY_SENDER: "local", IDENTITY_CODE_KEY: "local-only-identity-code-key-0123456789abcdef", UPLOAD_CALLBACK_SECRET: "local-only-callback-fixture", TICKET_APP_ORIGINS: localAppOrigins() })) {
     await stage(`fixture-env-${key.toLowerCase().replaceAll("_", "-")}`, ["env", "set", key, value]);
   }
   process.env.BROWSER_FIXTURE = JSON.stringify(JSON.parse(await stage("seed", ["run", "seed:run", JSON.stringify({ largeDataset: true })], { capture: true })));

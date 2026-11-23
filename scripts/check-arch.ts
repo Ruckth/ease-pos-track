@@ -182,6 +182,9 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "inbox.ts:setPreference": "customerMutation",
   "pilot_release.ts:ticketCapabilities": "actorQuery",
   "identity_staff_recovery.ts:changeBinding": "ownerMutation",
+  "pages.ts:listTicketPages": "actorQuery",
+  "pages.ts:publishTarget": "actorQuery",
+  "pages.ts:revokeTicketPage": "actorMutation",
   "projects.ts:createProject": "ownerMutation",
   "projects.ts:listProjectMembers": "staffQuery",
   "projects.ts:listProjects": "actorQuery",
@@ -257,8 +260,8 @@ export function violations(module: string, exports: Record<string, unknown>) {
 
 
 export function routeViolations(module: string, router: { getRoutes(): (readonly [string, string, object])[] }) {
-  const expected = new Map<string, string>(httpRouteManifest.map(({ path, method, credentialClass, operation }) =>
-    [`${method} ${path}`, `http:${credentialClass}:${operation}`]));
+  const expected = new Map<string, string>(httpRouteManifest.map(route =>
+    [`${route.method} ${"path" in route ? route.path : `${route.pathPrefix}*`}`, `http:${route.credentialClass}:${route.operation}`]));
   const errors = router.getRoutes().flatMap(([path, method, handler]) => {
     const route = `${method} ${path}`;
     const policy = registrationPolicy(handler);

@@ -14,6 +14,8 @@ import type { TicketDetail } from "../../shared/ticket-contracts";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { TicketRef } from "./cli";
 import type { TicketMediaItem } from "./images";
+import type { PageBundle } from "./pages";
+import { pageFormData } from "../../shared/ticket-pages";
 import { toStoredTicketStatus, type TicketStatus } from "./status";
 
 export type TicketDocument = TicketDetail;
@@ -45,6 +47,10 @@ export type TicketAttachInput = TicketUploadCredentials & {
   media: TicketMediaItem[];
 };
 
+export type TicketPage = { pageId: string; url: string; entry: string; fileCount: number; totalBytes: number; publishedAt: number };
+export type TicketPagePublishInput = { ticket: string; requestId: string; bundle: PageBundle };
+export type TicketPagePublishResult = TicketPage & { created: boolean; requestId: string };
+
 export interface TicketRemote {
   /** Named staff sign-in: Google start/complete through the same guarded adapter as the browser. */
   startGoogle(url: string, redirectTo: string): Promise<{ redirect: string; state: string }>;
@@ -66,6 +72,9 @@ export interface TicketRemote {
   changeStatus(url: string, token: string, input: TicketStatusInput): Promise<TicketDocument>;
   archive(url: string, token: string, ref: TicketRef, expectedVersion: number): Promise<TicketDocument>;
   restore(url: string, token: string, ref: TicketRef, expectedVersion: number): Promise<TicketDocument>;
+  publishPage(url: string, token: string, input: TicketPagePublishInput): Promise<TicketPagePublishResult>;
+  listPages(url: string, token: string, id: TicketDocument["_id"]): Promise<TicketPage[]>;
+  revokePage(url: string, token: string, pageId: string): Promise<boolean>;
 }
 
 /**
@@ -205,6 +214,32 @@ export class ConvexTicketRemote implements TicketRemote {
     return await this.write(url, token, ref, RESTORING, async (current) => {
       await this.client(url, token).mutation(api.tickets.restoreTicket, { id: current._id, expectedVersion });
     });
+  }
+
+  /**
+   * Publishes through the deployment's HTTP page route. The Convex site origin is
+   * read from the deployment, so local and hosted backends need no extra setting.
+   */
+  async publishPage(url: string, token: string, input: TicketPagePublishInput) {
+    const { siteUrl } = await this.client(url, token).query(api.pages.publishTarget, {});
+    const form = pageFormData(input.bundle.entry, input.bundle.files.map(file => ({ path: file.path, blob: new Blob([file.bytes as BlobPart]) })));
+    const response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(input.ticket)}/pages`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "X-Ticket-Image-Policy": "v1", "Idempotency-Key": input.requestId }, body: form,
+    });
+    const body = await response.json().catch(() => null) as ({ ok: true } & TicketPagePublishResult) | { ok: false; code?: string } | null;
+    if (!response.ok || !body?.ok) throw new ConvexError({ code: body && !body.ok && body.code ? body.code : "PAGE_PUBLISH_UNKNOWN" });
+    const { ok: _ok, ...page } = body;
+    return page;
+  }
+
+  async listPages(url: string, token: string, id: TicketDocument["_id"]) {
+    const pages = await this.client(url, token).query(api.pages.listTicketPages, { id });
+    return pages.map(page => ({ pageId: page._id, url: page.url, entry: page.entryPath, fileCount: page.fileCount, totalBytes: page.totalBytes, publishedAt: page.publishedAt }));
+  }
+
+  async revokePage(url: string, token: string, pageId: string) {
+    const result = await this.client(url, token).mutation(api.pages.revokeTicketPage, { pageId: pageId as Id<"ticketPages"> });
+    return result.revoked;
   }
 
   /**

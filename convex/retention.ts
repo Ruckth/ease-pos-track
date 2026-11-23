@@ -8,6 +8,7 @@ import { JOB_POLICY, SWEEP_LIMIT, AUDIT_BATCH, ARCHIVE_RETENTION_MS, createMedia
 import { MAX_MEDIA_FILES } from "../shared/media-policy";
 import { reserveIntentAssets, requireOwnedUploadIntent } from "./domain/media";
 import { tombstoneTicketRequests } from "./domain/requests";
+import { retireTicketPages } from "./domain/pages";
 import { hasLegacyAccess, mediaCleanupEnabled, requireLegacyAccess } from "./pilot_access";
 
 const fenceArgs = { jobId: v.id("mediaJobs"), attempt: v.number(), leaseId: v.string() };
@@ -153,7 +154,9 @@ export const advance = internalJobMutation({
       for (const { _id, source, caller, requestId, inputDigest } of suggestionRequests) {
         await ctx.db.replace(_id, { source, caller, requestId, inputDigest, outcome: "unavailable" });
       }
-      if ([...batches, suggestionRequests].every(batch => batch.length < AUDIT_BATCH)) phase = "complete";
+      // Hosted pages stop serving with the Ticket row; their blobs join the gated reclaim sweep.
+      const pagesRetired = await retireTicketPages(ctx, ticketId);
+      if (pagesRetired && [...batches, suggestionRequests].every(batch => batch.length < AUDIT_BATCH)) phase = "complete";
     }
     if (phase === "complete") {
       await patchMediaJob(ctx, job, { state: "completed", phase, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });

@@ -2,6 +2,7 @@ import { getFunctionName, type FunctionArgs, type FunctionReference, type Functi
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { internalJobAction, internalJobMutation, internalJobQuery } from "./functions";
 import { requireLocalFixtures } from "./local_fixtures";
 import { fixtureAccess } from "./local_identity";
@@ -12,6 +13,7 @@ import * as uploads from "./uploads";
 import * as retention from "./retention";
 import * as identity from "./identity";
 import * as auth from "./auth";
+import * as pagesModule from "./pages";
 import { transitionCustomer } from "./domain/identity";
 import { accessTokenSessionId } from "./identity_rules";
 import { LOCAL_CUSTOMER_PASSWORD } from "./local_identity";
@@ -20,11 +22,14 @@ import { createTicketRecord } from "./domain/tickets";
 import { actorFields, newTicketOwnership } from "./authz";
 import { errorCode } from "../shared/errors";
 import { attachIntentAssets, recordUpload } from "./domain/media";
+import { reconcilePageWrites } from "./domain/pages";
+import { formatTicketNumber } from "../shared/ticket-numbers";
+import { pageFormData, sha256Hex } from "../shared/ticket-pages";
 
 // Local-only: run a real public registration under a fixture core session, so
 // the smoke exercises the same live session, admission and policy checks as a
 // browser JWT. Internal actions have no identity of their own.
-const REGISTRY: Record<string, Record<string, unknown>> = { tickets, annotations, projects, uploads, retention, identity, auth };
+const REGISTRY: Record<string, Record<string, unknown>> = { tickets, annotations, projects, uploads, retention, identity, auth, pages: pagesModule };
 function registration(name: string) {
   const [module, exportName] = name.split(":");
   const fn = REGISTRY[module]?.[exportName] as { _handler?: (ctx: unknown, args: unknown) => Promise<unknown> } | undefined;
@@ -50,7 +55,7 @@ function as(ctx: ActionCtx) {
   return {
     query: <F extends FunctionReference<"query">>(session: string, ref: F, args: FunctionArgs<F>) =>
       ctx.runQuery(internal.local_smoke.queryAs, { session, name: getFunctionName(ref), args }) as Promise<FunctionReturnType<F>>,
-    mutation: <F extends FunctionReference<"mutation">>(session: string, ref: F, args: FunctionArgs<F>) =>
+    mutation: <F extends FunctionReference<"mutation", "public" | "internal">>(session: string, ref: F, args: FunctionArgs<F>) =>
       ctx.runMutation(internal.local_smoke.mutationAs, { session, name: getFunctionName(ref), args }) as Promise<FunctionReturnType<F>>,
   };
 }
@@ -346,5 +351,90 @@ export const reads = internalJobAction({
     }
     const first = await call.query(token, api.tickets.pageTickets, { ...args, projectId: seeded.projects[0].id, status: "new" });
     return { ok: true, checks: ["relevance order differs from Ticket-number order", "owner and Project search scope", "prefix matches; middle fragment does not", "reference-shaped text falls back to indexed search", "Thai examples accepted with real token boundary matching", "all pages ordered without duplicates", "workflow totals independent of pages"], projects, searchOrder, thaiMatches, firstPageDocuments: first.page.length, firstPageJsonBytes: new TextEncoder().encode(JSON.stringify(first)).byteLength };
+  },
+});
+
+export const pageStorage = internalJobQuery({
+  name: "local_smoke:pageStorage",
+  args: { pageId: v.id("ticketPages"), ids: v.array(v.id("_storage")) },
+  handler: async (ctx, { pageId, ids }) => {
+    requireLocalFixtures();
+    return { row: await ctx.db.get(pageId), blobs: await Promise.all(ids.map(id => ctx.db.system.get(id))) };
+  },
+});
+
+export const reconcilePage = internalJobMutation({
+  name: "local_smoke:reconcilePage",
+  args: { pageId: v.id("ticketPages") },
+  handler: async (ctx, { pageId }) => { requireLocalFixtures(); await reconcilePageWrites(ctx, pageId); },
+});
+
+/**
+ * Store-before-record interruption on the real local backend: storage metadata
+ * keeps the private write marker, a same-key retry over HTTP adopts exactly that
+ * blob, and an abandoned interruption becomes recorded, unreclaimed ownership.
+ */
+export const pages = internalJobAction({
+  name: "local_smoke:pages",
+  args: {},
+  handler: async (ctx): Promise<{ ok: true; checks: string[] }> => {
+    requireLocalFixtures();
+    if (process.env.MEDIA_CLEANUP_ENABLED === "true") throw new Error("LOCAL_PAGES_REQUIRES_CLEANUP_DISABLED");
+    const checks: string[] = [];
+    const check = (value: unknown, name: string) => { if (!value) throw new Error(`Local page smoke failed: ${name}`); checks.push(name); };
+    const seeded = await ctx.runAction(internal.seed.run, {});
+    const call = as(ctx);
+    // The HTTP route verifies a real Convex Auth JWT; internal steps run under its session.
+    const signedIn = await ctx.runMutation(api.auth.signInLocalFixture, { email: "owner@local.test" });
+    if (signedIn.status !== "complete") throw new Error("Local page smoke failed: fixture sign-in");
+    const jwt = signedIn.tokens.accessToken;
+    const session = accessTokenSessionId(jwt);
+    const ticket = (await call.query(session, api.tickets.getTicket, { id: seeded.tickets[0] }))!;
+    const ref = formatTicketNumber(ticket.ticketNumber, ticket.projectKey);
+    const files: Record<string, string> = { "index.html": `<p>local ${crypto.randomUUID()}</p>`, "assets/site.css": "body{}" };
+    const manifest = await Promise.all(Object.entries(files).map(async ([path, text]) => {
+      const bytes = new TextEncoder().encode(text);
+      return { path, size: bytes.byteLength, sha256: await sha256Hex(bytes) };
+    }));
+    async function interrupted(requestId: string) {
+      const reserved = await call.mutation(session, internal.pages.reserve, { ticket: ref, requestId, entry: "index.html", manifest });
+      if (reserved.state !== "staging") throw new Error("Local page smoke failed: staging reservation");
+      const write = reserved.writes.find(item => item.path === "index.html")!;
+      const orphan = await ctx.storage.store(new Blob([files["index.html"]], { type: write.contentType }));
+      const unrelated = await ctx.storage.store(new Blob([files["index.html"]]));
+      return { reserved, write, orphan, unrelated };
+    }
+
+    const requestId = crypto.randomUUID();
+    const first = await interrupted(requestId);
+    const stored = await ctx.runQuery(internal.local_smoke.pageStorage, { pageId: first.reserved.pageId, ids: [first.orphan, first.unrelated] });
+    check(stored.blobs[0]?.contentType === first.write.contentType, "local storage metadata retains the private write marker");
+    check(stored.blobs[0]?.sha256 === stored.blobs[1]?.sha256 && !stored.blobs[1]?.contentType, "unrelated blob has the same content and no marker");
+    check(stored.row?.writes?.length === 2 && stored.row.files.length === 0, "writes are claimed before storage; nothing recorded");
+
+    const site = process.env.CONVEX_SITE_URL!;
+    const response = await fetch(`${site}/v1/tickets/${ref}/pages`, { method: "POST",
+      headers: { Authorization: `Bearer ${jwt}`, "Idempotency-Key": requestId, "X-Ticket-Image-Policy": "v1" },
+      body: pageFormData("index.html", Object.entries(files).map(([path, text]) => ({ path, blob: new Blob([text]) }))) });
+    const page = await response.json() as { url: string; pageId: string };
+    check(response.status === 201, "same-key retry over HTTP publishes");
+    const adopted = await ctx.runQuery(internal.local_smoke.pageStorage, { pageId: first.reserved.pageId, ids: [first.orphan, first.unrelated] });
+    const ids = adopted.row?.files.map(file => file.storageId) ?? [];
+    check(ids.includes(first.orphan) && !ids.includes(first.unrelated) && adopted.row?.discarded.length === 0, "retry adopts exactly the interrupted blob");
+    check(adopted.blobs.every(Boolean), "unrelated blob untouched");
+    const served = await fetch(page.url);
+    check(served.headers.get("content-type") === "text/html; charset=utf-8" && await served.text() === files["index.html"], "served type comes from the validated path");
+
+    const second = await interrupted(crypto.randomUUID());
+    await ctx.runMutation(internal.pages.abandon, { pageId: second.reserved.pageId });
+    await ctx.runMutation(internal.local_smoke.reconcilePage, { pageId: second.reserved.pageId });
+    await ctx.runMutation(internal.pages.reclaim, {});
+    const abandoned = await ctx.runQuery(internal.local_smoke.pageStorage, { pageId: second.reserved.pageId, ids: [second.orphan, second.unrelated] });
+    check(abandoned.row?.discarded.includes(second.orphan) && !abandoned.row.discarded.includes(second.unrelated), "abandoned interruption is recorded as owned");
+    check(abandoned.blobs.every(Boolean), "cleanup disabled: no page blob deleted");
+
+    await call.mutation(session, api.pages.revokeTicketPage, { pageId: page.pageId as Id<"ticketPages"> });
+    check((await fetch(page.url)).status === 404, "revoked smoke page stops serving");
+    return { ok: true, checks };
   },
 });

@@ -43,3 +43,8 @@ export function readPortsFile(dir = process.cwd()) {
 export function loadPorts(dir = process.cwd()) {
   return { ...DEFAULT_PORTS, ...readPortsFile(dir) };
 }
+
+/** The only browser origins allowed to publish Ticket pages to this checkout's local backend. */
+export function localAppOrigins(ports = loadPorts()) {
+  return `http://localhost:${ports.VITE_PORT},http://127.0.0.1:${ports.VITE_PORT}`;
+}

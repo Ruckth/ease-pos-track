@@ -202,3 +202,56 @@ test("text-only composer refuses a retained file and submits plain text without 
   assert.equal(submitCalls, 1);
   assert.equal(intentCalls, 0);
 });
+
+/** A draft holding one image and one video, with an injected image preparation. */
+function preparedFixture(prepareImage: (file: File) => Promise<File>) {
+  let sequence = 0;
+  const draft = new DisposableTicketDraft("original-project" as Id<"projects">, {
+    prepareImage, createURL: file => `blob:${file.name}`, revokeURL: () => {}, requestKey: () => `key-${sequence++}`, now: () => 42,
+  });
+  const image = new File(["original image bytes"], "photo.jpg", { type: "image/jpeg" });
+  const video = new File(["fake video"], "clip.mp4", { type: "video/mp4" });
+  draft.setTitle("Ticket");
+  draft.addFiles([image, video]);
+  const declared: Array<Array<{ name: string; size: number; type: string }>> = [];
+  const deps = {
+    token: "token",
+    createUploadIntent: async (args: { files: Array<{ name: string; size: number; type: string }> }) => {
+      declared.push(args.files);
+      return { intentId: "intent" as Id<"uploadIntents">, secret: "secret", uploadedFiles: args.files.map((file, index) => ({ ...file, key: `key-${index}`, url: `https://fixture.invalid/${index}` })) };
+    },
+    createTicket: async () => {},
+  };
+  return { draft, image, video, declared, deps };
+}
+
+test("submission uploads prepared images, never videos, and keeps the originals for previews and retries", async () => {
+  const prepared = new File(["webp"], "photo.webp", { type: "image/webp" });
+  const calls: File[] = [];
+  const { draft, image, video, declared, deps } = preparedFixture(async file => { calls.push(file); return prepared; });
+  assert.equal(await draft.submit(deps), true);
+  assert.deepEqual(calls, [image]);
+  assert.deepEqual(declared, [[{ name: "photo.webp", size: 4, type: "image/webp" }, { name: video.name, size: video.size, type: video.type }]]);
+});
+
+test("a failed or oversized preparation leaves the draft intact with its error, and a retry prepares again", async () => {
+  let outcome: "invalid" | "large" | "ok" = "invalid";
+  const { draft, image, declared, deps } = preparedFixture(async () => {
+    if (outcome === "invalid") throw new Error("IMAGE_ANIMATION_UNSUPPORTED");
+    if (outcome === "large") return new File([new Uint8Array(8 * 1024 * 1024 + 1)], "photo.png", { type: "image/png" });
+    return new File(["ok"], "photo.webp", { type: "image/webp" });
+  });
+  const before = draft.getSnapshot();
+  assert.equal(await draft.submit(deps), false);
+  assert.equal((draft.getSnapshot().error as Error).message, "IMAGE_ANIMATION_UNSUPPORTED");
+  outcome = "large";
+  assert.equal(await draft.submit(deps), false);
+  assert.equal((draft.getSnapshot().error as Error).message, "IMAGE_TOO_LARGE");
+  const after = draft.getSnapshot();
+  assert.deepEqual([after.items, after.idempotencyKey, after.progress], [before.items, before.idempotencyKey, null]);
+  assert.equal(after.items[0].file, image, "the original stays selected");
+  assert.equal(declared.length, 0, "nothing is declared or uploaded before every image is prepared");
+  outcome = "ok";
+  assert.equal(await draft.submit(deps), true);
+  assert.equal(declared[0][0].name, "photo.webp");
+});

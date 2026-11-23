@@ -34,7 +34,10 @@ export type TicketCommand =
   | { kind: "update"; deployment: Deployment; ref: TicketRef; title?: string; description?: string; expectedVersion: number }
   | { kind: "status"; deployment: Deployment; ref: TicketRef; status: TicketStatus; expectedVersion: number }
   | { kind: "archive"; deployment: Deployment; ref: TicketRef; expectedVersion: number }
-  | { kind: "restore"; deployment: Deployment; ref: TicketRef; expectedVersion: number };
+  | { kind: "restore"; deployment: Deployment; ref: TicketRef; expectedVersion: number }
+  | { kind: "pagePublish"; deployment: Deployment; ref: TicketRef; source: string; entry?: string; requestId?: string }
+  | { kind: "pageList"; deployment: Deployment; ref: TicketRef }
+  | { kind: "pageRevoke"; deployment: Deployment; ref: TicketRef; pageId: string };
 
 /** A single Ticket plus the optimistic-lock version every write must carry. */
 type VersionedTicket = { deployment: Deployment; ref: TicketRef; expectedVersion: number };
@@ -162,6 +165,10 @@ class CommandInput {
     return ref;
   }
 
+  positional(index: number) {
+    return this.scanned.positionals[index];
+  }
+
   /** `--project` (or `project` in --json), normalized; absent when not given. */
   projectKey(fallback?: string) {
     const value = this.text("--project") ?? fallback;
@@ -272,22 +279,42 @@ function buildCommand(input: CommandInput): TicketCommand {
       return { kind: "archive", ...input.versionedTicket() };
     case "restore":
       return { kind: "restore", ...input.versionedTicket() };
+    case "page publish": {
+      const entry = input.text("--entry");
+      const requestId = input.text("--request-id");
+      return {
+        kind: "pagePublish", deployment, ref: input.ticketRef(), source: input.positional(1),
+        ...(entry === undefined ? {} : { entry }),
+        ...(requestId === undefined ? {} : { requestId: validated(() => normalizeRequestId(requestId)) }),
+      };
+    }
+    case "page list":
+      return { kind: "pageList", deployment, ref: input.ticketRef() };
+    case "page revoke":
+      return { kind: "pageRevoke", deployment, ref: input.ticketRef(), pageId: input.text("--page")! };
     default:
       throw usageError("UNKNOWN_COMMAND", `Unknown command "${input.name}".`);
   }
 }
 
 function helpCommand(rest: string[]): TicketCommand {
-  if (rest.length > 1) throw usageError("UNEXPECTED_ARGUMENT", "help accepts at most one command name.");
-  const [command] = rest;
+  const [command] = splitCommand(rest);
+  if (rest.length > (command?.includes(" ") ? 2 : 1)) throw usageError("UNEXPECTED_ARGUMENT", "help accepts at most one command name.");
   if (command && !commandDefinition(command)) throw usageError("UNKNOWN_COMMAND", `Unknown command "${command}".`);
   return { kind: "help", ...(command ? { command } : {}) };
 }
 
 const HELP_FLAGS = ["--help", "-h"];
 
+/** `page` takes a subcommand: `page publish` is one registry command. */
+function splitCommand(argv: string[]): [string | undefined, string[]] {
+  const [first, second, ...rest] = argv;
+  if (first === "page" && second !== undefined && !second.startsWith("-")) return [`page ${second}`, rest];
+  return [first, argv.slice(1)];
+}
+
 export function parseTicketArgs(argv: string[]): TicketCommand {
-  const [commandName, ...rest] = argv;
+  const [commandName, rest] = splitCommand(argv);
   if (commandName === undefined || HELP_FLAGS.includes(commandName)) return { kind: "help" };
   if (commandName === "help") return helpCommand(rest);
   if (rest.some((arg) => HELP_FLAGS.includes(arg))) {

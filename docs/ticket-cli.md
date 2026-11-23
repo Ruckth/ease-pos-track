@@ -102,7 +102,7 @@ between pages do not form a single database snapshot.
 
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
-attach up to 10 original image files. Each source may be a local path or an HTTPS
+attach up to 10 image files. Each source may be a local path or an HTTPS
 URL:
 
 ```bash
@@ -146,15 +146,14 @@ pnpm ticket get TKT-0007
 pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/detail.webp --expected-version 0 --request-id attach-images-0007
 ```
 
-Local files and downloaded HTTPS images are uploaded without resizing or
-re-encoding. Images must be non-empty, no larger than 8 MB each, and the Ticket
+Local files and downloaded HTTPS images are prepared before upload (up to 20 MiB and 40 megapixels per source). Still images fit inside 1920 × 1080 without upscaling. The CLI chooses a compact faithful encoding and preserves alpha. Animated GIF and WebP keep every frame and delay (larger ones become lossless animated WebP); APNG must already fit 1920 × 1080 and animated AVIF is refused (`IMAGE_ANIMATION_UNSUPPORTED`). Sharp's prebuilt binaries cannot decode HEIC/HEIF, so on macOS the CLI first converts such a photo with the system `sips` tool; elsewhere it fails with `IMAGE_FORMAT_UNSUPPORTED`. Before upload, every prepared file passes the same byte validation as the browser's provider callback (staff uploads are recorded with the staff session, not the callback). The uploaded image must be at most 8 MiB, and the Ticket
 may contain at most 10 images in total. The upload intent is bound to the durable
 actor and retry key; an interrupted retry, including after sign-in, reuses files
 already recorded by the intent instead of uploading or attaching them twice.
 Recording requires the validated staff session that acquired the intent; this
 direct provider adapter is a deliberate staff capability. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
-`create --dry-run` reads or downloads each image and reports its original name,
+`create --dry-run` reads or downloads each image and prints its prepared name,
 size, and type, but does not upload it or contact the deployment.
 Attachment receipts use their own operation scope and compare the target Ticket
 and ordered media keys. A replay returns the committed attachment's version and
@@ -201,6 +200,102 @@ pnpm ticket restore TKT-0007 --expected-version 7
 If another actor changed the Ticket first, the mutation returns
 `VERSION_CONFLICT` with exit 5. Read the Ticket again and decide whether the new
 state should still be changed; do not blindly increment the version.
+
+## Hosted pages
+
+A Ticket can carry hosted HTML pages: one HTML file, or a folder with an HTML
+entry page and its CSS, JavaScript, images and fonts. Publishing returns one link;
+staff and the Ticket's customer see the same link on the Ticket, where they can
+open, copy or revoke it. Anyone with an active link can open the page.
+
+```bash
+pnpm ticket page publish POS-0007 ./report.html
+pnpm ticket page publish POS-0007 ./site --entry reports/index.html --request-id page-0007
+pnpm ticket page list POS-0007
+pnpm ticket page revoke POS-0007 --page <pageId>
+```
+
+```json
+{"ok":true,"deployment":"dev","ticket":"POS-0007","url":"https://<deployment>.convex.site/p/<key>/reports/index.html","pageId":"kh7…","entry":"reports/index.html","fileCount":7,"totalBytes":4521,"created":true,"requestId":"page-0007"}
+```
+
+- `--entry` is required when a folder has several HTML files and no root
+  `index.html` (`PAGE_ENTRY_REQUIRED`, exit 3). Hidden files are skipped;
+  symbolic links are refused.
+- Limits: 50 files, 10 MiB of file content, 20 published pages per Ticket.
+  Allowed types: `html htm css js mjs png jpg jpeg gif webp avif ico woff woff2 ttf otf`.
+- `--request-id` is the retry key. The same key and files return the original
+  link with `"created":false`; different files return `PAGE_REQUEST_CONFLICT`
+  (exit 5). After an interrupted run, retry with the reported key: files already
+  stored are not uploaded again and the link appears only once every file is in.
+- Publishing requires current write access to an active Ticket, checked before
+  the upload is read and again when the page is committed. Archive hides every
+  page of the Ticket; restore brings the same links back. Revocation is permanent.
+
+### HTTP API
+
+The CLI and the Ticket UI share one route on the deployment's HTTP host
+(`*.convex.site`; locally `http://127.0.0.1:<CONVEX_SITE_PORT>`):
+
+```http
+POST /v1/tickets/{ticket}/pages
+Authorization: Bearer <Convex Auth access token (JWT) of a staff or customer session>
+Idempotency-Key: <stable request id>
+Content-Type: multipart/form-data
+
+entry    = reports/index.html
+manifest = [{"part":"f0","path":"reports/index.html"},{"part":"f1","path":"assets/site.css"}]
+f0, f1   = file bytes (each field exactly once)
+```
+
+The route verifies the access token like any browser call and forwards that
+identity to every internal step, so the live session and admission are checked
+again at reserve and commit.
+
+Image policy. Without `X-Ticket-Image-Policy`, the server converts each raster
+file and each literal base64 `img src` once with Sharp (fit within 1920 × 1080,
+then the smallest of a cleaned original, WebP, JPEG for opaque images and AVIF
+that passes the pixel comparison). The browser panel sends originals this way
+whenever they fit the 10 MiB page limit. A larger selection is prepared in the
+browser first (native canvas encoders) and sent with `X-Ticket-Image-Policy: v1`;
+if the server's converted output would exceed the limit, the first attempt
+falls back the same way. The CLI prepares images with the same Sharp pipeline
+and always sends `v1`. Prepared raster bytes are validated, not re-encoded. The
+policy is part of the request identity: a retry under the same
+`Idempotency-Key` must resend the same bytes with the same policy, and the
+browser panel keeps both with the selection. Paths in the HTML stay stable; the response MIME reflects the stored encoding. Literal base64 raster `img src` values in UTF-8 HTML can also be optimized. Hosted images use a private ETag with mandatory revalidation after checking that the page is active.
+
+`201` publishes, `200` replays. Errors are `{"ok":false,"code":…}`: `401`
+session, `403 ORIGIN_NOT_ALLOWED`, `404 TICKET_UNAVAILABLE`, `400` invalid
+bundle, `409` conflict/revoked/limit, `413 PAGE_TOO_LARGE`. Unknown outcomes are
+`503 PAGE_PUBLISH_UNKNOWN` with `"retryable":true` and `Retry-After`; incomplete
+or expired uploads are `409` with `"retryable":true`. Retry those with the same key.
+
+Browser writes are accepted only from origins listed in the Convex environment
+variable `TICKET_APP_ORIGINS` (comma-separated, exact). Clients without an
+`Origin` header, such as the CLI, are unaffected. Locally, `pnpm dev` and
+`pnpm test:browser` set it on this checkout's local backend to exactly this
+checkout's Vite origins (`localhost` and `127.0.0.1` on its `VITE_PORT`); no
+manual step is needed. Shared deployments are configured separately.
+
+`GET /p/{key}/{path}` serves committed files only, rechecking publication,
+revocation and Ticket lifecycle on every request. HTML and unavailable responses carry `no-store`. Served files carry
+`nosniff`, `no-referrer`, `noindex` and a CSP sandbox (`sandbox allow-scripts`,
+opaque origin, no network access beyond inline code, `data:`/`blob:` media and
+files under the page's own `/p/{key}/` prefix). External fonts and scripts do not
+load; bundle them. `/p/{key}` redirects to the entry page.
+
+Staging and blobs: before any byte is stored, the reservation records one
+claim per file with a private random marker; the stored blob carries it in its
+storage content type (served responses always use the validated path's type).
+Recording clears the claim. If a run stops between storing and recording, a
+same-key retry, or the five-minute reconciliation sweep, scans storage by
+creation time in bounded passes within the claim's 11-minute write window and
+attributes only the blob with that exact marker, size and hash. It is adopted
+while staging, otherwise recorded as discarded. Expiry (15 minutes) only marks
+abandoned uploads; deleting page blobs is part of the gated reclaim sweep and
+runs only with `MEDIA_CLEANUP_ENABLED=true`. Unrelated storage is never deleted.
+`pnpm convex:local run local_smoke:pages '{}'` checks this on the local backend.
 
 ## Output and error contract
 
@@ -274,7 +369,7 @@ syntax.
 | `scripts/ticket/lock.ts` | Crash-safe cross-process session lock (macOS `O_EXLOCK`). |
 | `scripts/ticket/google-login.ts` | Loopback listener for the named Google sign-in. |
 | `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
-| `scripts/ticket/images.ts` | Original-byte local/HTTPS image loading and UploadThing storage. |
+| `scripts/ticket/images.ts` | Local/HTTPS image loading, preparation with byte verification, HEIC conversion on macOS, and UploadThing storage. |
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
@@ -283,6 +378,11 @@ syntax.
 | `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 | `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
+| `scripts/ticket/pages.ts` | Reads a page file or folder from disk for `page publish`. |
+| `shared/ticket-pages.ts` | Page limits, path rules, media types, form body and serving headers. |
+| `convex/page_http.ts` | Publish and serve HTTP routes. |
+| `convex/domain/pages.ts` | Page reservation, staging, commit, revoke, expiry and reclaim. |
+| `src/features/tickets/ticket-pages.tsx` | Ticket dialog panel for staff and customers. |
 
 Verify changes with:
 
@@ -334,6 +434,10 @@ pnpm convex:local run local_smoke:run '{}'
 pnpm convex:local run local_smoke:media '{}'
 pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
 ```
+
+The CLI smoke also publishes `tests/fixtures/ticket-page` (nested entry, CSS,
+script, images, font) and a single file, then checks replay, conflict, served
+headers, nested assets and revocation against this checkout's backend.
 
 The internal seed requires explicit fixture opt-in and a loopback deployment URL, and is repeatable. It creates Projects `POS` and `APP`,
 the Owner `owner@local.test` and Staff `staff@local.test` (local test provider in

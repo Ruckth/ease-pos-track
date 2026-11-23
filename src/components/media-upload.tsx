@@ -1,3 +1,4 @@
+import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
 import type { PendingMedia } from "@/lib/types";
 import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
@@ -10,7 +11,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
 const VIDEO_LIMIT = 3;
-const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
 const VIDEO_MAX_BYTES = 64 * 1024 * 1024;
 
 export function MediaUploadField({
@@ -72,8 +73,8 @@ export function MediaUploadField({
           problems.push(`${file.name}: ${t("imageVideoOnly")}`);
           continue;
         }
-        if (isImage && file.size > IMAGE_MAX_BYTES) {
-          problems.push(`${file.name}: ${t("imageTooLarge")}`);
+        if (isImage && file.size > IMAGE_SOURCE_BYTES) {
+          problems.push(`${file.name}: ${t("sourceImageTooLarge")}`);
           continue;
         }
         if (isVideo && file.size > VIDEO_MAX_BYTES) {

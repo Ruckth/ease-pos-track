@@ -3,7 +3,7 @@ import { httpRouter } from "convex/server";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
-import { actorQuery, identityAction, namedStaffQuery, publicIdentityMutation, publicIdentityQuery, staffQuery, t3DoctorHttp, trustedCallbackMutation } from "../convex/functions";
+import { actorQuery, identityAction, namedStaffQuery, publicIdentityMutation, publicIdentityQuery, staffQuery, pageHttp, t3DoctorHttp, trustedCallbackMutation } from "../convex/functions";
 import { completePasswordSignIn, reservePasswordSignIn, signInWithPassword } from "../convex/auth";
 import { assignment, classification, routingTables } from "../convex/routing_schema";
 import schema from "../convex/schema";
@@ -74,17 +74,37 @@ test("protected registrations refuse raw token arguments at definition time", ()
 test("HTTP routes cannot hide an untagged handler inside the router", () => {
   const router = httpRouter();
   router.route({ path: "/bypass", method: "GET", handler: httpActionGeneric(async () => new Response()) });
-  assert.deepEqual(routeViolations("http.ts", router), [
+  assert.deepEqual(routeViolations("http.ts", router).sort(), [
     "http.ts:GET /bypass: untagged HTTP route",
+    "http.ts:GET /p/*: missing manifest route",
+    "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /integrations/t3/doctor: missing manifest route",
+    "http.ts:POST /v1/tickets/*: missing manifest route",
   ]);
 });
 
 test("a tagged doctor handler cannot be mounted at another method or path", () => {
   const router = httpRouter();
   router.route({ ...t3DoctorHttp(async () => new Response()), path: "/integrations/t3/other" });
-  assert.deepEqual(routeViolations("http.ts", router), [
-    "http.ts:POST /integrations/t3/other: unexpected HTTP policy http:t3-doctor:t3_doctor:verify",
+  assert.deepEqual(routeViolations("http.ts", router).sort(), [
+    "http.ts:GET /p/*: missing manifest route",
+    "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /integrations/t3/doctor: missing manifest route",
+    "http.ts:POST /integrations/t3/other: unexpected HTTP policy http:t3-doctor:t3_doctor:verify",
+    "http.ts:POST /v1/tickets/*: missing manifest route",
+  ]);
+});
+
+test("HTTP routes are enumerated: page serving cannot be relabelled, widened or dropped", () => {
+  const handler = async () => new Response();
+  const router = httpRouter();
+  router.route(t3DoctorHttp(handler));
+  router.route({ ...pageHttp("publish", handler), pathPrefix: "/p/", method: "GET" });
+  router.route({ ...pageHttp("publish", handler), method: "PUT" });
+  assert.deepEqual(routeViolations("http.ts", router).sort(), [
+    "http.ts:GET /p/*: unexpected HTTP policy http:convex-auth:pages:publish",
+    "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
+    "http.ts:POST /v1/tickets/*: missing manifest route",
+    "http.ts:PUT /v1/tickets/*: unexpected HTTP policy http:convex-auth:pages:publish",
   ]);
 });

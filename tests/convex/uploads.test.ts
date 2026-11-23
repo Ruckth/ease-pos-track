@@ -253,6 +253,27 @@ test("definitively rejected new trusted uploads reserve their keys without chang
   expect(await record(handle)).toEqual({ state: "recorded" });
 });
 
+test("a callback receipt for rejected image bytes is reserved for cleanup and can never complete the submission", async () => {
+  const { t, staff, alice, intent, file, create, snapshot } = await fixture();
+  const handle = await intent();
+  const receipt = { intentId: handle.intentId, secret: handle.secret, file, callbackToken: "fake-callback-secret" };
+  // The flag is the trusted callback's verdict; a staff session cannot claim it.
+  const staffIntent = await intent("staff-rejected-request", staff);
+  await expect(t.mutation(api.uploads.recordUploadedFile, { intentId: staffIntent.intentId, secret: staffIntent.secret, file, token: staff, rejectedImage: true }))
+    .rejects.toThrow("TRUSTED_CALLBACK_REQUIRED");
+
+  const rejected = await t.mutation(api.uploads.recordUploadedFile, { ...receipt, rejectedImage: true });
+  expect(rejected.state).toBe("queued");
+  const reserved = await snapshot();
+  expect(reserved.assets).toMatchObject([{ key: file.key, lifecycle: "deleting", intentId: handle.intentId }]);
+  expect(reserved.jobs).toMatchObject([{ kind: "rejected_upload", keys: [file.key] }]);
+  expect(reserved.intents.find(row => row._id === handle.intentId)?.uploadedFiles).toEqual([]);
+  // A replay without the flag cannot resurrect the key, and the submission stays incomplete.
+  expect(await t.mutation(api.uploads.recordUploadedFile, receipt)).toEqual(rejected);
+  await expect(create(handle, alice)).rejects.toThrow("UPLOAD_INCOMPLETE");
+  expect(await snapshot()).toMatchObject({ assets: reserved.assets, jobs: reserved.jobs, tickets: reserved.tickets });
+});
+
 test("staff CLI response loss reconciles registered recording and attachment without duplicate media or deletion", async () => {
   const { t, staff, intent, file, snapshot, seed } = await fixture();
   const handle = await intent("cli-media-request", staff);

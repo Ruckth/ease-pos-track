@@ -1,11 +1,12 @@
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { after, test as nodeTest } from "node:test";
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext, Locator, Page, Request } from "playwright";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { capture, newContext, redact } from "../../scripts/browser-evidence";
-import { authStorageKeys, baseURL, chooseProject, convex, copy, files, localIdentityAdmin, openHeaderMenu, projectSwitcher, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
+import { authStorageKeys, baseURL, hostedPageErrors, chooseProject, convex, copy, files, localIdentityAdmin, openHeaderMenu, projectSwitcher, suiteBrowser, open as openWith, seed, stats, type Language, LOCAL_CUSTOMER_PASSWORD } from "./harness";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -13,8 +14,8 @@ const open = async (role: "staff" | "customer", language?: Language, configure?:
 // Every check runs in an evidence scope: failures keep a screenshot, the
 // assertion, and (locally) a Playwright trace taken before teardown.
 function test(name: string, run: () => Promise<void>): void;
-function test(name: string, options: { timeout?: number }, run: () => Promise<void>): void;
-function test(name: string, optionsOrRun: { timeout?: number } | (() => Promise<void>), maybeRun?: () => Promise<void>) {
+function test(name: string, options: { timeout?: number; skip?: string | boolean }, run: () => Promise<void>): void;
+function test(name: string, optionsOrRun: { timeout?: number; skip?: string | boolean } | (() => Promise<void>), maybeRun?: () => Promise<void>) {
   if (typeof optionsOrRun === "function") nodeTest(name, () => capture("workflows", name, optionsOrRun));
   else nodeTest(name, optionsOrRun, () => capture("workflows", name, maybeRun!));
 }
@@ -1329,4 +1330,227 @@ test("sign-out waits for the active draft to cancel with a live session", { time
     console.error("Sign-out state", events, page.url(), (await page.locator("body").innerText()).slice(-1500));
     throw error;
   } finally { releaseIntent?.(); await context.close(); }
+});
+
+const pageFixture = path.resolve(import.meta.dirname, "../fixtures/ticket-page");
+/** Creates a text-only Ticket, deep-links to its detail and expands hosted pages. */
+async function openNewTicket(f: Awaited<ReturnType<typeof open>>, role: "staff" | "customer", language: Language) {
+  const name = `Pages ${role} ${crypto.randomUUID()}`;
+  const created = await convex.mutation(api.tickets.createTextTicket, {
+    token: f.token, projectKey: "POS", title: name, description: "Hosted page fixture", requestId: crypto.randomUUID(),
+  });
+  await f.page.goto(`${baseURL}/${role}?project=POS${role === "staff" ? "&view=table" : ""}&ticket=${created.ticket._id}`);
+  await f.page.getByRole("heading", { name, exact: true }).waitFor();
+  await f.page.getByRole("button", { name: copy(language, "pagesTitle"), exact: true }).click();
+  const dialog = f.page.locator("body");
+  await dialog.getByText(copy(language, "pagesHint"), { exact: true }).waitFor();
+  return { dialog, ref: created.ticket.ticketNumber };
+}
+async function publishFrom(dialog: Locator, language: Language, input: "choosePageFolder" | "chooseHtmlFile", source: string, entry?: string, timeout?: number) {
+  await dialog.getByLabel(copy(language, input), { exact: true }).setInputFiles(source);
+  if (entry) await dialog.getByLabel(copy(language, "pageEntry"), { exact: true }).selectOption(entry);
+  await dialog.getByRole("button", { name: copy(language, "publishPage"), exact: true }).click();
+  const link = dialog.getByRole("link", { name: copy(language, "openPageNamed", { name: entry ?? path.basename(source) }), exact: true });
+  await link.waitFor({ timeout });
+  return link;
+}
+
+for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
+  test(`${role} ${language}: publish a folder page with nested assets, open it isolated, copy, revoke; publish a single file`, async () => {
+    const f = await open(role, language);
+    const responses = new Map<string, { status: number; type: string | null }>();
+    f.context.on("response", response => { if (response.url().includes("/p/")) responses.set(new URL(response.url()).pathname, { status: response.status(), type: response.headers()["content-type"] ?? null }); });
+    try {
+      await f.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
+      const { dialog } = await openNewTicket(f, role, language);
+      await dialog.getByText(copy(language, "pagesEmpty"), { exact: true }).waitFor();
+      const link = await publishFrom(dialog, language, "choosePageFolder", pageFixture, "reports/summary.html");
+      const url = (await link.getAttribute("href"))!;
+      assert.match(url, /\/p\/[A-Za-z0-9_-]{43}\/reports\/summary\.html$/);
+      assert.equal(await link.getAttribute("rel"), "noopener noreferrer");
+
+      const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
+      const popupErrors = hostedPageErrors(popup);
+      await popup.getByText("Inline script ran", { exact: true }).waitFor();
+      await popup.getByText("External script ran", { exact: true }).waitFor();
+      await popup.waitForFunction(() => (document.getElementById("shot") as HTMLImageElement).naturalWidth === 8);
+      await popup.waitForFunction(() => document.fonts.status === "loaded");
+      const prefix = new URL(url).pathname.replace(/reports\/summary\.html$/, "");
+      const assets = [["assets/site.css", "text/css"], ["assets/app.js", "text/javascript"], ["assets/img/dot.png", "image/png"], ["assets/img/bg.png", "image/png"], ["assets/fonts/fixture.woff2", "font/woff2"]];
+      // CSS backgrounds and fonts load asynchronously after the scripts run.
+      for (let waited = 0; assets.some(([file]) => !responses.has(prefix + file)) && waited < 5000; waited += 50) await popup.waitForTimeout(50);
+      for (const [file, type] of assets) {
+        assert.equal(responses.get(prefix + file)?.status, 200, file);
+        assert.match(responses.get(prefix + file)?.type ?? "", new RegExp(`^${type}`), file);
+      }
+      // The page runs in an opaque-origin sandbox: no app storage and no opener.
+      assert.deepEqual(await popup.evaluate(() => {
+        let storage = "readable";
+        try { void sessionStorage.length; } catch { storage = "blocked"; }
+        return { storage, opener: window.opener === null, origin: window.origin };
+      }), { storage: "blocked", opener: true, origin: "null" });
+      await popup.locator("#details").click();
+      await popup.getByRole("heading", { name: "Fixture details", exact: true }).waitFor();
+      assert.deepEqual(popupErrors, []);
+
+      await dialog.getByRole("button", { name: copy(language, "copyLinkNamed", { name: "reports/summary.html" }), exact: true }).click();
+      await f.page.waitForFunction(async expected => await navigator.clipboard.readText() === expected, url);
+
+      await dialog.getByRole("button", { name: copy(language, "revokeLinkNamed", { name: "reports/summary.html" }), exact: true }).click();
+      await f.page.getByRole("alertdialog").getByRole("button", { name: copy(language, "revokeLink"), exact: true }).click();
+      await dialog.getByText(copy(language, "pagesEmpty"), { exact: true }).waitFor();
+      assert.equal((await popup.goto(url))?.status(), 404);
+      assert.equal((await popup.goto(new URL("../assets/img/dot.png", url).href))?.status(), 404);
+
+      const single = await publishFrom(dialog, language, "chooseHtmlFile", path.join(pageFixture, "reports/details.html"));
+      assert.match((await single.getAttribute("href"))!, /\/details\.html$/);
+      assert.equal(await dialog.getByLabel(copy(language, "pageEntry"), { exact: true }).count(), 0);
+      assert.equal(f.uploads(), 0);
+      assert.deepEqual(f.errors, []);
+    } finally { await f.context.close(); }
+  });
+}
+
+test("publishing an HTML screenshot fits Full HD and preserves transparent pixels", async () => {
+  const { default: sharp } = await import("sharp");
+  const source = await sharp({ create: { width: 3000, height: 300, channels: 4, background: "#1495ac80" } }).png().toBuffer();
+  const html = '<img alt="Ticket screenshot" src="data:image/png;base64,' + source.toString("base64") + '">';
+  const f = await open("staff");
+  try {
+    const { dialog } = await openNewTicket(f, "staff", "en");
+    await dialog.getByLabel(copy("en", "chooseHtmlFile"), { exact: true }).setInputFiles({
+      name: "screenshot.html", mimeType: "text/html", buffer: Buffer.from(html),
+    });
+    await dialog.getByRole("button", { name: copy("en", "publishPage"), exact: true }).click();
+    const link = dialog.getByRole("link", { name: copy("en", "openPageNamed", { name: "screenshot.html" }), exact: true });
+    const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
+    const image = popup.getByAltText("Ticket screenshot");
+    await image.evaluate(async element => { await (element as HTMLImageElement).decode(); });
+    const data = await image.getAttribute("src");
+    assert(data);
+    const pixels = await sharp(Buffer.from(data.split(",")[1], "base64")).raw().toBuffer({ resolveWithObject: true });
+    assert.deepEqual([pixels.info.width, pixels.info.height, pixels.info.channels, pixels.data[3]], [1920, 192, 4, 128]);
+  } finally { await f.context.close(); }
+});
+
+/**
+ * Records each page publish: its image policy header and multipart payload bytes.
+ * Chromium hides File-backed parts from Playwright, so the payload is summed in
+ * the page from the FormData the app hands to fetch. Applies from the next navigation.
+ */
+async function trackPublishes(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const send = window.fetch.bind(window);
+    const sizes: number[] = [];
+    Object.assign(window, { pageUploadBytes: sizes });
+    window.fetch = (input, init) => {
+      if (init?.body instanceof FormData && String(input).includes("/pages")) {
+        let bytes = 0;
+        init.body.forEach(value => { bytes += typeof value === "string" ? new TextEncoder().encode(value).length : value.size; });
+        sizes.push(bytes);
+      }
+      return send(input, init);
+    };
+  });
+  const requests: Request[] = [];
+  context.on("request", request => { if (request.method() === "POST" && /\/v1\/tickets\/[^/]+\/pages$/.test(new URL(request.url()).pathname)) requests.push(request); });
+  return async (page: Page) => {
+    const sizes = await page.evaluate(() => (window as unknown as { pageUploadBytes: number[] }).pageUploadBytes);
+    return requests.map((request, index) => ({ bytes: sizes[index], policy: request.headers()["x-ticket-image-policy"] ?? null }));
+  };
+}
+
+test("originals over the request limit are prepared in the browser and stay within Full HD", { timeout: 120_000 }, async () => {
+  const { default: sharp } = await import("sharp");
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const folder = await mkdtemp(path.join(tmpdir(), "ticket-page-large-"));
+  // Uncompressed noise: 2200 × 1800 RGBA is about 15.8 MB, over the 10 MiB page limit.
+  const photo = await sharp({ create: { width: 2200, height: 1800, channels: 4, background: "#000", noise: { type: "gaussian", mean: 128, sigma: 50 } } }).png({ compressionLevel: 0 }).toBuffer();
+  await writeFile(path.join(folder, "index.html"), '<img alt="Large photo" src="photo.png">');
+  await writeFile(path.join(folder, "photo.png"), photo);
+  const f = await open("staff");
+  const publishes = await trackPublishes(f.context);
+  try {
+    assert.ok(photo.length > 10 * 1024 * 1024);
+    const { dialog } = await openNewTicket(f, "staff", "en");
+    await dialog.getByLabel(copy("en", "choosePageFolder"), { exact: true }).setInputFiles(folder);
+    await dialog.getByRole("button", { name: copy("en", "publishPage"), exact: true }).click();
+    const link = dialog.getByRole("link", { name: copy("en", "openPageNamed", { name: "index.html" }), exact: true });
+    await link.waitFor({ timeout: 60_000 });
+    const posts = await publishes(f.page);
+    assert.deepEqual(posts.map(post => post.policy), ["v1"]);
+    assert.ok(posts[0].bytes < photo.length / 2, `request ${posts[0].bytes} bytes`);
+    const stored = Buffer.from(await (await fetch(new URL("photo.png", (await link.getAttribute("href"))!))).arrayBuffer());
+    const meta = await sharp(stored).metadata();
+    assert.deepEqual([meta.width, meta.height], [1320, 1080]);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); await rm(folder, { recursive: true, force: true }); }
+});
+
+/** Every literal base64 `img src` in served HTML, decoded with its stored format. */
+async function embeddedImages(html: string) {
+  const { default: sharp } = await import("sharp");
+  return await Promise.all([...html.matchAll(/<img\b[^>]*?\ssrc="data:(image\/[a-z]+);base64,([^"]+)"/g)].map(async ([, type, base64]) => {
+    const bytes = Buffer.from(base64, "base64");
+    const meta = await sharp(bytes).metadata();
+    return { type, bytes, size: bytes.length, width: meta.width!, height: meta.height!, alpha: Boolean(meta.hasAlpha) };
+  }));
+}
+
+// The real Thai report (1.4 MB, nine embedded screenshots, zoom dialog) when present locally.
+// PAGE_SAMPLE_EVIDENCE names a JSON file that receives per-image sizes and formats.
+const sampleHtml = process.env.PAGE_SAMPLE_HTML;
+test("staff: the real sample page publishes, renders every screenshot and opens its zoom dialog", { timeout: 120_000, skip: !sampleHtml && "PAGE_SAMPLE_HTML is not set" }, async () => {
+  const { default: sharp } = await import("sharp");
+  const { faithfulPixels, fitImage } = await import("../../shared/image-optimization");
+  const { readFile, writeFile } = await import("node:fs/promises");
+  const f = await open("staff");
+  const publishes = await trackPublishes(f.context);
+  try {
+    const { dialog } = await openNewTicket(f, "staff", "en");
+    const started = Date.now();
+    const link = await publishFrom(dialog, "en", "chooseHtmlFile", sampleHtml!, undefined, 90_000);
+    const publishMs = Date.now() - started;
+    const url = (await link.getAttribute("href"))!;
+    const [popup] = await Promise.all([f.context.waitForEvent("page"), link.click()]);
+    const popupErrors = hostedPageErrors(popup);
+    await popup.waitForLoadState("load");
+    const shots = popup.locator("button.shot img");
+    assert.equal(await shots.count(), 9);
+    await popup.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>("button.shot img")].every(image => image.complete && image.naturalWidth > 0));
+    await popup.locator("button.shot").first().click();
+    await popup.waitForFunction(() => (document.getElementById("zoom") as HTMLDialogElement).open);
+    await popup.locator("#zclose").click();
+    await popup.waitForFunction(() => !(document.getElementById("zoom") as HTMLDialogElement).open);
+    assert.deepEqual(popupErrors, []);
+    assert.deepEqual(f.errors, []);
+
+    const source = await readFile(sampleHtml!);
+    const served = Buffer.from(await (await fetch(url)).arrayBuffer());
+    const before = await embeddedImages(source.toString("utf8"));
+    const after = await embeddedImages(served.toString("utf8"));
+    assert.equal(after.length, before.length);
+    const images = await Promise.all(after.map(async (output, index) => {
+      const original = before[index];
+      const fitted = fitImage(original.width, original.height);
+      // Full HD bounds, aspect and alpha hold; pixels pass the same comparison the encoder used.
+      assert.deepEqual([output.width, output.height], [fitted.width, fitted.height], `image ${index} size`);
+      assert.equal(output.alpha && !original.alpha ? "alpha added" : "ok", "ok", `image ${index} alpha`);
+      const reference = await sharp(original.bytes).rotate().resize(fitted.width, fitted.height, { fit: "fill" }).ensureAlpha().raw().toBuffer();
+      const pixels = await sharp(output.bytes).ensureAlpha().raw().toBuffer();
+      return { index, from: original.type, to: output.type, beforeBytes: original.size, afterBytes: output.size,
+        width: output.width, height: output.height, faithful: faithfulPixels(reference, pixels) };
+    }));
+    assert.ok(images.every(image => image.faithful), "every stored image passes the pixel comparison");
+    const posts = await publishes(f.page);
+    assert.equal(posts.length, 1, "one publish request");
+    assert.equal(posts[0].policy, null, "originals within the limits go to the server pipeline");
+    assert.ok(posts[0].bytes >= source.length, "the original HTML is sent unchanged");
+    assert.ok(served.length < source.length, "the server stores a smaller page");
+    const evidence = { source: { bytes: source.length }, served: { bytes: served.length, savedPercent: +(100 * (1 - served.length / source.length)).toFixed(1) },
+      request: posts[0], publishMs, converted: images.filter(image => image.from !== image.to).length, images };
+    console.log("PAGE_SAMPLE_EVIDENCE " + JSON.stringify({ ...evidence, images: undefined }));
+    if (process.env.PAGE_SAMPLE_EVIDENCE) await writeFile(process.env.PAGE_SAMPLE_EVIDENCE, JSON.stringify(evidence, null, 2));
+  } finally { await f.context.close(); }
 });

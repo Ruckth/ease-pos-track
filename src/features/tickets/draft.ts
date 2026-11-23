@@ -1,10 +1,11 @@
+import { optimizeBrowserImage } from "@/lib/optimize-image";
 import type { Id } from "@convex/_generated/dataModel";
 import type { AnnotationDraftInput, AnnotationUpdateInput, PendingMedia } from "@/lib/types";
 import { withoutPendingAnnotationsForMedia } from "@/lib/pending-annotations";
 import { submitTicketDraft, type SubmitTicketDeps, type TicketDraft } from "@/lib/ticket-submit";
 
 export type DraftSnapshot = TicketDraft & { progress: number | null; error: unknown };
-type Resources = { createURL: (file: File) => string; revokeURL: (url: string) => void; requestKey: () => string; now: () => number };
+type Resources = { prepareImage?: (file: File) => Promise<File>; createURL: (file: File) => string; revokeURL: (url: string) => void; requestKey: () => string; now: () => number };
 
 /** A component-scoped, Project-bound owner. Disposal never deletes provider files. */
 export class DisposableTicketDraft {
@@ -17,7 +18,7 @@ export class DisposableTicketDraft {
   private submittedId: Id<"tickets"> | undefined;
   get lastSubmittedId() { return this.submittedId; }
   constructor(readonly projectId: Id<"projects">, private resources: Resources = {
-    createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
+    prepareImage: optimizeBrowserImage, createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
     requestKey: () => crypto.randomUUID(), now: () => Date.now(),
   }) {
     this.state = this.empty();
@@ -93,11 +94,18 @@ export class DisposableTicketDraft {
     const draft = this.state;
     this.change({ progress: 0, error: null });
     try {
+      const items = [];
+      for (const item of draft.items) {
+        const file = !item.isVideo && this.resources.prepareImage ? await this.resources.prepareImage(item.file) : item.file;
+        controller.signal.throwIfAborted();
+        if (!item.isVideo && file.size > 8 * 1024 * 1024) throw new Error("IMAGE_TOO_LARGE");
+        items.push({ ...item, file });
+      }
       this.submission = submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
         signal: controller.signal,
         onProgress: progress => { if (this.controller === controller) this.change({ progress }); },
         onRequestConflict: () => { if (this.controller === controller) this.change({ idempotencyKey: this.resources.requestKey() }); },
-      }, draft);
+      }, { ...draft, items });
       const created = await this.submission;
       if (this.disposed || this.controller !== controller) return false;
       controller.signal.throwIfAborted();

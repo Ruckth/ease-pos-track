@@ -39,6 +39,13 @@ fs.writeFileSync(".env.local", "CLI_SELECTED_LOCAL=true");
     assert.deepEqual(JSON.parse(readFileSync(join(dir, "args.json"), "utf8")).args, [
       "dev", "--once", "--typecheck", "disable", "--local-cloud-port", "4010", "--local-site-port", "4011", "--env-file", ".env.convex-local",
     ]);
+
+    // An agent-mode backend in this checkout is selected for run/env as well.
+    mkdirSync(join(dir, ".convex/local/default"), { recursive: true });
+    writeFileSync(join(dir, ".convex/local/default/config.json"), JSON.stringify({ deploymentName: "anonymous-agent" }));
+    assert.equal(spawnSync("pnpm", ["convex:local", "run", "seed:run", "{}"], { cwd: dir, encoding: "utf8" }).status, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, "args.json"), "utf8")).args.slice(-2), ["--env-file", ".convex/local/agent.env"]);
+    assert.equal(readFileSync(join(dir, ".convex/local/agent.env"), "utf8"), "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\n");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -132,6 +139,14 @@ require("node:fs").writeFileSync("invoked", "yes");
       rmSync(join(dir, "invoked"));
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("local page publishing origins are exactly this checkout's Vite origins, set through the local wrapper", async () => {
+  const { localAppOrigins, portsForSlot } = await import("../scripts/worktree-ports.mjs");
+  assert.equal(localAppOrigins(portsForSlot(3)), "http://localhost:4033,http://127.0.0.1:4033");
+  const dev = readFileSync(resolve(import.meta.dirname, "../scripts/dev.mjs"), "utf8");
+  assert.ok(dev.includes('"scripts/convex-local.mjs", "env", "set", "TICKET_APP_ORIGINS", localAppOrigins(ports)'));
+  assert.ok(readFileSync(resolve(import.meta.dirname, "../scripts/test-browser.mjs"), "utf8").includes("TICKET_APP_ORIGINS: localAppOrigins()"));
 });
 
 test("local wrapper uses the checkout's anonymous deployment identity after agent-mode setup", () => {

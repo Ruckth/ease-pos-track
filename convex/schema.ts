@@ -107,10 +107,13 @@ const uploadIntentStatus = v.union(
   v.literal("cleaned"),
 );
 
+const pageManifestEntry = v.object({ rasterType: v.optional(v.string()), path: v.string(), size: v.number(), sha256: v.string() });
+
 // Historical attribution and outstanding media reservations keep their original session reference.
 const sessionReference = v.union(v.id("sessionAdmissions"), v.id("sessions"));
 
 export default defineSchema({
+  imageChunks: defineTable({ bytes: v.bytes() }),
   projectIntakeStaff: defineTable({
     projectId: v.id("projects"), staffId: v.string(),
   }).index("by_project_staff", ["projectId", "staffId"]),
@@ -489,6 +492,44 @@ export default defineSchema({
     key: v.string(),
     count: v.number(),
   }).index("by_key", ["key"]),
+  // A hosted page published from a Ticket. Bytes live in Convex File Storage;
+  // `files` is the durable ownership record of every blob this row staged.
+  ticketPages: defineTable({
+    ticketId: v.id("tickets"),
+    projectId: v.id("projects"),
+    requestId: v.string(),
+    actorRole,
+    actorCustomerId: v.optional(v.id("customers")),
+    actorStaffId: v.optional(v.id("staff")),
+    sessionId: sessionReference,
+    inputDigest: v.string(),
+    entryPath: v.string(),
+    manifest: v.array(pageManifestEntry),
+    files: v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string(), contentType: v.string(), storageId: v.id("_storage") })),
+    // Blobs recorded after the row stopped staging, or duplicates of a staged path.
+    discarded: v.array(v.id("_storage")),
+    // Ownership proof issued before each blob is stored: the blob carries the
+    // private marker in its storage content type until it is recorded above.
+    writes: v.optional(v.array(v.object({ path: v.string(), size: v.number(), sha256: v.string(), marker: v.string(),
+      claimedAt: v.number(), scannedTo: v.number() }))),
+    // Set while unrecorded writes await reconciliation.
+    writeCheckAt: v.optional(v.number()),
+    totalBytes: v.number(),
+    state: v.union(v.literal("staging"), v.literal("published"), v.literal("revoked"), v.literal("abandoned")),
+    shareKey: v.optional(v.string()),
+    expiresAt: v.number(),
+    // Set while blobs await the gated reclaim sweep.
+    reclaimAfter: v.optional(v.number()),
+    publishedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_request", ["requestId"])
+    .index("by_share_key", ["shareKey"])
+    .index("by_ticket", ["ticketId", "state", "createdAt"])
+    .index("by_state_expires", ["state", "expiresAt"])
+    .index("by_reclaim", ["reclaimAfter"])
+    .index("by_write_check", ["writeCheckAt"]),
   uploadIntents: defineTable({
     sessionId: sessionReference,
     secret: v.string(),

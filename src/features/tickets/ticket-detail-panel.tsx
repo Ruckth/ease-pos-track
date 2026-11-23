@@ -20,6 +20,7 @@ import { TicketAssignment } from "@/features/routing/ticket-assignment";
 import { TicketConversation } from "./ticket-conversation";
 import { DetailEdit } from "./ticket-detail-edit";
 import { TicketHistory } from "./ticket-history";
+import { TicketPages } from "./ticket-pages";
 import { useTicketOperations } from "./use-ticket-operations";
 
 const MediaViewer = lazy(() => import("@/components/media-viewer").then(module => ({ default: module.MediaViewer })));
@@ -215,6 +216,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
             onDelete={id => operations.removeAnnotation(ticket, id)} onRestore={id => operations.restoreAnnotation(ticket, id)} />
         </Suspense>}</div>
       </section>}
+      <Disclosure title={t("pagesTitle")}><TicketPages ticket={ticket} /></Disclosure>
       <Disclosure title={t("detailHistory")}><TicketHistory id={ticket._id} staff={staff} /></Disclosure>
       {!archived && <Disclosure title={t("detailActions")}>
         <div className="space-y-4">

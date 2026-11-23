@@ -109,6 +109,7 @@ export const recordUploadedFile = trustedCallbackMutation({
     intentId: v.id("uploadIntents"),
     secret: v.string(),
     file: mediaItemValidator,
+    rejectedImage: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     requireLegacyMedia();
@@ -117,7 +118,8 @@ export const recordUploadedFile = trustedCallbackMutation({
       throw new Error("UPLOAD_INTENT_INVALID");
     }
     if (ctx.staffSessionId && intent.sessionId !== ctx.staffSessionId) throw new Error("UPLOAD_INTENT_NOT_FOUND");
-    return await recordUpload(ctx, intent, args.file, ctx.staffSessionId ? "staff" : "callback");
+    if (args.rejectedImage && ctx.staffSessionId) throw new Error("TRUSTED_CALLBACK_REQUIRED");
+    return await recordUpload(ctx, intent, args.file, ctx.staffSessionId ? "staff" : "callback", args.rejectedImage);
   },
 });
 

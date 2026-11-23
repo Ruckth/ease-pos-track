@@ -1,4 +1,6 @@
 /** Exercises the real CLI orchestration/adapter without Keychain, provider I/O or remote targets. */
+import { pageFormData } from "../shared/ticket-pages";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { loadPorts } from "./worktree-ports.mjs";
 import { randomUUID } from "node:crypto";
@@ -8,6 +10,7 @@ import type { TicketConfig } from "./ticket/config";
 import type { StoredCredential } from "./ticket/keychain";
 
 const url = `http://127.0.0.1:${loadPorts().CONVEX_CLOUD_PORT}`;
+const pageFixture = "tests/fixtures/ticket-page";
 let configuration: TicketConfig = { version: 1, clientId: "local-cli-smoke-client", deployments: { dev: { url } } };
 let credential: StoredCredential | null = null;
 const remote = new ConvexTicketRemote();
@@ -59,8 +62,52 @@ await command(["archive", created.ticket, "--expected-version", "2"]);
 const restored = await command(["restore", created.ticket, "--expected-version", "3"]);
 assert.equal(restored.ticket.version, 4);
 assert.equal(restored.ticket.archived, false);
+// Hosted pages: folder with a nested entry, retry, conflict, serving and revocation.
+assert.equal((await command(["page", "publish", created.ticket, pageFixture], 3)).code, "PAGE_ENTRY_REQUIRED");
+const pageArgs = ["page", "publish", created.ticket, pageFixture, "--entry", "reports/summary.html", "--request-id", randomUUID()];
+const published = await command(pageArgs);
+assert.equal(published.created, true);
+assert.equal(published.fileCount, 7);
+assert.match(published.url, /\/p\/[A-Za-z0-9_-]{43}\/reports\/summary\.html$/);
+const replayed = await command(pageArgs);
+assert.equal(replayed.created, false);
+assert.equal(replayed.url, published.url);
+assert.equal((await command([...pageArgs.slice(0, 5), "reports/details.html", ...pageArgs.slice(6)], 5)).code, "PAGE_REQUEST_CONFLICT");
+const entry = await fetch(published.url);
+assert.equal(entry.status, 200);
+assert.match(entry.headers.get("content-security-policy") ?? "", /^sandbox allow-scripts;/);
+assert.equal(entry.headers.get("cache-control"), "no-store");
+const asset = await fetch(new URL("../assets/img/dot.png", published.url));
+assert.match(asset.headers.get("content-type") ?? "", /^image\/(png|webp|avif|jpeg)$/);
+const single = await command(["page", "publish", created.ticket, `${pageFixture}/reports/details.html`]);
+assert.match(single.url, /\/details\.html$/);
+const listed = await command(["page", "list", created.ticket]);
+assert.equal(listed.count, 2);
+assert.equal((await command(["page", "revoke", created.ticket, "--page", published.pageId])).revoked, true);
+assert.equal((await fetch(published.url)).status, 404);
+assert.equal((await fetch(new URL("../assets/img/dot.png", published.url))).status, 404);
+assert.equal((await command(["page", "list", created.ticket])).count, 1);
+// Exercise both sides of the Node action transport limit on the real backend.
+const padding = " ".repeat(9.5 * 1024 * 1024);
+const png = await readFile(pageFixture + "/assets/img/dot.png");
+const html = new Blob(['<!--', padding, '--><img src="data:image/png;base64,', png.toString("base64"), '">']);
+// A separate fixture session supplies the Convex Auth JWT the HTTP route verifies.
+const session = await remote.signInLocalFixture(url, "owner@local.test");
+assert(session);
+const large = await fetch(new URL("/v1/tickets/" + created.ticket + "/pages", published.url), {
+  method: "POST",
+  headers: { Authorization: "Bearer " + session.accessToken, "Idempotency-Key": randomUUID() },
+  body: pageFormData("large.html", [{ path: "large.html", blob: html }]),
+});
+const result = await large.json();
+assert.equal(large.status, 201, result.code);
+const stored = await (await fetch(result.url)).text();
+assert(stored.includes(padding));
+assert.match(stored, /data:image\/(?:avif|webp);base64,/);
+assert(Buffer.byteLength(stored) < html.size);
 await command(["logout"]);
-console.log(JSON.stringify({ ok: true, target: url, checks: ["login", "whoami", "create", "retry", "retry after edit", "content and Project conflict exit 5", "detail", "edit", "status", "archive", "restore", "logout", "single JSON result"] }));
+console.log(JSON.stringify({ ok: true, target: url, checks: ["login", "whoami", "create", "retry", "retry after edit", "content and Project conflict exit 5", "detail", "edit", "status", "archive", "restore",
+  "page entry required", "page folder publish", "page replay", "page conflict exit 5", "page headers", "nested asset", "single-file page", "page list", "page revoke stops HTML and assets", "9.5 MiB server-optimized HTML round trip", "logout", "single JSON result"] }));
 
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

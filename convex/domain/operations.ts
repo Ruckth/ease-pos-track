@@ -99,7 +99,7 @@ function publicTicketEvent(event: Doc<"ticketEvents">, mediaEnabled: boolean) {
 }
 
 /** Loads an active ticket the actor is allowed to change. */
-async function requireWritableTicket(
+export async function requireWritableTicket(
   ctx: MutationCtx,
   actor: Actor<Id<"customers">>,
   id: Id<"tickets">,

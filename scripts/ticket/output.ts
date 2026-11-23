@@ -141,3 +141,19 @@ export function errorOutput(error: TicketCliError, deployment?: Deployment, requ
     ...(details ? { details } : {}),
   };
 }
+
+type PublishedPage = { pageId: string; url: string; entry: string; fileCount: number; totalBytes: number; publishedAt: number };
+
+export function pagePublishOutput(deployment: Deployment, ticket: string, page: PublishedPage & { created: boolean; requestId: string }) {
+  return { ok: true as const, deployment, ticket, url: page.url, pageId: page.pageId, entry: page.entry,
+    fileCount: page.fileCount, totalBytes: page.totalBytes, created: page.created, requestId: page.requestId };
+}
+
+export function pageListOutput(deployment: Deployment, ticket: string, pages: PublishedPage[]) {
+  return { ok: true as const, deployment, ticket, count: pages.length, pages: pages.map(page => ({
+    pageId: page.pageId, url: page.url, entry: page.entry, fileCount: page.fileCount, totalBytes: page.totalBytes, publishedAt: page.publishedAt })) };
+}
+
+export function pageRevokeOutput(deployment: Deployment, ticket: string, pageId: string, revoked: boolean) {
+  return { ok: true as const, deployment, ticket, pageId, revoked };
+}

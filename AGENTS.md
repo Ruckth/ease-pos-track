@@ -102,6 +102,20 @@ pnpm ticket create --title "<title>" --description "<description>" --project <KE
 
 `pnpm ticket --help` documents every flag. Details and setup: [docs/ticket-cli.md](docs/ticket-cli.md).
 
+## Publishing a Ticket page
+
+When the user asks for an HTML result on a Ticket, publish it and send the
+returned `url` in the conversation where the work was requested:
+
+```bash
+pnpm ticket page publish <TICKET> ./page.html
+pnpm ticket page publish <TICKET> ./folder --entry reports/index.html
+```
+
+Retry an interrupted publish with the reported `requestId`. Bundle fonts and
+scripts in the folder; pages cannot load external resources. Details:
+[docs/ticket-cli.md#hosted-pages](docs/ticket-cli.md#hosted-pages).
+
 ## Checks
 
 This repository is pnpm-only. Use `pnpm` for every command; `npm`, `npx`, yarn and

@@ -316,6 +316,23 @@ export function internalJobAction<A extends PropertyValidators, R>(definition: D
   }), "internalJobAction");
 }
 
+/**
+ * Internal session-checked mutation for HTTP actions: the route forwards the
+ * caller's Convex Auth JWT, so identity reaches here exactly as for a browser call.
+ */
+export function internalActorMutation<A extends PropertyValidators, R>(
+  definition: Definition<MutationCtx & Access, A, R>,
+) {
+  refuseRawToken(definition.name, definition.args);
+  return tagged(internalMutation({
+    args: v.object(definition.args),
+    handler: (ctx, args) => guarded(definition.name, async () => {
+      const access = await requireActor(ctx);
+      return await definition.handler(Object.assign(ctx, access), args);
+    }),
+  }), "internalActorMutation");
+}
+
 /** Live named staff admission for T3 Settings, resolved through t3Identity.browser. */
 export function namedStaffQuery<A extends PropertyValidators, R>(
   definition: Definition<QueryCtx & { namedStaff: T3Admission }, A, R>,
@@ -357,7 +374,19 @@ export const t3DoctorRoute = {
  * deployment JWKS are component- and platform-owned, mounted from
  * convex.config.ts, and never registered here.
  */
-export const httpRouteManifest = [t3DoctorRoute] as const;
+/** Hosted Ticket pages: publishing checks the forwarded JWT; serving is the capability-URL reader. */
+export const pageRoutes = {
+  publish: { pathPrefix: "/v1/tickets/", method: "POST" satisfies RoutableMethod, credentialClass: "convex-auth", operation: "pages:publish" },
+  preflight: { pathPrefix: "/v1/tickets/", method: "OPTIONS" satisfies RoutableMethod, credentialClass: "cors", operation: "pages:preflight" },
+  serve: { pathPrefix: "/p/", method: "GET" satisfies RoutableMethod, credentialClass: "share-key", operation: "pages:serve" },
+} as const;
+
+export const httpRouteManifest = [t3DoctorRoute, ...Object.values(pageRoutes)] as const;
+
+export function pageHttp(route: keyof typeof pageRoutes, handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
+  const { pathPrefix, method, credentialClass, operation } = pageRoutes[route];
+  return { pathPrefix, method, handler: tagged(httpAction(handler), `http:${credentialClass}:${operation}`) };
+}
 
 export function t3DoctorHttp(handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
   const { path, method, credentialClass, operation } = t3DoctorRoute;

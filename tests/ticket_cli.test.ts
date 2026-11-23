@@ -6,6 +6,10 @@ import * as authHandlers from "../convex/auth";
 import * as identityHandlers from "../convex/identity";
 import { ConvexTicketRemote } from "../scripts/ticket/remote";
 import * as uploadHandlers from "../convex/uploads";
+import * as pageHandlers from "../convex/pages";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ValidatorJSON } from "convex/values";
 import { ConvexError } from "convex/values";
 import assert from "node:assert/strict";
@@ -17,7 +21,7 @@ import { EXIT, TicketCliError, remoteError, internalError } from "../scripts/tic
 import type { CredentialStore, StoredCredential } from "../scripts/ticket/keychain";
 import { COMMAND_REGISTRY, commandDiscoveryOutput, humanHelp } from "../scripts/ticket/registry";
 import type { TicketRef } from "../scripts/ticket/cli";
-import type { SessionTokens, TicketAttachInput, TicketDocument, TicketRemote } from "../scripts/ticket/remote";
+import type { SessionTokens, TicketAttachInput, TicketDocument, TicketPagePublishInput, TicketRemote } from "../scripts/ticket/remote";
 import { classifyRemoteError, runTicketCli, type TicketCliDeps } from "../scripts/ticket/run";
 import { toStoredTicketStatus, type TicketStatus } from "../scripts/ticket/status";
 
@@ -165,6 +169,15 @@ class FakeRemote implements TicketRemote {
     this.rows[0] = ticket({ ...active, version: expectedVersion + 1 });
     return this.rows[0];
   }
+  pageError: Error | null = null;
+  pages = [{ pageId: "page-id", url: "https://site.example/p/key/index.html", entry: "index.html", fileCount: 2, totalBytes: 10, publishedAt: 1 }];
+  async publishPage(url: string, token: string, input: TicketPagePublishInput) {
+    this.record("publishPage", url, token, input);
+    if (this.pageError) throw this.pageError;
+    return { ...this.pages[0], entry: input.bundle.entry, fileCount: input.bundle.files.length, totalBytes: input.bundle.totalBytes, created: true, requestId: input.requestId };
+  }
+  async listPages(url: string, token: string, id: TicketDocument["_id"]) { this.record("listPages", url, token, id); return this.pages; }
+  async revokePage(url: string, token: string, pageId: string) { this.record("revokePage", url, token, pageId); return true; }
 }
 
 function fixture() {
@@ -778,7 +791,7 @@ test("every CLI transport call satisfies the real registered argument validators
   const originalQuery = ConvexHttpClient.prototype.query;
   const originalMutation = ConvexHttpClient.prototype.mutation;
   const originalAction = ConvexHttpClient.prototype.action;
-  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, identity: identityHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers };
+  const handlers: Record<string, Record<string, object>> = { auth: authHandlers, identity: identityHandlers, projects: projectHandlers, tickets: ticketHandlers, uploads: uploadHandlers, pages: pageHandlers };
   const called = new Set<string>();
   const invoke = (reference: Parameters<typeof getFunctionName>[0], args: unknown) => {
     const name = getFunctionName(reference);
@@ -794,6 +807,8 @@ test("every CLI transport call satisfies the real registered argument validators
     if (method === "recordUploadedFile") return { state: "recorded" };
     if (method === "listProjects") return [{ _id: ticket().projectId, key: "TKT" }];
     if (method === "pageTicketDetails") return { page: [ticket()], isDone: true, continueCursor: "" };
+    if (method === "listTicketPages") return [];
+    if (method === "revokeTicketPage") return { revoked: true };
     return ticket();
   };
   ConvexHttpClient.prototype.query = async (reference, ...args) => invoke(reference, args[0]) as never;
@@ -822,7 +837,9 @@ test("every CLI transport call satisfies the real registered argument validators
     await remote.changeStatus(url, token, { ref, status: "acknowledged", expectedVersion: 0 });
     await remote.archive(url, token, ref, 0);
     await remote.restore(url, token, ref, 0);
-    assert.equal(called.size, 18);
+    await remote.listPages(url, token, ticket()._id);
+    await remote.revokePage(url, token, "page-id");
+    assert.equal(called.size, 20);
   } finally {
     ConvexHttpClient.prototype.query = originalQuery;
     ConvexHttpClient.prototype.mutation = originalMutation;
@@ -858,4 +875,121 @@ test("CLI read adapter consumes every Project/lifecycle page and preserves full 
       ["empty-project", "active", null], ["empty-project", "archived", null],
     ]);
   } finally { ConvexHttpClient.prototype.query = original; }
+});
+
+function pageFolder(files: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), "ticket-page-"));
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(join(dir, path, ".."), { recursive: true });
+    writeFileSync(join(dir, path), content);
+  }
+  return dir;
+}
+
+test("page commands parse as registry subcommands with help and discovery", () => {
+  assert.deepEqual(parseTicketArgs(["page", "publish", "pos-0007", "./site", "--entry", "docs/a.html", "--request-id", " retry-1 "]), {
+    kind: "pagePublish", deployment: "dev", ref: { projectKey: "POS", ticketNumber: 7 }, source: "./site", entry: "docs/a.html", requestId: "retry-1",
+  });
+  assert.deepEqual(parseTicketArgs(["page", "list", "POS-0007", "--prod"]), { kind: "pageList", deployment: "prod", ref: { projectKey: "POS", ticketNumber: 7 } });
+  assert.deepEqual(parseTicketArgs(["page", "revoke", "POS-0007", "--page", "abc"]), { kind: "pageRevoke", deployment: "dev", ref: { projectKey: "POS", ticketNumber: 7 }, pageId: "abc" });
+  assert.deepEqual(parseTicketArgs(["page", "publish", "--help"]), { kind: "help", command: "page publish" });
+  assert.deepEqual(parseTicketArgs(["help", "page", "publish"]), { kind: "help", command: "page publish" });
+  assert.match(humanHelp("page publish"), /pnpm ticket page publish <KEY-####> <path> \[options\]/);
+  for (const argv of [["page"], ["page", "publish", "POS-0007"], ["page", "revoke", "POS-0007"], ["page", "bogus"]]) {
+    assert.throws(() => parseTicketArgs(argv), (error: TicketCliError) => error.exitCode === EXIT.usage, argv.join(" "));
+  }
+});
+
+test("page publish reads a nested folder, validates locally and reports the link and retry id", async () => {
+  const dir = pageFolder({ "docs/report.html": "<link href='../assets/a.css'>", "assets/a.css": "body{}", "assets/f.woff2": "font", ".DS_Store": "x" });
+  try {
+    const { deps, remote } = fixture();
+    const ambiguous = pageFolder({ "a.html": "a", "b.html": "b" });
+    const first = await runTicketCli(["page", "publish", "TKT-0007", ambiguous], deps);
+    rmSync(ambiguous, { recursive: true, force: true });
+    assert.equal(first.exitCode, EXIT.invalidInput);
+    assert.equal(JSON.parse(first.stderr).code, "PAGE_ENTRY_REQUIRED");
+    assert.equal(remote.calls.length, 0);
+
+    const outcome = await runTicketCli(["page", "publish", "TKT-0007", dir, "--entry", "docs/report.html"], deps);
+    assert.equal(outcome.exitCode, 0, outcome.stderr);
+    assert.deepEqual(JSON.parse(outcome.stdout), { ok: true, deployment: "dev", ticket: "TKT-0007", url: "https://site.example/p/key/index.html",
+      pageId: "page-id", entry: "docs/report.html", fileCount: 3, totalBytes: 39, created: true, requestId: "generated-request-id" });
+    const input = remote.calls.find(call => call.method === "publishPage")!.args[2] as TicketPagePublishInput;
+    assert.deepEqual(input.bundle.files.map(file => file.path).sort(), ["assets/a.css", "assets/f.woff2", "docs/report.html"]);
+    assert.equal(input.ticket, "TKT-0007");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("page publish rejects unsafe bundles before authentication and maps page conflicts", async () => {
+  const { deps, remote, credentials } = fixture();
+  credentials.values = {};
+  for (const [files, code] of [[{ "index.html": "x", "notes.md": "x" }, "PAGE_FILE_TYPE_UNSUPPORTED"], [{ "only.css": "x" }, "PAGE_ENTRY_REQUIRED"]] as const) {
+    const dir = pageFolder(files);
+    try {
+      const outcome = await runTicketCli(["page", "publish", "TKT-0007", dir], deps);
+      assert.equal(outcome.exitCode, EXIT.invalidInput);
+      assert.equal(JSON.parse(outcome.stderr).code, code);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+  assert.equal(JSON.parse((await runTicketCli(["page", "publish", "TKT-0007", "/definitely/missing.html"], deps)).stderr).code, "PAGE_SOURCE_NOT_FOUND");
+  assert.deepEqual(remote.calls, []);
+
+  const authed = fixture();
+  const dir = pageFolder({ "page.html": "<p>ok</p>" });
+  try {
+    authed.remote.pageError = new ConvexError({ code: "PAGE_REQUEST_CONFLICT" });
+    const conflict = await runTicketCli(["page", "publish", "TKT-0007", join(dir, "page.html"), "--request-id", "same"], authed.deps);
+    assert.equal(conflict.exitCode, EXIT.conflict);
+    assert.deepEqual(JSON.parse(conflict.stderr), { ok: false, code: "PAGE_REQUEST_CONFLICT", message: "This request id was already used for a different page.",
+      deployment: "dev", requestId: "same", hint: "Use the same --request-id only when retrying the same files." });
+    authed.remote.pageError = new TypeError("fetch failed");
+    const lost = await runTicketCli(["page", "publish", "TKT-0007", join(dir, "page.html")], authed.deps);
+    assert.equal(lost.exitCode, EXIT.remote);
+    assert.equal(JSON.parse(lost.stderr).requestId, "generated-request-id");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("page list and revoke resolve the Ticket reference and refuse pages from other Tickets", async () => {
+  const { deps, remote } = fixture();
+  const listed = JSON.parse((await runTicketCli(["page", "list", "TKT-0007"], deps)).stdout);
+  assert.deepEqual(listed, { ok: true, deployment: "dev", ticket: "TKT-0007", count: 1, pages: remote.pages });
+  assert.deepEqual(JSON.parse((await runTicketCli(["page", "revoke", "TKT-0007", "--page", "page-id"], deps)).stdout),
+    { ok: true, deployment: "dev", ticket: "TKT-0007", pageId: "page-id", revoked: true });
+  const other = await runTicketCli(["page", "revoke", "TKT-0007", "--page", "foreign"], deps);
+  assert.equal(other.exitCode, EXIT.invalidInput);
+  assert.equal(JSON.parse(other.stderr).code, "PAGE_NOT_FOUND");
+  assert.equal(remote.calls.filter(call => call.method === "revokePage").length, 1);
+});
+
+test("the page transport sends one bounded multipart request with bearer and idempotency headers", async () => {
+  const originalQuery = ConvexHttpClient.prototype.query;
+  const originalFetch = globalThis.fetch;
+  let sent: { url: string; init: RequestInit } | undefined;
+  ConvexHttpClient.prototype.query = async (reference, ...args) => {
+    assert.equal(getFunctionName(reference), "pages:publishTarget");
+    validateArgs(pageHandlers.publishTarget, args[0]);
+    return { siteUrl: "https://fixture.convex.site" } as never;
+  };
+  globalThis.fetch = async (url, init) => {
+    sent = { url: String(url), init: init! };
+    return new Response(JSON.stringify({ ok: true, ticket: "TKT-0007", url: "u", pageId: "p", entry: "a b.html", fileCount: 2, totalBytes: 3, publishedAt: 1, created: true, requestId: "r" }), { status: 201 });
+  };
+  try {
+    const bundle = { entry: "a b.html", totalBytes: 3, files: [{ path: "a b.html", size: 2, bytes: new Uint8Array([1, 2]) }, { path: "img/x.png", size: 1, bytes: new Uint8Array([3]) }] };
+    const result = await new ConvexTicketRemote().publishPage("https://fixture.convex.cloud", "staff", { ticket: "TKT-0007", requestId: "r", bundle });
+    assert.equal(result.pageId, "p");
+    assert.equal(sent?.url, "https://fixture.convex.site/v1/tickets/TKT-0007/pages");
+    assert.deepEqual(sent?.init.headers, { Authorization: "Bearer staff", "X-Ticket-Image-Policy": "v1", "Idempotency-Key": "r" });
+    const form = sent?.init.body as FormData;
+    assert.equal(form.get("entry"), "a b.html");
+    assert.deepEqual(JSON.parse(String(form.get("manifest"))), [{ part: "f0", path: "a b.html" }, { part: "f1", path: "img/x.png" }]);
+    assert.equal((form.get("f1") as File).size, 1);
+    globalThis.fetch = async () => new Response(JSON.stringify({ ok: false, code: "PAGE_TOO_LARGE" }), { status: 413 });
+    await assert.rejects(new ConvexTicketRemote().publishPage("https://fixture.convex.cloud", "staff", { ticket: "TKT-0007", requestId: "r", bundle }),
+      (error: ConvexError<{ code: string }>) => error.data.code === "PAGE_TOO_LARGE");
+  } finally {
+    ConvexHttpClient.prototype.query = originalQuery;
+    globalThis.fetch = originalFetch;
+  }
 });
