@@ -13,7 +13,7 @@ const browsers = suiteBrowser();
 after(() => browsers.close());
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, () => capture("components", name, run));
 const shotDir = path.join(EVIDENCE_DIR, "public", "screenshots");
-const shot = async (page: Page, name: string) => { mkdirSync(shotDir, { recursive: true }); await page.screenshot({ path: path.join(shotDir, `components-${name}.png`) }); };
+const shot = async (page: Page, name: string) => { mkdirSync(shotDir, { recursive: true }); await page.screenshot({ path: path.join(shotDir, `components-${name}.png`), animations: "disabled" }); };
 
 async function harness(query: string, viewport = { width: 1280, height: 900 }, language: Language = "en") {
   const context = await newContext(await browsers.get(), { viewport, reducedMotion: "reduce" });
@@ -82,6 +82,8 @@ for (const width of [320, 375, 390, 768, 1280]) for (const align of ["left", "ri
       await trigger(page, "th").click();
       await choices(page).first().waitFor();
       await assertInViewport(page, `${width}/${align}`);
+      // Reduced motion: the popup is fully opaque at once (no fade-in).
+      assert.equal(await page.getByRole("menu").evaluate(element => getComputedStyle(element).opacity), "1");
       if (width === 320 || width === 1280) await shot(page, `project-menu-${width}-${align}`);
     } finally { await context.close(); }
   });
