@@ -58,7 +58,9 @@ async function main() {
       // Both entry points always run so one failure does not hide the other.
       const grep = process.env.BROWSER_GREP;
       const workflows = await run("workflows", ["tsx", "--tsconfig", "tsconfig.test.json", "--test", "--test-concurrency=1",
-        ...(grep ? [`--test-name-pattern=${grep}`] : []), "tests/browser/workflows.test.ts", "tests/browser/accessibility.test.ts", "tests/browser/routing.test.ts"]);
+        ...(grep ? [`--test-name-pattern=${grep}`] : []), "tests/browser/workflows.test.ts", "tests/browser/accessibility.test.ts", "tests/browser/routing.test.ts", "tests/browser/components.test.ts",
+        // Before/after screenshots of real routes run only when a label is given.
+        ...(process.env.EVIDENCE_LABEL ? ["tests/browser/evidence.test.ts"] : [])]);
       const explorer = grep ? 0 : await run("explorer", ["tsx", "tests/browser/explorer-check.mjs"]);
       process.exitCode = workflows || explorer;
     }

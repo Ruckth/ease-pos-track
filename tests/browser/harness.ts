@@ -147,3 +147,19 @@ export async function files(page: Page, name = "draft.png") {
   });
   await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
 }
+/** The multi-Project switcher trigger: a menu button named for the open Project. */
+export function projectSwitcher(page: Page, language: Language = "en") {
+  return page.getByRole("button", { name: new RegExp(`^${copy(language, "chooseProject")}:`) });
+}
+/** Opens the Project menu and selects the Project with this key as a radio choice. */
+export async function chooseProject(page: Page, key: string, language: Language = "en") {
+  await projectSwitcher(page, language).click();
+  await page.getByRole("menuitemradio", { name: new RegExp(`\\(${key}\\)$`) }).click();
+  await page.getByRole("menu").waitFor({ state: "hidden" });
+}
+/** Opens a named header menu (staff "More options", customer "Account and language"). */
+export async function openHeaderMenu(page: Page, name: string, method: "click" | "Enter" = "click") {
+  const trigger = page.locator("header").getByRole("button", { name, exact: true });
+  if (method === "click") await trigger.click(); else await trigger.press("Enter");
+  await page.getByRole("menu").waitFor();
+}

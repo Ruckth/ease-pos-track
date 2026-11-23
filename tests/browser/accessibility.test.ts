@@ -7,7 +7,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { axeFindings, expectAccessible } from "./a11y";
 import { capture } from "../../scripts/browser-evidence";
-import { convex, copy, files, suiteBrowser, open as openWith, type Language } from "./harness";
+import { convex, copy, files, openHeaderMenu, suiteBrowser, open as openWith, type Language } from "./harness";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -125,8 +125,8 @@ for (const language of ["en", "th"] as const) {
       await details.waitFor({ state: "hidden" });
       await page.waitForFunction(id => document.activeElement?.getAttribute("data-ticket-id") === id, ticket._id);
 
-      await page.locator("summary").filter({ hasText: copy(language, "queueMore") }).click();
-      await page.getByRole("button", { name: copy(language, "healthTitle"), exact: true }).click();
+      await openHeaderMenu(page, copy(language, "queueMore"));
+      await page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const health = page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       await health.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
       await expectAccessible(page, `staff ${language} operations health`);

@@ -87,9 +87,9 @@ in `tests/browser/accessibility.test.ts`.
 | --- | --- | --- | --- | --- |
 | Draft focus, pin, camera teardown (staff/customer × en/th) | `#title`, `openMedia`, `addPin`, camera dialog | focus moves to the title and back to the file; every preview URL and camera track is released on remove and session expiry | none (no write); `draftStats` | provider uploads aborted, asserted 0 |
 | Text-only creation (×4) | composer submit | one submit creates one Ticket without review steps | `getTicket` title, empty description and media | |
-| Project switch keeps captured draft (×2) | `Choose Project`, resume | a draft keeps its Project after switching | `searchTickets` in POS; edit undo and conflict preserve server title | |
+| Project switch keeps captured draft (×2) | `Choose Project:` menu button → `menuitemradio`, resume | a draft keeps its Project after switching | `searchTickets` in POS; edit undo and conflict preserve server title | |
 | Cancel, retry, discard (×4) | `cancelUpload`, `discardDraft` | lost responses retry with identical intent; discard releases previews | exactly one Ticket per title | fake provider receipts recorded on the local backend only |
-| Lost Project access | membership removal | draft stays discardable | membership restored in `finally` | |
+| Lost Project access (two Projects → one) | Project menu, membership removal | both choices listed before revocation; then the single-Project label and `project=APP` URL replace the menu; the captured POS draft stays resumable and discardable and the next draft belongs to APP | membership restored in `finally` | |
 | Operations health (en/th) | `healthTitle` dialog | only booleans and counts shown | no secret strings in dialog text | |
 | Purge requeue confirmation (en/th) | browser `confirm` | dismiss sends nothing; accept sends one requeue | transport fixture, no deletion scheduled | |
 | Staff sign-in rate-limit action | `#staff-password` | wrong then right password | session reaches the workspace | |
@@ -101,6 +101,8 @@ in `tests/browser/accessibility.test.ts`.
 | **Keyboard-only creation** (staff en, customer th) | Escape, Enter, Tab ×25, Shift+Tab ×25, implicit submit | Escape returns focus to New Ticket; Tab stays in the modal; empty submit keeps focus on the title with `aria-invalid` and `aria-describedby` → required message; typing clears it; Enter creates | `getTicket` title | axe on composer and validation state |
 | **Media dialog** (staff en, customer th) | `openMedia`, Escape | Tab stays in the nested modal; Escape returns focus to the file | — | axe on media dialog |
 | **Archived details and Operations health** (staff en/th) | archive list, `restore`, `detailBack` | archived details have no Edit; Back returns focus to the row | backend-archived Ticket | axe on both |
+| **Component harness** (`tests/browser/components.test.ts`) | `tests/browser/components.html`: real `ProjectSwitcher`, `CustomerTicketRow`, `AppToaster` + `ticketOperations` | three→two Projects keeps exact choices, checked state and keyboard selection; Create Project is separate; menus stay 8 px inside the viewport at 320/375/390/768/1280 from both edges with a long Thai name; rows show one shaped status mark below 640 px and written status + excerpt from 640 px (light/dark), forced colors and grayscale keep every mark; two status updates keep independently bound Undo actions | in-memory only | screenshots `components-*.png` |
+| Before/after route evidence (`EVIDENCE_LABEL=<label> pnpm test:browser --grep evidence`) | `tests/browser/evidence.test.ts` | composer, queue, header menu, Project menu, detail and toast for customer/staff in en/th at 1280 and 390 px | synthetic seed only | screenshots `evidence-<label>-*.png` |
 | Ticket Explorer harness | `tests/browser/explorer.html` | table/board, filters, dates, urgency, pagination, archives, Thai, phone overflow | in-memory only | screenshots in `public/screenshots/explorer-*.png` |
 | Draft exploration | see below | model properties after every action | none written | seeds, budget, replay |
 

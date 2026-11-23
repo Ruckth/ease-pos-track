@@ -16,7 +16,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "playwright";
 import { capture, EVIDENCE_DIR, readManifest } from "../../scripts/browser-evidence";
-import { copy, files, launch, open, stats } from "./harness";
+import { chooseProject, copy, files, launch, open, stats } from "./harness";
 
 type Action =
   | { kind: "title" } | { kind: "add"; name: string } | { kind: "remove"; index: number }
@@ -111,7 +111,7 @@ async function apply(page: Page, model: Model, action: Action) {
       }
       model.open = true; return;
     case "switch":
-      await page.getByRole("combobox", { name: "Choose Project", exact: true }).selectOption(action.project);
+      await chooseProject(page, action.project, language);
       await page.waitForURL(url => url.searchParams.get("project") === action.project);
       model.project = action.project; return;
   }
