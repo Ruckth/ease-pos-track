@@ -45,4 +45,4 @@ export function useRoutingCopy() {
   return { copy: language === "th" ? th : en, language };
 }
 
-export const routingSelect = "min-h-11 w-full rounded-md border border-input bg-background px-2 text-sm";
+export const routingSelect = "min-h-11 w-full rounded-md border border-transparent bg-field px-2 text-sm";

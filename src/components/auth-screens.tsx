@@ -15,7 +15,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { readFragmentSecret } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-const authFieldClass = "aurora-control h-11 rounded-lg bg-card/85";
+const authFieldClass = "h-11 rounded-lg";
 const authLinkClass = "flex min-h-11 items-center justify-center rounded-lg text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** Errors returned as data (not thrown) use the same localized codes. */
@@ -32,7 +32,7 @@ export function LanguageSelector({
 }) {
   const { t } = useI18n();
   return (
-    <div className="aurora-control inline-flex rounded-lg border p-0.5" aria-label={t("language")}>
+    <div className="aurora-control inline-flex rounded-lg p-0.5" aria-label={t("language")}>
       <Button type="button" size="sm" variant={language === "th" ? "default" : "ghost"} className="h-11 rounded-md px-3" aria-pressed={language === "th"} onClick={() => onChange("th")}>ไทย</Button>
       <Button type="button" size="sm" variant={language === "en" ? "default" : "ghost"} className="h-11 rounded-md px-3" aria-pressed={language === "en"} onClick={() => onChange("en")}>EN</Button>
     </div>
@@ -52,7 +52,7 @@ function AuthLayout({
   return (
     <main className="aurora-canvas grid min-h-screen place-items-center px-4 py-8 sm:py-12">
       <div className="aurora-panel w-full max-w-md overflow-hidden text-card-foreground">
-        <CardHeader className="space-y-5 border-b border-border/60 bg-card/60 p-5 sm:p-6">
+        <CardHeader className="space-y-5 bg-muted/30 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
             <ProductWordmark />
             <LanguageSelector language={language} onChange={setLanguage} />
@@ -415,7 +415,7 @@ function PendingInvitation({ invitation, onSignOut }: { invitation: string; onSi
     {sent ? <form className="space-y-4" onSubmit={onAccept}>
       <Alert tone="info">{t("codeSent", { email: ready.invitedEmail })}</Alert>
       <Field id="invite-code" label={t("verificationCode")}>
-        <Input id="invite-code" className="aurora-control h-11 rounded-lg bg-card/85 font-mono" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} autoFocus />
+        <Input id="invite-code" className="h-11 rounded-lg font-mono" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} autoFocus />
       </Field>
       <SubmitButton busy={busy} disabled={code.trim().length < 8} idle={t("acceptInvite")} working={t("signingIn")} />
     </form> : <Button className="h-11 w-full rounded-xl" disabled={busy} onClick={() => void onSend()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("sendCode")}</Button>}

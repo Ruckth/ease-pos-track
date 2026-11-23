@@ -51,7 +51,7 @@ function JobDiagnostics({ view }: { view: "failed" | "pending" | "expired" }) {
   return <div className="space-y-3" aria-live="polite">
     <p className="text-xs text-muted-foreground">{t("healthPageHint")}</p>
     {jobs.status === "LoadingFirstPage" ? <p>{t("syncing")}</p> : jobs.results.length === 0 ? <p>{t("healthNone")}</p> : <ul className="space-y-2">
-      {jobs.results.map(job => <li key={job.jobId} className="space-y-1 rounded-md border p-3 text-sm">
+      {jobs.results.map(job => <li key={job.jobId} className="space-y-1 rounded-md border border-transparent bg-muted/40 p-3 text-sm">
         <p className="font-medium">{t(kinds[job.kind])} · {t(states[job.state])}</p>
         <p>{t("healthAttempt", { attempt: job.attempt, max: job.maxAttempts })}{job.exhausted ? ` · ${t("healthExhausted")}` : ""}</p>
         {job.lastOutcome ? <p>{t(outcomes[job.lastOutcome])}</p> : null}

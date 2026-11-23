@@ -39,7 +39,7 @@ export function RoutingSuggestions({ projectId, settings, openTicket }: {
     {queue.status === "LoadingFirstPage" ? <p role="status">{t("syncing")}</p>
       : suggestions.length === 0 && <p className="text-sm text-muted-foreground">{copy.noSuggestions}</p>}
     <ul className="space-y-2">
-      {suggestions.map(suggestion => <li key={suggestion.id} className="space-y-1 rounded-lg border p-3">
+      {suggestions.map(suggestion => <li key={suggestion.id} className="space-y-1 rounded-lg border border-transparent bg-muted/40 p-3">
         <Button type="button" variant="ghost" className="h-auto min-h-11 max-w-full whitespace-normal px-2 text-left text-primary underline-offset-4 hover:underline"
           onClick={() => openTicket(suggestion.ticketId)}>
           {formatTicketNumber(suggestion.ticketNumber, suggestion.projectKey)} · {suggestion.title}

@@ -313,7 +313,7 @@ export const MediaViewer = forwardRef<
       ) : null}
 
       {draft ? (
-        <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+        <div className="space-y-2 rounded-lg border border-transparent bg-muted/40 p-3">
           <p className="text-sm font-medium leading-5 text-muted-foreground">
             {t("addPin")} {draft.mediaIndex + 1}
             {draft.time !== undefined ? ` · ${t("pinAtTime", { time: formatClock(draft.time) })}` : ""}

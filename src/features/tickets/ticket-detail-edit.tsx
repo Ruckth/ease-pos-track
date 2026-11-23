@@ -63,7 +63,7 @@ export function DetailEdit({ item, mode, staff, operations, onClose }: {
       event.stopPropagation();
       if (!busy) onClose();
     }
-  }} className="space-y-3 rounded-lg border bg-muted/20 p-3" onSubmit={event => { event.preventDefault(); void save(); }}>
+  }} className="space-y-3 rounded-lg border border-transparent bg-muted/40 p-3" onSubmit={event => { event.preventDefault(); void save(); }}>
     {mode === "content" ? <>
       <label className="block space-y-1.5 text-sm font-medium" htmlFor={titleId}><span>{t("topic")}</span>
         <Input id={titleId} autoFocus required maxLength={100} value={title} onChange={event => setTitle(event.target.value)} />
@@ -78,7 +78,7 @@ export function DetailEdit({ item, mode, staff, operations, onClose }: {
       <p id={`${id}-hint`} className="text-sm text-muted-foreground">{t("urgencyScoreHint")}</p>
     </>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {conflict && <div className="space-y-2 rounded-md border p-3 text-sm">
+    {conflict && <div className="space-y-2 rounded-md border border-transparent bg-muted/40 p-3 text-sm">
       <p>{t("detailRetryHint")}</p><h4 className="font-semibold">{t("detailCurrent")}</h4>
       {mode === "content" ? <><p className="break-words font-medium">{item.title}</p><p className="whitespace-pre-wrap break-words">{item.description || t("noDescription")}</p></>
         : <p>{item.urgencyScore ?? t("urgencyUnscored")}</p>}
