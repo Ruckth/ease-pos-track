@@ -1,4 +1,6 @@
 import { optimizeEmbeddedImages } from "../../shared/html-images";
+import { imageErrorCode } from "../../shared/image-optimization";
+import type { ImageWorkerResult } from "./image-worker";
 import { prepareRaster } from "./prepare-raster";
 const prepared = new WeakMap<File, Promise<File>>();
 let queue: Promise<void> = Promise.resolve();
@@ -18,17 +20,19 @@ async function prepare(file: File) {
       type: "module",
     });
     const active = worker;
-    const result = await new Promise<File | null>((resolve, reject) => {
-      active.onmessage = (e) => resolve(e.data);
+    const result = await new Promise<ImageWorkerResult>((resolve, reject) => {
+      active.onmessage = (e: MessageEvent<ImageWorkerResult>) => resolve(e.data);
       active.onerror = () => reject(new Error("Worker unavailable"));
       active.postMessage(file);
     });
-    if (result) return result;
+    if ("file" in result) return result.file;
   } catch {
     /* Restricted worker environments can still encode on the main thread. */
   } finally {
     worker?.terminate();
   }
+  // Also after a failure in the worker: the main thread can decode some images
+  // through an <img> element, and reports the definitive error code otherwise.
   return prepareRaster(file);
 }
 
@@ -37,9 +41,10 @@ export function optimizeBrowserImage(file: File) {
   if (!cached) {
     cached = queue
       .then(() => prepare(file))
-      .catch(() => {
+      .catch((error) => {
+        // A failed File can be retried, for example after a transient worker error.
         prepared.delete(file);
-        throw new Error("IMAGE_INVALID");
+        throw new Error(imageErrorCode(error));
       });
     queue = cached.then(
       () => undefined,

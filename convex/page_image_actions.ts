@@ -11,11 +11,18 @@ import {
 import { optimizeImage } from "../shared/node/optimize-image";
 import { validatePreparedRaster } from "../shared/node/validate-raster";
 import { optimizeEmbeddedImages } from "../shared/html-images";
-import { inspectRaster, rasterTraits } from "../shared/image-optimization";
+import { inspectRaster } from "../shared/image-optimization";
+import { rasterTraits } from "../shared/raster-structure";
 
+/** Embedded images a client prepared are validated, never re-encoded. */
 async function acceptPrepared(file: File) {
   await validatePreparedRaster(new Uint8Array(await file.arrayBuffer()));
   return file;
+}
+
+/** Server-converted embedded images pass the same validation as client-prepared ones. */
+async function convertEmbedded(file: File) {
+  return acceptPrepared(await optimizeImage(file));
 }
 
 async function prepareBytes(
@@ -30,7 +37,7 @@ async function prepareBytes(
     if (isPageHtml(path)) {
       const html = await optimizeEmbeddedImages(
         file,
-        prepared ? acceptPrepared : optimizeImage,
+        prepared ? acceptPrepared : convertEmbedded,
       );
       if (html.size > PAGE_LIMITS.maxTotalBytes)
         throw new Error("PAGE_TOO_LARGE");
@@ -42,7 +49,7 @@ async function prepareBytes(
       source.length <= 512 &&
       width <= 1920 &&
       height <= 1080 &&
-      rasterTraits(source, type).simple;
+      rasterTraits(source, type).clean;
     if (prepared || tiny)
       return { rasterType: await validatePreparedRaster(source) };
     const output = await optimizeImage(file);

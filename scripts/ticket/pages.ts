@@ -52,7 +52,8 @@ export async function readPageBundle(source: string, entry?: string): Promise<Pa
     let bytes = new Uint8Array(await readFile(absolute));
     if (raster || html) {
       const input = new File([bytes], basename(path), { type });
-      const image = await (raster ? optimizeImage(input) : optimizeEmbeddedImages(input, optimizeImage));
+      const image = await (raster ? optimizeImage(input) : optimizeEmbeddedImages(input, optimizeImage))
+        .catch(error => { throw mapInputError(error); });
       bytes = new Uint8Array(await image.arrayBuffer());
     }
     totalBytes += bytes.length;

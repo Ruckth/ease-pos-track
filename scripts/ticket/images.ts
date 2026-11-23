@@ -1,9 +1,13 @@
 import { optimizeImage } from "../../shared/node/optimize-image";
-import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
-import { readFile, stat } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { validatePreparedRaster } from "../../shared/node/validate-raster";
+import { IMAGE_ERRORS, IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, extname, join } from "node:path";
+import { promisify } from "node:util";
 import { UTApi } from "uploadthing/server";
-import { authError, inputError, remoteError } from "./errors";
+import { authError, inputError, mapInputError, remoteError } from "./errors";
 
 const MAX_TICKET_IMAGES = 10;
 const MAX_TICKET_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -108,8 +112,45 @@ async function remoteImage(source: string, index: number, fetcher: typeof fetch)
   return new File(chunks, name, { type });
 }
 
-/** Resolve local paths and HTTPS links into bounded, optimized image files. */
-export async function prepareTicketImages(sources: string[], fetcher: typeof fetch = fetch) {
+/**
+ * Sharp's prebuilt binaries cannot decode HEIC/HEIF. On macOS the system `sips`
+ * tool converts such a photo to a full-quality JPEG, which is then prepared like
+ * any other image (fitted, metadata removed). Elsewhere there is no converter.
+ */
+async function convertHeic(file: File): Promise<File | undefined> {
+  if (process.platform !== "darwin") return undefined;
+  const directory = await mkdtemp(join(tmpdir(), "ticket-heic-"));
+  try {
+    const input = join(directory, "source.heic");
+    const output = join(directory, "converted.jpg");
+    await writeFile(input, new Uint8Array(await file.arrayBuffer()));
+    await promisify(execFile)("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "best", input, "--out", output], { timeout: 60_000 });
+    return new File([await readFile(output)], file.name.replace(/\.[^.]*$/, "") + ".jpg", { type: "image/jpeg", lastModified: file.lastModified });
+  } catch {
+    return undefined;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Optimize one image, converting HEIC first where the system can. */
+async function optimizeStaffImage(original: File) {
+  try {
+    return await optimizeImage(original);
+  } catch (error) {
+    const converted = error instanceof Error && error.message === IMAGE_ERRORS.format ? await convertHeic(original) : undefined;
+    if (!converted) throw mapInputError(error);
+    return await optimizeImage(converted).catch(retry => { throw mapInputError(retry); });
+  }
+}
+
+/**
+ * Resolve local paths and HTTPS links into bounded, optimized image files.
+ * Staff uploads are recorded with the staff session rather than through the
+ * provider callback, so each prepared file is also verified here with the same
+ * byte validation the callback applies.
+ */
+export async function prepareTicketImages(sources: string[], fetcher: typeof fetch = fetch, optimize = optimizeStaffImage) {
   if (sources.length > MAX_TICKET_IMAGES) {
     throw inputError("IMAGE_LIMIT_EXCEEDED", `At most ${MAX_TICKET_IMAGES} --image values are allowed.`);
   }
@@ -118,7 +159,9 @@ export async function prepareTicketImages(sources: string[], fetcher: typeof fet
     const source = rawSource.trim();
     if (!source) throw inputError("INVALID_IMAGE_SOURCE", "--image cannot be blank.");
     const original = await (source.includes("://") ? remoteImage(source, index, fetcher) : localImage(source));
-    const image = await optimizeImage(original).catch(() => { throw inputError("IMAGE_INVALID","Image decoding failed or the source exceeds the supported dimensions."); });
+    const image = await optimize(original);
+    const type = await validatePreparedRaster(new Uint8Array(await image.arrayBuffer())).catch(() => undefined);
+    if (type !== image.type) throw mapInputError(new Error(IMAGE_ERRORS.invalid));
     assertImageSize(image.size, MAX_TICKET_IMAGE_BYTES);
     images.push(image);
   }

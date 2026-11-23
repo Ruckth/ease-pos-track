@@ -146,7 +146,7 @@ pnpm ticket get TKT-0007
 pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/detail.webp --expected-version 0 --request-id attach-images-0007
 ```
 
-Local files and downloaded HTTPS images are prepared before upload (up to 20 MiB and 40 megapixels per source). Still images fit inside 1920 × 1080 without upscaling. The CLI chooses a compact faithful encoding and preserves alpha. The uploaded image must be at most 8 MiB, and the Ticket
+Local files and downloaded HTTPS images are prepared before upload (up to 20 MiB and 40 megapixels per source). Still images fit inside 1920 × 1080 without upscaling. The CLI chooses a compact faithful encoding and preserves alpha. Animated GIF and WebP keep every frame and delay (larger ones become lossless animated WebP); APNG must already fit 1920 × 1080 and animated AVIF is refused (`IMAGE_ANIMATION_UNSUPPORTED`). Sharp's prebuilt binaries cannot decode HEIC/HEIF, so on macOS the CLI first converts such a photo with the system `sips` tool; elsewhere it fails with `IMAGE_FORMAT_UNSUPPORTED`. Before upload, every prepared file passes the same byte validation as the browser's provider callback (staff uploads are recorded with the staff session, not the callback). The uploaded image must be at most 8 MiB, and the Ticket
 may contain at most 10 images in total. The upload intent is bound to the durable
 actor and retry key; an interrupted retry, including after sign-in, reuses files
 already recorded by the intent instead of uploading or attaching them twice.
@@ -369,7 +369,7 @@ syntax.
 | `scripts/ticket/lock.ts` | Crash-safe cross-process session lock (macOS `O_EXLOCK`). |
 | `scripts/ticket/google-login.ts` | Loopback listener for the named Google sign-in. |
 | `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
-| `scripts/ticket/images.ts` | Original-byte local/HTTPS image loading and UploadThing storage. |
+| `scripts/ticket/images.ts` | Local/HTTPS image loading, preparation with byte verification, HEIC conversion on macOS, and UploadThing storage. |
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |

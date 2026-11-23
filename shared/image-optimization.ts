@@ -4,6 +4,24 @@ export const IMAGE_SOURCE_BYTES = 20 * 1024 * 1024;
 export const IMAGE_SOURCE_PIXELS = 40_000_000;
 export const IMAGE_WIDTH = 1920;
 export const IMAGE_HEIGHT = 1080;
+
+/** Error codes shared by the browser, CLI and server image pipelines. */
+export const IMAGE_ERRORS = {
+  /** Unreadable, malformed, over the source limits, or not a supported raster. */
+  invalid: "IMAGE_INVALID",
+  /** An animation we cannot keep: APNG or animated AVIF over Full HD, animated AVIF
+   * anywhere, or any animation over Full HD in the browser (no animated encoder). */
+  animation: "IMAGE_ANIMATION_UNSUPPORTED",
+  /** A recognised format this runtime cannot decode, such as HEIC outside Safari. */
+  format: "IMAGE_FORMAT_UNSUPPORTED",
+} as const;
+
+/** The specific image error code carried by `error`, otherwise `IMAGE_INVALID`. */
+export function imageErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return Object.values(IMAGE_ERRORS).find(code => code === message) ?? IMAGE_ERRORS.invalid;
+}
+
 const mimeTypes: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -15,6 +33,7 @@ const mimeTypes: Record<string, string> = {
   heif: "image/heif",
 };
 
+/** Detect the format and declared size from the header, before decoding anything. */
 export function inspectRaster(bytes: Uint8Array, fullHD = false) {
   try {
     if (!bytes.length || bytes.length > IMAGE_SOURCE_BYTES) throw Error();
@@ -41,7 +60,7 @@ export function inspectRaster(bytes: Uint8Array, fullHD = false) {
     }
     return { type, width: image.width, height: image.height };
   } catch {
-    throw new Error("IMAGE_INVALID");
+    throw new Error(IMAGE_ERRORS.invalid);
   }
 }
 
@@ -53,193 +72,82 @@ export function fitImage(width: number, height: number) {
   };
 }
 
-/** Compare the candidate with the resized reference. Reject large local errors (text
- * edges), excessive average error and any alpha change, even on isolated pixels. */
+const LUMA = [0.299, 0.587, 0.114];
+/** Share of pixels whose colour may move beyond the per-channel limit in photo mode. */
+const PHOTO_COLOUR_SHIFT = 0.005;
+
+/**
+ * Whether a candidate encoding looks the same as the reference pixels.
+ *
+ * Alpha must match exactly. By default every colour channel stays within 24
+ * levels on every pixel, so small text and one-pixel UI edges cannot blur or
+ * change colour. `photo` relaxes colour only: brightness (luma), which carries
+ * edges and legibility, still stays within 24 on every pixel, while chroma
+ * subsampling may shift the colour of up to 0.5% of pixels further. Both modes
+ * cap the mean squared error at 12 per channel.
+ */
 export function faithfulPixels(
   reference: Uint8Array | Uint8ClampedArray,
   pixels: Uint8Array | Uint8ClampedArray,
+  photo = false,
 ) {
   if (pixels.length !== reference.length) return false;
   let squared = 0;
+  let colourShifted = 0;
   for (let i = 0; i < pixels.length; i += 4) {
     const alpha = reference[i + 3];
     if (alpha !== pixels[i + 3]) return false;
+    let luma = 0;
+    let shifted = false;
     for (let c = 0; c < 3; c++) {
       const delta = ((reference[i + c] - pixels[i + c]) * alpha) / 255;
-      if (Math.abs(delta) > 24) return false;
+      if (Math.abs(delta) > 24) {
+        if (!photo) return false;
+        shifted = true;
+      }
       squared += delta * delta;
+      luma += LUMA[c] * delta;
     }
+    if (shifted && (Math.abs(luma) > 24 || ++colourShifted > (pixels.length / 4) * PHOTO_COLOUR_SHIFT)) return false;
   }
   return squared <= (pixels.length / 4) * 3 * 12;
 }
 
-const text = new TextDecoder("latin1");
-/** Read native container chunk boundaries, never search compressed pixel bytes. */
-export function rasterTraits(bytes: Uint8Array, type: string) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let animated = type === "image/gif";
-  let simple = type === "image/jpeg" && cleanJpeg(bytes);
-  if (type === "image/png" || type === "image/webp") {
-    const png = type === "image/png";
-    let end = png ? 8 : 12;
-    simple = true;
-    let pixels = false;
-    let tail = false;
-    while (end + (png ? 12 : 8) <= bytes.length) {
-      const nameStart = end + (png ? 4 : 0);
-      const name = text.decode(bytes.subarray(nameStart, nameStart + 4));
-      const size = view.getUint32(end + (png ? 0 : 4), !png);
-      if (name === "acTL" || name === "ANIM") animated = true;
-      if (["IDAT", "VP8 ", "VP8L", "ANMF"].includes(name)) pixels = true;
-      tail = name === "IEND";
-      if (
-        !(
-          png
-            ? ["IHDR", "PLTE", "tRNS", "IDAT", "IEND", "sRGB", "gAMA", "cHRM"]
-            : ["VP8 ", "VP8L", "VP8X", "ALPH"]
-        ).includes(name)
-      )
-        simple = false;
-      end += size + (png ? 12 : 8 + (size % 2));
+/**
+ * How to judge candidates for one resized reference (RGBA rows of `width`).
+ *
+ * Camera photos have sensor noise and gradients, so horizontally neighbouring
+ * pixels rarely match exactly (under 55% in the photos we measured).
+ * Screenshots, documents and UI are mostly flat fills (over 75%). Only opaque
+ * photographic content gets the colour tolerance of `faithfulPixels`; anything
+ * that looks like UI keeps the strict comparison.
+ */
+export function pixelPolicy(reference: Uint8Array | Uint8ClampedArray, width: number) {
+  let opaque = true;
+  for (let i = 3; i < reference.length; i += 4) {
+    if (reference[i] !== 255) {
+      opaque = false;
+      break;
     }
-    if (end !== bytes.length || !pixels || (png && !tail))
-      throw new Error("IMAGE_INVALID");
   }
-  if (type === "image/avif")
-    animated = text
-      .decode(bytes.subarray(8, Math.min(bytes.length, 64)))
-      .includes("avis");
-  return { animated, simple };
+  let same = 0;
+  let pairs = 0;
+  // Every third pixel is enough to tell the two kinds of content apart.
+  for (let pixel = 0; pixel + 1 < reference.length / 4; pixel += 3) {
+    if (pixel % width === width - 1) continue;
+    const i = pixel * 4;
+    pairs++;
+    if (reference[i] === reference[i + 4] && reference[i + 1] === reference[i + 5] && reference[i + 2] === reference[i + 6]) same++;
+  }
+  const photo = opaque && pairs > 0 && same / pairs < 0.6;
+  return {
+    opaque,
+    photo,
+    faithful: (pixels: Uint8Array | Uint8ClampedArray) => faithfulPixels(reference, pixels, photo),
+  };
 }
 
 export function encodedName(name: string, type: string) {
   const ext = type === "image/jpeg" ? "jpg" : type.split("/")[1];
   return name.replace(/\.[^.]*$/, "") + "." + ext;
-}
-
-/** Private application segments prevent retaining a JPEG verbatim. Entropy-coded
- * FF bytes are stuffed, so scanning also covers multi-scan/progressive JPEGs. */
-export function cleanJpeg(bytes: Uint8Array) {
-  if (bytes[bytes.length - 2] !== 255 || bytes[bytes.length - 1] !== 217)
-    return false;
-  for (let i = 0; i < bytes.length - 1; i++) {
-    if (bytes[i] !== 255) continue;
-    const marker = bytes[i + 1];
-    if (
-      marker === 224 &&
-      !(
-        bytes[i + 2] === 0 &&
-        bytes[i + 3] === 16 &&
-        text.decode(bytes.subarray(i + 4, i + 9)) === "JFIF\0"
-      )
-    )
-      return false;
-    if ((marker >= 225 && marker <= 239) || marker === 254) return false;
-  }
-  return true;
-}
-
-/** Strip metadata segments before the first JPEG scan without recompressing.
- * Callers compare the decoded result to the oriented, color-managed reference:
- * removing orientation or an ICC profile can change its appearance. */
-export function jpegWithoutMetadata(bytes: Uint8Array<ArrayBuffer>) {
-  const chunks: Uint8Array[] = [bytes.subarray(0, 2)];
-  let start = 2;
-  while (start + 4 <= bytes.length && bytes[start] === 0xff) {
-    const marker = bytes[start + 1];
-    if (marker === 0xda) {
-      chunks.push(bytes.subarray(start));
-      const size = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      if (size === bytes.length) return;
-      const clean = new Uint8Array(size);
-      let offset = 0;
-      for (const chunk of chunks) {
-        clean.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return cleanJpeg(clean) ? clean : undefined;
-    }
-    const size = bytes[start + 2] * 256 + bytes[start + 3];
-    const end = start + 2 + size;
-    if (size < 2 || end > bytes.length) return;
-    if ((marker < 0xe0 || marker > 0xef) && marker !== 0xfe) {
-      chunks.push(bytes.subarray(start, end));
-    }
-    start = end;
-  }
-}
-
-/** Remove private ancillary records without touching compressed frames or timing.
- * GIF application extensions can carry arbitrary metadata; retain its loop control. */
-export function stripRasterMetadata(
-  bytes: Uint8Array<ArrayBuffer>,
-  type: string,
-): Uint8Array<ArrayBuffer> {
-  const chunks: Uint8Array[] = [];
-  let removed = false;
-  if (type === "image/gif") {
-    let p = 13 + (bytes[10] & 128 ? 3 * (2 << (bytes[10] & 7)) : 0);
-    chunks.push(bytes.subarray(0, p));
-    while (p < bytes.length) {
-      const start = p,
-        tag = bytes[p++];
-      if (tag === 0x3b) {
-        chunks.push(bytes.subarray(start, p));
-        removed ||= p !== bytes.length;
-        break;
-      }
-      let keep = true;
-      if (tag === 0x2c) {
-        const flags = bytes[p + 8];
-        p += 10 + (flags & 128 ? 3 * (2 << (flags & 7)) : 0);
-      } else if (tag === 0x21) {
-        const label = bytes[p++];
-        keep =
-          label === 0xf9 ||
-          (label === 0xff &&
-            ["NETSCAPE2.0", "ANIMEXTS1.0"].includes(
-              text.decode(bytes.subarray(p + 1, p + 12)),
-            ));
-      } else throw new Error("IMAGE_INVALID");
-      while (p < bytes.length && bytes[p]) p += 1 + bytes[p];
-      if (p >= bytes.length) throw new Error("IMAGE_INVALID");
-      p++;
-      if (keep) chunks.push(bytes.subarray(start, p));
-      else removed = true;
-    }
-    if (chunks[chunks.length - 1]?.[0] !== 0x3b)
-      throw new Error("IMAGE_INVALID");
-  } else if (type === "image/png" || type === "image/webp") {
-    const png = type === "image/png";
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    let p = png ? 8 : 12;
-    chunks.push(bytes.subarray(0, p));
-    while (p < bytes.length) {
-      const start = p;
-      const n = view.getUint32(p + (png ? 0 : 4), !png);
-      const off = p + (png ? 4 : 0);
-      const name = text.decode(bytes.subarray(off, off + 4));
-      p += n + (png ? 12 : 8 + (n % 2));
-      if (p > bytes.length) throw new Error("IMAGE_INVALID");
-      if (
-        ["eXIf", "tEXt", "iTXt", "zTXt", "tIME", "EXIF", "XMP "].includes(name)
-      )
-        removed = true;
-      else chunks.push(bytes.subarray(start, p));
-    }
-  } else return bytes;
-  if (!removed) return bytes;
-  const out = new Uint8Array(
-    chunks.reduce((count, chunk) => count + chunk.length, 0),
-  );
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  if (type === "image/webp") {
-    new DataView(out.buffer).setUint32(4, out.length - 8, true);
-    if (text.decode(out.subarray(12, 16)) === "VP8X") out[20] &= ~0x0c;
-  }
-  return out;
 }

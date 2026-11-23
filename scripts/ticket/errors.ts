@@ -77,6 +77,8 @@ const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
   REQUEST_ID_TOO_LONG: { code: "REQUEST_ID_TOO_LONG", message: `--request-id must be ${MAX_REQUEST_ID_LENGTH} characters or fewer.` },
   INVALID_REQUEST_ID: { code: "INVALID_REQUEST_ID", message: "--request-id must not contain control characters." },
   IMAGE_INVALID: { code: "IMAGE_INVALID", message: "This image could not be decoded or exceeds the supported limits." },
+  IMAGE_ANIMATION_UNSUPPORTED: { code: "IMAGE_ANIMATION_UNSUPPORTED", message: "This animation cannot be kept: animated AVIF is not supported and APNG must already fit 1920 × 1080. Use an animated GIF or WebP, or a still image." },
+  IMAGE_FORMAT_UNSUPPORTED: { code: "IMAGE_FORMAT_UNSUPPORTED", message: "This image format cannot be decoded here (HEIC needs macOS); export it as JPEG or PNG and retry." },
   PAGE_IMAGE_INVALID: { code: "PAGE_IMAGE_INVALID", message: "A page image could not be decoded or exceeds the supported limits." },
   IMAGE_VIDEO_ONLY: { code: "IMAGE_TYPE_UNSUPPORTED", message: "--image accepts image files only." },
   MEDIA_LIMIT_EXCEEDED: { code: "IMAGE_LIMIT_EXCEEDED", message: "A Ticket can contain at most 10 images." },

@@ -104,3 +104,31 @@ test("upload middleware verifies the server callback credential before accepting
     assert.equal(logs.length, 0);
   } finally { console.error = original; }
 });
+
+test("the upload callback records rejected image bytes as rejected and retries only provider read failures", async () => {
+  const { storedImageAccepted } = await import("../server/uploadthing");
+  const client = new ConvexHttpClient("https://fixture.convex.cloud");
+  const receipts: Array<Record<string, unknown>> = [];
+  client.mutation = async (_reference, ...args) => { receipts.push(args[0] as Record<string, unknown>); return { state: "recorded" } as never; };
+  const metadata = { intentId: "intent", secret: "s".repeat(48) };
+  const uploaded = (type: string) => ({ key: "file-key", name: "shot.webp", size: 9, type, ufsUrl: "https://demo.ufs.sh/f/file-key" });
+  const complete = (accept: (file: { type: string }) => Promise<boolean>, type = "image/webp") =>
+    createUploadRouter(client, "server-secret", undefined, accept).ticketMedia.onUploadComplete({ metadata, file: uploaded(type) } as never);
+
+  await complete(async () => true);
+  await complete(async () => false);
+  let checked = false;
+  await complete(async () => { checked = true; return false; }, "video/mp4");
+  assert.equal(checked, false, "videos are not image-validated");
+  assert.deepEqual(receipts.map(receipt => receipt.rejectedImage ?? null), [null, true, null]);
+  assert.ok(receipts.every(receipt => receipt.callbackToken === "server-secret" && receipt.intentId === "intent"));
+
+  // A provider read that fails twice then succeeds is accepted; one that keeps failing is rejected.
+  let reads = 0;
+  const flaky = async () => { if (++reads < 3) throw new Error("UPLOAD_VERIFICATION_FAILED"); return true; };
+  assert.equal(await storedImageAccepted(uploaded("image/webp"), flaky, 0), true);
+  assert.equal(reads, 3);
+  reads = 0;
+  assert.equal(await storedImageAccepted(uploaded("image/webp"), async () => { reads++; throw new Error("offline"); }, 0), false);
+  assert.equal(reads, 3);
+});
