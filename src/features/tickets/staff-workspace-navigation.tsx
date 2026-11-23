@@ -71,7 +71,7 @@ export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPh
         className={cn("h-auto min-h-11 justify-start", archived === isArchive && "bg-primary/15 font-semibold text-primary hover:bg-primary/15 hover:text-primary")}
         onClick={() => onArchive(isArchive)}><Icon aria-hidden />{label}</Button>)}</nav>}
       <DropdownMenu {...menu.root}>
-        <DropdownMenuTrigger render={<Button type="button" variant="ghost" className="ml-auto min-h-11 min-w-11 gap-2 px-2 xl:ml-0 xl:px-3" />}
+        <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="ghost" className="ml-auto min-h-11 min-w-11 gap-2 px-2 xl:ml-0 xl:px-3" />}
           aria-label={t("queueMore")} title={t("queueMore")}>
           <MoreHorizontal aria-hidden className="!size-5" /><span className="hidden sm:inline">{t("queueMore")}</span>
         </DropdownMenuTrigger>

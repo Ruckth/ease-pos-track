@@ -96,7 +96,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         <div className="ml-auto flex items-center gap-2">
           {project && <TicketInbox role="customer" compact key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
           <DropdownMenu {...toolsMenu.root}>
-            <DropdownMenuTrigger render={<Button type="button" variant="outline" className="min-h-11 min-w-11 gap-1.5 rounded-lg px-3" />}
+            <DropdownMenuTrigger ref={toolsMenu.triggerRef} render={<Button type="button" variant="outline" className="min-h-11 min-w-11 gap-1.5 rounded-lg px-3" />}
               aria-label={t("customerQueueMore")} title={t("customerQueueMore")}>
               <UserRound aria-hidden="true" /><span className="hidden sm:inline">{t("customerQueueMore")}</span><ChevronDown className="hidden text-muted-foreground sm:block" aria-hidden="true" />
             </DropdownMenuTrigger>

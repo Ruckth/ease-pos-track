@@ -70,7 +70,7 @@ export function ProjectSwitcher({
   }
   return (
     <DropdownMenu {...menu.root}>
-      <DropdownMenuTrigger render={<Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left" />}
+      <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left" />}
         aria-label={`${t("chooseProject")}: ${projectLabel(current)}`} title={projectLabel(current)}>
         <FolderKanban className="text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 truncate">{projectLabel(current)}</span>

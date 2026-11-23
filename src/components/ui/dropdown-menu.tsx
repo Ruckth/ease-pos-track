@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
  */
 function useMenuAction() {
   const [open, setOpen] = React.useState(false)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
   const pending = React.useRef<(() => void) | null>(null)
   const run = React.useCallback((action: () => void) => {
     if (open) pending.current = action
@@ -22,9 +23,14 @@ function useMenuAction() {
     if (next) return
     const action = pending.current
     pending.current = null
-    action?.()
+    if (action) {
+      // Touch dismissal can leave focus on the document. Give a new dialog
+      // the same opener that a keyboard selection would have.
+      triggerRef.current?.focus({ preventScroll: true })
+      action()
+    }
   }, [])
-  return { root: { open, onOpenChange: setOpen, onOpenChangeComplete }, run }
+  return { triggerRef, root: { open, onOpenChange: setOpen, onOpenChangeComplete }, run }
 }
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
