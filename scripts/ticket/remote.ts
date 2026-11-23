@@ -15,6 +15,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import type { TicketRef } from "./cli";
 import type { TicketMediaItem } from "./images";
 import type { PageBundle } from "./pages";
+import { pageFormData } from "../../shared/ticket-pages";
 import { toStoredTicketStatus, type TicketStatus } from "./status";
 
 export type TicketDocument = TicketDetail;
@@ -208,10 +209,7 @@ export class ConvexTicketRemote implements TicketRemote {
    */
   async publishPage(url: string, token: string, input: TicketPagePublishInput) {
     const { siteUrl } = await this.client(url).query(api.pages.publishTarget, { token });
-    const form = new FormData();
-    form.set("entry", input.bundle.entry);
-    form.set("manifest", JSON.stringify(input.bundle.files.map((file, index) => ({ part: `f${index}`, path: file.path }))));
-    input.bundle.files.forEach((file, index) => form.set(`f${index}`, new Blob([file.bytes as BlobPart]), file.path.split("/").at(-1)));
+    const form = pageFormData(input.bundle.entry, input.bundle.files.map(file => ({ path: file.path, blob: new Blob([file.bytes as BlobPart]) })));
     const response = await fetch(`${siteUrl}/v1/tickets/${encodeURIComponent(input.ticket)}/pages`, {
       method: "POST", headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": input.requestId }, body: form,
     });

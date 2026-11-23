@@ -13,9 +13,13 @@ import { PAGE_LIMITS, pageSecurityHeaders, parseServedPath, sha256Hex, validateP
 const STATUS: Record<string, number> = {
   AUTH_REQUIRED: 401, SESSION_EXPIRED: 401, ORIGIN_NOT_ALLOWED: 403,
   TICKET_UNAVAILABLE: 404, PROJECT_NOT_FOUND: 404,
-  PAGE_REQUEST_CONFLICT: 409, PAGE_REVOKED: 409, PAGE_LIMIT_REACHED: 409, PAGE_UPLOAD_EXPIRED: 409,
-  PAGE_TOO_LARGE: 413, PAGE_HOST_NOT_CONFIGURED: 500,
+  PAGE_REQUEST_CONFLICT: 409, PAGE_REVOKED: 409, PAGE_LIMIT_REACHED: 409,
+  PAGE_UPLOAD_EXPIRED: 409, PAGE_UPLOAD_INCOMPLETE: 409,
+  PAGE_TOO_LARGE: 413, PAGE_HOST_NOT_CONFIGURED: 500, PAGE_PUBLISH_UNKNOWN: 503,
 };
+
+/** Outcomes a client resolves by retrying with the same Idempotency-Key. */
+const RETRYABLE = new Set(["PAGE_PUBLISH_UNKNOWN", "PAGE_UPLOAD_INCOMPLETE", "PAGE_UPLOAD_EXPIRED"]);
 
 /** Exact browser origins allowed to publish, from TICKET_APP_ORIGINS. */
 function allowedOrigins() {
@@ -42,7 +46,10 @@ function json(request: Request, status: number, body: unknown) {
 
 function failure(request: Request, code: string) {
   const status = STATUS[code] ?? (code.startsWith("PAGE_") || code.endsWith("REQUEST_ID") || code === "REQUEST_ID_TOO_LONG" || code === "INVALID_INPUT" ? 400 : 500);
-  return json(request, status, { ok: false, code: status === 500 && !/^[A-Z][A-Z_]+$/.test(code) ? "INTERNAL_ERROR" : code });
+  const retryable = RETRYABLE.has(code);
+  const response = json(request, status, { ok: false, code, ...(retryable ? { retryable } : {}) });
+  if (status === 503) response.headers.set("Retry-After", "2");
+  return response;
 }
 
 class PublishError extends Error {}
@@ -87,6 +94,9 @@ async function readBundle(request: Request) {
   let form: FormData;
   try { form = await new Response(body, { headers: { "content-type": type } }).formData(); }
   catch { throw reject("PAGE_FORM_INVALID"); }
+  // Every field appears once: a repeated part could otherwise smuggle unhashed bytes.
+  const keys = [...form.keys()];
+  if (keys.length > PAGE_LIMITS.maxFiles + 2 || new Set(keys).size !== keys.length) throw reject("PAGE_FORM_INVALID");
   const entry = form.get("entry");
   const manifestText = form.get("manifest");
   if (typeof entry !== "string" || typeof manifestText !== "string") throw reject("PAGE_FORM_INVALID");
@@ -102,7 +112,7 @@ async function readBundle(request: Request) {
     if (!blob || typeof blob === "string") throw reject("PAGE_FORM_INVALID");
     return { path: item.path as string, size: blob.size, blob };
   });
-  for (const key of form.keys()) if (key !== "entry" && key !== "manifest" && !parts.has(key)) throw reject("PAGE_FORM_INVALID");
+  if (keys.some(key => key !== "entry" && key !== "manifest" && !parts.has(key))) throw reject("PAGE_FORM_INVALID");
   const bundle = validatePageBundle(entry, files);
   const hashed = await Promise.all(bundle.files.map(async file => ({ ...file, sha256: await sha256Hex(await file.blob.arrayBuffer()) })));
   return { entry: bundle.entry, files: hashed };
@@ -134,7 +144,11 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     const token = bearer(request);
     const requestId = request.headers.get("idempotency-key");
     if (!requestId) throw reject("REQUIRED_REQUEST_ID");
-    const ticket = decodeURIComponent(match[1]);
+    let ticket: string;
+    try { ticket = decodeURIComponent(match[1]); } catch { throw reject("TICKET_UNAVAILABLE"); }
+    // Session, Ticket write access, Project access and lifecycle come before any
+    // body is read or hashed; reserve and commit check them again.
+    await ctx.runMutation(internal.pages.authorize, { token, ticket });
     const bundle = await readBundle(request);
     const manifest = bundle.files.map(({ path, size, sha256 }) => ({ path, size, sha256 }));
     const reservation = await ctx.runMutation(internal.pages.reserve, { token, ticket, requestId, entry: bundle.entry, manifest });
@@ -156,8 +170,13 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     if (pageId && error instanceof ConvexError && code && code !== "INTERNAL_ERROR") {
       try { await ctx.runMutation(internal.pages.abandon, { pageId }); } catch { /* Expiry reconciles it. */ }
     }
-    if (!code) console.error({ route: "pages:publish", errorClass: error instanceof Error ? error.constructor.name : typeof error });
-    return failure(request, code ?? "PAGE_PUBLISH_UNKNOWN");
+    // Storage or transport failures and internal errors have an unknown outcome:
+    // report them as retryable, never as a client mistake.
+    if (!code || code === "INTERNAL_ERROR") {
+      console.error({ route: "pages:publish", errorClass: error instanceof Error ? error.constructor.name : typeof error });
+      return failure(request, "PAGE_PUBLISH_UNKNOWN");
+    }
+    return failure(request, code);
   }
 }
 

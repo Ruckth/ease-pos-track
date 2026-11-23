@@ -74,6 +74,16 @@ function stagedView(row: Doc<"ticketPages">) {
   return row.files.map(file => ({ path: file.path, sha256: file.sha256 }));
 }
 
+/** Runs before the HTTP route reads or hashes any request body. */
+export const authorizePublish = mutationOperation({
+  args: { token: v.string(), ticket: v.string() },
+  handler: async (ctx, args) => {
+    const located = await ticketByReference(ctx, args.ticket);
+    await requirePublishableTicket(ctx, ctx.actor, located._id);
+    return null;
+  },
+});
+
 export const reservePage = mutationOperation({
   args: { token: v.string(), ticket: v.string(), requestId: v.string(), entry: v.string(), manifest: manifestValidator },
   handler: async (ctx, args) => {

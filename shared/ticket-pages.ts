@@ -147,7 +147,7 @@ export function parseServedPath(pathname: string) {
 export function pageSecurityHeaders(siteUrl: string, shareKey: string): Record<string, string> {
   const prefix = `${siteUrl.replace(/\/+$/, "")}/p/${shareKey}/`;
   const csp = [
-    "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
+    "sandbox allow-scripts",
     "default-src 'none'",
     `script-src 'unsafe-inline' ${prefix}`,
     `style-src 'unsafe-inline' ${prefix}`,
@@ -172,4 +172,16 @@ export function pageSecurityHeaders(siteUrl: string, shareKey: string): Record<s
     "Cross-Origin-Resource-Policy": "cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   };
+}
+
+/**
+ * The one multipart body every client sends to `POST /v1/tickets/{ticket}/pages`:
+ * `entry`, a `manifest` mapping part names to relative paths, and one part per file.
+ */
+export function pageFormData(entry: string, files: Array<{ path: string; blob: Blob }>) {
+  const form = new FormData();
+  form.set("entry", entry);
+  form.set("manifest", JSON.stringify(files.map((file, index) => ({ part: `f${index}`, path: file.path }))));
+  files.forEach((file, index) => form.set(`f${index}`, file.blob, file.path.split("/").at(-1)));
+  return form;
 }

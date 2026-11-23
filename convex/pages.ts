@@ -7,6 +7,7 @@ export const revokeTicketPage = actorMutation({ name: "pages:revokeTicketPage", 
 /** The page host for clients that publish through the HTTP route. */
 export const publishTarget = actorQuery({ name: "pages:publishTarget", args: { token: v.string() }, handler: () => ({ siteUrl: pages.siteUrl() }) });
 
+export const authorize = internalActorMutation({ name: "pages:authorize", ...pages.authorizePublish });
 export const reserve = internalActorMutation({ name: "pages:reserve", ...pages.reservePage });
 export const commit = internalActorMutation({ name: "pages:commit", ...pages.commitPage });
 export const recordStaged = internalJobMutation({

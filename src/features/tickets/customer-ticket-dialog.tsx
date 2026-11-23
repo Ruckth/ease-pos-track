@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSelectedTicket, useTicketActivity } from "./adapter";
+import { TicketPages } from "./ticket-pages";
 import { useTicketOperations } from "./use-ticket-operations";
 
 export function CustomerTicketDialog({
@@ -183,6 +184,7 @@ function CustomerTicketContent({ ticket, token, onClose }: { ticket: Ticket; tok
         onDelete={handleDeleteAnnotation}
         onRestore={handleRestoreAnnotation}
       />
+      <TicketPages ticket={item} token={token} />
       <AnnotationActivityList events={activity ?? []} />
       <TicketActivityList events={ticketActivity ?? []} />
       <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>

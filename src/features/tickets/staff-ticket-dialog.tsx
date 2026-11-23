@@ -27,6 +27,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTicketActivity } from "./adapter";
+import { TicketPages } from "./ticket-pages";
 import { useTicketOperations } from "./use-ticket-operations";
 
 export function StaffTicketDialog({
@@ -253,6 +254,7 @@ function StaffTicketContent({ ticket, token, onMove, onArchive }: {
           onDelete={handleDeleteAnnotation}
           onRestore={handleRestoreAnnotation}
         />
+        <TicketPages ticket={item} token={token} />
         <AnnotationActivityList events={activity ?? []} />
         <TicketActivityList events={ticketActivity ?? []} />
         <p className="text-sm leading-5 text-muted-foreground">{t("createdAt", { date: formatDate(item.createdAt) })}</p>
