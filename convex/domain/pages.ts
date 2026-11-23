@@ -179,10 +179,15 @@ export const authorizePublish = mutationOperation({
   handler: async (ctx, args) => {
     const ticket = await ticketByReference(ctx, args.ticket);
     await requirePublishableTicket(ctx, ctx.actor, ticket._id);
-    const requestId=normalizeRequestId(args.requestId);
-    const row=await ctx.db.query("ticketPages").withIndex("by_request",q=>q.eq("requestId",requestId)).unique();
-    if (row && !sameActor(row,ctx.actor)) throw new Error("TICKET_UNAVAILABLE");
-    return { ticketId:ticket._id, digest:row?.inputDigest, published:row?.state==="published" ? publicPage(ticket,row) : null };
+    const requestId = normalizeRequestId(args.requestId);
+    const row = await ctx.db.query("ticketPages").withIndex("by_request", q => q.eq("requestId", requestId)).unique();
+    if (row && !sameActor(row, ctx.actor)) throw new Error("TICKET_UNAVAILABLE");
+    if (row && row.ticketId !== ticket._id) throw new Error("PAGE_REQUEST_CONFLICT");
+    return {
+      ticketId: ticket._id, digest: row?.inputDigest,
+      manifest: row?.manifest ?? null,
+      published: row?.state === "published" ? publicPage(ticket, row) : null,
+    };
   },
 });
 
@@ -210,7 +215,7 @@ export const reservePage = mutationOperation({
       await ctx.db.patch(existing._id, { state: "staging", sessionId: session._id, expiresAt: now + STAGING_TTL_MS,
         reclaimAfter: existing.discarded.length ? existing.reclaimAfter ?? now : undefined, updatedAt: now });
       const current = (await reconcilePageWrites(ctx, existing._id))!;
-      return { state: "staging" as const, pageId: existing._id, staged: stagedView(current), writes: await claimWrites(ctx, current, now) };
+      return { state: "staging" as const, pageId: existing._id, manifest: current.manifest, staged: stagedView(current), writes: await claimWrites(ctx, current, now) };
     }
     const published = await ctx.db.query("ticketPages").withIndex("by_ticket", q => q.eq("ticketId", ticket._id).eq("state", "published")).take(PAGE_LIMITS.maxPagesPerTicket);
     const staging = await ctx.db.query("ticketPages").withIndex("by_ticket", q => q.eq("ticketId", ticket._id).eq("state", "staging")).take(PAGE_LIMITS.maxPagesPerTicket);
@@ -220,7 +225,7 @@ export const reservePage = mutationOperation({
       inputDigest, entryPath: bundle.entry, manifest, files: [], discarded: [], totalBytes: bundle.totalBytes,
       state: "staging", expiresAt: now + STAGING_TTL_MS, createdAt: now, updatedAt: now,
     });
-    return { state: "staging" as const, pageId, staged: [], writes: await claimWrites(ctx, (await ctx.db.get(pageId))!, now) };
+    return { state: "staging" as const, pageId, manifest, staged: [], writes: await claimWrites(ctx, (await ctx.db.get(pageId))!, now) };
   },
 });
 

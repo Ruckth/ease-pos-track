@@ -88,7 +88,7 @@ assert.equal((await fetch(published.url)).status, 404);
 assert.equal((await fetch(new URL("../assets/img/dot.png", published.url))).status, 404);
 assert.equal((await command(["page", "list", created.ticket])).count, 1);
 // Exercise both sides of the Node action transport limit on the real backend.
-const padding = " ".repeat(5 * 1024 * 1024);
+const padding = " ".repeat(9.5 * 1024 * 1024);
 const png = await readFile(pageFixture + "/assets/img/dot.png");
 const html = new Blob(['<!--', padding, '--><img src="data:image/png;base64,', png.toString("base64"), '">']);
 // A separate fixture session supplies the Convex Auth JWT the HTTP route verifies.
@@ -101,10 +101,13 @@ const large = await fetch(new URL("/v1/tickets/" + created.ticket + "/pages", pu
 });
 const result = await large.json();
 assert.equal(large.status, 201, result.code);
-assert((await (await fetch(result.url)).text()).includes(padding));
+const stored = await (await fetch(result.url)).text();
+assert(stored.includes(padding));
+assert.match(stored, /data:image\/(?:avif|webp);base64,/);
+assert(Buffer.byteLength(stored) < html.size);
 await command(["logout"]);
 console.log(JSON.stringify({ ok: true, target: url, checks: ["login", "whoami", "create", "retry", "retry after edit", "content and Project conflict exit 5", "detail", "edit", "status", "archive", "restore",
-  "page entry required", "page folder publish", "page replay", "page conflict exit 5", "page headers", "nested asset", "single-file page", "page list", "page revoke stops HTML and assets", "large HTML round trip", "logout", "single JSON result"] }));
+  "page entry required", "page folder publish", "page replay", "page conflict exit 5", "page headers", "nested asset", "single-file page", "page list", "page revoke stops HTML and assets", "9.5 MiB server-optimized HTML round trip", "logout", "single JSON result"] }));
 
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -68,34 +68,37 @@ export async function publishPreflight(_ctx: ActionCtx, request: Request) {
   return new Response(null, { status: 204, headers: corsHeaders(request) });
 }
 
-async function boundedBody(request: Request) {
-  const declared = Number(request.headers.get("content-length") ?? NaN);
-  if (declared > PAGE_LIMITS.maxRequestBytes) throw reject("PAGE_TOO_LARGE");
-  if (!request.body) throw reject("PAGE_FILES_REQUIRED");
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > PAGE_LIMITS.maxRequestBytes) { await reader.cancel(); throw reject("PAGE_TOO_LARGE"); }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return bytes;
-}
-
-/** Parses `entry`, `manifest` and exactly the file parts the manifest names. */
-async function readBundle(request: Request) {
+/** Count multipart bytes as the parser consumes them, including requests without a length. */
+async function boundedForm(request: Request) {
   const type = request.headers.get("content-type") ?? "";
   if (!/^multipart\/form-data;/i.test(type)) throw reject("PAGE_FORM_INVALID");
-  const body = await boundedBody(request);
-  let form: FormData;
-  try { form = await new Response(body, { headers: { "content-type": type } }).formData(); }
-  catch { throw reject("PAGE_FORM_INVALID"); }
+  if (Number(request.headers.get("content-length")) > PAGE_LIMITS.maxRequestBytes) throw reject("PAGE_TOO_LARGE");
+  if (!request.body) throw reject("PAGE_FILES_REQUIRED");
+  const reader = request.body.getReader();
+  let total = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) return controller.close();
+      total += value.byteLength;
+      if (total > PAGE_LIMITS.maxRequestBytes) {
+        controller.error(reject("PAGE_TOO_LARGE"));
+        await reader.cancel();
+      } else {
+        controller.enqueue(value);
+      }
+    },
+    cancel(reason) { return reader.cancel(reason); },
+  });
+  try {
+    return await new Response(body, { headers: { "content-type": type } }).formData();
+  } catch {
+    throw reject(total > PAGE_LIMITS.maxRequestBytes ? "PAGE_TOO_LARGE" : "PAGE_FORM_INVALID");
+  }
+}
+
+async function readBundle(request: Request) {
+  const form = await boundedForm(request);
   // Every field appears once: a repeated part could otherwise smuggle unhashed bytes.
   const keys: string[] = [];
   form.forEach((_value, key) => { keys.push(key); });
@@ -129,18 +132,32 @@ async function readBundle(request: Request) {
  * client: they are validated, not re-encoded. Without it, each raster and each
  * literal base64 `img src` goes through the Sharp pipeline once.
  */
-async function prepareBundle(ctx: ActionCtx, bundle: Awaited<ReturnType<typeof readBundle>>, prepared: boolean) {
-  const files = [];
-  // Each image file converts in its own Node action; a few run at once.
-  for (let start = 0; start < bundle.files.length; start += FILE_BATCH) {
-    files.push(...await Promise.all(bundle.files.slice(start, start + FILE_BATCH).map(file => prepareFile(ctx, file, prepared))));
-    if (files.reduce((total, file) => total + file.size, 0) > PAGE_LIMITS.maxTotalBytes) throw reject("PAGE_TOO_LARGE");
+type SourceFile = Awaited<ReturnType<typeof readBundle>>["files"][number];
+type PreparedFile = Awaited<ReturnType<typeof prepareFile>>;
+
+async function prepareFiles(ctx: ActionCtx, remaining: SourceFile[], prepared: boolean) {
+  const files: PreparedFile[] = [];
+  let totalBytes = 0;
+  // Consume the queue so each source can be collected after conversion. Small
+  // assets share a batch; a large file gets the transfer budget to itself.
+  while (remaining.length) {
+    let count = 1;
+    let batchBytes = remaining[0].size;
+    while (count < 3 && count < remaining.length && batchBytes + remaining[count].size <= 1024 * 1024) {
+      batchBytes += remaining[count].size;
+      count++;
+    }
+    const batch = await Promise.all(remaining.splice(0, count).map(file => prepareFile(ctx, file, prepared)));
+    for (const file of batch) {
+      totalBytes += file.size;
+      if (totalBytes > PAGE_LIMITS.maxTotalBytes) throw reject("PAGE_TOO_LARGE");
+      files.push(file);
+    }
   }
-  return { entry: bundle.entry, files };
+  return files;
 }
 
-const FILE_BATCH = 3;
-async function prepareFile(ctx: ActionCtx, file: Awaited<ReturnType<typeof readBundle>>["files"][number], prepared: boolean) {
+async function prepareFile(ctx: ActionCtx, file: SourceFile, prepared: boolean) {
   let blob: Blob = file.blob;
   let sha256 = file.sha256;
   let rasterType: string | undefined;
@@ -203,17 +220,30 @@ export async function publishPage(ctx: ActionCtx, request: Request) {
     })));
     if (previous.digest && previous.digest !== sourceDigest) throw reject("PAGE_REQUEST_CONFLICT");
     if (previous.published) return json(request, 200, published(previous.published, false, requestId));
-    const bundle = await prepareBundle(ctx, source, prepared);
-    const manifest = bundle.files.map(({ path, size, sha256, rasterType }) => ({ path, size, sha256, rasterType }));
-    const reservation = await ctx.runMutation(internal.pages.reserve, { ticket, requestId, entry: bundle.entry, manifest, sourceDigest });
+    let files: PreparedFile[] = [];
+    let manifest = previous.manifest;
+    if (!manifest) {
+      files = await prepareFiles(ctx, source.files, prepared);
+      manifest = files.map(({ path, size, sha256, rasterType }) => ({ path, size, sha256, rasterType }));
+    }
+    const reservation = await ctx.runMutation(internal.pages.reserve, { ticket, requestId, entry: source.entry, manifest, sourceDigest });
     if (reservation.state === "published") {
       return json(request, 200, published(reservation.page, false, requestId));
     }
     pageId = reservation.pageId;
-    // Each write was claimed before storage; the blob carries its private marker
-    // until it is recorded, so an interruption here stays recoverable.
+    if (previous.manifest) {
+      const missing = new Set(reservation.writes.map(write => write.path));
+      const remaining = source.files.splice(0).filter(file => missing.has(file.path));
+      files = await prepareFiles(ctx, remaining, prepared);
+    }
+    // A codec update during an interrupted publish may produce different bytes.
+    // Fail before storing new blobs or mixing outputs from different manifests.
+    for (const file of files) {
+      const expected = reservation.manifest.find(item => item.path === file.path);
+      if (!expected || expected.sha256 !== file.sha256 || expected.size !== file.size) throw reject("PAGE_REQUEST_CONFLICT");
+    }
     for (const write of reservation.writes) {
-      const file = bundle.files.find(item => item.path === write.path)!;
+      const file = files.find(item => item.path === write.path)!;
       const storageId = await ctx.storage.store(new Blob([file.blob], { type: write.contentType }));
       await ctx.runMutation(internal.pages.recordStaged, { pageId, marker: write.marker, path: file.path, sha256: file.sha256, size: file.size, storageId });
     }

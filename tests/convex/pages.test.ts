@@ -6,7 +6,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import schema from "../../convex/schema";
 import { PAGE_WRITE_SCAN, pageWriteType, reconcilePageWrites, retireTicketPages } from "../../convex/domain/pages";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
-import { pageFormData, sha256Hex } from "../../shared/ticket-pages";
+import { pageFingerprintInput, pageFormData, sha256Hex } from "../../shared/ticket-pages";
 import { modules } from "./modules";
 
 const SITE = "http://127.0.0.1:3213";
@@ -172,6 +172,7 @@ test("serving checks publication, lifecycle and revocation on every HTML and ass
   expect((await f.t.fetch(asset)).status).toBe(404);
   const blocked = await f.publish(f.alice, f.aliceTicket.ref, form());
   expect([blocked.status, (await blocked.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
+  expect((await f.t.fetch(asset, { headers: { "If-None-Match": tag } })).status).toBe(404);
   await f.t.mutation(api.tickets.restoreTicket, { token: f.staff, id: f.aliceTicket.id, expectedVersion: archived.version });
   expect((await f.t.fetch(entry)).status).toBe(200);
 
@@ -209,6 +210,41 @@ test("an unexpected storage failure is retryable; the same key stages only missi
   const [row] = await f.rows();
   expect([row.state, row.files.map(file => file.path).sort(), row.discarded]).toEqual(["published", ["index.html", "style.css"], []]);
   expect((await f.blobs()).length).toBe(2);
+});
+
+test("an interrupted publish retains stored encoder output and rejects drift for a missing file", async () => {
+  const f = await fixture();
+  const entry = "index.html";
+  const original = { [entry]: '<img src="data:image/png;base64,' + bundle["assets/img/dot.png"] + '">' };
+  const sourceManifest = await manifestOf(original);
+  const sourceDigest = await sha256Hex(new TextEncoder().encode(pageFingerprintInput({
+    ticketId: f.aliceTicket.id, entry, files: sourceManifest, imagePolicy: "server",
+  })));
+  // This row represents a prior encoder which preserved the original image
+  // and serialized the img element differently from the current encoder.
+  const prior = original[entry] + "\n";
+  const manifest = await manifestOf({ [entry]: prior });
+  const reserve = (requestId: string) => f.as(f.alice).mutation(internal.pages.reserve, {
+    ticket: f.aliceTicket.ref, requestId, entry, manifest, sourceDigest,
+  });
+
+  const savedKey = crypto.randomUUID();
+  const saved = await reserve(savedKey);
+  if (saved.state !== "staging") throw new Error("expected staging");
+  const [write] = saved.writes;
+  const storageId = await f.t.run(ctx => ctx.storage.store(new Blob([prior], { type: write.contentType })));
+  await f.t.mutation(internal.pages.recordStaged, { pageId: saved.pageId, marker: write.marker, storageId, ...manifest[0] });
+  const success = await f.publish(f.alice, f.aliceTicket.ref, form(original, entry), savedKey);
+  expect(success.status).toBe(201);
+  const page = await success.json();
+  expect(await (await f.t.fetch(f.path(page.url))).text()).toBe(prior);
+
+  const missingKey = crypto.randomUUID();
+  await reserve(missingKey);
+  const conflict = await f.publish(f.alice, f.aliceTicket.ref, form(original, entry), missingKey);
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toEqual({ ok: false, code: "PAGE_REQUEST_CONFLICT" });
+  expect(await f.blobs()).toHaveLength(1);
 });
 
 test("commit rechecks access; expiry records abandonment and only gated reclaim deletes recorded blobs", async () => {
