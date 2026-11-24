@@ -977,7 +977,8 @@ test("Thai keyboard customer recovery returns to sign-in and resumes Join with t
     const join = page.getByRole("button", { name: copy("th", "joinAction"), exact: true });
     assert.equal(await join.evaluate(element => element === document.activeElement), true);
     await page.keyboard.press("Enter");
-    await page.waitForURL(`${baseURL}/customer`);
+    // Joining opens the joined Project.
+    await page.waitForURL(`${baseURL}/customer?project=APP`);
     assert.deepEqual(await convex.query(api.identity.previewCustomerInvitation, { invitation: invitation.secret }), { status: "INVITE_USED" });
     await checkInMemoryOnly();
     assert.deepEqual(documentRequests, [joinPath]);

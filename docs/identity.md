@@ -154,8 +154,12 @@ Opening it never consumes it. New customers sign in through Clerk, then redeem t
 lowercased before submit), a Thai or English display name and a 15–100 code point
 password, then generates, saves and confirms a recovery code before opening
 Tickets. Returning customers can sign in from the invitation and are sent back
-to Join. The browser keeps the invitation in memory through sign-in and saved-code
-recovery. A signed-in customer adds the Project to their account. A completed Join
+to Join. The browser keeps the invitation in memory through password sign-in and
+saved-code recovery. The Clerk redirect reloads the page, so only for that round
+trip the invitation waits in the tab's session storage (as the staff invitation
+does); returning to the join flow takes and removes it, and leaving the flow
+discards it. Joining opens the joined Project. A signed-in customer adds the
+Project to their account. A completed Join
 can be retried by the same customer with current membership while the invitation
 and Project remain in the active release. A staff or pending session can sign
 out from Join to switch accounts.
