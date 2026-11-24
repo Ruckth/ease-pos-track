@@ -38,7 +38,7 @@ const en = {
   composerPreview: "Preview Ticket (optional)",
   composerHidePreview: "Hide preview",
   composerUntitled: "Untitled Ticket",
-  customerQueueWaiting: "Waiting for your reply",
+  customerQueueWaiting: "Waiting for your response",
   customerQueueSearch: "Search Tickets",
   customerQueueCount: "{{shown}} of {{loaded}} Tickets",
   customerQueueCountsHint: "Only loaded Tickets are counted and searched. Load older Tickets to include more.",
