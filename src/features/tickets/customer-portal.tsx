@@ -214,10 +214,10 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
         </select>
       </label>
     </div>
-    <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p>
+    {page.status !== "Exhausted" ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p> : null}
     {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
       : <div>
-        <div className="flex flex-wrap justify-between gap-2 px-1 pb-2 text-xs text-muted-foreground"><p>{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p><span>{t("customerQueueOrder")}</span></div>
+        <p className="px-1 pb-2 text-xs text-muted-foreground">{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p>
         {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
           : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
       </div>}

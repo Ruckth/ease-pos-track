@@ -93,47 +93,52 @@
 
 @layer components {
   /*
-   * Flat, low-border base. Surfaces use fills and soft elevation; borders stay
-   * transparent so forced-colors mode still draws every boundary. Structured
-   * data keeps its own dividers and focus keeps a high-contrast ring.
+   * Aurora glass. A soft glow canvas sits behind translucent, blurred panels
+   * with a light rim and inner glint. Without backdrop-filter support, or when
+   * the visitor asks for reduced transparency, every surface turns opaque.
    */
   .aurora-canvas {
     background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(ellipse 66rem 42rem at 0% 0%, var(--aurora-glow-a), transparent 75%),
+      radial-gradient(ellipse 60rem 40rem at 100% 5rem, var(--aurora-glow-b), transparent 78%),
+      radial-gradient(ellipse 48rem 36rem at 45% 30rem, var(--aurora-glow-c), transparent 85%);
   }
 
   .aurora-panel, .aurora-toolbar, .aurora-ticket {
-    border: 1px solid transparent;
-    box-shadow: var(--surface-shadow);
+    border: 1px solid var(--glass-rim);
+    box-shadow: inset 0 1px var(--glass-glint), 0 6px 20px -7px var(--glass-shadow);
   }
 
   .aurora-panel, .aurora-toolbar {
-    background-color: hsl(var(--card));
+    background-color: rgb(var(--glass-fill));
     border-radius: 1rem;
   }
 
   .aurora-ticket {
-    background-color: hsl(var(--card));
+    background-color: hsl(var(--card) / 0.96);
     color: hsl(var(--card-foreground));
     border-radius: 0.75rem;
   }
 
   .ticket-lane {
-    background-color: hsl(var(--muted) / 0.55);
-    border: 1px solid transparent;
+    background: linear-gradient(155deg, rgb(var(--ticket-paper) / 0.54), rgb(var(--ticket-paper) / 0.28));
+    border: 1px solid var(--glass-rim);
     border-radius: 1.125rem;
+    box-shadow: inset 0 1px var(--glass-glint);
   }
 
   .ticket-surface {
-    background-color: hsl(var(--card));
+    background: linear-gradient(135deg, rgb(var(--ticket-paper) / 0.97), rgb(var(--ticket-paper) / 0.88));
     color: hsl(var(--card-foreground));
-    border: 1px solid transparent;
+    border: 1px solid color-mix(in srgb, hsl(var(--border)) 62%, transparent);
     border-radius: 0.875rem;
-    box-shadow: var(--surface-shadow);
+    box-shadow: inset 0 1px var(--glass-glint), 0 3px 9px -6px var(--glass-shadow);
   }
 
   .ticket-surface-selected {
-    background-color: color-mix(in srgb, hsl(var(--primary)) 8%, hsl(var(--card)));
-    box-shadow: inset 0 0 0 2px hsl(var(--primary) / 0.7), var(--surface-shadow);
+    background: color-mix(in srgb, hsl(var(--primary)) 8%, rgb(var(--ticket-paper)));
+    box-shadow: inset 0 0 0 2px hsl(var(--primary) / 0.7), 0 3px 9px -6px var(--glass-shadow);
   }
 
   .ticket-chip {
@@ -146,43 +151,50 @@
   }
 
   .aurora-control {
-    border: 1px solid transparent;
-    background-color: hsl(var(--field));
+    border: 1px solid var(--glass-rim);
+    background-color: hsl(var(--field) / 0.8);
   }
 
   select.aurora-control {
     border-bottom-color: hsl(var(--input));
   }
 
-  /* Elevated glass recipe kept for a later explicit appearance choice; unused by default. */
-  .surface-glass {
-    background-color: rgb(var(--glass-fill));
-    border: 1px solid var(--glass-rim);
-    box-shadow: inset 0 1px var(--glass-glint), 0 6px 20px -7px var(--glass-shadow);
-  }
-
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .surface-glass {
+    .aurora-panel {
       background-color: rgb(var(--glass-fill) / 0.64);
       -webkit-backdrop-filter: blur(16px);
       backdrop-filter: blur(16px);
+    }
+    .aurora-toolbar {
+      background-color: rgb(var(--glass-fill) / 0.76);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+    }
+    /* Reading surface: denser fill keeps long Ticket text legible on the glow. */
+    .aurora-ticket {
+      background-color: rgb(var(--glass-fill) / 0.82);
+      -webkit-backdrop-filter: blur(24px);
+      backdrop-filter: blur(24px);
     }
   }
 
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
     .ticket-surface:has([data-ticket-id]), button.ticket-surface {
-      transition: background-color 140ms ease, box-shadow 140ms ease;
+      transition: border-color 140ms ease, background-color 140ms ease;
     }
   }
 
   @media (hover: hover) {
     .ticket-surface:has([data-ticket-id]):hover, button.ticket-surface:hover {
-      background-color: color-mix(in srgb, hsl(var(--primary)) 5%, hsl(var(--card)));
+      border-color: hsl(var(--primary) / 0.45);
     }
   }
 
   @media (prefers-reduced-transparency: reduce) {
-    .surface-glass {
+    .ticket-lane, .ticket-surface {
+      background: hsl(var(--card));
+    }
+    .aurora-panel, .aurora-toolbar, .aurora-ticket {
       background-color: rgb(var(--glass-fill));
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
