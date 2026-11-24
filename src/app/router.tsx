@@ -116,7 +116,7 @@ function CustomerJoin() {
   return <CustomerJoinPage invitation={currentInvitation()} signedInAs={auth.status === "signed-in" ? auth.viewer.kind : null}
     onSignOut={signOut}
     onExistingAccount={() => void navigate({ to: APP_PATHS.customerLogin })}
-    onDone={() => void navigate({ to: APP_PATHS.customerHome })} />;
+    onDone={projectKey => void navigate({ to: APP_PATHS.customerHome, search: projectKey ? { project: projectKey } : {} })} />;
 }
 
 function StaffInvite() {

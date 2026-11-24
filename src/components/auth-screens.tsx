@@ -4,7 +4,7 @@ import {
   useStaffInvitation,
 } from "@/app/adapter";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { stashReturnTarget } from "@/app/auth-store";
+import { stashInvitation, stashReturnTarget } from "@/app/auth-store";
 import { PrivacyNoticeLink } from "@/components/privacy-notice-link";
 import { ProductWordmark } from "@/components/product-wordmark";
 import { Button } from "@/components/ui/button";
@@ -127,6 +127,7 @@ function ClerkSignIn({ invitation, customerPath }: { invitation?: string; custom
       if (invitation) sessionStorage.setItem(staffInviteStorageKey, invitation);
       // The Google redirect URL carries no query; keep a deep-link return target per tab.
       else stashReturnTarget(new URLSearchParams(window.location.search).get("redirect"), customerPath ? "customer" : "staff");
+      if (customerPath) stashInvitation();
       const path = customerPath ?? (invitation ? APP_PATHS.staffInvite : APP_PATHS.staffLogin);
       const result = await signIn({ redirectTo: new URL(path, window.location.origin).href });
       if (result.status === "error") { setError(t("googleFlowFailed")); setBusy(false); }
@@ -237,7 +238,7 @@ function NewPasswordFields({ password, confirmation, onPassword, onConfirmation,
 /** Invitation-bound signup, or adding the Project to the signed-in customer. */
 export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExistingAccount, onDone }: {
   invitation: string; signedInAs: "staff" | "pending" | "customer" | null;
-  onSignOut: () => Promise<void>; onExistingAccount: () => void; onDone: () => void;
+  onSignOut: () => Promise<void>; onExistingAccount: () => void; onDone: (projectKey?: string) => void;
 }) {
   const { t } = useI18n();
   const { preview, join, enroll } = useCustomerInvitation(invitation);
@@ -253,13 +254,15 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
   if (preview === undefined) return <AuthLayout title={t("customerSignUp")}><Loader2 className="mx-auto animate-spin text-primary" aria-label={t("loadingWorkspace")} /></AuthLayout>;
   if (preview.status !== "ready") return <AuthLayout title={t("customerSignUp")}><Alert focus>{userErrorMessage(preview.status, t)}</Alert></AuthLayout>;
   const project = preview.projectName;
+  // Open the Project just joined, not whichever one the workspace last showed.
+  const done = () => onDone(preview.projectKey);
 
   if (signedInAs === "pending") {
     return <AuthLayout title={t("joinTitle", { project })}>
       <form className="space-y-4" onSubmit={async event => {
         event.preventDefault();
         setBusy(true);
-        try { await enroll({ invitation, username, displayName }); onDone(); }
+        try { await enroll({ invitation, username, displayName }); done(); }
         catch (err) { setError(localizeError(err, t)); }
         finally { setBusy(false); }
       }}>
@@ -293,7 +296,7 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
     async function onJoin() {
       setBusy(true);
       setError("");
-      try { await join({ invitation }); onDone(); }
+      try { await join({ invitation }); done(); }
       catch (err) { setError(localizeError(err, t)); }
       finally { setBusy(false); }
     }
@@ -301,7 +304,7 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
       {viewer.alreadyMember ? <Alert tone="info">{t("joinAlreadyMember", { project })}</Alert> : <p className="text-sm">{t("joinAsCustomer", { project, username: viewer.username })}</p>}
       {error ? <Alert focus>{error}</Alert> : null}
       {viewer.alreadyMember
-        ? <Button className="h-11 w-full rounded-xl" autoFocus onClick={onDone}>{t("openWorkspace")}</Button>
+        ? <Button className="h-11 w-full rounded-xl" autoFocus onClick={done}>{t("openWorkspace")}</Button>
         : <Button className="h-11 w-full rounded-xl" autoFocus disabled={busy} onClick={() => void onJoin()}>{busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}{t("joinAction")}</Button>}
       <Button className="h-11 w-full rounded-lg" variant="ghost" onClick={() => void switchAccount()}>{t("signOut")}</Button>
     </AuthLayout>;
@@ -315,7 +318,7 @@ export function CustomerJoinPage({ invitation, signedInAs, onSignOut, onExisting
     try {
       const result = await signUp({ invitation, username, displayName, password });
       if (result.status === "error") setError(userErrorMessage(result.userError.error, t));
-      else onDone();
+      else done();
     } catch (err) { setError(localizeError(err, t)); }
     finally { setBusy(false); }
   }
@@ -392,12 +395,27 @@ function FixtureRecovery({ onSignIn }: { onSignIn: () => void }) {
 }
 
 const staffInviteStorageKey = "track-ease.staff-invite-return";
+const staffInviteAcceptedKey = "track-ease.staff-invite-accepted";
+
+function InvitationAccepted({ onSignOut }: { onSignOut: () => Promise<void> }) {
+  const { t } = useI18n();
+  return <AuthLayout title={t("staffInviteTitle")}>
+    <Alert tone="info">{t("inviteAccepted")}</Alert>
+    <Button className="h-11 w-full rounded-xl" onClick={() => {
+      sessionStorage.removeItem(staffInviteAcceptedKey);
+      void onSignOut();
+    }}>{t("continueWithGoogle")}</Button>
+  </AuthLayout>;
+}
 
 /** Sign in with Google, confirm the invited mailbox with a code, then sign in again. */
 export function StaffInvitePage({ pending, onSignOut }: { pending: boolean; onSignOut: () => Promise<void> }) {
   const { t } = useI18n();
   const [invitation] = useState(() => readFragmentSecret() || sessionStorage.getItem(staffInviteStorageKey) || "");
+  // Acceptance changes the viewer, which remounts this page without the spent invitation.
+  const [accepted] = useState(() => !invitation && sessionStorage.getItem(staffInviteAcceptedKey) === "1");
   useEffect(() => { if (pending) sessionStorage.removeItem(staffInviteStorageKey); }, [pending]);
+  if (accepted) return <InvitationAccepted onSignOut={onSignOut} />;
   if (!invitation) return <AuthLayout title={t("staffInviteTitle")}><Alert>{t("inviteNotFound")}</Alert></AuthLayout>;
   if (!pending) {
     return <AuthLayout title={t("staffInviteTitle")} description={t("staffInviteDescription")}>
@@ -416,12 +434,7 @@ function PendingInvitation({ invitation, onSignOut }: { invitation: string; onSi
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   if (preview === undefined) return <AuthLayout title={t("staffInviteTitle")}><Loader2 className="mx-auto animate-spin text-primary" aria-label={t("loadingWorkspace")} /></AuthLayout>;
-  if (accepted) {
-    return <AuthLayout title={t("staffInviteTitle")}>
-      <Alert tone="info">{t("inviteAccepted")}</Alert>
-      <Button className="h-11 w-full rounded-xl" onClick={() => void onSignOut()}>{t("continueWithGoogle")}</Button>
-    </AuthLayout>;
-  }
+  if (accepted) return <InvitationAccepted onSignOut={onSignOut} />;
   if (preview.status === "WRONG_GOOGLE_ACCOUNT") {
     return <AuthLayout title={t("staffInviteTitle")}>
       <Alert>{t("staffInviteWrongAccount", { invited: preview.invitedEmail, email: preview.signedInEmail ?? "" })}</Alert>
@@ -443,7 +456,10 @@ function PendingInvitation({ invitation, onSignOut }: { invitation: string; onSi
     setError("");
     try {
       const result = await accept({ invitation, code });
-      if (result.ok) setAccepted(true);
+      if (result.ok) {
+        sessionStorage.setItem(staffInviteAcceptedKey, "1");
+        setAccepted(true);
+      }
       else setError(userErrorMessage(result.error, t));
     } catch (err) { setError(localizeError(err, t)); }
     finally { setBusy(false); }

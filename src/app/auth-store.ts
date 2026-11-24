@@ -47,15 +47,19 @@ export function useSessionExpiry(loginPath: string) {
 const JOIN_FLOW = new Set<string>([APP_PATHS.customerJoin, APP_PATHS.customerLogin, APP_PATHS.customerRecover]);
 let invitation = "";
 
+const INVITE_KEY = "track-ease.customer-invite-return";
+
 /**
  * Captures a customer invitation from the `/customer/join` fragment, strips it
  * from the address bar, and keeps it in memory only while the visitor stays in
- * the join, sign-in and recovery flow.
+ * the join, sign-in and recovery flow. The Clerk round trip reloads the page, so
+ * the invitation waits in this tab's storage until the visitor returns to that flow.
  */
 export function syncInvitation(pathname: string, hash: string) {
   const path = normalizePathname(pathname);
   const fresh = path === APP_PATHS.customerJoin ? new URLSearchParams(hash.replace(/^#/, "")).get("invite") ?? "" : "";
-  invitation = JOIN_FLOW.has(path) ? fresh || invitation : "";
+  const stashed = takeStashedInvitation();
+  invitation = JOIN_FLOW.has(path) ? fresh || invitation || stashed : "";
   if (fresh && typeof window !== "undefined" && window.location.hash) {
     window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
   }
@@ -63,6 +67,19 @@ export function syncInvitation(pathname: string, hash: string) {
 }
 
 export const currentInvitation = () => invitation;
+
+/** Called just before the Clerk redirect leaves the page. */
+export function stashInvitation() {
+  try { if (invitation) sessionStorage.setItem(INVITE_KEY, invitation); } catch { /* storage unavailable: reopen the link */ }
+}
+
+function takeStashedInvitation() {
+  try {
+    const stashed = sessionStorage.getItem(INVITE_KEY) ?? "";
+    sessionStorage.removeItem(INVITE_KEY);
+    return stashed;
+  } catch { return ""; }
+}
 
 const RETURN_KEY = "track-ease.staff-sign-in-return";
 
