@@ -12,7 +12,7 @@ import { localDeploymentName, localResetTarget } from "../scripts/dev-reset-targ
 const config = { deployment: "dev:disposable-123", uploadthingAppId: "dev-app" };
 /** A development target ready for the post-clear Owner bootstrap. */
 const ready = {
-  MEDIA_CLEANUP_ENABLED: "false", TICKET_DEPLOYMENT_MODE: "legacy", AUTH_GOOGLE_CLIENT_ID: "client", AUTH_GOOGLE_CLIENT_SECRET: "secret",
+  MEDIA_CLEANUP_ENABLED: "false", TICKET_DEPLOYMENT_MODE: "legacy", CLERK_OAUTH_CLIENT_ID: "client", CLERK_OAUTH_CLIENT_SECRET: "secret",
   OWNER_BOOTSTRAP_GOOGLE_SUBJECT: "google-owner", AUTH_REDIRECT_ORIGINS: "https://app.example, http://127.0.0.1:4271",
 };
 const owner = { _id: "owner", userId: "user", googleSubject: ready.OWNER_BOOTSTRAP_GOOGLE_SUBJECT, email: "owner@example.invalid", role: "owner", status: "active", generation: 1 };
@@ -326,7 +326,7 @@ test("execution requires explicit legacy mode and the Owner bootstrap settings b
     [{ OWNER_BOOTSTRAP_GOOGLE_SUBJECT: "  " }, /RESET_OWNER_BOOTSTRAP_NOT_READY/],
     [{ AUTH_REDIRECT_ORIGINS: undefined }, /RESET_OWNER_BOOTSTRAP_NOT_READY/],
     [{ AUTH_REDIRECT_ORIGINS: "http://localhost:5173,http://127.0.0.1:42710" }, /RESET_OWNER_BOOTSTRAP_NOT_READY/],
-    [{ AUTH_GOOGLE_CLIENT_SECRET: undefined }, /RESET_IDENTITY_SETTINGS_REQUIRED/],
+    [{ CLERK_OAUTH_CLIENT_SECRET: undefined }, /RESET_IDENTITY_SETTINGS_REQUIRED/],
     [{ TICKET_DEPLOYMENT_MODE: undefined }, /RESET_LEGACY_MODE_REQUIRED/],
     [{ TICKET_DEPLOYMENT_MODE: "named-pilot" }, /RESET_LEGACY_MODE_REQUIRED/],
     [{ TICKET_PILOT_TRAFFIC: "closed" }, /RESET_LEGACY_MODE_REQUIRED/],
@@ -342,8 +342,8 @@ test("execution requires explicit legacy mode and the Owner bootstrap settings b
     assert.equal((await reset({ ...execute, mode: "inspect", confirm: undefined }, deps)).stage, "inventoried");
   }
   // The disposable backend defaults to legacy and configures its own fixture Owner subject.
-  assert.equal(resetReadiness({ AUTH_GOOGLE_CLIENT_ID: "placeholder", AUTH_GOOGLE_CLIENT_SECRET: "placeholder" }, true), undefined);
-  assert.equal(resetReadiness({ AUTH_GOOGLE_CLIENT_ID: "placeholder", AUTH_GOOGLE_CLIENT_SECRET: "placeholder", TICKET_DEPLOYMENT_MODE: "named-pilot" }, true), "RESET_LEGACY_MODE_REQUIRED");
+  assert.equal(resetReadiness({ CLERK_OAUTH_CLIENT_ID: "placeholder", CLERK_OAUTH_CLIENT_SECRET: "placeholder" }, true), undefined);
+  assert.equal(resetReadiness({ CLERK_OAUTH_CLIENT_ID: "placeholder", CLERK_OAUTH_CLIENT_SECRET: "placeholder", TICKET_DEPLOYMENT_MODE: "named-pilot" }, true), "RESET_LEGACY_MODE_REQUIRED");
   assert.equal(resetReadiness({}, true), "RESET_IDENTITY_SETTINGS_REQUIRED");
 });
 

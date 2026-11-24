@@ -1,7 +1,7 @@
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useAuthActions, useAuthToken } from "@convex-dev/auth/react";
 import { useOauth } from "@convex-dev/auth/methods/oauth/react";
-import { useSignInWithGoogle } from "@convex-dev/auth/methods/google/react";
+import { useOauthSignIn } from "@convex-dev/auth/methods/oauth/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 
@@ -42,7 +42,7 @@ export function useInvitationSignUp() {
 }
 
 export function useGoogleSignIn() {
-  const { signIn } = useSignInWithGoogle(api.auth);
+  const { signIn } = useOauthSignIn({ providerName: "clerk", startSignIn: api.auth.startSignInWithClerk, completeSignIn: api.auth.completeSignInWithClerk });
   const { flowError } = useOauth();
   return { signIn, flowError };
 }
@@ -63,6 +63,7 @@ export function useCustomerInvitation(invitation: string) {
   return {
     preview: useQuery(api.identity.previewCustomerInvitation, invitation ? { invitation } : "skip"),
     join: useMutation(api.identity.joinWithInvitation),
+    enroll: useMutation(api.identity.enrollClerkCustomer),
   };
 }
 

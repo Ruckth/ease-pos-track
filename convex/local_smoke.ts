@@ -67,9 +67,9 @@ export const googleStartAndInvalidCompletion = internalJobMutation({
   handler: async (ctx) => {
     requireLocalFixtures();
     const before = (await ctx.db.query("sessionAdmissions").collect()).length;
-    const started = await registration("auth:startSignInWithGoogle")(ctx, { redirectTo: "http://localhost:5173/" }) as { redirect: string; state: string };
+    const started = await registration("auth:startSignInWithClerk")(ctx, { redirectTo: "http://localhost:5173/" }) as { redirect: string; state: string };
     const flowRecorded = (await ctx.db.query("googleFlows").collect()).some(flow => flow.consumedAt === undefined);
-    const completion = await registration("auth:completeSignInWithGoogle")(ctx, { code: "unknown-ticket", state: started.state }) as { status: string; userError?: { error: string } };
+    const completion = await registration("auth:completeSignInWithClerk")(ctx, { code: "unknown-ticket", state: started.state }) as { status: string; userError?: { error: string } };
     const admitted = (await ctx.db.query("sessionAdmissions").collect()).length !== before;
     return { redirect: started.redirect, flowRecorded, completion: completion.userError?.error ?? completion.status, admitted };
   },
@@ -212,7 +212,7 @@ export const run = internalJobAction({
     check((await call.query(alice, api.annotations.listAnnotationActivity, { id })).length === 4, "annotation create/edit/remove/restore with fake metadata");
     if (!args.skipGoogle) {
       const google = await ctx.runMutation(internal.local_smoke.googleStartAndInvalidCompletion, {});
-      check(google.redirect.startsWith("https://accounts.google.com/") && google.redirect.includes(encodeURIComponent("/oauth/google/callback")), "Google start uses the component callback route");
+      check(google.redirect.startsWith(process.env.CLERK_ISSUER_URL + "/oauth/authorize?") && google.redirect.includes(encodeURIComponent("/oauth/clerk/callback")), "Google start uses the component callback route");
       check(google.flowRecorded && google.completion === "INVALID_CODE" && !google.admitted, "Google flow recorded; unknown ticket admits nothing");
     }
     await ctx.runMutation(internal.local_smoke.disableAndRestore, { session: bob });

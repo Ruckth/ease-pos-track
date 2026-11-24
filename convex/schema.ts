@@ -260,6 +260,7 @@ export default defineSchema({
     generation: v.number(),
     validAfter: v.number(),
     pilotEpoch: v.optional(v.string()),
+    clerkManaged: v.optional(v.boolean()),
     // Saved recovery code digest, bound to customerId and generation.
     recoveryCodeDigest: v.optional(v.string()),
     recoveryCodeGeneration: v.optional(v.number()),
@@ -306,7 +307,7 @@ export default defineSchema({
     staffId: v.optional(v.id("staff")),
     customerId: v.optional(v.id("customers")),
     generation: v.number(),
-    method: v.union(v.literal("google"), v.literal("password")),
+    method: v.union(v.literal("google"), v.literal("password"), v.literal("clerk")),
     // Named pilot epoch the session was admitted under; absent outside a pilot.
     pilotEpoch: v.optional(v.string()),
     createdAt: v.number(),

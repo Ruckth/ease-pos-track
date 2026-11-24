@@ -62,7 +62,7 @@ export const COMMAND_REGISTRY = [
   },
   {
     name: "login",
-    summary: "Sign in as a named staff member with Google and save the rotating session in macOS Keychain.",
+    summary: "Sign in as a named staff member with Clerk and save the rotating session in macOS Keychain.",
     authentication: "none",
     interactive: "browser-sign-in",
     arguments: [],

@@ -475,7 +475,7 @@ test("staff invitation survives a same-tab Google redirect without entering its 
       const server = socket.connectToServer();
       socket.onMessage(raw => {
         const message = JSON.parse(String(raw));
-        if (message.udfPath === "auth:startSignInWithGoogle") {
+        if (message.udfPath === "auth:startSignInWithClerk") {
           observe(message.args[0].redirectTo);
           return;
         }
@@ -485,7 +485,7 @@ test("staff invitation survives a same-tab Google redirect without entering its 
     });
     const page = await context.newPage();
     await page.goto(baseURL + "/staff/invite#invite=" + secret);
-    const google = page.getByRole("button", { name: /Google/ }).first();
+    const google = page.getByRole("button", { name: /Clerk/ }).first();
     const [returnURL] = await Promise.all([started, google.click()]);
     assert.equal(returnURL, new URL("/staff/invite", baseURL).href);
     await page.goto(returnURL);
@@ -977,7 +977,8 @@ test("Thai keyboard customer recovery returns to sign-in and resumes Join with t
     const join = page.getByRole("button", { name: copy("th", "joinAction"), exact: true });
     assert.equal(await join.evaluate(element => element === document.activeElement), true);
     await page.keyboard.press("Enter");
-    await page.waitForURL(`${baseURL}/customer`);
+    // Joining opens the joined Project.
+    await page.waitForURL(`${baseURL}/customer?project=APP`);
     assert.deepEqual(await convex.query(api.identity.previewCustomerInvitation, { invitation: invitation.secret }), { status: "INVITE_USED" });
     await checkInMemoryOnly();
     assert.deepEqual(documentRequests, [joinPath]);
@@ -1097,7 +1098,7 @@ test("staff deep link survives a query-free Google redirect through tab return s
       const server = socket.connectToServer();
       socket.onMessage(raw => {
         const message = JSON.parse(String(raw));
-        if (message.udfPath === "auth:startSignInWithGoogle") {
+        if (message.udfPath === "auth:startSignInWithClerk") {
           observe(message.args[0].redirectTo);
           return;
         }

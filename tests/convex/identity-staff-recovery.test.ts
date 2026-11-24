@@ -18,21 +18,21 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 /** Seed the output of a verified Google callback, then exercise real redemption and admission. */
 async function googleProof(t: IdentityTest, state: string, sub: string, email: string) {
   await t.mutation(fixtures.recordFlow, { state });
-  const createTicket = (components.authGoogle as unknown as { provider: {
-    createTicket: FunctionReference<"mutation", "internal", { ticketCodeHash: string; stateHash: string; encryptedPayload: string }, null>;
+  const createTicket = (components.authClerk as unknown as { provider: {
+    createTicket: FunctionReference<"mutation", "internal", { providerName: string; ticketCodeHash: string; stateHash: string; encryptedPayload: string }, null>;
   } }).provider.createTicket;
   const code = crypto.randomUUID();
   const encode = new TextEncoder();
   const keyBytes = await crypto.subtle.digest("SHA-256", encode.encode(`convex-auth-ticket-payload:${code}`));
   const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = encode.encode(JSON.stringify({ claims: { sub, email, email_verified: true } }));
+  const plaintext = encode.encode(JSON.stringify({ claims: { sub: sub.replace(/^https:\/\/clerk\.invalid\|/, ""), email, email_verified: true } }));
   const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
   const encryptedPayload = Buffer.concat([iv, new Uint8Array(encrypted)]).toString("base64url");
   const ticketCodeHash = await sha256Hex(code);
   const stateHash = await sha256Hex(state);
-  await t.run(ctx => ctx.runMutation(createTicket, { ticketCodeHash, stateHash, encryptedPayload }));
-  return () => t.mutation(api.auth.completeSignInWithGoogle, { state, code });
+  await t.run(ctx => ctx.runMutation(createTicket, { providerName: "clerk", ticketCodeHash, stateHash, encryptedPayload }));
+  return () => t.mutation(api.auth.completeSignInWithClerk, { state, code });
 }
 
 async function signIn(t: IdentityTest, state: string, sub: string, email: string) {
@@ -63,7 +63,7 @@ test("Owner proof binds a staff Google replacement and revocation to the exact v
   const beforeTransition = await googleProof(t, "before-transition", "replacement", candidateEmail);
   const change = {
     staffId: member.staffId, expectedGeneration: 1, expectedRole: "staff" as const, evidenceRef: "private-vault/staff-182",
-    change: { kind: "replace" as const, replacement: { googleSubject: "replacement", verifiedEmail: candidateEmail } },
+    change: { kind: "replace" as const, replacement: { googleSubject: "https://clerk.invalid|replacement", verifiedEmail: candidateEmail } },
   };
   const code = await issue(t, authority, change);
   const replace = (token: string, input = change) => t.mutation(api.identity_staff_recovery.changeBinding, { ...input, token, proof: { code } });
@@ -113,7 +113,7 @@ test("sole Owner cannot be revoked and the verified operator replacement keeps t
   await expect(t.mutation(api.identity_staff_recovery.changeBinding, { ...change, token: authority.session, proof: { code } }))
     .rejects.toThrow("LAST_OWNER");
 
-  const replacement = { googleSubject: "replacement-owner", verifiedEmail: "new-owner@fixture.test" };
+  const replacement = { googleSubject: "https://clerk.invalid|replacement-owner", verifiedEmail: "new-owner@fixture.test" };
   const candidate = await signIn(t, "sole-owner-pending", replacement.googleSubject, replacement.verifiedEmail);
   const { staffId, expectedGeneration, evidenceRef } = change;
   const args = { staffId, expectedGeneration, replacement, evidenceRef };
@@ -199,7 +199,7 @@ test("a partial pilot restore only counts current Owners with a usable Google bi
   await auth.mutation(internal.identity.issueChallenge, { purpose: "staff-google-binding", target: staffGoogleChangeIntent(revocation), code });
   await expect(t.mutation(api.identity_staff_recovery.changeBinding, { ...revocation, token, proof: { code } })).rejects.toThrow("LAST_OWNER");
 
-  const replacement = { googleSubject: "current-owner-replacement", verifiedEmail: "replacement@fixture.test" };
+  const replacement = { googleSubject: "https://clerk.invalid|current-owner-replacement", verifiedEmail: "replacement@fixture.test" };
   await signIn(t, "replacement-pending", replacement.googleSubject, replacement.verifiedEmail);
   vi.stubEnv("OWNER_REPLACEMENT_STAFF_ID", stale.staffId);
   vi.stubEnv("OWNER_REPLACEMENT_GOOGLE_SUBJECT", replacement.googleSubject);
@@ -213,4 +213,26 @@ test("a partial pilot restore only counts current Owners with a usable Google bi
   vi.advanceTimersByTime(1);
   const fresh = await signIn(t, "replacement-current", replacement.googleSubject, replacement.verifiedEmail);
   expect(await t.query(api.identity.viewer, { token: fresh.session })).toMatchObject({ staffId: owner.staffId, role: "owner" });
+});
+
+test("a Clerk account needs a Project invitation, keeps its customer identity and cannot claim another Project", async () => {
+  const t = identityTest();
+  const owner = await t.mutation(fixtures.staff, { email: "owner@fixture.test" });
+  const project = await t.mutation(api.projects.createProject, { token: owner.session, key: "POS", name: "Point of Sale" });
+  await t.mutation(api.projects.createProject, { token: owner.session, key: "APP", name: "Customer App" });
+  const invite = await t.mutation(api.identity.createCustomerInvitation, { token: owner.session, projectId: project._id, eligibilityConfirmed: true });
+  const account = await signIn(t, "start-customer", "user_customer", "customer@fixture.test");
+  const input = { username: "clerk_customer", displayName: "Customer" };
+  await expect(t.mutation(api.identity.enrollClerkCustomer, { ...input, invitation: "unused", token: account.session })).rejects.toThrow("INVITE_NOT_FOUND");
+  expect(await t.query(api.identity.viewer, { token: account.session })).toMatchObject({ kind: "pending" });
+  await t.mutation(api.identity.enrollClerkCustomer, { ...input, invitation: invite.secret, token: account.session });
+  const viewer = await t.query(api.identity.viewer, { token: account.session });
+  expect(viewer).toMatchObject({ kind: "customer", clerkManaged: true, needsRecoveryCode: false });
+  vi.advanceTimersByTime(1000);
+  const returning = await signIn(t, "return-customer", "user_customer", "changed@fixture.test");
+  expect(await t.query(api.identity.viewer, { token: returning.session })).toEqual(viewer);
+  expect((await t.query(api.projects.listProjects, { token: returning.session })).map(p => p.key)).toEqual(["POS"]);
+  await expect(t.mutation(api.identity.createRecoveryCode, { token: returning.session })).rejects.toThrow("ACCESS_UNAVAILABLE");
+  const other = await signIn(t, "other-customer", "user_other", "changed@fixture.test");
+  await expect(t.mutation(api.identity.enrollClerkCustomer, { ...input, username: "other_customer", invitation: invite.secret, token: other.session })).rejects.toThrow("INVITE_USED");
 });

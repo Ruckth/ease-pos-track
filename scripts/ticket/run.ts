@@ -182,7 +182,7 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
   },
   {
     codes: ["ACCESS_UNAVAILABLE", "SIGN_IN_RESTART_REQUIRED", "IDENTITY_PENDING"],
-    toError: (target) => credentialError("NOT_AUTHORIZED", "This account is not an active staff member. Sign in again with the invited Google account.", target),
+    toError: (target) => credentialError("NOT_AUTHORIZED", "This account is not an active staff member. Sign in again with the invited Clerk account.", target),
   },
   {
     codes: ["SESSION_EXPIRED"],

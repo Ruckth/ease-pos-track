@@ -6,8 +6,9 @@
 import { spawnSync } from "node:child_process";
 
 export const LOCAL_IDENTITY_PLACEHOLDERS = {
-  AUTH_GOOGLE_CLIENT_ID: "local-google-disabled",
-  AUTH_GOOGLE_CLIENT_SECRET: "local-google-disabled",
+  CLERK_ISSUER_URL: "https://clerk.invalid",
+  CLERK_OAUTH_CLIENT_ID: "local-clerk-disabled",
+  CLERK_OAUTH_CLIENT_SECRET: "local-clerk-disabled",
 };
 
 /**

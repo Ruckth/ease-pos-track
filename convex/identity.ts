@@ -12,12 +12,12 @@ import {
   pendingIdentityMutation, pendingIdentityQuery, publicIdentityQuery, staffQuery,
 } from "./functions";
 import { staffRole } from "./schema";
-import { newChallengeCode, normalizeEmail } from "./identity_rules";
+import { newChallengeCode, normalizeEmail, normalizeUsername, normalizeDisplayName } from "./identity_rules";
 import { liveAdmission, requireActor } from "./session_auth";
 import { localFixturesEnabled } from "./local_fixtures";
 import {
   audit, bootstrapOwner as bootstrap, consumeChallenge, createChallenge, createProjectInvitation, createStaffInvitation, verifyCustomerPassword, customerCredentialSelector,
-  invitationState, issueRecoveryCode, joinProjectInvitation, recoveryCodeMatches, projectInvitationBySecret,
+  invitationState, issueRecoveryCode, joinProjectInvitation, requireRedeemableProjectInvitation, redeemProjectInvitation, recoveryCodeMatches, projectInvitationBySecret,
   requireInvitationEpoch, reserveChallengeEmail, revokeUserSessions, setStaffRole as changeRole, staffInvitationBySecret, t3ChallengeIntent,
   transitionCustomer, transitionStaff, viewerFor, type ChallengePurpose,
 } from "./domain/identity";
@@ -35,7 +35,7 @@ export const createGoogleUser = internalJobMutation({
   args: methodArgs,
   handler: async (ctx, { method }): Promise<Id<"users">> => {
     const profile = method.profile as { id?: unknown; email?: unknown; emailVerified?: unknown; name?: unknown };
-    if (method.name !== "google" || typeof profile.id !== "string" || !profile.id) throw new Error("INVALID_PROFILE");
+    if (method.name !== "clerk" || typeof profile.id !== "string" || !profile.id) throw new Error("INVALID_PROFILE");
     const googleSubject = profile.id;
     if (await ctx.db.query("users").withIndex("by_google_subject", q => q.eq("googleSubject", googleSubject)).first()) {
       throw new Error("ACCESS_UNAVAILABLE");
@@ -59,7 +59,7 @@ export const syncGoogleProfile = internalJobMutation({
   handler: async (ctx, { method, userId }) => {
     const profile = method.profile as { id?: unknown; email?: unknown; emailVerified?: unknown; name?: unknown };
     const user = await ctx.db.get(userId);
-    if (method.name !== "google" || !user || user.kind === "revoked" || user.googleSubject !== profile.id) throw new Error("ACCESS_UNAVAILABLE");
+    if (method.name !== "clerk" || !user || user.kind === "revoked" || user.googleSubject !== profile.id) throw new Error("ACCESS_UNAVAILABLE");
     const emailVerified = typeof profile.email === "string" && profile.emailVerified === true;
     await ctx.db.patch(userId, {
       ...(typeof profile.email === "string" ? { googleEmail: profile.email.toLowerCase() } : {}),
@@ -491,6 +491,33 @@ export const previewCustomerInvitation = publicIdentityQuery("invite-preview")({
   },
 });
 
+/** A verified Clerk account becomes a customer only by redeeming a Project invitation. */
+export const enrollClerkCustomer = pendingIdentityMutation({
+  name: "identity:enrollClerkCustomer",
+  args: { invitation: v.string(), username: v.string(), displayName: v.string() },
+  handler: async (ctx, args) => {
+    if (ctx.admission.method !== "clerk" || !ctx.user.googleEmailVerified) throw new Error("VERIFIED_EMAIL_REQUIRED");
+    const { invite } = await requireRedeemableProjectInvitation(ctx, args.invitation);
+    const username = normalizeUsername(args.username);
+    const displayName = normalizeDisplayName(args.displayName);
+    if (await ctx.db.query("customers").withIndex("by_username", q => q.eq("username", username)).unique()) {
+      throw new Error("USERNAME_TAKEN");
+    }
+    const named = await ctx.runMutation(components.authUsername.public.setUsername, { userId: ctx.user._id, username });
+    if (!named.success) throw new Error("USERNAME_TAKEN");
+    const now = Date.now();
+    const customerId = await ctx.db.insert("customers", {
+      userId: ctx.user._id, clerkManaged: true, username, displayName, status: "active", generation: 1,
+      validAfter: now, createdAt: now, updatedAt: now, ...epochStamp(ctx.admission.pilotEpoch), credentialEpoch: ctx.admission.pilotEpoch,
+    });
+    await ctx.db.patch(ctx.user._id, { kind: "customer", customerId });
+    await redeemProjectInvitation(ctx, invite, customerId);
+    await ctx.db.patch(ctx.admission._id, { principal: "customer", customerId, generation: 1 });
+    await audit(ctx, "customer.enrolled", { customerId });
+    return { ok: true as const };
+  },
+});
+
 /** A returning customer adds the Project to their existing customerId. */
 export const joinWithInvitation = customerMutation({
   name: "identity:joinWithInvitation",
@@ -509,6 +536,7 @@ export const createRecoveryCode = customerRecoveryMutation({
   args: { currentPassword: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const customer = (await ctx.db.get(ctx.actor.customerId!))!;
+    if (customer.clerkManaged) throw new Error("ACCESS_UNAVAILABLE");
     if (customer.recoveryCodeDigest !== undefined) {
       if (!args.currentPassword) return { ok: false as const, error: "PROOF_REQUIRED" };
       const verified = await verifyCustomerPassword(ctx, {

@@ -135,7 +135,7 @@ export function checkArchitecture(root: string) {
  * Every public Convex registration and its policy. Browser RPC is live-JWT
  * admission only; sign-in, refresh, recovery and callback entry points carry a
  * named purpose. The policy test fails on an extra, missing or relabelled
- * export. Component-owned routes (the Google callback under /oauth/google and
+ * export. Component-owned routes (the Google callback under /oauth/clerk and
  * the deployment JWKS) are mounted by Convex from convex.config.ts, not here.
  */
 export const PUBLIC_REGISTRATIONS: Record<string, string> = {
@@ -146,7 +146,7 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "annotations.ts:undoAnnotationUpdate": "actorMutation",
   "annotations.ts:updateAnnotation": "actorMutation",
   "auth.ts:changePassword": "authMethod:customer-change-password",
-  "auth.ts:completeSignInWithGoogle": "authMethod:google-complete",
+  "auth.ts:completeSignInWithClerk": "authMethod:google-complete",
   "auth.ts:isAuthenticated": "authCore:is-authenticated",
   "auth.ts:recoverWithCode": "publicIdentityMutation:customer-recover",
   "auth.ts:refreshSession": "authPackage:refresh-session",
@@ -154,7 +154,7 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "auth.ts:signInWithPassword": "identityAction:customer-sign-in",
   "auth.ts:signOut": "authCore:sign-out",
   "auth.ts:signUpWithInvitation": "authMethod:customer-sign-up",
-  "auth.ts:startSignInWithGoogle": "authPackage:google-start",
+  "auth.ts:startSignInWithClerk": "authPackage:google-start",
   "conversations.ts:page": "actorQuery",
   "conversations.ts:send": "actorMutation",
   "identity.ts:acceptStaffInvitation": "pendingIdentityMutation",
@@ -175,6 +175,7 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "identity.ts:setCustomerAccess": "ownerMutation",
   "identity.ts:setStaffAccess": "ownerMutation",
   "identity.ts:setStaffRole": "ownerMutation",
+  "identity.ts:enrollClerkCustomer": "pendingIdentityMutation",
   "identity.ts:viewer": "publicIdentityQuery:viewer",
   "inbox.ts:markRead": "customerMutation",
   "inbox.ts:page": "customerQuery",

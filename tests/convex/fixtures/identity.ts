@@ -16,7 +16,7 @@ export const staff = internalMutation({
   args: { email: v.optional(v.string()), role: v.optional(v.union(v.literal("owner"), v.literal("staff"))), name: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const email = args.email ?? "owner@fixture.test";
-    const member = await ensureFixtureStaff(ctx, { email, name: args.name ?? email, role: args.role ?? "owner", subject: `fixture-${email}` });
+    const member = await ensureFixtureStaff(ctx, { email, name: args.name ?? email, role: args.role ?? "owner", subject: `https://clerk.invalid|fixture-${email}` });
     const minted = await mintFixtureSession(ctx, { principal: "staff", staff: member });
     return { session: minted.authSessionId, staffId: member._id, userId: member.userId, refreshToken: minted.tokens.refreshToken };
   },
@@ -52,7 +52,7 @@ export const pending = internalMutation({
       kind: "pending", googleSubject: args.subject, googleEmail: args.email, googleEmailVerified: args.verified ?? true,
       ...(args.name ? { googleName: args.name } : {}), createdAt: Date.now(),
     });
-    await ctx.runMutation(components.authGoogle.provider._internal_dangerous_createAccount, { providerAccountId: args.subject, userId });
+    await ctx.runMutation(components.authClerk.provider._internal_dangerous_createAccount, { providerAccountId: args.subject, userId });
     const tokens = await ctx.runMutation(components.auth.public._internal_dangerous_signIn, {
       claims: { method: "google", profile: {} }, componentPath: "authGoogle", userId, ...TTL,
     });

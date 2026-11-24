@@ -35,7 +35,7 @@ export async function admitSession(ctx: MutationCtx, tokens: TokenBundle, princi
   | { principal: "pending" }
   | { principal: "staff"; staff: Doc<"staff"> }
   | { principal: "customer"; customer: Doc<"customers"> },
-  method: "google" | "password") {
+  method: "google" | "password" | "clerk") {
   const authSessionId = accessTokenSessionId(tokens.accessToken);
   const session = await ctx.runQuery(components.auth.public.getSession, { sessionId: authSessionId });
   if (!session || session.userId !== tokens.userId) throw new Error("ADMISSION_REQUIRED");
@@ -98,11 +98,16 @@ export async function admitGoogleCompletion(ctx: MutationCtx, tokens: TokenBundl
   await ctx.db.patch(started._id, { consumedAt: Date.now() });
   const user = await ctx.db.get(tokens.userId as Id<"users">);
   if (!user) throw new Error("ACCESS_UNAVAILABLE");
-  if (user.kind === "pending") return await admitSession(ctx, tokens, { principal: "pending" }, "google");
+  if (user.kind === "pending") return await admitSession(ctx, tokens, { principal: "pending" }, "clerk");
+  if (user.kind === "customer" && user.customerId) {
+    const customer = await ctx.db.get(user.customerId);
+    if (!customer?.clerkManaged || !googleFlowAdmissible(started.startedAt, customer)) throw new Error("ACCESS_UNAVAILABLE");
+    return await admitSession(ctx, tokens, { principal: "customer", customer }, "clerk");
+  }
   if (user.kind !== "staff" || !user.staffId) throw new Error("ACCESS_UNAVAILABLE");
   const staff = await ctx.db.get(user.staffId);
   if (!staff || !googleFlowAdmissible(started.startedAt, staff)) throw new Error("ACCESS_UNAVAILABLE");
-  await admitSession(ctx, tokens, { principal: "staff", staff }, "google");
+  await admitSession(ctx, tokens, { principal: "staff", staff }, "clerk");
 }
 
 // ---------------------------------------------------------------- viewer
@@ -127,7 +132,8 @@ export async function viewerFor(ctx: Ctx, admission: Doc<"sessionAdmissions">) {
       || !customerCredentialIsCurrent(customer, await identityRecoveryAdmission(ctx))) return null;
     return {
       kind: "customer" as const, customerId: customer._id, username: customer.username,
-      displayName: customer.displayName, needsRecoveryCode: customer.recoveryCodeDigest === undefined,
+      displayName: customer.displayName, clerkManaged: customer.clerkManaged === true,
+      needsRecoveryCode: !customer.clerkManaged && customer.recoveryCodeDigest === undefined,
       recoveryEnrollmentRequired: customer.recoveryEnrollmentRequired === true,
     };
   }
@@ -266,7 +272,7 @@ async function recordPasswordAttempt(ctx: MutationCtx, key: string) {
 async function hasStaffGoogleBinding(ctx: Ctx, staff: Doc<"staff">) {
   const user = await ctx.db.get(staff.userId);
   if (!staff.googleSubject || user?.kind !== "staff" || user.staffId !== staff._id || user.googleSubject !== staff.googleSubject) return false;
-  return await ctx.runQuery(components.authGoogle.provider.getUserIdByAccount, { providerAccountId: staff.googleSubject }) === staff.userId;
+  return await ctx.runQuery(components.authClerk.provider.getUserIdByAccount, { providerAccountId: staff.googleSubject }) === staff.userId;
 }
 
 export async function hasOtherUsableOwner(ctx: Ctx, exceptStaffId: Id<"staff">) {

@@ -30,7 +30,7 @@ async function replacementGoogleUser(ctx: MutationCtx, input: { googleSubject: s
   if (!user || user.kind !== "pending" || user.staffId || user.customerId || user.googleEmailVerified !== true
     || user.googleEmail !== normalizeEmail(input.verifiedEmail) || user.googleVerifiedAt === undefined
     || user.googleVerifiedAt <= Date.now() - PENDING_VERIFICATION_MS) throw new Error("PENDING_IDENTITY_REQUIRED");
-  if (await ctx.runQuery(components.authGoogle.provider.getUserIdByAccount, { providerAccountId: input.googleSubject }) !== user._id) {
+  if (await ctx.runQuery(components.authClerk.provider.getUserIdByAccount, { providerAccountId: input.googleSubject }) !== user._id) {
     throw new Error("PENDING_IDENTITY_REQUIRED");
   }
   return user;

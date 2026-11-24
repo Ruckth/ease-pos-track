@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { router, type RouterContext } from "../src/app/router";
-import { currentInvitation } from "../src/app/auth-store";
+import { currentInvitation, stashInvitation } from "../src/app/auth-store";
 
 type Auth = RouterContext["auth"];
 type Viewer = Extract<Auth, { status: "signed-in" }>["viewer"];
@@ -70,4 +70,32 @@ test("a customer invitation is held only through the join, sign-in and recovery 
   assert.equal((await land("/customer/login", customer)).href, "/customer/join");
   await land("/staff/login", out);
   assert.equal(currentInvitation(), "");
+});
+
+test("a customer invitation survives the Clerk round trip in this tab only", async () => {
+  const store = new Map<string, string>();
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+  } });
+  try {
+    await land("/customer/join#invite=secret-2", out);
+    stashInvitation();
+    // The redirect reloads the page and drops the in-memory copy.
+    await land("/staff/login", out);
+    store.set("track-ease.customer-invite-return", "secret-2");
+    await land("/customer/join", pending);
+    assert.equal(currentInvitation(), "secret-2");
+    assert.equal(store.size, 0);
+    // Leaving the flow discards a stash that was never collected.
+    store.set("track-ease.customer-invite-return", "secret-3");
+    await land("/staff/login", out);
+    assert.equal(currentInvitation(), "");
+    assert.equal(store.size, 0);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "sessionStorage", previous);
+    else delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
+  }
 });
