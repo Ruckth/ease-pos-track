@@ -177,7 +177,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
           try { await navigator.clipboard.writeText(number); toast.success(t("ticketCopied")); }
           catch { toast.error(t("ticketCopyFailed")); }
         }}>{number}<Copy className="size-3.5" /></button>
-        <Badge variant="outline" className={meta.tone}>{t(meta.labelKey)}</Badge>
+        <Badge variant="outline" className={meta.tone}>{t(!staff && ticket.status === "waiting" ? "customerQueueWaiting" : meta.labelKey)}</Badge>
       </div>
       <h2 id={props.heading} className="text-xl font-semibold leading-tight">{ticket.title}</h2>
       <TicketTagList tags={ticket.tags} />
