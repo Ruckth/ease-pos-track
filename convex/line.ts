@@ -5,6 +5,7 @@ import type { Id } from "./_generated/dataModel";
 import { assertStaffActor } from "./authz";
 import { createLine } from "./adapters/line";
 import { lineBot, lineChat, lineProject, publicBot, webhookUrl } from "./domain/line";
+import { lineAiReleaseEnabled, readLineAiConnection } from "./domain/line_ai_settings";
 import { staffQuery, staffMutation, internalActorMutation, lineStaffAction } from "./functions";
 import { openLineSecret, sealLineSecret } from "./line_crypto";
 import { botInfo, locale, notify } from "./line_schema";
@@ -35,8 +36,10 @@ export const updateBot = staffMutation({
   handler: async (ctx, { botId, enabled, ...settings }) => {
     const current = await lineBot(ctx, botId);
     if (enabled !== undefined && current.state === "setup") throw new Error("LINE_SETUP_REQUIRED");
+    const state = enabled === undefined ? current.state : enabled ? "active" : "disabled";
     await ctx.db.patch(botId, {
-      ...settings, ...(enabled === undefined ? {} : { state: enabled ? "active" : "disabled" }), updatedAt: Date.now(),
+      ...settings, state, updatedAt: Date.now(),
+      ...(state === current.state ? {} : { assistantRevision: (current.assistantRevision ?? 0) + 1 }),
     });
   },
 });
@@ -63,6 +66,8 @@ export const updateChat = staffMutation({
     if (approve && !approvedBy) throw new Error("NAMED_STAFF_REQUIRED");
     await ctx.db.patch(chatId, {
       ...settings, ownerCustomerId, displayNameOverride: displayNameOverride?.trim().slice(0, 120) || undefined,
+      ...(current.ownerCustomerId === ownerCustomerId && current.allowCreate === settings.allowCreate ? {}
+        : { assistantRevision: (current.assistantRevision ?? 0) + 1 }),
       ...(approve ? { state: "active" as const, approvedAt: Date.now(), approvedBy: approvedBy || undefined } : {}),
     });
   },
@@ -76,7 +81,30 @@ export const setChatState = staffMutation({
     if (current.joinedAt !== joinedAt) throw new Error("LINE_CHAT_ENROLLMENT_CHANGED");
     const expected = { rejected: "pending", muted: "active", active: "muted" } as const;
     if (current.state !== expected[state]) throw new Error("LINE_CHAT_STATE_CHANGED");
-    await ctx.db.patch(chatId, { state });
+    await ctx.db.patch(chatId, {
+      state, assistantEnabled: false, assistantEnabledAt: undefined,
+      assistantRevision: (current.assistantRevision ?? 0) + 1,
+    });
+  },
+});
+
+export const setAssistantEnabled = staffMutation({
+  name: "line:setAssistantEnabled",
+  args: { ...chat, joinedAt: v.number(), enabled: v.boolean() },
+  handler: async (ctx, { chatId, joinedAt, enabled }) => {
+    const current = await lineChat(ctx, chatId);
+    if (current.joinedAt !== joinedAt) throw new Error("LINE_CHAT_ENROLLMENT_CHANGED");
+    if (enabled) {
+      const bot = await lineBot(ctx, current.botId);
+      if (bot.state !== "active" || current.state !== "active") throw new Error("LINE_CHAT_STATE_CHANGED");
+      const connection = await readLineAiConnection(ctx, current.projectId);
+      if (!await lineAiReleaseEnabled(ctx) || !connection?.enabled) throw new Error("LINE_AI_CONNECTION_REQUIRED");
+    }
+    if ((current.assistantEnabled ?? false) === enabled) return;
+    await ctx.db.patch(chatId, {
+      assistantEnabled: enabled, assistantRevision: (current.assistantRevision ?? 0) + 1,
+      assistantEnabledAt: enabled ? Date.now() : undefined,
+    });
   },
 });
 
@@ -140,6 +168,7 @@ export const prepareBot = internalActorMutation({
 
 const endpointResult = v.object({
   endpointSet: v.boolean(), success: v.boolean(), statusCode: v.optional(v.number()), reason: v.optional(v.string()),
+  webhookActive: v.optional(v.boolean()),
 });
 
 export const finishEndpoint = internalActorMutation({
@@ -153,6 +182,7 @@ export const finishEndpoint = internalActorMutation({
       endpointLease: undefined, updatedAt: Date.now(),
       state: current.state === "setup" && result.success ? "active" : current.state,
       lastError: result.success ? undefined : result.reason ?? "LINE_WEBHOOK_TEST_FAILED",
+      ...(result.webhookActive === undefined ? {} : { webhookActive: result.webhookActive }),
     });
   },
 });
@@ -180,7 +210,8 @@ async function configureEndpoint(line: ReturnType<typeof createLine>, endpoint: 
   if (!result.success) return result;
   try {
     await line.setWebhook(endpoint);
-    return { ...result, endpointSet: true };
+    const settings = await line.webhookSettings().catch(() => undefined);
+    return { ...result, endpointSet: true, webhookActive: settings?.endpoint === endpoint ? settings.active : undefined };
   } catch (error) {
     return { ...result, success: false, reason: error instanceof Error && error.message === "LINE_API_RATE_LIMITED"
       ? error.message : "LINE_ENDPOINT_NOT_SET" };
@@ -195,7 +226,7 @@ export const addBot = lineStaffAction({
     const { projectId, locale = "th" } = args;
     const name = args.name.trim();
     const secret = args.channelSecret.trim(), token = args.accessToken.trim();
-    if (!name || name.length > 120
+    if (name.length > 120
       || secret.length < 4 || secret.length > 256 || token.length < 4 || token.length > 2048) {
       throw new Error("LINE_BOT_FIELDS_INVALID");
     }
@@ -203,7 +234,7 @@ export const addBot = lineStaffAction({
     const line = createLine(token);
     const { userId, basicId, displayName, pictureUrl } = await line.info();
     const current = await ctx.runMutation(internal.line.insertBot, {
-      projectId, locale, name, lineUserId: userId, basicId, displayName, pictureUrl,
+      projectId, locale, name: name || displayName.trim().slice(0, 120) || basicId, lineUserId: userId, basicId, displayName, pictureUrl,
       secretCipher, tokenCipher, secretHint: secret.slice(-4), tokenHint: token.slice(-4),
     });
     const result = await configureEndpoint(line, webhookUrl(current.webhookSlug));
@@ -291,7 +322,10 @@ export const manageRemoval = internalActorMutation({
     // LINE already handled the leave. If events arrived meanwhile, LINE's own leave event settles the chat.
     if (current.lastEventAt !== expectedEventAt) return null;
     // lastEventAt stays on LINE's clock, so a rejoin still queued here is not mistaken for a stale event.
-    if (current.state !== "left") await ctx.db.patch(chatId, { state: "left", leftAt: Date.now() });
+    if (current.state !== "left") await ctx.db.patch(chatId, {
+      state: "left", leftAt: Date.now(), assistantEnabled: false, assistantEnabledAt: undefined,
+      assistantRevision: (current.assistantRevision ?? 0) + 1,
+    });
     return null;
   },
 });

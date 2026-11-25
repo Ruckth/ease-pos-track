@@ -20,5 +20,32 @@ export function useLineActions() {
     updateBot: useMutation(api.line.updateBot),
     updateChat: useMutation(api.line.updateChat),
     setChatState: useMutation(api.line.setChatState),
+    setAssistantEnabled: useMutation(api.line.setAssistantEnabled),
+  };
+}
+
+export function useLineAiSettings(projectId: Id<"projects">) {
+  return useQuery(api.line_ai_settings.get, { projectId });
+}
+
+export function useLineAiSetupActions() {
+  return {
+    testAndSave: useAction(api.line_ai_settings.testAndSave),
+    disable: useMutation(api.line_ai_settings.disable),
+    setPaused: useMutation(api.line_ai_settings.setPaused),
+  };
+}
+
+export function useLineAiReviews(projectId: Id<"projects">) {
+  return useQuery(api.line_ai_reviews.list, { projectId });
+}
+
+export type LineAiDraft = NonNullable<ReturnType<typeof useLineAiReviews>>["drafts"][number];
+
+export function useLineAiReviewActions() {
+  return {
+    approve: useMutation(api.line_ai_reviews.approve),
+    dismiss: useMutation(api.line_ai_reviews.dismiss),
+    retryReply: useMutation(api.line_ai_reviews.retryReply),
   };
 }

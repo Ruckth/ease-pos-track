@@ -1,4 +1,6 @@
 import { lineTables } from "./line_schema";
+import { lineAiTables } from "./line_ai_provider_schema";
+import { lineAiReviewTables } from "./line_ai_review_schema";
 
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
@@ -99,7 +101,7 @@ const ticketStateValidator = v.object({
   tagIds: v.optional(v.array(v.id("ticketTags"))),
 });
 
-const ticketCreatedVia = v.literal("codex");
+const ticketCreatedVia = v.union(v.literal("codex"), v.literal("line"));
 
 const uploadIntentStatus = v.union(
   v.literal("pending"),
@@ -116,6 +118,8 @@ const sessionReference = v.union(v.id("sessionAdmissions"), v.id("sessions"));
 
 export default defineSchema({
   ...lineTables,
+  ...lineAiTables,
+  ...lineAiReviewTables,
 
   imageChunks: defineTable({ bytes: v.bytes() }),
   projectIntakeStaff: defineTable({

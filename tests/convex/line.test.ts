@@ -6,7 +6,7 @@ import { modules } from "./modules";
 import { sealLineSecret } from "../../convex/line_crypto";
 
 const fake = vi.hoisted(() => ({
-  info: vi.fn(), setWebhook: vi.fn(), testWebhook: vi.fn(), groupSummary: vi.fn(),
+  info: vi.fn(), setWebhook: vi.fn(), testWebhook: vi.fn(), webhookSettings: vi.fn(), groupSummary: vi.fn(),
   count: vi.fn(), profile: vi.fn(), leave: vi.fn(), reply: vi.fn(),
 }));
 vi.mock("../../convex/adapters/line", () => ({ createLine: () => fake, localLineFixtureToken: "fixture" }));
@@ -21,6 +21,7 @@ beforeEach(() => {
   vi.stubEnv("CONVEX_SITE_URL", "https://fixture.convex.site");
   fake.info.mockResolvedValue({ userId: "Ubot", basicId: "@bot", displayName: "Bot" });
   fake.setWebhook.mockResolvedValue({});
+  fake.webhookSettings.mockResolvedValue(undefined);
   fake.testWebhook.mockResolvedValue({ success: true, statusCode: 200 });
   fake.groupSummary.mockResolvedValue({ groupName: "Fixture group" });
   fake.count.mockResolvedValue({ count: 5 });
@@ -120,6 +121,19 @@ test("a Project can manage multiple bots and each bot lists only its own groups"
   };
   expect(await chats(f.botId)).toEqual(["Cgroup", "Cother"]);
   expect(await chats(second.botId)).toEqual(["Csecond"]);
+});
+
+test("a bot can use LINE's display name and read the active webhook setting", async () => {
+  const f = await fixture();
+  fake.info.mockResolvedValueOnce({ userId: "Uoptionalname", basicId: "@optionalname", displayName: "LINE POS Help" });
+  fake.setWebhook.mockImplementationOnce(endpoint => {
+    fake.webhookSettings.mockResolvedValueOnce({ endpoint, active: false });
+    return Promise.resolve({});
+  });
+  const result = await f.t.action(api.line.addBot, { ...f.add, name: "", token: f.token });
+  expect(result).toMatchObject({ success: true, webhookActive: false });
+  const bots = await f.t.query(api.line.listBots, { projectId: f.projectId, token: f.token });
+  expect(bots.find(bot => bot._id === result.botId)).toMatchObject({ name: "LINE POS Help", webhookActive: false });
 });
 
 test("approval validates Project membership, stale events stay ignored, rejoin clears approval", async () => {

@@ -8,7 +8,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ProjectSummary } from "@/lib/types";
-import { useLineActions, useLineBots, useLineChats, type LineBot, type LineChat } from "./adapters/convex";
+import { useLineActions, useLineAiSettings, useLineBots, useLineChats, type LineBot, type LineChat } from "./adapters/convex";
+import { LineAiReviews, LineAiSetup } from "./line-assistant";
 
 const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 const errors: Record<string, string> = {
@@ -28,6 +29,7 @@ const errors: Record<string, string> = {
   LINE_OWNER_NOT_PROJECT_MEMBER: "The selected customer must belong to this Project.",
   LINE_API_REQUEST_FAILED: "LINE could not complete that request. Check the bot credentials and try again.",
   LINE_BOT_FIELDS_INVALID: "Check the bot name and credentials.",
+  LINE_AI_CONNECTION_REQUIRED: "Test and save the Project AI connection before enabling this chat.",
 };
 function useTask(onError?: (code: string | undefined) => void) {
   const [busy, setBusy] = useState(false);
@@ -65,7 +67,8 @@ function AddBot({ project, close, openBot }: {
         locale: values.get("locale") === "en" ? "en" : "th",
       });
       form.reset();
-      setResult(result);
+      if (result.success) openBot(result.botId);
+      else setResult(result);
     });
   }
   return <Dialog open onOpenChange={close} title="Add LINE bot">
@@ -80,7 +83,7 @@ function AddBot({ project, close, openBot }: {
       </ul>
       <Button onClick={() => openBot(result.botId)}>Open bot settings</Button>
     </div> : <form className="grid gap-3" onSubmit={submit}>
-      <Field label="Bot name"><Input name="name" required maxLength={120} /></Field>
+      <Field label="Bot name (optional)"><Input name="name" maxLength={120} placeholder="Use the LINE display name" /></Field>
       <Field label="Channel secret"><Input name="secret" type="password" autoComplete="off" required /></Field>
       <Field label="Channel access token"><Input name="token" type="password" autoComplete="off" required /></Field>
       <Field label="Bot language"><select name="locale" className={selectClass}><option value="th">ไทย</option><option value="en">English</option></select></Field>
@@ -120,7 +123,7 @@ function ChatSettings({ chat, projectId, close }: { chat: LineChat; projectId: P
   </Dialog>;
 }
 
-function BotDetail({ bot, back }: { bot: LineBot; back: () => void }) {
+function BotDetail({ bot, back, assistantReady }: { bot: LineBot; back: () => void; assistantReady: boolean }) {
   const chats = useLineChats(bot._id);
   const actions = useLineActions();
   const [editingCredentials, setEditingCredentials] = useState(false);
@@ -144,6 +147,17 @@ function BotDetail({ bot, back }: { bot: LineBot; back: () => void }) {
         <Button variant="outline" onClick={() => run(async () => { await navigator.clipboard.writeText(bot.webhookUrl); toast.success("Webhook URL copied"); })}>Copy</Button>
       </div>
       <p className="text-sm text-muted-foreground">Secret ••••{bot.secretHint} · Token ••••{bot.tokenHint}</p>
+      <details>
+        <summary className="cursor-pointer text-sm font-medium">LINE console checklist</summary>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+          <li>{bot.webhookActive === undefined ? "Check that Use webhook is enabled."
+            : bot.webhookActive ? "Use webhook was enabled when last verified." : "Enable Use webhook."}</li>
+          <li>Enable webhook redelivery and allow the bot to join groups.</li>
+          <li>Review auto-reply and greeting messages in LINE Official Account Manager.</li>
+        </ul>
+        <a href="https://developers.line.biz/en/docs/messaging-api/getting-started/" target="_blank" rel="noreferrer"
+          className="mt-2 inline-block text-sm underline">LINE setup instructions</a>
+      </details>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" disabled={busy || bot.state === "setup"} onClick={() => setEditingCredentials(true)}>Update credentials</Button>
         <Button variant="outline" disabled={busy || bot.state === "setup"} onClick={() => run(() => actions.updateBot({ botId, enabled: bot.state === "disabled" }))}>{bot.state === "disabled" ? "Enable" : "Disable"}</Button>
@@ -175,6 +189,10 @@ function BotDetail({ bot, back }: { bot: LineBot; back: () => void }) {
                   {{ pending: "Reject", active: "Mute", muted: "Unmute" }[state]}
                 </Button>;
               })}
+              {chat.state === "active" && ((assistantReady && bot.state === "active") || chat.assistantEnabled) &&
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => actions.setAssistantEnabled({
+                  chatId: chat._id, joinedAt: chat.joinedAt, enabled: !chat.assistantEnabled,
+                }))}>{chat.assistantEnabled ? "Pause assistant" : "Enable assistant"}</Button>}
               {chat.state !== "left" && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirm(chat)}>Remove</Button>}
             </div></TableCell>
           </TableRow>)}</TableBody></Table>}
@@ -209,13 +227,15 @@ function BotDetail({ bot, back }: { bot: LineBot; back: () => void }) {
   </div>;
 }
 
-export function LineSettings({ project, selected, onSelect }: {
-  project: ProjectSummary; selected?: string; onSelect: (bot?: LineBot["_id"]) => void;
+export function LineSettings({ project, selected, onSelect, owner }: {
+  project: ProjectSummary; selected?: string; onSelect: (bot?: LineBot["_id"]) => void; owner: boolean;
 }) {
   const bots = useLineBots(project._id);
+  const ai = useLineAiSettings(project._id);
   const [adding, setAdding] = useState(false);
   const bot = bots?.find(item => item._id === selected);
-  if (bot) return <BotDetail key={bot._id} bot={bot} back={() => onSelect()} />;
+  if (bot) return <BotDetail key={bot._id} bot={bot} back={() => onSelect()}
+    assistantReady={!!ai?.releaseEnabled && !!ai.connection?.enabled} />;
   return <div className="space-y-3">
     <div className="flex items-center justify-between gap-2"><h2 className="font-semibold">{project.name} · LINE bots</h2><Button onClick={() => setAdding(true)}>Add bot</Button></div>
     {!bots?.length && <p className="text-sm text-muted-foreground">{bots ? "No LINE bots connected." : "Loading LINE bots…"}</p>}
@@ -224,6 +244,10 @@ export function LineSettings({ project, selected, onSelect }: {
         <span>{bot.name} <span className="text-sm text-muted-foreground">{bot.basicId}</span></span><Badge variant="outline">{bot.state}</Badge>
       </button>
     </li>)}</ul>
+    {ai?.releaseEnabled && <>
+      <LineAiSetup projectId={project._id} settings={ai} owner={owner && ai.canManage} />
+      <LineAiReviews projectId={project._id} />
+    </>}
     {adding && <AddBot project={project} close={() => setAdding(false)} openBot={id => { setAdding(false); onSelect(id); }} />}
   </div>;
 }

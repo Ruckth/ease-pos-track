@@ -9,6 +9,8 @@
  */
 
 import type * as adapters_line from "../adapters/line.js";
+import type * as adapters_line_ai_provider from "../adapters/line_ai_provider.js";
+import type * as adapters_line_attachment from "../adapters/line_attachment.js";
 import type * as adapters_storage from "../adapters/storage.js";
 import type * as annotation_state from "../annotation_state.js";
 import type * as annotations from "../annotations.js";
@@ -21,6 +23,9 @@ import type * as domain_conversation from "../domain/conversation.js";
 import type * as domain_identity from "../domain/identity.js";
 import type * as domain_inbox from "../domain/inbox.js";
 import type * as domain_line from "../domain/line.js";
+import type * as domain_line_ai_intake from "../domain/line_ai_intake.js";
+import type * as domain_line_ai_review from "../domain/line_ai_review.js";
+import type * as domain_line_ai_settings from "../domain/line_ai_settings.js";
 import type * as domain_media from "../domain/media.js";
 import type * as domain_media_jobs from "../domain/media_jobs.js";
 import type * as domain_operation from "../domain/operation.js";
@@ -48,6 +53,13 @@ import type * as image_chunks from "../image_chunks.js";
 import type * as image_transfer from "../image_transfer.js";
 import type * as inbox from "../inbox.js";
 import type * as line from "../line.js";
+import type * as line_ai_delivery from "../line_ai_delivery.js";
+import type * as line_ai_processing from "../line_ai_processing.js";
+import type * as line_ai_provider_schema from "../line_ai_provider_schema.js";
+import type * as line_ai_retention from "../line_ai_retention.js";
+import type * as line_ai_review_schema from "../line_ai_review_schema.js";
+import type * as line_ai_reviews from "../line_ai_reviews.js";
+import type * as line_ai_settings from "../line_ai_settings.js";
 import type * as line_crypto from "../line_crypto.js";
 import type * as line_jobs from "../line_jobs.js";
 import type * as line_local from "../line_local.js";
@@ -88,6 +100,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "adapters/line": typeof adapters_line;
+  "adapters/line_ai_provider": typeof adapters_line_ai_provider;
+  "adapters/line_attachment": typeof adapters_line_attachment;
   "adapters/storage": typeof adapters_storage;
   annotation_state: typeof annotation_state;
   annotations: typeof annotations;
@@ -100,6 +114,9 @@ declare const fullApi: ApiFromModules<{
   "domain/identity": typeof domain_identity;
   "domain/inbox": typeof domain_inbox;
   "domain/line": typeof domain_line;
+  "domain/line_ai_intake": typeof domain_line_ai_intake;
+  "domain/line_ai_review": typeof domain_line_ai_review;
+  "domain/line_ai_settings": typeof domain_line_ai_settings;
   "domain/media": typeof domain_media;
   "domain/media_jobs": typeof domain_media_jobs;
   "domain/operation": typeof domain_operation;
@@ -127,6 +144,13 @@ declare const fullApi: ApiFromModules<{
   image_transfer: typeof image_transfer;
   inbox: typeof inbox;
   line: typeof line;
+  line_ai_delivery: typeof line_ai_delivery;
+  line_ai_processing: typeof line_ai_processing;
+  line_ai_provider_schema: typeof line_ai_provider_schema;
+  line_ai_retention: typeof line_ai_retention;
+  line_ai_review_schema: typeof line_ai_review_schema;
+  line_ai_reviews: typeof line_ai_reviews;
+  line_ai_settings: typeof line_ai_settings;
   line_crypto: typeof line_crypto;
   line_jobs: typeof line_jobs;
   line_local: typeof line_local;

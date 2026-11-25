@@ -4,7 +4,6 @@ import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { notifyIntake } from "./staff_inbox";
 import { recordCustomerUpdate } from "./inbox";
-import { newTicketOwnership } from "../authz";
 import { validateAnnotationBudget, type AnnotationRecord } from "../annotation_state";
 import { requireLegacyMedia } from "../pilot_access";
 import { requireCurrentVersion } from "../../shared/ticket-state";
@@ -56,7 +55,7 @@ type TicketAuthor = {
   actorRole: "staff" | "customer";
   actorCustomerId?: Id<"customers">;
   actorStaffId?: Id<"staff">;
-  createdVia?: "codex";
+  createdVia?: NonNullable<Doc<"ticketEvents">["createdVia"]>;
 };
 
 /**
@@ -217,8 +216,10 @@ type NewTicket = {
   media: MediaItem[];
   annotations?: AnnotationRecord[];
   routingClassification?: Doc<"tickets">["routingClassification"];
-  /** Derived from the actor by `newTicketOwnership`; never taken from a client. */
-  ownership: ReturnType<typeof newTicketOwnership<Id<"customers">>>;
+  /** Derived from the actor or a verified integration mapping. */
+  ownership:
+    | { origin: "customer"; ownerCustomerId: Id<"customers"> }
+    | { origin: "staff"; ownerCustomerId?: Id<"customers"> };
   author: TicketAuthor;
   now: number;
 };

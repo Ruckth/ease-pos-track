@@ -134,6 +134,8 @@ export const advance = internalJobMutation({
         if (!asset || asset.jobId !== job._id || asset.lifecycle !== "deleted") { await failJob(ctx, job, "ownership_conflict"); return false; }
       }
       await tombstoneTicketRequests(ctx, ticket._id);
+      const lineLink = await ctx.db.query("lineAiTicketLinks").withIndex("by_ticket", q => q.eq("ticketId", ticket._id)).unique();
+      if (lineLink) await ctx.db.delete(lineLink._id);
       await ctx.db.delete(ticket._id);
       phase = "delete_events";
     } else if (phase === "delete_events") {
@@ -146,8 +148,9 @@ export const advance = internalJobMutation({
       const suggestions = await ctx.db.query("ticketRoutingSuggestions").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
       const customerInbox = await ctx.db.query("customerInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
       const staffInbox = await ctx.db.query("staffInbox").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
+      const lineReplies = await ctx.db.query("lineAiReplies").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
       const suggestionRequests = await ctx.db.query("ticketRoutingSuggestionRequests").withIndex("by_ticket", q => q.eq("ticketId", ticketId)).take(AUDIT_BATCH);
-      const batches = [events, annotations, messages, assignments, suggestions, customerInbox, staffInbox];
+      const batches = [events, annotations, messages, assignments, suggestions, customerInbox, staffInbox, lineReplies];
       for (const row of batches.flat()) await ctx.db.delete(row._id);
       // Keep caller-scoped request IDs reserved while clearing every result and Ticket reference.
       // Replacing the row also removes it from the next Ticket-scoped batch.

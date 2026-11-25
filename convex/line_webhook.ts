@@ -4,11 +4,28 @@ import type { ActionCtx } from "./_generated/server";
 import { internalJobMutation, internalJobQuery, lineWebhookRoute } from "./functions";
 import { openLineSecret, verifyLineSignature } from "./line_crypto";
 import { admittedLineProject } from "./domain/line";
+import {
+  acceptLineAiEvents,
+  cleanupExpiredLineAiRecords,
+  lineAiInboundEvent,
+  trimLineAiEvents,
+  type LineAiScheduleHook,
+} from "./domain/line_ai_intake";
 import { inbound } from "./line_schema";
 import { hasLegacyAccess } from "./pilot_access";
 
 const event = v.object(inbound);
 const lookup = { slug: v.string() };
+
+const scheduleLineAiIntake: LineAiScheduleHook = async (ctx, { intakeId, availableAt }) => {
+  await ctx.scheduler.runAfter(Math.max(0, availableAt - Date.now()), internal.line_ai_processing.process, { intakeId });
+};
+
+export const cleanupExpiredAiIntake = internalJobMutation({
+  name: "line_webhook:cleanupExpiredAiIntake",
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => cleanupExpiredLineAiRecords(ctx, { limit }),
+});
 
 export const findBot = internalJobQuery({
   name: "line_webhook:findBot", args: lookup,
@@ -28,15 +45,22 @@ export const signatureFailure = internalJobMutation({
 
 export const accept = internalJobMutation({
   name: "line_webhook:accept",
-  args: { botId: v.id("lineBots"), ...lookup, destination: v.string(), verifiedSecretCipher: v.string(), events: v.array(event) },
-  handler: async (ctx, { botId, slug, destination, verifiedSecretCipher, events }) => {
+  args: {
+    botId: v.id("lineBots"),
+    ...lookup,
+    destination: v.string(),
+    verifiedSecretCipher: v.string(),
+    events: v.array(event),
+    assistantEvents: v.optional(v.array(lineAiInboundEvent)),
+  },
+  handler: async (ctx, { botId, slug, destination, verifiedSecretCipher, events, assistantEvents }) => {
     const bot = await ctx.db.get(botId);
     if (!bot || bot.webhookSlug !== slug) return 404;
     if (bot.lineUserId !== destination) return 401;
     if (bot.state === "disabled" || !await admittedLineProject(ctx, bot.projectId)) return 200;
     if (bot.secretCipher !== verifiedSecretCipher) return 503;
     // LINE can deliver once the endpoint is saved, before setup settles. Ask it to retry rather than drop the events.
-    if (bot.state === "setup") return events.length ? 503 : 200;
+    if (bot.state === "setup") return (events.length || (assistantEvents?.length ?? 0)) ? 503 : 200;
     const now = Date.now();
     await ctx.db.patch(botId, { lastWebhookAt: now });
     for (const fields of events) {
@@ -48,6 +72,9 @@ export const accept = internalJobMutation({
       await ctx.scheduler.runAfter(0, internal.line_jobs.process, { eventId });
       // A scheduled action can be interrupted before it obtains a lease.
       await ctx.scheduler.runAfter(45_000, internal.line_jobs.process, { eventId });
+    }
+    if (assistantEvents?.length) {
+      await acceptLineAiEvents(ctx, { bot, events: assistantEvents, now }, { onSchedule: scheduleLineAiIntake });
     }
     return 200;
   },
@@ -120,8 +147,15 @@ export async function receiveLineWebhook(ctx: ActionCtx, request: Request) {
     const trimmed = trimEvent(value);
     return trimmed ? [trimmed] : [];
   });
+  let assistantEvents;
+  try {
+    assistantEvents = await trimLineAiEvents(bot._id, body.events);
+  } catch {
+    return new Response("LINE webhook credentials unavailable", { status: 503 });
+  }
   const status = await ctx.runMutation(internal.line_webhook.accept, {
     botId: bot._id, slug, destination: body.destination, verifiedSecretCipher: bot.secretCipher, events,
+    ...(assistantEvents.length ? { assistantEvents } : {}),
   });
   return new Response(null, { status });
 }

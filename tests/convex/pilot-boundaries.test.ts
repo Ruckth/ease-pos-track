@@ -184,6 +184,12 @@ test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cr
   await expect(f.t.action(api.line.addBot, {
     token: owner, projectId: f.projectId, name: "Pilot bot", accessToken: "fixture-token", channelSecret: "fixture-secret",
   })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
+  vi.stubEnv("LINE_AI_ENABLED", "true");
+  await expect(f.t.query(api.line_ai_settings.get, { token: owner, projectId: f.projectId })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
+  await expect(f.t.action(api.line_ai_settings.testAndSave, {
+    token: owner, projectId: f.projectId, provider: "gemini", apiKey: "synthetic-never-sent",
+  })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
+  expect(await f.t.query(api.line_ai_reviews.list, { token: owner, projectId: f.projectId })).toEqual({ drafts: [], replies: [] });
 
   // Enrollment stays closed until both invitation and identity sender switches open.
   await expect(f.t.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: owner, projectId: f.projectId }))
