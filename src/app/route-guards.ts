@@ -15,7 +15,7 @@ const MAX_REDIRECT_LENGTH = 2048;
 const PROBE_ORIGIN = "https://app.invalid";
 const AUTH_PAGES = new Set(["staff-login", "customer-login"]);
 const RETURN_PATHS: Record<SessionRole, readonly string[]> = {
-  staff: [APP_PATHS.staffHome, APP_PATHS.staffT3Settings],
+  staff: [APP_PATHS.staffHome, APP_PATHS.staffT3Settings, APP_PATHS.staffLineSettings],
   customer: [APP_PATHS.customerHome],
 };
 

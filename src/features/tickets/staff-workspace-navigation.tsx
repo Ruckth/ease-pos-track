@@ -14,7 +14,7 @@ import type { ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { ListView } from "./use-workspace-navigation";
 
-export type ProjectTool = "project" | "members" | "health" | "team" | "t3" | "routing";
+export type ProjectTool = "project" | "members" | "health" | "team" | "t3" | "routing" | "line";
 
 export function StaffViewSwitcher({ view, archived, onSelect }: { view: ListView; archived: boolean; onSelect: (view: ListView) => void }) {
   const { t } = useI18n();
@@ -40,6 +40,7 @@ type StaffNavigationProps = {
   current?: ProjectSummary | null;
   archived: boolean;
   legacyToolsEnabled: boolean;
+  lineEnabled?: boolean;
   hideOnPhone: boolean;
   t3Available: boolean;
   routingAvailable?: boolean;
@@ -52,7 +53,7 @@ type StaffNavigationProps = {
   signedInAs: string;
 };
 
-export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPhone, legacyToolsEnabled, t3Available, routingAvailable, onArchive, onSelectProject, onTool, onLogout, owner, signedInAs }: StaffNavigationProps) {
+export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPhone, legacyToolsEnabled, lineEnabled, t3Available, routingAvailable, onArchive, onSelectProject, onTool, onLogout, owner, signedInAs }: StaffNavigationProps) {
   const { t } = useI18n();
   const { copy: routingCopy } = useRoutingCopy();
   const copy = useExplorerCopy();
@@ -88,6 +89,7 @@ export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPh
           <p className="truncate px-2.5 py-1.5 text-xs text-muted-foreground" title={signedInAs}>{signedInAs}</p>
           {owner && legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("project")}><FolderPlus aria-hidden />{t("newProject")}</DropdownMenuItem>}
           {owner && <DropdownMenuItem onClick={() => openTool("team")}><UserCog aria-hidden />{t("teamTitle")}</DropdownMenuItem>}
+          {current && lineEnabled && <DropdownMenuItem onClick={() => openTool("line")}><Plug aria-hidden />LINE</DropdownMenuItem>}
           {current && <DropdownMenuItem onClick={() => openTool("members")}><Users aria-hidden />{t("projectMembers")}</DropdownMenuItem>}
           {legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("health")}><HeartPulse aria-hidden />{t("healthTitle")}</DropdownMenuItem>}
           {current && routingAvailable && <DropdownMenuItem onClick={() => openTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}

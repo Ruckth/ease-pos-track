@@ -5,6 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.5.2",
   "scripts": {
+    "line:replay": "node scripts/line-replay.mjs",
     "preinstall": "node scripts/ensure-pnpm.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite",

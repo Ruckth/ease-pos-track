@@ -1,0 +1,11 @@
+[
+  {
+    "type": "unfollow",
+    "webhookEventId": "fixture-line-5",
+    "timestamp": 1795656005000,
+    "source": {
+      "type": "user",
+      "userId": "Ufixture"
+    }
+  }
+]

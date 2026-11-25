@@ -3,7 +3,7 @@ import { httpRouter } from "convex/server";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
-import { actorQuery, identityAction, namedStaffQuery, publicIdentityMutation, publicIdentityQuery, staffQuery, pageHttp, t3DoctorHttp, trustedCallbackMutation } from "../convex/functions";
+import { actorQuery, identityAction, namedStaffQuery, publicIdentityMutation, publicIdentityQuery, staffQuery, lineWebhookHttp, pageHttp, t3DoctorHttp, trustedCallbackMutation } from "../convex/functions";
 import { completePasswordSignIn, reservePasswordSignIn, signInWithPassword } from "../convex/auth";
 import { assignment, classification, routingTables } from "../convex/routing_schema";
 import schema from "../convex/schema";
@@ -79,6 +79,7 @@ test("HTTP routes cannot hide an untagged handler inside the router", () => {
     "http.ts:GET /p/*: missing manifest route",
     "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /integrations/t3/doctor: missing manifest route",
+    "http.ts:POST /line/webhook/*: missing manifest route",
     "http.ts:POST /v1/tickets/*: missing manifest route",
   ]);
 });
@@ -91,6 +92,7 @@ test("a tagged doctor handler cannot be mounted at another method or path", () =
     "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /integrations/t3/doctor: missing manifest route",
     "http.ts:POST /integrations/t3/other: unexpected HTTP policy http:t3-doctor:t3_doctor:verify",
+    "http.ts:POST /line/webhook/*: missing manifest route",
     "http.ts:POST /v1/tickets/*: missing manifest route",
   ]);
 });
@@ -104,7 +106,17 @@ test("HTTP routes are enumerated: page serving cannot be relabelled, widened or 
   assert.deepEqual(routeViolations("http.ts", router).sort(), [
     "http.ts:GET /p/*: unexpected HTTP policy http:convex-auth:pages:publish",
     "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
+    "http.ts:POST /line/webhook/*: missing manifest route",
     "http.ts:POST /v1/tickets/*: missing manifest route",
     "http.ts:PUT /v1/tickets/*: unexpected HTTP policy http:convex-auth:pages:publish",
   ]);
+});
+
+test("LINE signature policy is limited to the exact webhook prefix and POST", () => {
+  const route = lineWebhookHttp(async () => new Response());
+  const router = httpRouter();
+  router.route({ ...route, method: "GET" });
+  const errors = routeViolations("http.ts", router);
+  assert.ok(errors.includes("http.ts:GET /line/webhook/*: unexpected HTTP policy http:line-signature:line_webhook:receive"));
+  assert.ok(errors.includes("http.ts:POST /line/webhook/*: missing manifest route"));
 });

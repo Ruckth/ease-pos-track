@@ -68,5 +68,8 @@ export const checkAdmission = internalJobQuery({
 export const ticketCapabilities = actorQuery({
   name: "pilot_release:ticketCapabilities",
   args: {},
-  handler: async ctx => ({ mediaEnabled: await hasLegacyAccess(ctx) }),
+  handler: async ctx => {
+    const legacy = await hasLegacyAccess(ctx);
+    return { mediaEnabled: legacy, lineEnabled: legacy && ctx.actor.role === "staff" };
+  },
 });

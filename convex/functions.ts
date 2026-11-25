@@ -381,7 +381,25 @@ export const pageRoutes = {
   serve: { pathPrefix: "/p/", method: "GET" satisfies RoutableMethod, credentialClass: "share-key", operation: "pages:serve" },
 } as const;
 
-export const httpRouteManifest = [t3DoctorRoute, ...Object.values(pageRoutes)] as const;
+export const lineWebhookRoute = {
+  pathPrefix: "/line/webhook/", method: "POST" satisfies RoutableMethod,
+  credentialClass: "line-signature", operation: "line_webhook:receive",
+} as const;
+
+export function lineWebhookHttp(handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
+  const { pathPrefix, method, credentialClass, operation } = lineWebhookRoute;
+  return { pathPrefix, method, handler: tagged(httpAction(handler), `http:${credentialClass}:${operation}`) };
+}
+
+/** LINE actions perform live staff admission inside their internal database operation. */
+export function lineStaffAction<A extends PropertyValidators, R>(definition: Definition<ActionCtx, A, R>) {
+  return tagged(action({
+    args: v.object(definition.args),
+    handler: (ctx, args) => guarded(definition.name, () => definition.handler(ctx, args)),
+  }), "lineStaffAction");
+}
+
+export const httpRouteManifest = [t3DoctorRoute, lineWebhookRoute, ...Object.values(pageRoutes)] as const;
 
 export function pageHttp(route: keyof typeof pageRoutes, handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
   const { pathPrefix, method, credentialClass, operation } = pageRoutes[route];

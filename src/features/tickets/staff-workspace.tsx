@@ -1,3 +1,4 @@
+import { LineSettings } from "@/features/line/line-settings";
 import { ConnectT3Code } from "@/features/t3/connect-t3-code";
 import { useT3Proof, useT3ReleaseAvailable } from "@/features/t3/adapters/connection";
 import { TicketInbox } from "./ticket-inbox";
@@ -35,12 +36,14 @@ const selectClass = "aurora-control min-h-11 max-w-full rounded-lg px-2.5 text-s
 type TicketId = Id<"tickets">;
 const emptyTickets: TicketSummary[] = [];
 
-export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Settings }: {
+export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Settings, lineSettings, onLineSettings }: {
   viewer: { staffId: string; name: string; email: string; role: "owner" | "staff" };
   onLogout: () => Promise<void>;
   /** The mounted T3 Settings route (APP_PATHS.staffT3Settings). */
   t3Settings?: boolean;
   onT3Settings?: (open: boolean) => void;
+  lineSettings?: { bot?: string };
+  onLineSettings?: (open: boolean, bot?: string) => void;
 }) {
   const owner = viewer.role === "owner";
   const { t } = useI18n();
@@ -51,7 +54,9 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const composer = useComposer(project, onLogout);
   const operations = useTicketOperations();
   // Media, retention health and Project creation stay closed in a named pilot.
-  const legacyToolsEnabled = useTicketCapabilities()?.mediaEnabled === true;
+  const capabilities = useTicketCapabilities();
+  const legacyToolsEnabled = capabilities?.mediaEnabled === true;
+  const lineEnabled = capabilities?.lineEnabled === true;
   const requestT3Proof = useT3Proof();
   const t3Available = useT3ReleaseAvailable();
   const [tool, setTool] = useState<ProjectTool | null>(null);
@@ -64,6 +69,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   // The T3 tool is a route, so the signed kit's settingsUrl opens it directly.
   const openTool = (next: ProjectTool) => {
     if (next === "t3") onT3Settings?.(true);
+    else if (next === "line") onLineSettings?.(true);
     else if (next === "health") nav.setHealth(true);
     else setTool(next);
   };
@@ -198,7 +204,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 pt-3 sm:px-5 xl:px-7"}>
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation projects={projects} current={project} archived={showArchived} hideOnPhone={split}
-        legacyToolsEnabled={legacyToolsEnabled} t3Available={t3Available} routingAvailable={!!routing}
+        legacyToolsEnabled={legacyToolsEnabled} lineEnabled={lineEnabled} t3Available={t3Available} routingAvailable={!!routing}
         onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : undefined); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
       <div className="mx-auto w-full min-w-0 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-5">
@@ -272,6 +278,9 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     </Dialog>}
     {legacyToolsEnabled && <Dialog open={nav.health} onOpenChange={nav.setHealth} title={t("healthTitle")} description={t("healthDescription")}>
       {nav.health && <StaffHealth />}
+    </Dialog>}
+    {lineEnabled && lineSettings && project && <Dialog open onOpenChange={() => onLineSettings?.(false)} title="LINE" mobileFullScreen>
+      <LineSettings key={project._id} project={project} selected={lineSettings.bot} onSelect={bot => onLineSettings?.(true, bot)} />
     </Dialog>}
     {tool === "routing" && project && routing && <Dialog open onOpenChange={() => setTool(null)} title={routingCopy.routing} mobileFullScreen>
       <RoutingWorkspace key={project._id} projectId={project._id} settings={routing} openTicket={id => {
