@@ -147,6 +147,13 @@ const staffT3SettingsRoute = createRoute({
   // Signed T3 kits link to APP_PATHS.staffT3Settings; tests pin the full path.
   path: "settings/t3",
 });
+const staffLineSettingsRoute = createRoute({
+  getParentRoute: () => staffRoute,
+  path: "settings/line",
+  validateSearch: (search: Record<string, unknown>) => ({
+    bot: typeof search.bot === "string" && /^[a-z0-9]{1,64}$/.test(search.bot) ? search.bot : undefined,
+  }),
+});
 const customerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: APP_PATHS.customerHome,
@@ -162,7 +169,7 @@ const routeTree = rootRoute.addChildren([
   customerLoginRoute,
   customerRecoverRoute,
   customerJoinRoute,
-  staffRoute.addChildren([staffHomeRoute, staffT3SettingsRoute]),
+  staffRoute.addChildren([staffHomeRoute, staffT3SettingsRoute, staffLineSettingsRoute]),
   customerRoute,
 ]);
 

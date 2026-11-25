@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as adapters_line from "../adapters/line.js";
 import type * as adapters_storage from "../adapters/storage.js";
 import type * as annotation_state from "../annotation_state.js";
 import type * as annotations from "../annotations.js";
@@ -19,6 +20,7 @@ import type * as crons from "../crons.js";
 import type * as domain_conversation from "../domain/conversation.js";
 import type * as domain_identity from "../domain/identity.js";
 import type * as domain_inbox from "../domain/inbox.js";
+import type * as domain_line from "../domain/line.js";
 import type * as domain_media from "../domain/media.js";
 import type * as domain_media_jobs from "../domain/media_jobs.js";
 import type * as domain_operation from "../domain/operation.js";
@@ -45,6 +47,12 @@ import type * as identity_staff_recovery from "../identity_staff_recovery.js";
 import type * as image_chunks from "../image_chunks.js";
 import type * as image_transfer from "../image_transfer.js";
 import type * as inbox from "../inbox.js";
+import type * as line from "../line.js";
+import type * as line_crypto from "../line_crypto.js";
+import type * as line_jobs from "../line_jobs.js";
+import type * as line_local from "../line_local.js";
+import type * as line_schema from "../line_schema.js";
+import type * as line_webhook from "../line_webhook.js";
 import type * as local_fixtures from "../local_fixtures.js";
 import type * as local_identity from "../local_identity.js";
 import type * as local_smoke from "../local_smoke.js";
@@ -79,6 +87,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "adapters/line": typeof adapters_line;
   "adapters/storage": typeof adapters_storage;
   annotation_state: typeof annotation_state;
   annotations: typeof annotations;
@@ -90,6 +99,7 @@ declare const fullApi: ApiFromModules<{
   "domain/conversation": typeof domain_conversation;
   "domain/identity": typeof domain_identity;
   "domain/inbox": typeof domain_inbox;
+  "domain/line": typeof domain_line;
   "domain/media": typeof domain_media;
   "domain/media_jobs": typeof domain_media_jobs;
   "domain/operation": typeof domain_operation;
@@ -116,6 +126,12 @@ declare const fullApi: ApiFromModules<{
   image_chunks: typeof image_chunks;
   image_transfer: typeof image_transfer;
   inbox: typeof inbox;
+  line: typeof line;
+  line_crypto: typeof line_crypto;
+  line_jobs: typeof line_jobs;
+  line_local: typeof line_local;
+  line_schema: typeof line_schema;
+  line_webhook: typeof line_webhook;
   local_fixtures: typeof local_fixtures;
   local_identity: typeof local_identity;
   local_smoke: typeof local_smoke;

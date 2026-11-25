@@ -139,6 +139,14 @@ export function checkArchitecture(root: string) {
  * the deployment JWKS) are mounted by Convex from convex.config.ts, not here.
  */
 export const PUBLIC_REGISTRATIONS: Record<string, string> = {
+  "line.ts:listBots": "staffQuery",
+  "line.ts:listChats": "staffQuery",
+  "line.ts:updateBot": "staffMutation",
+  "line.ts:updateChat": "staffMutation",
+  "line.ts:setChatState": "staffMutation",
+  "line.ts:addBot": "lineStaffAction",
+  "line.ts:updateCredentials": "lineStaffAction",
+  "line.ts:removeChat": "lineStaffAction",
   "annotations.ts:addAnnotation": "actorMutation",
   "annotations.ts:listAnnotationActivity": "actorQuery",
   "annotations.ts:removeAnnotation": "actorMutation",

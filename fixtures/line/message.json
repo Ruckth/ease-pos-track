@@ -1,0 +1,16 @@
+[
+  {
+    "type": "message",
+    "webhookEventId": "fixture-line-6",
+    "timestamp": 1795656006000,
+    "source": {
+      "type": "group",
+      "groupId": "Cfixture"
+    },
+    "message": {
+      "type": "text",
+      "id": "fixture-message",
+      "text": "Synthetic chat message"
+    }
+  }
+]

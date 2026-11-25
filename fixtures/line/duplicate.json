@@ -1,0 +1,15 @@
+[
+  {
+    "type": "join",
+    "webhookEventId": "fixture-line-1",
+    "timestamp": 1795656001000,
+    "source": {
+      "type": "group",
+      "groupId": "Cfixture"
+    },
+    "replyToken": "fixture-reply-token",
+    "deliveryContext": {
+      "isRedelivery": true
+    }
+  }
+]

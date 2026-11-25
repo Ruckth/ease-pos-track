@@ -1,3 +1,5 @@
+import { lineTables } from "./line_schema";
+
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { T3_DOCTOR_AUDIENCE } from "../shared/t3-doctor";
@@ -113,6 +115,8 @@ const pageManifestEntry = v.object({ rasterType: v.optional(v.string()), path: v
 const sessionReference = v.union(v.id("sessionAdmissions"), v.id("sessions"));
 
 export default defineSchema({
+  ...lineTables,
+
   imageChunks: defineTable({ bytes: v.bytes() }),
   projectIntakeStaff: defineTable({
     projectId: v.id("projects"), staffId: v.string(),

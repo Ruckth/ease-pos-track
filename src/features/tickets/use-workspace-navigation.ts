@@ -41,6 +41,7 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
   }) => {
     const current = router.state.location;
     const to = role === "customer" ? APP_PATHS.customerHome :
+      current.pathname === APP_PATHS.staffLineSettings ? APP_PATHS.staffLineSettings :
       current.pathname === APP_PATHS.staffT3Settings ? APP_PATHS.staffT3Settings : APP_PATHS.staffHome;
     const previous = workspaceSearch(role, current.search);
     const next = change(previous);
@@ -51,7 +52,8 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
       workspaceTicketFromList: next.ticket ? options?.openedFromList ? to :
         options?.replace ? previous.workspaceTicketFromList : undefined : undefined,
     });
-    return router.navigate({ to, search: next, state, replace: options?.replace, resetScroll: false });
+    return router.navigate({ to, search: to === APP_PATHS.staffLineSettings && previous.project === next.project
+      ? { ...next, bot: current.search.bot } : next, state, replace: options?.replace, resetScroll: false });
   }, [role, router]);
 
   const selectProject = useCallback((key: string, replace: boolean, nextView?: ListView) => {

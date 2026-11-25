@@ -9,6 +9,7 @@
     { "source": "/staff/login", "destination": "/index.html" },
     { "source": "/staff/invite", "destination": "/index.html" },
     { "source": "/staff/settings/t3", "destination": "/index.html" },
+    { "source": "/staff/settings/line", "destination": "/index.html" },
     { "source": "/customer/join", "destination": "/index.html" },
     { "source": "/customer/recover", "destination": "/index.html" },
     { "source": "/customer", "destination": "/index.html" },

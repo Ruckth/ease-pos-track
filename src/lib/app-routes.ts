@@ -7,6 +7,7 @@ export const APP_PATHS = {
   staffInvite: "/staff/invite",
   /** Signed T3 kits link here (`settingsUrl`); keep both in step. */
   staffT3Settings: "/staff/settings/t3",
+  staffLineSettings: "/staff/settings/line",
   customerHome: "/customer",
   customerLogin: "/customer/login",
   customerJoin: "/customer/join",
@@ -24,7 +25,7 @@ type AppRoute =
   | { page: "customer-login" }
   | { page: "customer-join" }
   | { page: "customer-recover" }
-  | { page: "staff-home"; settings?: "t3" }
+  | { page: "staff-home"; settings?: "t3" | "line" }
   | { page: "customer-home" };
 
 export function homePathForRole(role: SessionRole) {
@@ -55,6 +56,7 @@ export function resolveAppRoute(pathname: string, session: RouteSession): AppRou
   if (session === "pending") {
     return path === APP_PATHS.staffInvite ? { page: "staff-invite" } : { page: "pending-identity" };
   }
+  if (session === "staff" && path === APP_PATHS.staffLineSettings) return { page: "staff-home", settings: "line" };
   if (session === "staff" && path === APP_PATHS.staffT3Settings) return { page: "staff-home", settings: "t3" };
   if (session === "staff" || session === "customer") {
     const home = homePathForRole(session);

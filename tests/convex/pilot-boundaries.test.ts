@@ -174,12 +174,16 @@ test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cr
     await expect(f.t.query(api.uploads.validateUploadIntent, {
       token, callbackToken: "synthetic-old-callback", intentId: f.handle.intentId, secret: f.handle.secret, files: [pending],
     })).rejects.toThrow("PILOT_MEDIA_DISABLED");
-    expect(await f.t.query(api.pilot_release.ticketCapabilities, { token })).toEqual({ mediaEnabled: false });
+    expect(await f.t.query(api.pilot_release.ticketCapabilities, { token })).toEqual({ mediaEnabled: false, lineEnabled: false });
   }
   await expect(f.t.mutation(api.uploads.recordUploadedFile, { ...callback, callbackToken: "synthetic-old-callback" }))
     .rejects.toThrow("LEGACY_ACCESS_DISABLED");
   await expect(f.t.mutation(api.uploads.recordUploadedFile, { ...callback, token: owner })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
   await expect(f.t.mutation(api.projects.createProject, { token: owner, name: "Unreviewed", key: "NEW" })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
+  await expect(f.t.query(api.line.listBots, { token: owner, projectId: f.projectId })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
+  await expect(f.t.action(api.line.addBot, {
+    token: owner, projectId: f.projectId, name: "Pilot bot", accessToken: "fixture-token", channelSecret: "fixture-secret",
+  })).rejects.toThrow("LEGACY_ACCESS_DISABLED");
 
   // Enrollment stays closed until both invitation and identity sender switches open.
   await expect(f.t.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: owner, projectId: f.projectId }))
