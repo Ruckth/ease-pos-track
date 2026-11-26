@@ -43,7 +43,7 @@ export function useLineAiReviews(projectId: Id<"projects">) {
 export type LineAiDraft = Extract<ReturnType<typeof useLineAiReviews>["results"][number], { state: "review" }>;
 
 export function useLineAiReplies(projectId: Id<"projects">) {
-  return useQuery(api.line_ai_reviews.listReplies, { projectId });
+  return usePaginatedQuery(api.line_ai_reviews.listReplies, { projectId }, { initialNumItems: 20 });
 }
 
 export function useLineAiReviewActions() {

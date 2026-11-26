@@ -18,6 +18,15 @@ test("PDF page limits apply to a compressed page tree", async () => {
   const pdf = await PDFDocument.create();
   for (let index = 0; index < 12; index += 1) pdf.addPage();
   assert.equal((await validateLineAttachment(await pdf.save())).mimeType, "application/pdf");
+  assert.equal((await validateLineAttachment(await pdf.save({ useObjectStreams: false }))).mimeType, "application/pdf");
   pdf.addPage();
   await assert.rejects(validateLineAttachment(await pdf.save()), /LINE_CONTENT_PAGE_LIMIT/);
+});
+
+test("a large PDF metadata field exceeds the structure budget without reaching the provider", async () => {
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  // pdf-lib writes text metadata as UTF-16 hexadecimal inside an object stream.
+  pdf.setSubject("Sample metadata ".repeat(40_000));
+  await assert.rejects(validateLineAttachment(await pdf.save()), /LINE_CONTENT_MALFORMED/);
 });

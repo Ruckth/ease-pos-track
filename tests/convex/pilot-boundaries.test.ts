@@ -192,7 +192,9 @@ test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cr
   expect(await f.t.query(api.line_ai_reviews.list, {
     token: owner, projectId: f.projectId, paginationOpts: { numItems: 25, cursor: null },
   })).toEqual({ page: [], isDone: true, continueCursor: "" });
-  expect(await f.t.query(api.line_ai_reviews.listReplies, { token: owner, projectId: f.projectId })).toEqual([]);
+  expect(await f.t.query(api.line_ai_reviews.listReplies, {
+    token: owner, projectId: f.projectId, paginationOpts: { numItems: 20, cursor: null },
+  })).toEqual({ page: [], isDone: true, continueCursor: "" });
 
   // Enrollment stays closed until both invitation and identity sender switches open.
   await expect(f.t.mutation(api.identity.createCustomerInvitation, { eligibilityConfirmed: true, token: owner, projectId: f.projectId }))

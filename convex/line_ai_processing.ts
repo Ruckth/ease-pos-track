@@ -89,7 +89,9 @@ export const authorizeDownload = internalJobQuery({
   name: "line_ai_processing:authorizeDownload", args: { ...lease, tokenCipher: v.string() },
   handler: async (ctx, { intakeId, leaseId, connectionRevision, tokenCipher }) => {
     const row = await ctx.db.get(intakeId);
-    if (!row || row.state !== "processing" || row.leaseId !== leaseId || (row.leaseExpiresAt ?? 0) <= Date.now()) return false;
+    const now = Date.now();
+    if (!row || row.state !== "processing" || row.leaseId !== leaseId
+      || (row.leaseExpiresAt ?? 0) <= now || row.expiresAt <= now) return false;
     const enrollment = await assistantEnrollment(ctx, { ...row, connectionRevision });
     return enrollment?.bot.tokenCipher === tokenCipher;
   },

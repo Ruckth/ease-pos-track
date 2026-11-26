@@ -135,6 +135,15 @@ test("an Owner can pause and resume the tested connection without another provid
   expect(scan).toHaveBeenCalledOnce();
   await patch(true, 3);
   await expect(f.save("gemini-key-9999")).resolves.toMatchObject({ enabled: false, revision: 5, keyHint: "9999" });
+  await f.t.mutation(api.line_ai_settings.disable, { token: f.owner.session, projectId: f.projectId });
+  const history = await f.t.run(({ db }) => db.query("lineAiConnectionEvents").withIndex("by_project_revision",
+    q => q.eq("projectId", f.projectId)).collect());
+  expect(history.map(({ action, revision, enabled }) => [action, revision, enabled])).toEqual([
+    ["saved", 1, true], ["paused", 2, false], ["resumed", 3, true],
+    ["paused", 4, false], ["saved", 5, false], ["disconnected", 6, false],
+  ]);
+  expect(history.every(row => row.staffId === f.owner.staffId)).toBe(true);
+  expect(JSON.stringify(history)).not.toMatch(/keyCipher|keyHint|gemini-key/);
 });
 
 test("external calls need LINE_AI_ENABLED exactly true on a legacy deployment", async () => {

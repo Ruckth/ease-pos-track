@@ -12,4 +12,9 @@ export const lineAiTables = {
     enabled: v.boolean(), revision: v.number(), authorizationRevision: v.optional(v.number()),
     testedAt: v.optional(v.number()), updatedAt: v.number(), updatedBy: v.optional(v.id("staff")),
   }).index("by_project", ["projectId"]),
+  lineAiConnectionEvents: defineTable({
+    projectId: v.id("projects"), provider: lineAiProvider, model: v.string(), revision: v.number(),
+    action: v.union(v.literal("saved"), v.literal("paused"), v.literal("resumed"), v.literal("disconnected")),
+    enabled: v.boolean(), createdAt: v.number(), staffId: v.optional(v.id("staff")),
+  }).index("by_project_revision", ["projectId", "revision"]),
 };

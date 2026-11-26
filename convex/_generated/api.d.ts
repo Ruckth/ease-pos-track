@@ -11,6 +11,7 @@
 import type * as adapters_line from "../adapters/line.js";
 import type * as adapters_line_ai_provider from "../adapters/line_ai_provider.js";
 import type * as adapters_line_attachment from "../adapters/line_attachment.js";
+import type * as adapters_line_pdf from "../adapters/line_pdf.js";
 import type * as adapters_storage from "../adapters/storage.js";
 import type * as annotation_state from "../annotation_state.js";
 import type * as annotations from "../annotations.js";
@@ -102,6 +103,7 @@ declare const fullApi: ApiFromModules<{
   "adapters/line": typeof adapters_line;
   "adapters/line_ai_provider": typeof adapters_line_ai_provider;
   "adapters/line_attachment": typeof adapters_line_attachment;
+  "adapters/line_pdf": typeof adapters_line_pdf;
   "adapters/storage": typeof adapters_storage;
   annotation_state: typeof annotation_state;
   annotations: typeof annotations;

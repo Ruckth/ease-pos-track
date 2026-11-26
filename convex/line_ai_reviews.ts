@@ -28,26 +28,32 @@ async function currentDraft(ctx: Pick<QueryCtx, "db">, draft: Doc<"lineAiDrafts"
   return enrollment && matchesLineAiAuthorization(enrollment.connection, draft) ? { ...enrollment, intake } : null;
 }
 
-function replyReceipt(row: Doc<"lineAiReplies">, now: number) {
+async function replyReceipt(ctx: Pick<QueryCtx, "db">, row: Doc<"lineAiReplies">, now: number) {
   return {
     _id: row._id, draftId: row.draftId, number: row.ticketNumber,
     state: row.state, updatedAt: row.updatedAt,
     canRetry: (row.state === "unknown" || row.state === "limited") && !!row.text
-      && row.attempt < replyAttempts && row.expiresAt > now,
+      && row.attempt < replyAttempts && row.expiresAt > now && !!await currentReplyDestination(ctx, row),
   };
 }
 
+const paginatedProject = { ...project, paginationOpts: paginationOptsValidator };
+const emptyPage: { page: never[]; isDone: true; continueCursor: string } = { page: [], isDone: true, continueCursor: "" };
+
+function boundedPage(options: Infer<typeof paginationOptsValidator>) {
+  if (!Number.isInteger(options.numItems) || options.numItems < 1 || options.numItems > 50) throw new Error("INVALID_INPUT");
+  return { ...options, maximumRowsRead: 50 };
+}
+
 export const list = staffQuery({
-  name: "line_ai_reviews:list", args: { ...project, paginationOpts: paginationOptsValidator },
+  name: "line_ai_reviews:list", args: paginatedProject,
   handler: async (ctx, { projectId, paginationOpts }) => {
-    if (!await lineAiReleaseEnabled(ctx)) return { page: [], isDone: true, continueCursor: "" };
+    if (!await lineAiReleaseEnabled(ctx)) return emptyPage;
     await lineProject(ctx, projectId);
-    const { numItems } = paginationOpts;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > 50) throw new Error("INVALID_INPUT");
     const now = Date.now();
     const rows = await ctx.db.query("lineAiDrafts").withIndex("by_project_review_state",
       q => q.eq("projectId", projectId).eq("state", "review")).order("desc")
-      .paginate({ ...paginationOpts, maximumRowsRead: 50 });
+      .paginate(boundedPage(paginationOpts));
     const page = await Promise.all(rows.page.map(async draft => {
       const current = await currentDraft(ctx, draft, now);
       if (!current) return { _id: draft._id, state: "unavailable" as const };
@@ -70,17 +76,14 @@ export const list = staffQuery({
 });
 
 export const listReplies = staffQuery({
-  name: "line_ai_reviews:listReplies", args: project,
-  handler: async (ctx, { projectId }) => {
-    if (!await lineAiReleaseEnabled(ctx)) return [];
+  name: "line_ai_reviews:listReplies", args: paginatedProject,
+  handler: async (ctx, { projectId, paginationOpts }) => {
+    if (!await lineAiReleaseEnabled(ctx)) return emptyPage;
     await lineProject(ctx, projectId);
     const rows = await ctx.db.query("lineAiReplies").withIndex("by_project", q => q.eq("projectId", projectId))
-      .order("desc").take(20);
+      .order("desc").paginate(boundedPage(paginationOpts));
     const now = Date.now();
-    return Promise.all(rows.map(async row => {
-      const receipt = replyReceipt(row, now);
-      return { ...receipt, canRetry: receipt.canRetry && !!await currentReplyDestination(ctx, row) };
-    }));
+    return { ...rows, page: await Promise.all(rows.page.map(row => replyReceipt(ctx, row, now))) };
   },
 });
 
@@ -109,7 +112,7 @@ export const approve = staffMutation({
     const receipt = await ctx.db.query("lineAiReplies").withIndex("by_draft", q => q.eq("draftId", draftId)).unique();
     if (receipt) {
       if (receipt.decisionDigest !== decisionDigest) throw new Error("LINE_AI_APPROVAL_CONFLICT");
-      return replyReceipt(receipt, now);
+      return replyReceipt(ctx, receipt, now);
     }
     const current = await currentDraft(ctx, draft, now);
     if (!current) throw new Error("LINE_AI_DRAFT_UNAVAILABLE");
@@ -156,7 +159,7 @@ export const approve = staffMutation({
     await ctx.db.patch(draftId, { state: "acted" });
     await ctx.db.patch(intake._id, { state: "acted", text: "", files: [] });
     await ctx.scheduler.runAfter(0, internal.line_ai_delivery.send, { replyId });
-    return replyReceipt((await ctx.db.get(replyId))!, now);
+    return replyReceipt(ctx, (await ctx.db.get(replyId))!, now);
   },
 });
 
@@ -178,7 +181,7 @@ export const retryReply = staffMutation({
   handler: async (ctx, { replyId }) => {
     const row = await ctx.db.get(replyId);
     const now = Date.now();
-    if (!row || !replyReceipt(row, now).canRetry || !await currentReplyDestination(ctx, row)) {
+    if (!row || !(await replyReceipt(ctx, row, now)).canRetry) {
       throw new Error("LINE_AI_REPLY_UNAVAILABLE");
     }
     await ctx.db.patch(replyId, { state: "pending", updatedAt: now });

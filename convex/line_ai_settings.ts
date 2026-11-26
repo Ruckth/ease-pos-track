@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import type { Actor } from "./authz";
 import { lineAiModels, scanLineRequest, syntheticLineAiInput } from "./adapters/line_ai_provider";
@@ -31,6 +31,17 @@ function editor(ctx: Pick<MutationCtx, "db"> & { actor: Actor }) {
   return (ctx.actor.staffId && ctx.db.normalizeId("staff", ctx.actor.staffId)) || undefined;
 }
 
+async function recordConnectionChange(ctx: Pick<MutationCtx, "db">, connectionId: Id<"lineAiConnections">,
+  action: Doc<"lineAiConnectionEvents">["action"]) {
+  const row = await ctx.db.get(connectionId);
+  if (!row) throw new Error("LINE_AI_NOT_CONFIGURED");
+  const { projectId, provider, model, revision, enabled, updatedAt, updatedBy } = row;
+  await ctx.db.insert("lineAiConnectionEvents", {
+    projectId, provider, model, revision, enabled, action, createdAt: updatedAt, staffId: updatedBy,
+  });
+  return publicLineAiConnection(row);
+}
+
 export const disable = ownerMutation({
   name: "line_ai_settings:disable", args: project,
   handler: async (ctx, { projectId }) => {
@@ -43,7 +54,7 @@ export const disable = ownerMutation({
       authorizationRevision: (row.authorizationRevision ?? 0) + 1,
       updatedAt: Date.now(), updatedBy: editor(ctx),
     });
-    return publicLineAiConnection(await ctx.db.get(row._id));
+    return recordConnectionChange(ctx, row._id, "disconnected");
   },
 });
 
@@ -61,7 +72,7 @@ export const setPaused = ownerMutation({
       enabled: !paused, revision: row.revision + 1, updatedAt: Date.now(), updatedBy: editor(ctx),
       authorizationRevision: (row.authorizationRevision ?? 0) + 1,
     });
-    return publicLineAiConnection(await ctx.db.get(row._id));
+    return recordConnectionChange(ctx, row._id, paused ? "paused" : "resumed");
   },
 });
 
@@ -91,9 +102,12 @@ export const commitTest = internalActorMutation({
       ...fields, enabled: row?.keyCipher ? row.enabled : true, revision: expectedRevision + 1,
       testedAt: now, updatedAt: now, updatedBy: editor(ctx),
     };
-    if (!row) return publicLineAiConnection(await ctx.db.get(await ctx.db.insert("lineAiConnections", { projectId, ...next })));
-    await ctx.db.patch(row._id, next);
-    return publicLineAiConnection(await ctx.db.get(row._id));
+    if (row) {
+      await ctx.db.patch(row._id, next);
+      return recordConnectionChange(ctx, row._id, "saved");
+    }
+    const connectionId = await ctx.db.insert("lineAiConnections", { projectId, ...next });
+    return recordConnectionChange(ctx, connectionId, "saved");
   },
 });
 

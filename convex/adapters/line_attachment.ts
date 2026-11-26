@@ -1,8 +1,7 @@
 import { imageSize } from "image-size";
-import { PDFDocument } from "pdf-lib";
 import { lineAiLimits, type LineAiFile } from "./line_ai_provider";
+import { validateLinePdf } from "./line_pdf";
 
-const maxPdfPages = 12;
 const maxImagePixels = 32_000_000;
 const pngEnd = [0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
 
@@ -26,16 +25,7 @@ export async function validateLineAttachment(bytes: Uint8Array, declaredMime?: s
     throw new Error("LINE_CONTENT_TYPE_MISMATCH");
   }
   if (mimeType === "application/pdf") {
-    let pages: number;
-    try {
-      const tail = new TextDecoder().decode(bytes.subarray(-1024));
-      if (!/%%EOF\s*$/.test(tail)) throw new Error();
-      const document = await PDFDocument.load(bytes, { updateMetadata: false, throwOnInvalidObject: true });
-      pages = document.getPageCount();
-    } catch {
-      throw new Error("LINE_CONTENT_MALFORMED");
-    }
-    if (pages < 1 || pages > maxPdfPages) throw new Error("LINE_CONTENT_PAGE_LIMIT");
+    await validateLinePdf(bytes);
   } else {
     const ending = mimeType === "image/png" ? pngEnd : [0xff, 0xd9];
     if (!matches(bytes, ending, bytes.length - ending.length)) throw new Error("LINE_CONTENT_MALFORMED");

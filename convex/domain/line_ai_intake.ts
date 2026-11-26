@@ -188,14 +188,15 @@ function normalizeTriggerText(rawText: string, spans: MentionSpan[]): string {
 
 /**
  * Pure parser for LINE assistant events (`message` text/file and `unsend`).
- * Drops non-active modes, non-trigger group chatter, unsupported message types,
+ * Drops standby messages, non-trigger group chatter, unsupported message types,
  * and malformed payloads before they reach database mutations.
  */
 export function extractLineAiEvent(value: unknown): ExtractedLineAiEvent | undefined {
   if (!value || typeof value !== "object") return;
   const fields = value as Record<string, unknown>;
   const { type, timestamp, source, webhookEventId, mode } = fields;
-  if (mode !== undefined && mode !== "active") return;
+  // A module taking control of the chat does not cancel the sender's withdrawal.
+  if (mode !== undefined && mode !== "active" && (mode !== "standby" || type !== "unsend")) return;
   if (!shortId(webhookEventId) || typeof timestamp !== "number" || !Number.isSafeInteger(timestamp)
     || timestamp < 0 || !source || typeof source !== "object") return;
 

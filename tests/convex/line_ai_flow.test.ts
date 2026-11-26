@@ -78,12 +78,17 @@ async function fixture() {
   const page = (numItems = 25, cursor: string | null = null) => t.query(api.line_ai_reviews.list, {
     projectId, token, paginationOpts: { numItems, cursor },
   });
+  const replyPage = (cursor: string | null = null) => t.query(api.line_ai_reviews.listReplies, {
+    projectId, token, paginationOpts: { numItems: 20, cursor },
+  });
+  type ReviewRow = Awaited<ReturnType<typeof page>>["page"][number];
+  type Reviewable = Extract<ReviewRow, { state: "review" }>;
   const review = async () => ({
-    drafts: (await page()).page.filter(item => item.state === "review"),
-    replies: await t.query(api.line_ai_reviews.listReplies, { projectId, token }),
+    drafts: (await page()).page.filter((item): item is Reviewable => item.state === "review"),
+    replies: (await replyPage()).page,
   });
   const tickets = () => t.run(({ db }) => db.query("tickets").collect());
-  return { t, owner, token, projectId, botId, chatId, send, message, runJobs, page, review, tickets };
+  return { t, owner, token, projectId, botId, chatId, send, message, runJobs, page, replyPage, review, tickets };
 }
 
 test("a signed request is scanned once and staff create and close one linked Ticket", async () => {
@@ -325,11 +330,78 @@ test("resuming a paused connection keeps its earlier draft and rate-limited repl
   }
   expect((await f.page()).page).toEqual([{ _id: second._id, state: "unavailable" }]);
   expect((await f.review()).replies).toMatchObject([{ state: "limited", canRetry: false }]);
+  await expect(f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: first._id, decision }))
+    .resolves.toMatchObject({ _id: reply._id, state: "limited", canRetry: false });
   await expect(f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: second._id, decision }))
     .rejects.toThrow("LINE_AI_DRAFT_UNAVAILABLE");
   await expect(f.t.mutation(api.line_ai_reviews.retryReply, { token: f.token, replyId: reply._id }))
     .rejects.toThrow("LINE_AI_REPLY_UNAVAILABLE");
   expect(fake.push).toHaveBeenCalledOnce();
+});
+
+test("reply paging reaches an older rate-limited reply while it can still be retried", async () => {
+  const f = await fixture();
+  await f.send([f.message("older", "@POS Help Printer offline")]);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  const [older] = (await f.review()).drafts;
+  const decision = { type: "clarify" as const, reply: older.replies.clarify };
+  fake.push.mockResolvedValueOnce("limited");
+  const reply = await f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: older._id, decision });
+  await f.runJobs();
+
+  await f.send(Array.from({ length: 20 }, (_, index) => f.message(`newer-${index}`, "@POS Help Printer offline")));
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  const { drafts } = await f.review();
+  expect(drafts).toHaveLength(20);
+  for (const draft of drafts) {
+    await f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: draft._id, decision });
+  }
+  await f.runJobs();
+  const first = await f.replyPage();
+  expect(first.isDone).toBe(false);
+  expect(first.page).toHaveLength(20);
+  expect(first.page.every(item => item.state === "accepted")).toBe(true);
+  expect((await f.replyPage(first.continueCursor)).page).toEqual([
+    expect.objectContaining({ _id: reply._id, state: "limited", canRetry: true }),
+  ]);
+});
+
+test("standby messages do not create suggestions, and standby unsends remove earlier suggestions", async () => {
+  const f = await fixture();
+  const active = f.message("active", "@POS Help Printer offline");
+  const standby = { ...f.message("standby", "@POS Help Other request"), mode: "standby" };
+  expect((await f.send([active, standby])).status).toBe(200);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  expect(fake.scan).toHaveBeenCalledOnce();
+  const [draft] = (await f.review()).drafts;
+  const withdrawal = {
+    type: "unsend", mode: "standby", timestamp: Date.now(), webhookEventId: "standby-unsend",
+    source: active.source, unsend: { messageId: active.message.id },
+  };
+  expect((await f.send([withdrawal])).status).toBe(200);
+  expect((await f.review()).drafts).toEqual([]);
+  expect(await f.t.run(({ db }) => db.query("lineAiIntakes").collect())).toEqual([
+    expect.objectContaining({ messageId: active.message.id, state: "ignored", text: "", files: [] }),
+  ]);
+  await expect(f.t.mutation(api.line_ai_reviews.approve, {
+    token: f.token, draftId: draft._id, decision: { type: "clarify", reply: "More details?" },
+  })).rejects.toThrow("LINE_AI_DRAFT_UNAVAILABLE");
+});
+
+test("a valid processing lease cannot download attachments after the intake expires", async () => {
+  const f = await fixture();
+  await f.send([f.message("expire", "@POS Help Printer offline")]);
+  const row = (await f.t.run(({ db }) => db.query("lineAiIntakes").first()))!;
+  const expiresAt = row.availableAt + 10;
+  await f.t.run(({ db }) => db.patch(row._id, { expiresAt }));
+  vi.setSystemTime(row.availableAt);
+  const job = (await f.t.mutation(internal.line_ai_processing.claim, { intakeId: row._id }))!;
+  const args = {
+    intakeId: row._id, leaseId: job.leaseId, connectionRevision: job.connectionRevision, tokenCipher: job.bot.tokenCipher,
+  };
+  expect(await f.t.query(internal.line_ai_processing.authorizeDownload, args)).toBe(true);
+  vi.setSystemTime(expiresAt);
+  expect(await f.t.query(internal.line_ai_processing.authorizeDownload, args)).toBe(false);
 });
 
 test.each(["leave", "join"])("signed %s revokes draft and leased reply authority before metadata settles", async type => {

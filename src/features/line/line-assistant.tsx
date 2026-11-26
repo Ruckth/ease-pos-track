@@ -33,6 +33,7 @@ const errors: Record<string, string> = {
   LINE_AI_REPLY_REQUIRED: "Enter a reply.",
   LINE_AI_REPLY_TOO_LONG: "Shorten the LINE reply.",
   LINE_AI_REPLY_UNAVAILABLE: "This reply can no longer be retried.",
+  NAMED_STAFF_REQUIRED: "Sign in with a named staff account to approve this suggestion.",
   LINE_OWNER_NOT_PROJECT_MEMBER: "Update the chat’s Ticket owner to an active Project member.",
   VERSION_CONFLICT: "The Ticket changed. Review its latest version before closing it.",
   REQUIRED_TICKET: "Enter a Ticket title.",
@@ -227,14 +228,19 @@ export function LineAiReviews({ projectId }: { projectId: ProjectSummary["_id"] 
         disabled={status === "LoadingMore"} onClick={() => loadMore(25)}>
         {status === "LoadingMore" ? "Loading…" : "Load more suggestions"}
       </Button>}
-    {!!replies?.length && <details className="border-t pt-3">
+    {!!replies.results.length && <details className="border-t pt-3">
       <summary className="cursor-pointer text-sm font-medium">Recent replies</summary>
-      <ul className="mt-2 grid gap-2">{replies.map(reply => <li key={reply._id}
+      <ul className="mt-2 grid gap-2">{replies.results.map(reply => <li key={reply._id}
         className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span>{reply.number ? `${reply.number} · ` : ""}{replyStates[reply.state]}</span>
         {reply.canRetry && <Button type="button" size="sm" variant="outline" disabled={busy}
           onClick={() => void run(async () => { await retryReply({ replyId: reply._id }); })}>Retry reply</Button>}
       </li>)}</ul>
+      {(replies.status === "CanLoadMore" || replies.status === "LoadingMore") &&
+        <Button type="button" size="sm" variant="outline" className="mt-2"
+          disabled={replies.status === "LoadingMore"} onClick={() => replies.loadMore(20)}>
+          {replies.status === "LoadingMore" ? "Loading…" : "Load more replies"}
+        </Button>}
     </details>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </section>;

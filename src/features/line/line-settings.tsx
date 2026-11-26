@@ -26,6 +26,7 @@ const errors: Record<string, string> = {
   LINE_CHANNEL_ALREADY_CONNECTED: "This LINE channel is already connected.",
   LINE_TOKEN_BOT_MISMATCH: "The access token belongs to a different bot.",
   LINE_CHAT_ENROLLMENT_CHANGED: "This chat rejoined since you opened it. Check its latest state and try again.",
+  LINE_CHAT_STATE_CHANGED: "The chat is no longer in the expected state. Check its status in LINE and try again.",
   LINE_OWNER_NOT_PROJECT_MEMBER: "The selected customer must belong to this Project.",
   LINE_API_REQUEST_FAILED: "LINE could not complete that request. Check the bot credentials and try again.",
   LINE_BOT_FIELDS_INVALID: "Check the bot name and credentials.",
