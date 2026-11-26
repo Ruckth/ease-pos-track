@@ -342,14 +342,77 @@ test("customer navigation does not expose staff health", async () => {
   } finally { await f.context.close(); }
 });
 
+test("customer search finds older Tickets and can include resolved Tickets", async () => {
+  const { page, context, token, errors } = await open("customer");
+  try {
+    await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    const query = page.getByLabel(copy("en", "customerQueueSearch"), { exact: true });
+    const status = page.getByLabel(copy("en", "ticketStatus"), { exact: true });
+    const older = page.getByRole("button", { name: copy("en", "loadOlder"), exact: true });
+    const rows = page.locator("button[data-ticket-id]");
+    const projectId = seed.projects.find(project => project.key === "POS")!.id;
+    const scope = { projectId, lifecycle: "active" as const };
+    const resolved = await convex.query(api.tickets.searchTickets, { ...scope, token, status: "done", search: "Printer queue fixture" });
+    const target = resolved.matches.find(ticket => ticket.title === "Printer queue fixture 4");
+    assert.ok(target, "seeded older resolved Ticket");
+    const reference = formatTicketNumber(target.ticketNumber, target.projectKey);
+    const targetRow = page.locator(`button[data-ticket-id="${target._id}"]`);
+    const noMatches = page.getByText(copy("en", "customerQueueSearchEmpty"), { exact: true });
+
+    await status.selectOption("all");
+    await older.waitFor();
+    assert.equal(await targetRow.count(), 0, "the resolved Ticket lies beyond the first page");
+    await status.selectOption("active");
+    await query.fill("quartz");
+    await rows.filter({ hasText: "Printer calibration" }).waitFor();
+    assert.equal(await rows.filter({ hasText: "quartz calibration" }).count(), 0, "the other customer's Ticket stays hidden");
+    assert.equal(await older.count(), 0, "search has its own result cap");
+    await query.fill("Printer queue fixture");
+    await rows.nth(1).waitFor();
+    const nextId = await rows.nth(1).getAttribute("data-ticket-id");
+    await rows.first().click();
+    await page.getByRole("button", { name: copy("en", "detailNext"), exact: true }).click();
+    await page.waitForFunction(id => new URL(location.href).searchParams.get("ticket") === id, nextId);
+    await page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+
+    await query.fill(reference);
+    await noMatches.waitFor();
+    await page.getByRole("button", { name: copy("en", "customerQueueSearchAllStatuses"), exact: true }).click();
+    await targetRow.waitFor();
+    assert.equal(await status.inputValue(), "all");
+    assert.equal(await query.inputValue(), reference);
+    await targetRow.click();
+    await page.getByRole("heading", { name: target.title, exact: true }).waitFor();
+    await page.goBack();
+    await page.waitForFunction(id => document.activeElement?.getAttribute("data-ticket-id") === id, target._id);
+    assert.equal(await query.inputValue(), reference);
+
+    await query.fill("");
+    await older.waitFor();
+    assert.equal(await rows.count(), 20, "clearing search restores the first browse page");
+    await older.click();
+    await page.waitForFunction(() => document.querySelectorAll("button[data-ticket-id]").length === 40);
+    assert.equal(await targetRow.count(), 0, "the resolved Ticket lies beyond the first 40 rows");
+
+    await query.fill(reference);
+    await targetRow.waitFor();
+    await query.fill("");
+    await older.waitFor();
+    assert.equal(await rows.count(), 40, "clearing search restores the loaded browse pages");
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
 for (const language of ["en", "th"] as const) test(`${language}: staff question and customer reply share one Ticket and preserve Waiting`, async () => {
   const customer = await open("customer", language);
   let staff: Awaited<ReturnType<typeof open>> | undefined;
   const name = `Conversation ${language} ${crypto.randomUUID()}`;
+  const description = "The receipt printer disconnects after its first print. ".repeat(15).trim();
   const question = `Which connection does your printer use? ${language}`;
   const reply = `It uses Bluetooth. ${language}`;
   try {
     await customer.title.fill(name);
+    await customer.page.locator("#customer-ticket-description").fill(description);
     await customer.page.getByRole("button", { name: copy(language, "submitTicket"), exact: true }).click();
     await customer.page.getByRole("dialog").waitFor({ state: "hidden" });
     await customer.page.getByRole("heading", { name, exact: true }).waitFor();
@@ -366,11 +429,22 @@ for (const language of ["en", "th"] as const) test(`${language}: staff question 
     await customer.page.goBack();
     await customer.page.waitForFunction(ticket => !new URL(location.href).searchParams.has("ticket") && document.activeElement?.getAttribute("data-ticket-id") === ticket, id);
     await customerRow.click();
+    const history = customer.page.getByRole("button", { name: copy(language, "ticketConversation"), exact: true });
+    await history.waitFor();
+    assert.equal(await history.getAttribute("aria-expanded"), "false");
+    assert.equal(await customer.page.getByText(copy(language, "noTicketMessages"), { exact: true }).count(), 0);
 
     staff = await open("staff", language);
     await staff.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
     await staff.page.getByPlaceholder(copy(language, "search"), { exact: true }).fill(name);
     await staff.page.locator(`button[data-ticket-id="${id}"]`).click();
+    const beforeWaiting = await convex.query(api.tickets.getTicket, { token: staff.token, id });
+    assert.ok(beforeWaiting);
+    await convex.mutation(api.tickets.updateTicketStatus, { token: staff.token, id, status: "waiting", expectedVersion: beforeWaiting.version });
+    await staff.page.getByRole("button", { name: `${copy(language, "queueResume")} · ${formatTicketNumber(beforeWaiting.ticketNumber, beforeWaiting.projectKey)}`, exact: true }).waitFor();
+    await customer.page.getByText(copy(language, "detailCustomerWaiting"), { exact: true }).waitFor();
+    assert.equal(await customer.page.getByLabel(copy(language, "replyLabel"), { exact: true }).count(), 0);
+    assert.equal(await customer.page.getByText(copy(language, "staffQuestion"), { exact: true }).count(), 0);
     await staff.page.getByRole("button", { name: copy(language, "askCustomer"), exact: true }).click();
     await staff.page.getByLabel(copy(language, "questionLabel"), { exact: true }).fill(question);
     await staff.page.getByRole("button", { name: copy(language, "sendQuestion"), exact: true }).click();
@@ -382,19 +456,41 @@ for (const language of ["en", "th"] as const) test(`${language}: staff question 
     const inbox = customer.page.getByRole("dialog", { name: copy(language, "ticketInbox") });
     await inbox.getByRole("button").filter({ hasText: name }).click();
     await customer.page.getByRole("heading", { name, exact: true }).waitFor();
-    // Opening a waiting Ticket from the inbox expands its conversation.
-    await customer.page.getByText(question, { exact: true }).waitFor();
-    await customer.page.getByLabel(copy(language, "replyLabel"), { exact: true }).fill(reply);
+    const questionText = customer.page.getByText(question, { exact: true });
+    const replyInput = customer.page.getByLabel(copy(language, "replyLabel"), { exact: true });
+    await questionText.waitFor();
+    await replyInput.waitFor();
+    const questionBox = await questionText.boundingBox();
+    const replyBox = await replyInput.boundingBox();
+    const descriptionBox = await customer.page.getByText(description, { exact: true }).boundingBox();
+    assert.ok(questionBox && replyBox && descriptionBox && questionBox.y < replyBox.y && replyBox.y < descriptionBox.y);
+    await replyInput.fill(reply);
+    const beforeResume = await convex.query(api.tickets.getTicket, { token: staff.token, id });
+    assert.ok(beforeResume);
+    await convex.mutation(api.tickets.updateTicketStatus, { token: staff.token, id, status: "in_progress", expectedVersion: beforeResume.version });
+    await customer.page.getByText(copy(language, "threadClosed"), { exact: true }).waitFor();
+    assert.equal(await replyInput.inputValue(), reply);
+    await staff.page.getByRole("button", { name: `${copy(language, "queueResolve")} · ${formatTicketNumber(beforeResume.ticketNumber, beforeResume.projectKey)}`, exact: true }).waitFor();
     const secondQuestion = question + " (2)";
     await staff.page.getByLabel(copy(language, "questionLabel")).fill(secondQuestion);
     await staff.page.getByRole("button", { name: copy(language, "sendQuestion"), exact: true }).click();
     await customer.page.getByText(secondQuestion, { exact: true }).waitFor();
+    assert.equal(await questionText.isVisible(), false);
+    await customer.page.getByRole("button", { name: copy(language, "olderMessages"), exact: true }).click();
+    await questionText.waitFor();
     assert.ok(await customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).isDisabled());
     assert.equal(await customer.page.getByLabel(copy(language, "replyLabel")).inputValue(), reply);
     await customer.page.getByRole("button", { name: copy(language, "answerLatestQuestion") }).click();
     await customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).click();
     await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
+    await replyInput.waitFor({ state: "hidden" });
+    assert.equal(await customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).count(), 0);
+    await customer.page.getByText(reply, { exact: true }).waitFor();
     await staff.page.getByText(reply, { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.click();
+    await customer.page.getByText(copy(language, "replyWithTeam"), { exact: true }).waitFor();
+    assert.equal(await replyInput.count(), 0);
     assert.equal((await convex.query(api.tickets.getTicket, { token: customer.token, id }))?.status, "waiting");
     assert.equal(customer.uploads() + staff.uploads(), 0);
     assert.deepEqual(customer.errors, []);

@@ -1,4 +1,5 @@
 import { TicketInbox } from "./ticket-inbox";
+import { isTicketSearchWithinLimits, type TicketSummary } from "../../../shared/ticket-contracts";
 import { errorCode } from "../../../shared/errors";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
 import { ProductWordmark } from "@/components/product-wordmark";
@@ -16,16 +17,18 @@ import type { Id } from "@convex/_generated/dataModel";
 import { ChevronDown, Loader2, LogOut, Plus, Search, UserRound } from "lucide-react";
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { useCustomerTickets, useWorkspaceTicket } from "./adapter";
+import { useCustomerTickets, useCustomerTicketSearch, useWorkspaceTicket } from "./adapter";
 import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
-import { customerQueue, customerQueueCounts } from "./customer-queue";
+import { customerQueue, customerQueueCounts, type CustomerQueueFilter } from "./customer-queue";
 import { useComposer } from "./use-composer";
 import { CustomerTicketRow } from "./customer-ticket-row";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, useMenuAction,
 } from "@/components/ui/dropdown-menu";
 import { useWorkspaceNavigation } from "./use-workspace-navigation";
+
+const EMPTY_TICKETS: TicketSummary[] = [];
 
 const CustomerAccount = lazy(() => import("@/components/account-dialogs").then(module => ({ default: module.CustomerAccount })));
 
@@ -42,9 +45,9 @@ export function CustomerPortal({ viewer, onLogout }: {
   const ticket = project && (!navigation.project || navigation.project === project.key) ? navigation.ticket : null;
   const selected = useWorkspaceTicket(ticket, projectId);
   const selectedId = selected?._id ?? null;
-  const [visible, setVisible] = useState<{ projectId?: Id<"projects">; ids: Id<"tickets">[] }>({ ids: [] });
-  const visibleIds = visible.projectId === projectId ? visible.ids : [];
-  const setVisibleIds = useCallback((ids: Id<"tickets">[]) => setVisible({ projectId, ids }), [projectId]);
+  const [visible, setVisible] = useState<{ projectId?: Id<"projects">; ids?: Id<"tickets">[] }>({});
+  const visibleIds = visible.projectId === projectId ? visible.ids ?? [] : [];
+  const setVisibleIds = useCallback((ids: Id<"tickets">[] | undefined) => setVisible({ projectId, ids }), [projectId]);
   const previousSelection = useRef(ticket);
   const focusTicket = useRef<Id<"tickets"> | null>(null);
   if (selectedId) focusTicket.current = selectedId;
@@ -119,10 +122,7 @@ export function CustomerPortal({ viewer, onLogout }: {
       </Suspense>
     </Dialog>
     <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
-      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
-        <span>{t("recoveryCodeNeeded")}</span>
-        <Button className="min-h-11 rounded-lg" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
-      </div> : null}
+      {viewer.needsRecoveryCode && !ticket && <RecoveryReminder onOpen={() => setAccountOpen(true)} />}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
         <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
         <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
@@ -135,13 +135,14 @@ export function CustomerPortal({ viewer, onLogout }: {
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
           <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
             ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
-            onFilter={navigation.setFilter} onQuery={navigation.setQuery} onShowAll={() => navigation.setFilter("all", true)} onVisibleIds={setVisibleIds} />
+            onFilter={navigation.setFilter} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
         </ProjectTicketsBoundary>
         {project ? <CustomerTicketDialog ticket={selected} ticketId={ticket} onClose={navigation.closeTicket}
-          inResults={selectedId && visible.projectId === projectId ? visibleIds.includes(selectedId) : undefined}
+          inResults={selectedId && visible.projectId === projectId ? visible.ids?.includes(selectedId) : undefined}
           inline initialSection={navigation.section} onPrevious={previousId ? () => navigation.changeTicket(previousId) : undefined}
           onNext={nextId ? () => navigation.changeTicket(nextId) : undefined} /> : null}
       </div>
+      {viewer.needsRecoveryCode && ticket && <RecoveryReminder className="mt-4" onOpen={() => setAccountOpen(true)} />}
     </div>
     <Dialog open={composer.open} mobileFullScreen initialFocus={() => document.getElementById("customer-ticket-title")} onOpenChange={composer.setOpen}
       title={t("newTicket")} description={composer.project ? `${composer.project.name} (${composer.project.key})` : t("customerPortalSubtitle")}>
@@ -170,40 +171,66 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
   render() { return this.state.denied ? <ProjectUnavailable /> : this.props.children; }
 }
 
+function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
+  const { t } = useI18n();
+  return <div role="status" className={cn("mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100", className)}>
+    <span>{t("recoveryCodeNeeded")}</span>
+    <Button className="min-h-11 rounded-lg" onClick={onOpen}>{t("recoveryCodeCreate")}</Button>
+  </div>;
+}
+
 function ProjectUnavailable() {
   const { t } = useI18n();
   return <p role="alert" className="aurora-panel p-4 text-sm text-foreground">{t("projectMissing")}</p>;
 }
 
-function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onQuery, onShowAll, onVisibleIds }: {
+function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onQuery, onVisibleIds }: {
   project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
   selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string) => void; onQuery: (query: string) => void;
-  onShowAll: () => void;
-  onVisibleIds: (ids: Id<"tickets">[]) => void;
+  onVisibleIds: (ids: Id<"tickets">[] | undefined) => void;
 }) {
   const { t } = useI18n();
   const page = useCustomerTickets(project?._id);
   const tickets = page.results;
   const counts = useMemo(() => customerQueueCounts(tickets), [tickets]);
-  const visibleTickets = useMemo(() => customerQueue(tickets, filter, query), [tickets, filter, query]);
-  useEffect(() => { onVisibleIds(visibleTickets.map(item => item._id)); }, [visibleTickets, onVisibleIds]);
-  const options = [
+  const statusScope = filter === "all" || filter === "waiting" || filter === "done" ? filter : "active";
+  const browseTickets = useMemo(() => customerQueue(tickets, statusScope), [tickets, statusScope]);
+  const text = query.trim();
+  const searching = text.length > 0;
+  const invalidSearch = !isTicketSearchWithinLimits(text);
+  const [settledText, setSettledText] = useState(text);
+  useEffect(() => {
+    if (text === settledText) return;
+    const timer = window.setTimeout(() => setSettledText(text), 300);
+    return () => window.clearTimeout(timer);
+  }, [text, settledText]);
+  const search = useCustomerTicketSearch(project?._id, text === settledText && !invalidSearch ? text : "", statusScope);
+  const pending = searching && !invalidSearch && search === undefined;
+  const visibleTickets = searching ? search?.matches ?? EMPTY_TICKETS : browseTickets;
+  const loaded = page.status !== "LoadingFirstPage";
+  useEffect(() => {
+    onVisibleIds(pending || (!searching && !loaded) ? undefined : visibleTickets.map(item => item._id));
+  }, [pending, searching, loaded, visibleTickets, onVisibleIds]);
+  const options: { value: CustomerQueueFilter; label: string; count: number }[] = [
     { value: "active", label: t("customerQueueAllActive"), count: counts.active },
     { value: "waiting", label: t("customerQueueWaiting"), count: counts.waiting },
     { value: "done", label: t("resolvedTickets"), count: counts.done },
     { value: "all", label: t("allTickets"), count: counts.all },
   ];
-  const loaded = page.status !== "LoadingFirstPage";
+  const countLabel = searching
+    ? t(search?.hasMore ? "searchLoaded" : "searchMatches", { count: visibleTickets.length })
+    : t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length });
   const [announcement, setAnnouncement] = useState("");
+  const statusSelect = useRef<HTMLSelectElement>(null);
   useEffect(() => {
-    if (!loaded || !project) return;
-    const timer = window.setTimeout(() => setAnnouncement(t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })), 250);
+    if (!loaded || !project || pending || invalidSearch) return;
+    const timer = window.setTimeout(() => setAnnouncement(countLabel), 250);
     return () => window.clearTimeout(timer);
-  }, [loaded, project, visibleTickets.length, tickets.length, t]);
+  }, [loaded, project, pending, invalidSearch, countLabel]);
   if (project === null) return <NoProjects />;
   if (!project || !loaded) return <div className="aurora-panel grid min-h-48 place-items-center" role="status"><Loader2 className="size-6 animate-spin text-primary" /><span className="sr-only">{t("syncingTickets")}</span></div>;
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
-    <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
+    <span className="sr-only" role="status" aria-live="polite">{pending || invalidSearch ? "" : announcement}</span>
     <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
       <label className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto">
         <span>{t("customerQueueSearch")}</span>
@@ -212,20 +239,22 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
           <Input className="min-h-11 rounded-lg pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
         </div>
       </label>
-      <label className="grid gap-1 text-sm font-medium text-foreground">
-        <span>{t("ticketStatus")}</span>
-        <select className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={filter} onChange={event => onFilter(event.target.value)}>
-          {options.map(option => <option key={option.value} value={option.value}>{option.label}{loaded ? ` (${option.count})` : ""}</option>)}
+      <div className="grid gap-1 text-sm font-medium text-foreground">
+        <label htmlFor="customer-ticket-status">{t("ticketStatus")}</label>
+        <select id="customer-ticket-status" ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
+          {options.map(option => <option key={option.value} value={option.value}>{option.label}{!searching ? ` (${option.count})` : ""}</option>)}
         </select>
-      </label>
+      </div>
     </div>
-    {page.status !== "Exhausted" ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p> : null}
-    {tickets.length === 0 && page.status === "Exhausted" && !query.trim() && (filter === "all" || filter === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
+    {!searching && page.status !== "Exhausted" ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p> : null}
+    {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
+      : pending ? <div className="ticket-surface flex items-center gap-2 p-5 text-sm" role="status"><Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />{t("syncingTickets")}</div>
+      : !searching && tickets.length === 0 && page.status === "Exhausted" && (statusScope === "all" || statusScope === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
       : <div>
-        <p className="px-1 pb-2 text-xs text-muted-foreground">{t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length })}</p>
+        <p className="px-1 pb-2 text-xs text-muted-foreground">{countLabel}</p>
         {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
-          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t("customerQueueEmpty")}</p><Button variant="outline" className="min-h-11 rounded-lg" onClick={onShowAll}>{t("showAllTickets")}</Button></div>}
+          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t(searching ? "customerQueueSearchEmpty" : "customerQueueEmpty")}</p>{statusScope !== "all" && <Button variant="outline" className="min-h-11 rounded-lg" onClick={() => { statusSelect.current?.focus(); onFilter("all"); }}>{t(searching ? "customerQueueSearchAllStatuses" : "showAllTickets")}</Button>}</div>}
       </div>}
-    {page.status !== "Exhausted" && project ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
+    {!searching && page.status !== "Exhausted" ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
   </section>;
 }
