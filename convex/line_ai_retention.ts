@@ -26,7 +26,9 @@ export const expire = internalJobMutation({
       }
       await ctx.db.patch(row._id, {
         text: undefined, eraseTextAt: undefined, leaseId: undefined, leaseExpiresAt: undefined,
-        state: row.state === "pending" ? (row.attempt ? "unknown" : "suppressed") : row.state,
+        state: row.state === "pending"
+          ? ((row.hadUncertainAttempt ?? row.attempt > 0) || row.leaseId ? "unknown" : "suppressed")
+          : row.state,
       });
     }
     for (const row of [...drafts, ...replies, ...usage]) await ctx.db.delete(row._id);

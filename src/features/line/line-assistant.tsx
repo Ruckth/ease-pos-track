@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProjectSummary } from "@/lib/types";
 import {
-  useLineAiReviewActions, useLineAiReviews, useLineAiSettings, useLineAiSetupActions, type LineAiDraft,
+  useLineAiReplies, useLineAiReviewActions, useLineAiReviews, useLineAiSettings, useLineAiSetupActions, type LineAiDraft,
 } from "./adapters/convex";
 
 const providerNames = {
@@ -27,6 +27,7 @@ const errors: Record<string, string> = {
   LINE_AI_NOT_CONFIGURED: "Test and save an API key before resuming.",
   LINE_AI_CONNECTION_CHANGED: "The connection changed while you were testing it. Check the current connection and try again.",
   LINE_AI_DRAFT_UNAVAILABLE: "This suggestion changed or expired. Open the current suggestion to continue.",
+  LINE_AI_APPROVAL_CONFLICT: "This suggestion was already handled with a different decision. Check recent replies.",
   LINE_AI_TICKET_NOT_LINKED: "Choose a clarification reply when the Ticket is unavailable in this LINE chat.",
   LINE_AI_CREATE_DISABLED: "Ticket creation is disabled for this chat.",
   LINE_AI_REPLY_REQUIRED: "Enter a reply.",
@@ -37,6 +38,17 @@ const errors: Record<string, string> = {
   REQUIRED_TICKET: "Enter a Ticket title.",
   TITLE_TOO_LONG: "Shorten the Ticket title.",
   DESCRIPTION_TOO_LONG: "Shorten the Ticket description.",
+};
+
+const scanWarnings: Record<string, string> = {
+  LINE_AI_ATTACHMENT_UNAVAILABLE: "A file could not be read. Check the chat before continuing.",
+  LINE_AI_KEY_REJECTED: "The provider rejected the Project API key.",
+  LINE_AI_KEY_UNREADABLE: "The saved Project API key could not be opened. Ask an Owner to reconnect it.",
+  LINE_AI_QUOTA_EXCEEDED: "The provider reported a billing or quota limit.",
+  LINE_AI_RATE_LIMITED: "The provider rate-limited this scan.",
+  LINE_AI_DAILY_LIMIT: "This Project reached its daily scan limit.",
+  LINE_AI_REQUEST_REJECTED: "The provider declined this scan.",
+  LINE_AI_RESPONSE_INVALID: "The provider returned a response that could not be used.",
 };
 
 function useLineAiTask() {
@@ -112,6 +124,7 @@ export function LineAiSetup({ projectId, settings, owner }: {
 const replyStates = {
   pending: "Reply queued", accepted: "Reply accepted by LINE", unknown: "Reply status unknown",
   rejected: "Reply rejected by LINE", suppressed: "Reply paused",
+  limited: "LINE reached a limit. Check the rate and message quota before retrying.",
 };
 
 function ReviewSuggestion({ draft, onClose }: { draft: LineAiDraft; onClose: () => void }) {
@@ -142,8 +155,7 @@ function ReviewSuggestion({ draft, onClose }: { draft: LineAiDraft; onClose: () 
   return <form className="grid gap-3" onSubmit={submit}>
     <p className="whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-sm">{draft.text}</p>
     {draft.warning && <p className="text-sm text-muted-foreground">
-      {draft.warning === "LINE_AI_ATTACHMENT_UNAVAILABLE" ? "A file could not be read. Check the chat before continuing."
-        : "A model suggestion was unavailable. Review the message and prepare a response."}
+      {scanWarnings[draft.warning] ?? "A model suggestion was unavailable."} Review the message and prepare a response.
     </p>}
     {!!draft.suggestion.evidence.length && <ul className="list-disc space-y-1 break-words pl-5 text-sm text-muted-foreground">
       {draft.suggestion.evidence.map((item, index) => <li key={index}>{item}</li>)}
@@ -184,14 +196,18 @@ function ReviewSuggestion({ draft, onClose }: { draft: LineAiDraft; onClose: () 
 }
 
 export function LineAiReviews({ projectId }: { projectId: ProjectSummary["_id"] }) {
-  const items = useLineAiReviews(projectId);
+  const { results, status, loadMore } = useLineAiReviews(projectId);
+  const replies = useLineAiReplies(projectId);
+  const drafts = results.filter(item => item.state === "review");
+  const unavailableCount = results.length - drafts.length;
   const { retryReply } = useLineAiReviewActions();
   const { busy, error, run } = useLineAiTask();
   const [openId, setOpenId] = useState<LineAiDraft["_id"]>();
   return <section className="grid gap-3 rounded-lg border p-4">
     <h3 className="font-semibold">LINE Ticket suggestions</h3>
-    {!items?.drafts.length && <p className="text-sm text-muted-foreground">{items ? "No suggestions to review." : "Loading suggestions…"}</p>}
-    {items?.drafts.map(draft => (
+    {status === "LoadingFirstPage" && <p className="text-sm text-muted-foreground">Loading suggestions…</p>}
+    {status === "Exhausted" && !results.length && <p className="text-sm text-muted-foreground">No suggestions to review.</p>}
+    {drafts.map(draft => (
       <div key={draft._id} className="grid gap-3 border-t pt-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="min-w-0 break-words text-sm">{draft.chatName} · {draft.suggestion.title ?? "Review message"}</span>
@@ -203,9 +219,17 @@ export function LineAiReviews({ projectId }: { projectId: ProjectSummary["_id"] 
         {openId === draft._id && <ReviewSuggestion key={draft.target?.version ?? "new"} draft={draft} onClose={() => setOpenId(undefined)} />}
       </div>
     ))}
-    {!!items?.replies.length && <details className="border-t pt-3">
+    {unavailableCount > 0 && <p className="text-sm text-muted-foreground" role="status">
+      {unavailableCount === 1 ? "One suggestion is" : `${unavailableCount} suggestions are`} unavailable because access changed or the request expired.
+    </p>}
+    {(status === "CanLoadMore" || status === "LoadingMore") &&
+      <Button type="button" size="sm" variant="outline" className="justify-self-start"
+        disabled={status === "LoadingMore"} onClick={() => loadMore(25)}>
+        {status === "LoadingMore" ? "Loading…" : "Load more suggestions"}
+      </Button>}
+    {!!replies?.length && <details className="border-t pt-3">
       <summary className="cursor-pointer text-sm font-medium">Recent replies</summary>
-      <ul className="mt-2 grid gap-2">{items.replies.map(reply => <li key={reply._id}
+      <ul className="mt-2 grid gap-2">{replies.map(reply => <li key={reply._id}
         className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span>{reply.number ? `${reply.number} · ` : ""}{replyStates[reply.state]}</span>
         {reply.canRetry && <Button type="button" size="sm" variant="outline" disabled={busy}

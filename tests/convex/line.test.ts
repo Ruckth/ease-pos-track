@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import { fixtures, identityTest } from "./identity-harness";
 import { modules } from "./modules";
+import { currentLineLifecycle } from "../../convex/domain/line_ai_review";
 import { sealLineSecret } from "../../convex/line_crypto";
 
 const fake = vi.hoisted(() => ({
@@ -112,7 +113,7 @@ test("a Project can manage multiple bots and each bot lists only its own groups"
   expect(bots[0].webhookSlug).not.toBe(bots[1].webhookSlug);
   const otherGroup = { ...group("join", now, "second-group"), source: { type: "group", groupId: "Cother" } };
   expect((await f.send([group(), otherGroup])).status).toBe(200);
-  const secondBotGroup = { ...group("join", now, "second-bot-group"), source: { type: "group", groupId: "Csecond" } };
+  const secondBotGroup = { ...group("join", now, "second-group"), source: { type: "group", groupId: "Csecond" } };
   expect((await f.send([secondBotGroup], "Usecond", "second-secret", bots[1].webhookSlug)).status).toBe(200);
   await f.processEvents();
   const chats = async (botId: typeof f.botId) => {
@@ -504,4 +505,20 @@ test("a removal keeps LINE's clock, so a rejoin still queued afterwards is enrol
   await f.send([group("join", now + 5, "rejoin")]);
   await f.processEvents();
   expect((await f.rows()).chats[0]).toMatchObject({ state: "pending", joinedAt: now + 5 });
+});
+
+test("direct authority follows the signed clock across unfollow, follow and delayed redelivery", async () => {
+  const f = await fixture();
+  const lifecycle = () => f.t.run(async ctx => currentLineLifecycle(ctx, (await ctx.db.query("lineChats").first())!));
+  await f.send([direct("follow")]);
+  await f.processEvents();
+  expect(await lifecycle()).toBe(true);
+  await f.send([direct("unfollow")]);
+  expect(await lifecycle()).toBe(false);
+  const follow = { ...direct("follow", now + 2), webhookEventId: "follow-again" };
+  await f.send([follow]);
+  expect(await lifecycle()).toBe(false);
+  await f.processEvents();
+  await f.send([direct("unfollow"), follow, { ...direct("unfollow", now + 1), webhookEventId: "late" }]);
+  expect(await lifecycle()).toBe(true);
 });

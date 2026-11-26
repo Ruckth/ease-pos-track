@@ -1,8 +1,8 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { formatTicketNumber, parseTicketReference } from "../../shared/ticket-numbers";
-import { admittedLineProject } from "./line";
-import { lineAiReleaseEnabled, readLineAiConnection } from "./line_ai_settings";
+import { admittedLineProject, currentAssistantOptIn } from "./line";
+import { lineAiReleaseEnabled, matchesLineAiAuthorization, readLineAiConnection } from "./line_ai_settings";
 
 type DbContext = Pick<QueryCtx, "db">;
 type Enrollment = Pick<Doc<"lineAiReplies">, "botId" | "chatId" | "projectId" | "joinedAt">
@@ -11,6 +11,20 @@ type Enrollment = Pick<Doc<"lineAiReplies">, "botId" | "chatId" | "projectId" | 
 export const replyFreshnessMs = 6 * 60 * 60_000;
 export const replyHistoryMs = 7 * 24 * 60 * 60_000;
 export const replyAttempts = 3;
+
+// Signed lifecycle records become authoritative at accept, even if a metadata job
+// has not run or has exhausted its retries. A leave wins a same-timestamp tie.
+export async function currentLineLifecycle(ctx: DbContext, chat: Doc<"lineChats">) {
+  const direct = chat.kind === "user";
+  const latest = (type: "follow" | "unfollow" | "join" | "leave") =>
+    ctx.db.query("lineInboundEvents").withIndex("by_chat_type_timestamp", q =>
+      q.eq("botId", chat.botId).eq("lineChatId", chat.lineChatId).eq("type", type)
+        .gte("timestamp", chat.lastEventAt)).order("desc").first();
+  const [join, leave] = await Promise.all([
+    latest(direct ? "follow" : "join"), latest(direct ? "unfollow" : "leave"),
+  ]);
+  return !leave && (!join || join.timestamp <= chat.joinedAt);
+}
 
 /** The same enrollment owns analysis, approval and outbound delivery. */
 export async function assistantEnrollment(ctx: DbContext, scope: Enrollment) {
@@ -22,13 +36,28 @@ export async function assistantEnrollment(ctx: DbContext, scope: Enrollment) {
     readLineAiConnection(ctx, scope.projectId),
   ]);
   if (!project || !bot || bot.state !== "active" || bot.projectId !== project._id
-    || !chat || chat.state !== "active" || chat.assistantEnabled !== true || chat.botId !== bot._id
+    || !chat || chat.state !== "active" || chat.botId !== bot._id
     || chat.projectId !== project._id || chat.joinedAt !== scope.joinedAt || !connection?.enabled || !connection.keyCipher) return null;
+  if (!currentAssistantOptIn(chat, bot.assistantRevision ?? 0, project.inboxVisibilityVersion ?? 0)) return null;
   if ((scope.chatRevision !== undefined && (chat.assistantRevision ?? 0) !== scope.chatRevision)
     || (scope.botRevision !== undefined && (bot.assistantRevision ?? 0) !== scope.botRevision)
     || (scope.projectVisibilityVersion !== undefined && (project.inboxVisibilityVersion ?? 0) !== scope.projectVisibilityVersion)
     || (scope.connectionRevision !== undefined && connection.revision !== scope.connectionRevision)) return null;
+  if (!await currentLineLifecycle(ctx, chat)) return null;
   return { project, bot, chat, connection };
+}
+
+export async function currentReplyDestination(ctx: DbContext, row: Doc<"lineAiReplies">) {
+  const enrollment = await assistantEnrollment(ctx, { ...row, connectionRevision: undefined });
+  if (!enrollment || !matchesLineAiAuthorization(enrollment.connection, row)) return null;
+  const author = await ctx.db.get(row.authorStaffId);
+  if (author?.status !== "active") return null;
+  if (row.ticketId) {
+    const ticket = await ctx.db.get(row.ticketId);
+    if (!ticket || ticket.projectId !== enrollment.project._id || ticket.lifecycle !== "active"
+      || (ticket.inboxVisibilityVersion ?? 0) !== row.ticketVisibilityVersion) return null;
+  }
+  return { to: enrollment.chat.lineChatId, tokenCipher: enrollment.bot.tokenCipher };
 }
 
 export async function linkedTicket(

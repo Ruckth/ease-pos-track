@@ -266,6 +266,8 @@ async function setup() {
     return t.run(async ({ db }) => ({
       intakes: await db.query("lineAiIntakes").collect(),
       fileLinks: await db.query("lineAiIntakeFiles").collect(),
+      recentFiles: await db.query("lineAiRecentFiles").collect(),
+      drafts: await db.query("lineAiDrafts").collect(),
       aiEvents: await db.query("lineAiEvents").collect(),
       unsends: await db.query("lineAiUnsends").collect(),
       inboundEvents: await db.query("lineInboundEvents").collect(),
@@ -278,7 +280,7 @@ async function setup() {
 
 test("LINE_AI_ENABLED must be strictly 'true', and named pilot / archived project / disabled bot block intake", async () => {
   const f = await setup();
-  await f.enrollGroup("Cgroup", { approve: true, assistantEnabled: true });
+  const chat = await f.enrollGroup("Cgroup", { approve: true, assistantEnabled: true });
 
   // Non-'true' values must reject assistant intake completely.
   for (const flag of [undefined, "", "false", "TRUE", "1", "yes"]) {
@@ -303,8 +305,13 @@ test("LINE_AI_ENABLED must be strictly 'true', and named pilot / archived projec
   expect((await f.send([groupMention({ webhookEventId: "evt-archived", messageId: "msg-ar", text: "@Bot help" })])).status).toBe(200);
   await f.t.mutation(internal.projects.setArchived, { projectId: f.projectId, archived: false });
   expect((await f.rows()).intakes).toEqual([]);
+  await f.t.mutation(api.line.setAssistantEnabled, { token: f.token, chatId: chat._id, joinedAt: chat.joinedAt, enabled: true });
 
-  // Named pilot blocks both HTTP webhook and direct accept mutation even when LINE_AI_ENABLED === "true".
+  expect((await f.send([groupMention({
+    webhookEventId: "evt-legacy", messageId: "msg-legacy", text: "@Bot legacy", timestamp: now + 100,
+  })])).status).toBe(200);
+
+  // Named pilot blocks both HTTP webhook and direct accept mutation even for an existing legacy intake.
   const epoch = "a".repeat(64);
   const manifestDigest = "b".repeat(64);
   await f.t.run(({ db }) => db.insert("pilotRelease", {
@@ -326,6 +333,10 @@ test("LINE_AI_ENABLED must be strictly 'true', and named pilot / archived projec
   })) vi.stubEnv(key, value);
 
   expect((await f.send([groupMention({ webhookEventId: "evt-pilot-http", messageId: "msg-pilot-http", text: "@Bot pilot" })])).status).toBe(404);
+  vi.stubEnv("LINE_AI_ENABLED", "false");
+  expect((await f.send([unsendEvent({
+    webhookEventId: "evt-pilot-unsend", messageId: "msg-legacy", timestamp: now + 200,
+  })])).status).toBe(404);
   const bot = await f.botDoc();
   const status = await f.t.mutation(internal.line_webhook.accept, {
     botId: f.botId,
@@ -334,18 +345,81 @@ test("LINE_AI_ENABLED must be strictly 'true', and named pilot / archived projec
     verifiedSecretCipher: bot.secretCipher,
     events: [],
     assistantEvents: [{
-      eventType: "text",
+      eventType: "unsend",
       webhookEventId: "evt-pilot-direct",
-      timestamp: now + 100,
+      timestamp: now + 200,
       kind: "group",
       lineChatId: "Cgroup",
-      messageId: "msg-pilot-direct",
+      messageId: "msg-legacy",
       senderDigest: await opaqueLineSenderDigest(f.botId, "Cgroup", "Ualice"),
-      text: "pilot bypass attempt",
     }],
   });
   expect(status).toBe(200);
-  expect((await f.rows()).intakes).toEqual([]);
+  expect((await f.rows()).intakes).toMatchObject([{ messageId: "msg-legacy", state: "pending", text: "legacy" }]);
+});
+
+test("signed unsends scrub drafts and invalidate leases with intake and scheduling paused", async () => {
+  const f = await setup();
+  await f.enrollGroup("Cgroup", { assistantEnabled: true });
+  const trigger = (id: string, timestamp: number) =>
+    groupMention({ webhookEventId: `e-${id}`, messageId: id, text: "@Bot private request", timestamp });
+  const file = (id: string, timestamp: number, userId = "Ualice") =>
+    fileMessage({ userId, webhookEventId: `e-${id}`, messageId: id, fileType: "image", timestamp });
+  const unsend = (id: string, userId = "Ualice") =>
+    unsendEvent({ userId, webhookEventId: `u-${id}`, messageId: id, timestamp: now + 600 });
+
+  expect((await f.send([
+    trigger("draft-trigger", now + 100),
+    trigger("draft-file-trigger", now + 200), file("draft-file", now + 250),
+    trigger("leased-trigger", now + 300), file("leased-file", now + 350),
+    file("buffered-file", now + 400, "Ubob"),
+  ])).status).toBe(200);
+  const { intakes } = await f.rows();
+  const leased = intakes.find(row => row.messageId === "leased-trigger")!;
+  await f.t.run(async ({ db }) => {
+    await db.patch(leased._id, { state: "processing", leaseId: "synthetic-lease", leaseExpiresAt: now + 60_000 });
+    for (const intake of intakes.filter(row => row._id !== leased._id)) {
+      await db.patch(intake._id, { state: "draft" });
+      await db.insert("lineAiDrafts", {
+        intakeId: intake._id, projectId: intake.projectId, state: "review",
+        suggestion: { intent: "create", title: "Derived title", description: "Derived detail", ticketNumber: null, reply: null, evidence: [] },
+        connectionRevision: intake.connectionRevision, createdAt: now, expiresAt: intake.expiresAt,
+      });
+    }
+  });
+  const scheduledCount = () => f.t.run(async ({ db }) =>
+    (await db.system.query("_scheduled_functions").collect()).filter(job => job.name.includes("line_ai_processing")).length,
+  );
+  const before = await scheduledCount();
+  vi.stubEnv("LINE_AI_ENABLED", "false");
+
+  expect((await f.send([unsend("draft-trigger")], { secret: "other-secret" })).status).toBe(401);
+  expect((await f.rows()).drafts).toHaveLength(2);
+  const withdrawn = [unsend("draft-trigger"), unsend("draft-file"), unsend("leased-file"), unsend("buffered-file", "Ubob")];
+  expect((await f.send([
+    ...withdrawn, unsend("unknown"), trigger("off-trigger", now + 700), file("off-file", now + 750),
+  ])).status).toBe(200);
+  expect((await f.send(withdrawn)).status).toBe(200);
+  expect(await scheduledCount()).toBe(before);
+
+  const rows = await f.rows();
+  expect(rows.intakes.find(row => row.messageId === "draft-trigger")).toMatchObject({ state: "ignored", text: "", files: [] });
+  expect(rows.intakes.find(row => row.messageId === "draft-file-trigger")).toMatchObject({ state: "pending", files: [] });
+  const previouslyLeased = rows.intakes.find(row => row._id === leased._id)!;
+  expect(previouslyLeased).toMatchObject({ state: "pending", files: [] });
+  expect(previouslyLeased.leaseId).toBeUndefined();
+  expect(previouslyLeased.leaseExpiresAt).toBeUndefined();
+  expect(rows).toMatchObject({ drafts: [], recentFiles: [], fileLinks: [] });
+  expect(rows.intakes).toHaveLength(3);
+  expect(rows.unsends).toHaveLength(4);
+
+  vi.stubEnv("LINE_AI_ENABLED", "true");
+  expect((await f.send([
+    groupMention({ userId: "Ubob", webhookEventId: "e-new-trigger", messageId: "new-trigger", text: "@Bot New request", timestamp: now + 390 }),
+    trigger("draft-trigger", now + 100), file("buffered-file", now + 400, "Ubob"),
+  ])).status).toBe(200);
+  expect((await f.rows()).intakes.find(row => row.messageId === "new-trigger")?.files).toEqual([]);
+  expect((await f.rows()).drafts).toEqual([]);
 });
 
 test("only active, explicitly opted-in chats accept group bot mentions and 1:1 direct requests", async () => {
@@ -423,12 +497,109 @@ test("only active, explicitly opted-in chats accept group bot mentions and 1:1 d
   expect(dmIntake.senderDigest).toBe(await opaqueLineSenderDigest(f.botId, "UdmOpted", "UdmOpted"));
 });
 
+test("reordered files attach to the latest matching trigger before processing, with a two-file cap", async () => {
+  const f = await setup();
+  await f.enrollGroup("Cgroup", { assistantEnabled: true });
+  await f.enrollGroup("Cother", { assistantEnabled: true });
+  const trigger = (id: string, timestamp: number) =>
+    groupMention({ webhookEventId: `e-${id}`, messageId: id, text: "@Bot Need help", timestamp });
+  const file = (id: string, timestamp: number, scope?: { chatId?: string; userId?: string }) =>
+    fileMessage({ ...scope, webhookEventId: `e-${id}`, messageId: id, fileType: "file", timestamp });
+
+  expect((await f.send([trigger("older-trigger", now + 100)])).status).toBe(200);
+  const first = file("reordered-1", now + 300);
+  const second = file("reordered-2", now + 310);
+  expect((await f.send([
+    file("other-chat", now + 250, { chatId: "Cother" }),
+    file("other-sender", now + 260, { userId: "Ubob" }),
+    file("reordered-3", now + 320), first, second, first,
+  ])).status).toBe(200);
+  const before = await f.rows();
+  expect(before.recentFiles).toHaveLength(5);
+  expect(before.intakes[0].files.map(ref => ref.messageId)).toEqual(["reordered-3", "reordered-1"]);
+  expect(JSON.stringify(before.recentFiles)).not.toMatch(/Ualice|secret-filename|fileSize/);
+
+  expect((await f.send([trigger("delayed-trigger", now + 200)])).status).toBe(200);
+  expect((await f.send([
+    first, second, trigger("superseded-trigger", now + 180), file("older-only", now + 150),
+  ])).status).toBe(200);
+  const { intakes, fileLinks } = await f.rows();
+  const delayed = intakes.find(row => row.messageId === "delayed-trigger")!;
+  expect(delayed.files).toEqual([
+    { messageId: "reordered-1", type: "file" },
+    { messageId: "reordered-2", type: "file" },
+  ]);
+  expect(intakes.find(row => row.messageId === "older-trigger")?.files).toEqual([{ messageId: "older-only", type: "file" }]);
+  expect(intakes.find(row => row.messageId === "superseded-trigger")?.files).toEqual([]);
+  expect(fileLinks.some(row => row.messageId === "reordered-3")).toBe(false);
+  expect(fileLinks.filter(row => row.intakeId === delayed._id).map(row => row.messageId).sort()).toEqual(["reordered-1", "reordered-2"]);
+});
+
+test("reordered files bypass closed context and cannot cross enrollment or assistant revisions", async () => {
+  const f = await setup();
+  const chat = await f.enrollGroup("Cgroup", { assistantEnabled: true });
+  const trigger = (id: string, timestamp: number) =>
+    groupMention({ webhookEventId: `e-${id}`, messageId: id, text: "@Bot Need help", timestamp });
+  const file = (id: string, timestamp: number, userId = "Ualice") =>
+    fileMessage({ userId, webhookEventId: `e-${id}`, messageId: id, fileType: "image", timestamp });
+  const withdraw = (id: string, timestamp: number) =>
+    unsendEvent({ userId: "Ualice", webhookEventId: `u-${id}`, messageId: id, timestamp });
+
+  expect((await f.send([trigger("unsent-trigger", now + 100), withdraw("unsent-trigger", now + 200)])).status).toBe(200);
+  expect((await f.send([
+    file("survives", now + 400), file("withdrawn", now + 450), withdraw("withdrawn", now + 500),
+  ])).status).toBe(200);
+  expect((await f.send([trigger("too-old", now + 50), trigger("current-trigger", now + 350)])).status).toBe(200);
+  const after = await f.rows();
+  expect(after.intakes.find(row => row.messageId === "too-old")?.files).toEqual([]);
+  expect(after.intakes.find(row => row.messageId === "unsent-trigger")).toMatchObject({ state: "ignored", files: [] });
+  expect(after.intakes.find(row => row.messageId === "current-trigger")?.files).toEqual([{ messageId: "survives", type: "image" }]);
+
+  // Delayed reference is newer than the event-time opt-in cutoff but was received under the old revision.
+  expect((await f.send([file("before-revision", now + 900, "Ubob")])).status).toBe(200);
+  await f.t.run(({ db }) => db.patch(chat._id, { assistantRevision: (chat.assistantRevision ?? 0) + 1 }));
+  expect((await f.send([groupMention({
+    userId: "Ubob", webhookEventId: "e-after-revision", messageId: "after-revision", text: "@Bot New", timestamp: now + 800,
+  })])).status).toBe(200);
+
+  expect((await f.send([file("old-enrollment", now + 1_200, "Ucara")])).status).toBe(200);
+  await f.t.run(({ db }) => db.patch(chat._id, { joinedAt: now + 1_000 }));
+  expect((await f.send([groupMention({
+    userId: "Ucara", webhookEventId: "e-new-enrollment", messageId: "new-enrollment", text: "@Bot New", timestamp: now + 1_100,
+  })])).status).toBe(200);
+  const { intakes, recentFiles } = await f.rows();
+  expect(recentFiles.map(row => row.messageId)).toEqual(["survives", "before-revision", "old-enrollment"]);
+  expect(intakes.find(row => row.messageId === "after-revision")?.files).toEqual([]);
+  expect(intakes.find(row => row.messageId === "new-enrollment")?.files).toEqual([]);
+});
+
+test("reordered references occupy a bounded buffer and expire without attaching", async () => {
+  const f = await setup();
+  await f.enrollGroup("Cgroup", { assistantEnabled: true });
+  const files = Array.from({ length: 20 }, (_, index) => fileMessage({
+    webhookEventId: `e-orphan-${index}`, messageId: `orphan-${index}`, timestamp: now + 200, fileType: "image",
+  }));
+  expect((await f.send(files)).status).toBe(200);
+  expect(await f.rows()).toMatchObject({ recentFiles: Array.from({ length: 8 }, () => ({ messageTimestamp: now + 200 })), intakes: [], aiEvents: [] });
+
+  const expiresAt = Math.max(...(await f.rows()).recentFiles.map(row => row.expiresAt));
+  vi.setSystemTime(expiresAt);
+  expect((await f.send([
+    groupMention({ webhookEventId: "e-delayed", messageId: "delayed", text: "@Bot delayed request", timestamp: now + 100 }),
+  ])).status).toBe(200);
+  expect((await f.rows()).intakes[0].files).toEqual([]);
+  expect(await f.t.mutation(internal.line_webhook.cleanupExpiredAiIntake, { limit: 1 })).toMatchObject({ deletedRecentFiles: 1 });
+  expect((await f.rows()).recentFiles).toHaveLength(7);
+  expect(await f.t.mutation(internal.line_webhook.cleanupExpiredAiIntake, { limit: 20 })).toMatchObject({ deletedRecentFiles: 7 });
+  expect((await f.rows()).recentFiles).toEqual([]);
+});
+
 test("follow-up files attach within window up to max 2 and reject pre-trigger, cross-sender, cross-chat, outside-window and stale enrollment", async () => {
   const f = await setup();
   const chatA = await f.enrollGroup("CgroupA", { approve: true, assistantEnabled: true, timestamp: now });
   await f.enrollGroup("CgroupB", { approve: true, assistantEnabled: true, timestamp: now });
 
-  // Pre-trigger file before trigger arrives is rejected.
+  // A file whose LINE timestamp precedes the trigger must not attach.
   expect((await f.send([
     fileMessage({ chatId: "CgroupA", userId: "Ualice", webhookEventId: "f-pre-1", messageId: "mf-pre-1", fileType: "image", timestamp: now + 50 }),
   ])).status).toBe(200);
@@ -667,6 +838,18 @@ test("setup state returns 503 for assistant events, non-pending intakes reject n
     state: "ignored", text: "", files: [],
   });
 
+  const delayed = groupMention({
+    groupId: "Cshared", webhookEventId: "e-delayed-b1", messageId: "m-delayed-b1", text: "@Bot Delayed", timestamp: now + 150,
+  });
+  expect((await f.send([delayed])).status).toBe(200);
+  expect((await f.rows()).intakes.find(row => row.messageId === "m-delayed-b1")?.files)
+    .toEqual([{ messageId: "mf-late", type: "image" }]);
+  expect((await f.send([{
+    ...delayed, webhookEventId: "e-delayed-b2", message: { ...delayed.message, id: "m-delayed-b2" },
+  }], { botId: bot2Id, secret: "secret-2" })).status).toBe(200);
+  expect((await f.rows()).intakes.find(row => row.messageId === "m-delayed-b2")?.files)
+    .toEqual([{ messageId: "mf-b2", type: "image" }]);
+
   // Bot in `setup` state returns 503 for assistant events so LINE retries after setup completes.
   await f.t.run(({ db }) => db.patch(bot2Id, { state: "setup" }));
   expect((await f.send([
@@ -697,13 +880,13 @@ test("bounded cleanup sweeps expired intakes, file links, events and unsends whi
   // Advance past intake TTL (24h), before active lease expiry and dedup/unsend TTL (7d).
   vi.setSystemTime(intakeExpiry + 1_000);
   const firstSweep = await f.t.mutation(internal.line_webhook.cleanupExpiredAiIntake, { limit: 50 });
-  expect(firstSweep).toEqual({ deletedIntakes: 1, deletedFiles: 1, deletedEvents: 0, deletedUnsends: 0 });
+  expect(firstSweep).toEqual({ deletedIntakes: 1, deletedFiles: 1, deletedRecentFiles: 2, deletedEvents: 0, deletedUnsends: 0 });
   expect((await f.rows()).intakes.map(row => row.messageId)).toEqual(["m-c2"]);
   expect((await f.rows()).fileLinks.map(row => row.messageId)).toEqual(["mf-c2"]);
 
   // Advance past dedup TTL (7d) and active lease expiry.
   vi.setSystemTime(leased.createdAt + LINE_AI_DEDUP_TTL_MS + 1_000);
   const secondSweep = await f.t.mutation(internal.line_webhook.cleanupExpiredAiIntake, { limit: 50 });
-  expect(secondSweep).toEqual({ deletedIntakes: 1, deletedFiles: 1, deletedEvents: 5, deletedUnsends: 1 });
+  expect(secondSweep).toEqual({ deletedIntakes: 1, deletedFiles: 1, deletedRecentFiles: 0, deletedEvents: 5, deletedUnsends: 1 });
   expect(await f.rows()).toMatchObject({ intakes: [], fileLinks: [], aiEvents: [], unsends: [] });
 });

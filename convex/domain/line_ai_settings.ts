@@ -21,6 +21,16 @@ export async function readLineAiConnection(ctx: DbContext, projectId: Id<"projec
   return await ctx.db.query("lineAiConnections").withIndex("by_project", q => q.eq("projectId", projectId)).unique();
 }
 
+/** Older rows without a separate authority revision retain the original strict fence. */
+export function matchesLineAiAuthorization(
+  connection: Pick<Doc<"lineAiConnections">, "revision" | "authorizationRevision">,
+  scope: { connectionRevision: number; authorizationRevision?: number },
+) {
+  return scope.authorizationRevision === undefined
+    ? connection.revision === scope.connectionRevision
+    : (connection.authorizationRevision ?? 0) === scope.authorizationRevision;
+}
+
 /** Owner of a current Project on a deployment where LINE is available. */
 export async function lineAiOwnerProject(ctx: DbContext & { actor: Actor }, projectId: Id<"projects">) {
   assertOwnerActor(ctx.actor);

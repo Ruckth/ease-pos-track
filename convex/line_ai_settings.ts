@@ -40,6 +40,7 @@ export const disable = ownerMutation({
     // The key is discarded; enabling again requires a new tested key.
     await ctx.db.patch(row._id, {
       enabled: false, keyCipher: undefined, keyHint: undefined, revision: row.revision + 1,
+      authorizationRevision: (row.authorizationRevision ?? 0) + 1,
       updatedAt: Date.now(), updatedBy: editor(ctx),
     });
     return publicLineAiConnection(await ctx.db.get(row._id));
@@ -58,6 +59,7 @@ export const setPaused = ownerMutation({
     if (row.enabled !== paused) return publicLineAiConnection(row);
     await ctx.db.patch(row._id, {
       enabled: !paused, revision: row.revision + 1, updatedAt: Date.now(), updatedBy: editor(ctx),
+      authorizationRevision: (row.authorizationRevision ?? 0) + 1,
     });
     return publicLineAiConnection(await ctx.db.get(row._id));
   },

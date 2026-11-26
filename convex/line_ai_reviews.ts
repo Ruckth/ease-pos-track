@@ -1,15 +1,18 @@
-import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
+import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { actorFields } from "./authz";
 import { lineProject } from "./domain/line";
 import {
-  assistantEnrollment, currentChatOwner, linkedTicket, replyAttempts, replyFreshnessMs, replyHistoryMs, reviewReplyDefaults, validatedLineReply,
+  assistantEnrollment, currentChatOwner, currentReplyDestination, linkedTicket, replyAttempts,
+  replyFreshnessMs, replyHistoryMs, reviewReplyDefaults, validatedLineReply,
 } from "./domain/line_ai_review";
-import { lineAiReleaseEnabled, readLineAiConnection } from "./domain/line_ai_settings";
+import { lineAiReleaseEnabled, matchesLineAiAuthorization } from "./domain/line_ai_settings";
 import { applyTicketChange, createTicketRecord } from "./domain/tickets";
 import { staffMutation, staffQuery } from "./functions";
+import { hashTicketRequest } from "./ticket_requests";
 import { formatTicketNumber } from "../shared/ticket-numbers";
 import { validateTicketText } from "../shared/ticket-state";
 
@@ -21,39 +24,38 @@ async function currentDraft(ctx: Pick<QueryCtx, "db">, draft: Doc<"lineAiDrafts"
   if (draft.state !== "review" || draft.expiresAt <= now) return null;
   const intake = await ctx.db.get(draft.intakeId);
   if (!intake || intake.projectId !== draft.projectId || intake.state !== "draft" || intake.expiresAt <= now) return null;
-  const enrollment = await assistantEnrollment(ctx, { ...intake, connectionRevision: draft.connectionRevision });
-  return enrollment && { ...enrollment, intake };
+  const enrollment = await assistantEnrollment(ctx, { ...intake, connectionRevision: undefined });
+  return enrollment && matchesLineAiAuthorization(enrollment.connection, draft) ? { ...enrollment, intake } : null;
 }
 
 function replyReceipt(row: Doc<"lineAiReplies">, now: number) {
   return {
     _id: row._id, draftId: row.draftId, number: row.ticketNumber,
     state: row.state, updatedAt: row.updatedAt,
-    canRetry: row.state === "unknown" && !!row.text && row.attempt < replyAttempts && row.expiresAt > now,
+    canRetry: (row.state === "unknown" || row.state === "limited") && !!row.text
+      && row.attempt < replyAttempts && row.expiresAt > now,
   };
 }
 
 export const list = staffQuery({
-  name: "line_ai_reviews:list", args: project,
-  handler: async (ctx, { projectId }) => {
-    if (!await lineAiReleaseEnabled(ctx)) return { drafts: [], replies: [] };
+  name: "line_ai_reviews:list", args: { ...project, paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { projectId, paginationOpts }) => {
+    if (!await lineAiReleaseEnabled(ctx)) return { page: [], isDone: true, continueCursor: "" };
     await lineProject(ctx, projectId);
+    const { numItems } = paginationOpts;
+    if (!Number.isInteger(numItems) || numItems < 1 || numItems > 50) throw new Error("INVALID_INPUT");
     const now = Date.now();
-    const connection = await readLineAiConnection(ctx, projectId);
-    const [rows, replies] = await Promise.all([
-      connection?.enabled ? ctx.db.query("lineAiDrafts").withIndex("by_project_state",
-        q => q.eq("projectId", projectId).eq("state", "review").eq("connectionRevision", connection.revision)
-          .gt("expiresAt", now)).order("desc").take(25) : [],
-      ctx.db.query("lineAiReplies").withIndex("by_project", q => q.eq("projectId", projectId)).order("desc").take(20),
-    ]);
-    const drafts = await Promise.all(rows.map(async draft => {
+    const rows = await ctx.db.query("lineAiDrafts").withIndex("by_project_review_state",
+      q => q.eq("projectId", projectId).eq("state", "review")).order("desc")
+      .paginate({ ...paginationOpts, maximumRowsRead: 50 });
+    const page = await Promise.all(rows.page.map(async draft => {
       const current = await currentDraft(ctx, draft, now);
-      if (!current) return null;
+      if (!current) return { _id: draft._id, state: "unavailable" as const };
       const { intake, bot, chat, project } = current;
       const suggested = draft.suggestion;
       const target = suggested.intent === "close" && await linkedTicket(ctx, chat, project, suggested.ticketNumber);
       return {
-        _id: draft._id, warning: draft.warning, createdAt: draft.createdAt,
+        _id: draft._id, state: "review" as const, warning: draft.warning, createdAt: draft.createdAt,
         chatName: chat.displayNameOverride ?? chat.name, kind: chat.kind, text: intake.text,
         suggestion: suggested, canCreate: chat.allowCreate,
         replies: reviewReplyDefaults(bot.locale, draft.warning === "LINE_AI_ATTACHMENT_UNAVAILABLE"),
@@ -63,7 +65,22 @@ export const list = staffQuery({
         } : null,
       };
     }));
-    return { drafts: drafts.filter(draft => draft !== null), replies: replies.map(row => replyReceipt(row, now)) };
+    return { ...rows, page };
+  },
+});
+
+export const listReplies = staffQuery({
+  name: "line_ai_reviews:listReplies", args: project,
+  handler: async (ctx, { projectId }) => {
+    if (!await lineAiReleaseEnabled(ctx)) return [];
+    await lineProject(ctx, projectId);
+    const rows = await ctx.db.query("lineAiReplies").withIndex("by_project", q => q.eq("projectId", projectId))
+      .order("desc").take(20);
+    const now = Date.now();
+    return Promise.all(rows.map(async row => {
+      const receipt = replyReceipt(row, now);
+      return { ...receipt, canRetry: receipt.canRetry && !!await currentReplyDestination(ctx, row) };
+    }));
   },
 });
 
@@ -73,6 +90,14 @@ const decision = v.union(
   v.object({ type: v.literal("clarify"), reply: v.string() }),
 );
 
+async function approvalDigest(input: Infer<typeof decision>) {
+  const { text: reply } = validatedLineReply(input.reply);
+  const content = input.type === "create" ? validateTicketText(input.title, input.description)
+    : input.type === "close" ? { ticketVersion: input.ticketVersion } : {};
+  const { inputDigest } = await hashTicketRequest(JSON.stringify({ type: input.type, ...content, reply }));
+  return inputDigest;
+}
+
 export const approve = staffMutation({
   name: "line_ai_reviews:approve", args: { ...draftId, decision },
   handler: async (ctx, { draftId, decision }) => {
@@ -80,8 +105,12 @@ export const approve = staffMutation({
     if (!draft) throw new Error("LINE_AI_DRAFT_UNAVAILABLE");
     await lineProject(ctx, draft.projectId);
     const now = Date.now();
+    const decisionDigest = await approvalDigest(decision);
     const receipt = await ctx.db.query("lineAiReplies").withIndex("by_draft", q => q.eq("draftId", draftId)).unique();
-    if (receipt) return replyReceipt(receipt, now);
+    if (receipt) {
+      if (receipt.decisionDigest !== decisionDigest) throw new Error("LINE_AI_APPROVAL_CONFLICT");
+      return replyReceipt(receipt, now);
+    }
     const current = await currentDraft(ctx, draft, now);
     if (!current) throw new Error("LINE_AI_DRAFT_UNAVAILABLE");
     const staffId = ctx.session.staffId;
@@ -117,9 +146,10 @@ export const approve = staffMutation({
     const replyId = await ctx.db.insert("lineAiReplies", {
       draftId, projectId: project._id, botId: bot._id, chatId: chat._id,
       joinedAt: chat.joinedAt, chatRevision: chat.assistantRevision ?? 0, botRevision: bot.assistantRevision ?? 0,
-      connectionRevision: connection.revision, projectVisibilityVersion: project.inboxVisibilityVersion ?? 0,
+      connectionRevision: connection.revision, authorizationRevision: connection.authorizationRevision ?? 0,
+      projectVisibilityVersion: project.inboxVisibilityVersion ?? 0,
       ...(ticket && { ticketId: ticket._id, ticketNumber: number, ticketVisibilityVersion: ticket.inboxVisibilityVersion ?? 0 }),
-      authorStaffId: staffId, text, retryKey: crypto.randomUUID(),
+      authorStaffId: staffId, text, retryKey: crypto.randomUUID(), decisionDigest,
       state: "pending", attempt: 0, createdAt: now, updatedAt: now,
       expiresAt: now + replyFreshnessMs, eraseTextAt: now + replyFreshnessMs, deleteAt: now + replyHistoryMs,
     });
@@ -148,7 +178,7 @@ export const retryReply = staffMutation({
   handler: async (ctx, { replyId }) => {
     const row = await ctx.db.get(replyId);
     const now = Date.now();
-    if (!row || !replyReceipt(row, now).canRetry || !await assistantEnrollment(ctx, row)) {
+    if (!row || !replyReceipt(row, now).canRetry || !await currentReplyDestination(ctx, row)) {
       throw new Error("LINE_AI_REPLY_UNAVAILABLE");
     }
     await ctx.db.patch(replyId, { state: "pending", updatedAt: now });

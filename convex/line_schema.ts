@@ -55,6 +55,7 @@ export const lineTables = {
     // Explicit per-chat opt-in for AI Ticket intake; absent/false disables intake.
     assistantEnabled: v.optional(v.boolean()),
     assistantEnabledAt: v.optional(v.number()), assistantRevision: v.optional(v.number()),
+    assistantOptIn: v.optional(v.object({ botRevision: v.number(), projectVisibilityVersion: v.number() })),
     approvedAt: v.optional(v.number()), approvedBy: v.optional(v.id("staff")),
     joinedAt: v.number(), leftAt: v.optional(v.number()), lastEventAt: v.number(),
     lastMembershipAt: v.optional(v.number()),
@@ -64,7 +65,8 @@ export const lineTables = {
     state: v.union(v.literal("pending"), v.literal("done"), v.literal("ignored"), v.literal("failed")),
     attempt: v.number(), leaseId: v.optional(v.string()), leaseExpiresAt: v.optional(v.number()),
     error: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
-  }).index("by_event", ["webhookEventId"]),
+  }).index("by_bot_event", ["botId", "webhookEventId"])
+    .index("by_chat_type_timestamp", ["botId", "lineChatId", "type", "timestamp"]),
   lineAiIntakes: defineTable({
     projectId: v.id("projects"),
     botId: v.id("lineBots"),
@@ -107,6 +109,25 @@ export const lineTables = {
   })
     .index("by_bot_message", ["botId", "messageId"])
     .index("by_intake", ["intakeId"])
+    .index("by_expires_at", ["expiresAt"]),
+  // Short-lived references for reconciling file webhooks with delayed text triggers.
+  lineAiRecentFiles: defineTable({
+    botId: v.id("lineBots"),
+    chatId: v.id("lineChats"),
+    joinedAt: v.number(),
+    senderDigest: v.string(),
+    chatRevision: v.number(), botRevision: v.number(),
+    connectionRevision: v.number(), projectVisibilityVersion: v.number(),
+    messageId: v.string(),
+    webhookEventId: v.string(),
+    type: lineAiFileType,
+    messageTimestamp: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_bot_message", ["botId", "messageId"])
+    .index("by_bot_event", ["botId", "webhookEventId"])
+    .index("by_scope_expiry", ["botId", "chatId", "joinedAt", "senderDigest", "chatRevision",
+      "botRevision", "connectionRevision", "projectVisibilityVersion", "expiresAt"])
     .index("by_expires_at", ["expiresAt"]),
   // Stable per-bot webhookEventId dedup for accepted AI intake/unsend events.
   lineAiEvents: defineTable({

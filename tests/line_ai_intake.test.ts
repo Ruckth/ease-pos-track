@@ -4,6 +4,7 @@ import {
   extractLineAiEvent,
   LINE_AI_MAX_TEXT_LENGTH,
   opaqueLineSenderDigest,
+  trimLineAiEvents,
 } from "../convex/domain/line_ai_intake";
 
 const now = 1_795_656_000_000;
@@ -191,4 +192,27 @@ test("opaqueLineSenderDigest is deterministic, scoped per bot and chat, and reje
     if (previous === undefined) delete process.env.LINE_SECRETS_KEY;
     else process.env.LINE_SECRETS_KEY = previous;
   }
+});
+
+test("trimLineAiEvents drops new events and seals unsend senders when intake is paused", async t => {
+  const previousFlag = process.env.LINE_AI_ENABLED;
+  const previousKey = process.env.LINE_SECRETS_KEY;
+  t.after(() => {
+    if (previousFlag === undefined) delete process.env.LINE_AI_ENABLED;
+    else process.env.LINE_AI_ENABLED = previousFlag;
+    if (previousKey === undefined) delete process.env.LINE_SECRETS_KEY;
+    else process.env.LINE_SECRETS_KEY = previousKey;
+  });
+  process.env.LINE_AI_ENABLED = "false";
+  process.env.LINE_SECRETS_KEY = Buffer.alloc(32, 7).toString("base64");
+  const source = { type: "user", userId: "Usender" };
+  const events = await trimLineAiEvents("botA", [
+    { type: "message", timestamp: now, source, webhookEventId: "e1", message: { type: "text", id: "m1", text: "private" } },
+    { type: "message", timestamp: now, source, webhookEventId: "e2", message: { type: "image", id: "m2" } },
+    { type: "unsend", timestamp: now, source, webhookEventId: "e3", unsend: { messageId: "m0" } },
+  ]);
+  assert.deepEqual(events, [{
+    eventType: "unsend", timestamp: now, kind: "user", lineChatId: "Usender", webhookEventId: "e3", messageId: "m0",
+    senderDigest: await opaqueLineSenderDigest("botA", "Usender", "Usender"),
+  }]);
 });

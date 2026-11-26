@@ -1,9 +1,7 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
-import type { QueryCtx } from "./_generated/server";
 import { createLine } from "./adapters/line";
-import { assistantEnrollment, replyAttempts } from "./domain/line_ai_review";
+import { currentReplyDestination, replyAttempts } from "./domain/line_ai_review";
 import { lineAiReleaseEnabled } from "./domain/line_ai_settings";
 import { internalJobAction, internalJobMutation, internalJobQuery } from "./functions";
 import { lineAiReplyResult } from "./line_ai_review_schema";
@@ -26,35 +24,24 @@ export const recover = internalJobMutation({
   },
 });
 
-async function deliveryTarget(ctx: Pick<QueryCtx, "db">, row: Doc<"lineAiReplies">) {
-  const enrollment = await assistantEnrollment(ctx, row);
-  if (!enrollment) return null;
-  const author = await ctx.db.get(row.authorStaffId);
-  if (author?.status !== "active") return null;
-  if (row.ticketId) {
-    const ticket = await ctx.db.get(row.ticketId);
-    if (!ticket || ticket.projectId !== enrollment.project._id || ticket.lifecycle !== "active"
-      || (ticket.inboxVisibilityVersion ?? 0) !== row.ticketVisibilityVersion) return null;
-  }
-  return { to: enrollment.chat.lineChatId, tokenCipher: enrollment.bot.tokenCipher };
-}
-
 export const claim = internalJobMutation({
   name: "line_ai_delivery:claim", args: reply,
   handler: async (ctx, { replyId }) => {
+    if (!await lineAiReleaseEnabled(ctx)) return null;
     const row = await ctx.db.get(replyId);
     const now = Date.now();
     if (!row || row.state !== "pending" || (row.leaseExpiresAt ?? 0) > now || !row.text) return null;
-    const target = now < row.expiresAt && row.attempt < replyAttempts ? await deliveryTarget(ctx, row) : null;
+    const hadUncertainAttempt = (row.hadUncertainAttempt ?? row.attempt > 0) || !!row.leaseId;
+    const target = now < row.expiresAt && row.attempt < replyAttempts ? await currentReplyDestination(ctx, row) : null;
     if (!target) {
       await ctx.db.patch(replyId, {
-        state: row.attempt ? "unknown" : "suppressed", text: undefined, eraseTextAt: undefined,
+        state: hadUncertainAttempt ? "unknown" : "suppressed", text: undefined, eraseTextAt: undefined,
         leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now,
       });
       return null;
     }
     const leaseId = crypto.randomUUID();
-    await ctx.db.patch(replyId, { leaseId, leaseExpiresAt: now + leaseMs, attempt: row.attempt + 1, updatedAt: now });
+    await ctx.db.patch(replyId, { leaseId, leaseExpiresAt: now + leaseMs, attempt: row.attempt + 1, updatedAt: now, hadUncertainAttempt });
     await ctx.scheduler.runAfter(leaseMs, internal.line_ai_delivery.send, { replyId });
     return { ...target, leaseId, text: row.text, retryKey: row.retryKey };
   },
@@ -67,7 +54,7 @@ export const authorize = internalJobQuery({
     const now = Date.now();
     if (!row || row.state !== "pending" || row.leaseId !== leaseId
       || (row.leaseExpiresAt ?? 0) <= now || row.expiresAt <= now) return false;
-    return (await deliveryTarget(ctx, row))?.tokenCipher === tokenCipher;
+    return (await currentReplyDestination(ctx, row))?.tokenCipher === tokenCipher;
   },
 });
 
@@ -78,11 +65,12 @@ export const finish = internalJobMutation({
     const row = await ctx.db.get(replyId);
     if (!row || row.state !== "pending" || row.leaseId !== leaseId) return;
     const now = Date.now();
-    const retryable = result === "unknown" && row.attempt < replyAttempts && row.expiresAt > now;
+    const retryable = (result === "unknown" || result === "limited") && row.attempt < replyAttempts && row.expiresAt > now;
     // A later refusal cannot resolve an earlier attempt whose acceptance was unknown.
-    const state = row.attempt > 1 && result !== "accepted" ? "unknown" : result;
+    const hadUncertainAttempt = (row.hadUncertainAttempt ?? row.attempt > 1) || result === "unknown";
+    const state = hadUncertainAttempt && result !== "accepted" ? "unknown" : result;
     await ctx.db.patch(replyId, {
-      state, updatedAt: now, leaseExpiresAt: undefined, leaseId: undefined,
+      state, hadUncertainAttempt, updatedAt: now, leaseExpiresAt: undefined, leaseId: undefined,
       ...(retryable ? {} : { text: undefined, eraseTextAt: undefined }),
     });
   },
@@ -94,7 +82,7 @@ export const send = internalJobAction({
     const job = await ctx.runMutation(internal.line_ai_delivery.claim, { replyId });
     if (!job) return;
     const { leaseId, tokenCipher, retryKey, to, text } = job;
-    let result: "accepted" | "rejected" | "unknown" | "suppressed" = "suppressed";
+    let result: Infer<typeof lineAiReplyResult> | "suppressed" = "suppressed";
     try {
       const line = createLine(await openLineSecret(tokenCipher));
       if (await ctx.runQuery(internal.line_ai_delivery.authorize, { replyId, leaseId, tokenCipher })) {

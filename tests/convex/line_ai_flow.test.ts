@@ -75,9 +75,15 @@ async function fixture() {
     await vi.advanceTimersByTimeAsync(delay);
     await t.finishInProgressScheduledFunctions();
   };
-  const review = () => t.query(api.line_ai_reviews.list, { projectId, token });
+  const page = (numItems = 25, cursor: string | null = null) => t.query(api.line_ai_reviews.list, {
+    projectId, token, paginationOpts: { numItems, cursor },
+  });
+  const review = async () => ({
+    drafts: (await page()).page.filter(item => item.state === "review"),
+    replies: await t.query(api.line_ai_reviews.listReplies, { projectId, token }),
+  });
   const tickets = () => t.run(({ db }) => db.query("tickets").collect());
-  return { t, owner, token, projectId, botId, chatId, send, message, runJobs, review, tickets };
+  return { t, owner, token, projectId, botId, chatId, send, message, runJobs, page, review, tickets };
 }
 
 test("a signed request is scanned once and staff create and close one linked Ticket", async () => {
@@ -98,6 +104,12 @@ test("a signed request is scanned once and staff create and close one linked Tic
   };
   const created = await f.t.mutation(api.line_ai_reviews.approve, args);
   expect(await f.t.mutation(api.line_ai_reviews.approve, args)).toMatchObject({ _id: created._id });
+  await expect(f.t.mutation(api.line_ai_reviews.approve, {
+    ...args, decision: { type: "clarify", reply: "Can you send more details?" },
+  })).rejects.toThrow("LINE_AI_APPROVAL_CONFLICT");
+  await expect(f.t.mutation(api.line_ai_reviews.approve, {
+    ...args, decision: { ...args.decision, title: "Conflicting edit" },
+  })).rejects.toThrow("LINE_AI_APPROVAL_CONFLICT");
   await f.runJobs();
   expect(await f.tickets()).toMatchObject([{ ticketNumber: 1, createdVia: "line", status: "new" }]);
   expect((await f.review()).replies[0]).toMatchObject({ state: "unknown", canRetry: true });
@@ -140,6 +152,95 @@ test("a stale enrollment suppresses its queued reply and the Ticket stays commit
   expect(fake.push).not.toHaveBeenCalled();
   expect(await f.tickets()).toHaveLength(1);
   expect((await f.review()).replies[0]).toMatchObject({ state: "suppressed", canRetry: false });
+});
+
+test("review paging reaches an actionable suggestion behind an unavailable one", async () => {
+  const f = await fixture();
+  await f.send([f.message("valid", "@POS Help Printer offline")]);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  const [valid] = (await f.review()).drafts;
+  await f.t.run(async ({ db }) => {
+    const { _id, _creationTime, ...row } = (await db.get(valid._id))!;
+    await db.insert("lineAiDrafts", { ...row, authorizationRevision: 99, expiresAt: row.expiresAt + 1 });
+  });
+  const first = await f.page(1);
+  expect(first.page).toEqual([{ _id: expect.any(String), state: "unavailable" }]);
+  expect(first.isDone).toBe(false);
+  const next = await f.page(1, first.continueCursor);
+  expect(next.page).toMatchObject([{ _id: valid._id, state: "review" }]);
+});
+
+test("rotating the model key preserves an approved reply and its retry after a LINE rate limit", async () => {
+  const f = await fixture();
+  await f.send([f.message("rotate", "@POS Help Printer offline")]);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  const [draft] = (await f.review()).drafts;
+  const rotate = (apiKey: string) => f.t.action(api.line_ai_settings.testAndSave, {
+    token: f.owner.session, projectId: f.projectId, provider: "gemini", apiKey,
+  });
+  await rotate("rotated-fixture-key-one");
+  const receipt = await f.t.mutation(api.line_ai_reviews.approve, {
+    token: f.token, draftId: draft._id, decision: { type: "clarify", reply: "Which register?" },
+  });
+  await rotate("rotated-fixture-key-two");
+  fake.push.mockResolvedValueOnce("limited");
+  await f.runJobs();
+  expect((await f.review()).replies).toMatchObject([{ state: "limited", canRetry: true }]);
+  await f.t.mutation(api.line_ai_reviews.retryReply, { token: f.token, replyId: receipt._id });
+  await f.runJobs();
+  expect(fake.push.mock.calls[1]).toEqual(fake.push.mock.calls[0]);
+  expect((await f.review()).replies).toMatchObject([{ state: "accepted", canRetry: false }]);
+});
+
+test("analysis reports a known provider error and strips unexpected errors", async () => {
+  const f = await fixture();
+  for (const [id, error, warning] of [
+    ["rate", "LINE_AI_RATE_LIMITED", "LINE_AI_RATE_LIMITED"],
+    ["other", "unexpected fixture details", "LINE_AI_UNAVAILABLE"],
+  ]) {
+    fake.scan.mockRejectedValueOnce(new Error(error));
+    await f.send([f.message(id, "@POS Help Printer offline")]);
+    await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+    expect((await f.review()).drafts[0]).toMatchObject({ warning, suggestion: { intent: "clarify" } });
+  }
+});
+
+test("an accepted leave blocks a message in the same webhook batch", async () => {
+  const f = await fixture();
+  const item = f.message("after-leave", "@POS Help Printer offline");
+  const leave = { type: "leave", timestamp: item.timestamp, webhookEventId: "same-batch-leave", source: item.source };
+  expect((await f.send([item, leave])).status).toBe(200);
+  expect(await f.t.run(({ db }) => db.query("lineAiIntakes").collect())).toHaveLength(0);
+});
+
+test("a reactivated bot and a restored Project each require a fresh chat opt-in", async () => {
+  const f = await fixture();
+  for (const enabled of [false, true]) {
+    await f.t.mutation(api.line.updateBot, { token: f.token, botId: f.botId, enabled });
+  }
+  const chat = async () => (await f.t.query(api.line.listChats, { token: f.token, botId: f.botId }))[0];
+  const enableChat = async () => {
+    await f.t.mutation(api.line.setAssistantEnabled, { token: f.token, chatId: f.chatId, joinedAt: now - 1_000, enabled: true });
+    await f.runJobs();
+  };
+  await f.runJobs();
+  expect((await chat()).assistantEnabled).toBe(false);
+  await f.send([f.message("uncertain-bot", "@POS Help Printer offline")]);
+  expect(await f.t.run(({ db }) => db.query("lineAiIntakes").collect())).toHaveLength(0);
+  await enableChat();
+  expect((await chat()).assistantEnabled).toBe(true);
+  for (const archived of [true, false]) {
+    await f.t.mutation(internal.projects.setArchived, { projectId: f.projectId, archived });
+  }
+  await f.runJobs();
+  expect((await chat()).assistantEnabled).toBe(false);
+  await f.send([f.message("uncertain-project", "@POS Help Printer offline")]);
+  expect(await f.t.run(({ db }) => db.query("lineAiIntakes").collect())).toHaveLength(0);
+  await enableChat();
+  expect((await chat()).assistantEnabled).toBe(true);
+  await f.send([f.message("reenabled", "@POS Help Printer offline")]);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  expect(fake.scan).toHaveBeenCalledOnce();
 });
 
 test("an allowed photo is analyzed and an expired attachment requires manual review", async () => {
@@ -204,4 +305,29 @@ test("resuming a paused connection does not send its earlier queued intake to an
   await f.send([f.message("new", "@POS Help New printer request")]);
   await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
   expect(fake.scan).toHaveBeenCalledOnce();
+});
+
+test.each(["leave", "join"])("signed %s revokes draft and leased reply authority before metadata settles", async type => {
+  const f = await fixture();
+  await f.send([f.message("one", "@POS Help First printer"), f.message("two", "@POS Help Second printer")]);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  const [first, second] = (await f.review()).drafts;
+  const decision = { type: "create" as const, title: "Printer offline", description: "Register", reply: first.replies.create };
+  const reply = await f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: first._id, decision });
+  const lease = await f.t.mutation(internal.line_ai_delivery.claim, { replyId: reply._id });
+  expect(lease).toBeTruthy();
+  const auth = { replyId: reply._id, leaseId: lease!.leaseId, tokenCipher: lease!.tokenCipher };
+  const event = (id: string, kind: string, timestamp: number) => ({
+    webhookEventId: id, type: kind, timestamp, source: { type: "group", groupId: "Cgroup" },
+  });
+  const duplicate = event("same-join", "join", now - 1_000);
+  await f.send([event("older-leave", "leave", now - 1_001), duplicate, duplicate]);
+  expect(await f.t.query(internal.line_ai_delivery.authorize, auth)).toBe(true);
+  const timestamp = type === "leave" ? now - 1_000 : now;
+  expect((await f.send([event("transition", type, timestamp)])).status).toBe(200);
+  expect(await f.t.run(({ db }) => db.get(f.chatId))).toMatchObject({ state: "active", assistantEnabled: true });
+  expect(await f.t.query(internal.line_ai_delivery.authorize, auth)).toBe(false);
+  await expect(f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: second._id, decision }))
+    .rejects.toThrow("LINE_AI_DRAFT_UNAVAILABLE");
+  expect(await f.tickets()).toHaveLength(1);
 });

@@ -4,7 +4,8 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { assertStaffActor } from "./authz";
 import { createLine } from "./adapters/line";
-import { lineBot, lineChat, lineProject, publicBot, webhookUrl } from "./domain/line";
+import { currentAssistantOptIn, lineBot, lineChat, lineProject, publicBot, webhookUrl } from "./domain/line";
+import { currentLineLifecycle } from "./domain/line_ai_review";
 import { lineAiReleaseEnabled, readLineAiConnection } from "./domain/line_ai_settings";
 import { staffQuery, staffMutation, internalActorMutation, lineStaffAction } from "./functions";
 import { openLineSecret, sealLineSecret } from "./line_crypto";
@@ -25,8 +26,12 @@ export const listBots = staffQuery({
 export const listChats = staffQuery({
   name: "line:listChats", args: bot,
   handler: async (ctx, { botId }) => {
-    await lineBot(ctx, botId);
-    return ctx.db.query("lineChats").withIndex("by_bot_chat", q => q.eq("botId", botId)).collect();
+    const current = await lineBot(ctx, botId);
+    const project = await ctx.db.get(current.projectId);
+    const chats = await ctx.db.query("lineChats").withIndex("by_bot_chat", q => q.eq("botId", botId)).collect();
+    return chats.map(chat => ({
+      ...chat, assistantEnabled: currentAssistantOptIn(chat, current.assistantRevision ?? 0, project?.inboxVisibilityVersion ?? 0),
+    }));
   },
 });
 
@@ -82,7 +87,7 @@ export const setChatState = staffMutation({
     const expected = { rejected: "pending", muted: "active", active: "muted" } as const;
     if (current.state !== expected[state]) throw new Error("LINE_CHAT_STATE_CHANGED");
     await ctx.db.patch(chatId, {
-      state, assistantEnabled: false, assistantEnabledAt: undefined,
+      state, assistantEnabled: false, assistantEnabledAt: undefined, assistantOptIn: undefined,
       assistantRevision: (current.assistantRevision ?? 0) + 1,
     });
   },
@@ -94,16 +99,25 @@ export const setAssistantEnabled = staffMutation({
   handler: async (ctx, { chatId, joinedAt, enabled }) => {
     const current = await lineChat(ctx, chatId);
     if (current.joinedAt !== joinedAt) throw new Error("LINE_CHAT_ENROLLMENT_CHANGED");
+    let assistantOptIn;
     if (enabled) {
       const bot = await lineBot(ctx, current.botId);
-      if (bot.state !== "active" || current.state !== "active") throw new Error("LINE_CHAT_STATE_CHANGED");
+      const project = await lineProject(ctx, current.projectId);
+      if (bot.state !== "active" || current.state !== "active" || !await currentLineLifecycle(ctx, current)) {
+        throw new Error("LINE_CHAT_STATE_CHANGED");
+      }
       const connection = await readLineAiConnection(ctx, current.projectId);
       if (!await lineAiReleaseEnabled(ctx) || !connection?.enabled) throw new Error("LINE_AI_CONNECTION_REQUIRED");
+      const botRevision = bot.assistantRevision ?? 0;
+      const projectVisibilityVersion = project.inboxVisibilityVersion ?? 0;
+      if (currentAssistantOptIn(current, botRevision, projectVisibilityVersion)) return;
+      assistantOptIn = { botRevision, projectVisibilityVersion };
+    } else if (!current.assistantEnabled) {
+      return;
     }
-    if ((current.assistantEnabled ?? false) === enabled) return;
     await ctx.db.patch(chatId, {
       assistantEnabled: enabled, assistantRevision: (current.assistantRevision ?? 0) + 1,
-      assistantEnabledAt: enabled ? Date.now() : undefined,
+      assistantEnabledAt: enabled ? Date.now() : undefined, assistantOptIn,
     });
   },
 });
@@ -323,7 +337,7 @@ export const manageRemoval = internalActorMutation({
     if (current.lastEventAt !== expectedEventAt) return null;
     // lastEventAt stays on LINE's clock, so a rejoin still queued here is not mistaken for a stale event.
     if (current.state !== "left") await ctx.db.patch(chatId, {
-      state: "left", leftAt: Date.now(), assistantEnabled: false, assistantEnabledAt: undefined,
+      state: "left", leftAt: Date.now(), assistantEnabled: false, assistantEnabledAt: undefined, assistantOptIn: undefined,
       assistantRevision: (current.assistantRevision ?? 0) + 1,
     });
     return null;

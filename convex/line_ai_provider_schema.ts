@@ -4,12 +4,12 @@ import { v } from "convex/values";
 export const lineAiProvider = v.union(v.literal("gemini"), v.literal("openrouter"), v.literal("claude"), v.literal("openai"));
 
 export const lineAiTables = {
-  /** One write-only connection per Project. `revision` fences every change. */
+  /** Configuration changes fence scans. Pause and disconnect also revoke approvals. */
   lineAiConnections: defineTable({
     projectId: v.id("projects"), provider: lineAiProvider, model: v.string(),
     // Absent once disabled; a new key must pass the synthetic test again.
     keyCipher: v.optional(v.string()), keyHint: v.optional(v.string()),
-    enabled: v.boolean(), revision: v.number(),
+    enabled: v.boolean(), revision: v.number(), authorizationRevision: v.optional(v.number()),
     testedAt: v.optional(v.number()), updatedAt: v.number(), updatedBy: v.optional(v.id("staff")),
   }).index("by_project", ["projectId"]),
 };

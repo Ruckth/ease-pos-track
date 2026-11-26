@@ -18,6 +18,7 @@ test("push records provider acceptance, including a retry of an accepted request
     new Response(null, { status: 409, headers: { "x-line-accepted-request-id": "accepted" } }),
     new Response(null, { status: 409 }),
     new Response(null, { status: 503 }),
+    new Response(null, { status: 429 }),
   ];
   const line = createLine("test-token", async (url, options) => {
     assert.equal(url, "https://api.line.me/v2/bot/message/push");
@@ -28,7 +29,7 @@ test("push records provider acceptance, including a retry of an accepted request
     });
     return responses.shift()!;
   });
-  for (const expected of ["accepted", "accepted", "rejected", "unknown"]) {
+  for (const expected of ["accepted", "accepted", "rejected", "unknown", "limited"]) {
     assert.equal(await line.push("group-id", "Ticket is ready", "stable-key"), expected);
   }
 });

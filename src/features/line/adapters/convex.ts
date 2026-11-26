@@ -1,4 +1,4 @@
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 
@@ -37,10 +37,14 @@ export function useLineAiSetupActions() {
 }
 
 export function useLineAiReviews(projectId: Id<"projects">) {
-  return useQuery(api.line_ai_reviews.list, { projectId });
+  return usePaginatedQuery(api.line_ai_reviews.list, { projectId }, { initialNumItems: 25 });
 }
 
-export type LineAiDraft = NonNullable<ReturnType<typeof useLineAiReviews>>["drafts"][number];
+export type LineAiDraft = Extract<ReturnType<typeof useLineAiReviews>["results"][number], { state: "review" }>;
+
+export function useLineAiReplies(projectId: Id<"projects">) {
+  return useQuery(api.line_ai_reviews.listReplies, { projectId });
+}
 
 export function useLineAiReviewActions() {
   return {

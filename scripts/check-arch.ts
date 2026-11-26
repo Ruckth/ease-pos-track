@@ -153,6 +153,7 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "line_ai_settings.ts:setPaused": "ownerMutation",
   "line_ai_settings.ts:testAndSave": "lineStaffAction",
   "line_ai_reviews.ts:list": "staffQuery",
+  "line_ai_reviews.ts:listReplies": "staffQuery",
   "line_ai_reviews.ts:approve": "staffMutation",
   "line_ai_reviews.ts:dismiss": "staffMutation",
   "line_ai_reviews.ts:retryReply": "staffMutation",

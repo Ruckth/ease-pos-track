@@ -6,7 +6,9 @@ type DbContext = Pick<QueryCtx, "db">;
 
 export async function lineProject(ctx: DbContext, id: Id<"projects">) {
   if (!await hasLegacyAccess(ctx)) throw new Error("LEGACY_ACCESS_DISABLED");
-  if (!await currentLineProject(ctx, id)) throw new Error("PROJECT_NOT_FOUND");
+  const project = await currentLineProject(ctx, id);
+  if (!project) throw new Error("PROJECT_NOT_FOUND");
+  return project;
 }
 
 export async function admittedLineProject(ctx: DbContext, id: Id<"projects">) {
@@ -30,6 +32,11 @@ export async function lineChat(ctx: DbContext, id: Id<"lineChats">) {
   if (!chat) throw new Error("LINE_CHAT_NOT_FOUND");
   await lineProject(ctx, chat.projectId);
   return chat;
+}
+
+export function currentAssistantOptIn(chat: Doc<"lineChats">, botRevision: number, projectVisibilityVersion: number) {
+  return chat.assistantEnabled === true && (chat.assistantOptIn?.botRevision ?? 0) === botRevision
+    && (chat.assistantOptIn?.projectVisibilityVersion ?? 0) === projectVisibilityVersion;
 }
 
 export function webhookUrl(slug: string) {

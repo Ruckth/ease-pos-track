@@ -1,7 +1,8 @@
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { admittedLineProject } from "./line";
+import { admittedLineProject, currentAssistantOptIn } from "./line";
+import { currentLineLifecycle } from "./line_ai_review";
 import { readLineAiConnection } from "./line_ai_settings";
 import { kind, lineAiFileType } from "../line_schema";
 import { retentionHeld } from "../../shared/pilot-settings";
@@ -10,6 +11,7 @@ export const LINE_AI_MAX_TEXT_LENGTH = 2000;
 export const LINE_AI_MAX_RAW_TEXT_LENGTH = 20_000;
 export const LINE_AI_MAX_FILES = 2;
 export const LINE_AI_FILE_WINDOW_MS = 2 * 60 * 1000;
+const MAX_RECENT_FILES = 8;
 export const LINE_AI_INTAKE_TTL_MS = 24 * 60 * 60 * 1000;
 export const LINE_AI_DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const LINE_AI_CLEANUP_BATCH = 100;
@@ -94,15 +96,8 @@ type DbContext = Pick<QueryCtx, "db">;
 type IntakeAuthority = { connectionRevision: number; connectionUpdatedAt: number; projectVisibilityVersion: number };
 const encode = new TextEncoder();
 
-/** Assistant intake requires LINE_AI_ENABLED to be strictly "true". */
-export function lineAiEnabled(): boolean {
+function lineAiEnabled(): boolean {
   return process.env.LINE_AI_ENABLED === "true";
-}
-
-/** Named-pilot, archived-Project and LINE_AI_ENABLED gate for assistant intake. */
-export async function admittedLineAiProject(ctx: DbContext, projectId: Id<"projects">) {
-  if (!lineAiEnabled()) return null;
-  return admittedLineProject(ctx, projectId);
 }
 
 function shortId(value: unknown): value is string {
@@ -267,9 +262,9 @@ export function extractLineAiEvent(value: unknown): ExtractedLineAiEvent | undef
   return;
 }
 
-/** Parses and seals sender identities for a webhook batch when LINE_AI_ENABLED === "true". */
+/** Parses signed unsends during a pause as well as new intake events when enabled. */
 export async function trimLineAiEvents(botId: string, rawEvents: unknown[]): Promise<LineAiInboundEvent[]> {
-  if (!lineAiEnabled()) return [];
+  const enabled = lineAiEnabled();
   const parsed: LineAiInboundEvent[] = [];
   for (const raw of rawEvents) {
     const extracted = extractLineAiEvent(raw);
@@ -289,6 +284,7 @@ export async function trimLineAiEvents(botId: string, rawEvents: unknown[]): Pro
       });
       continue;
     }
+    if (!enabled) continue;
     const senderDigest = await opaqueLineSenderDigest(botId, extracted.lineChatId, extracted.senderUserId);
     if (extracted.eventType === "text") {
       parsed.push({
@@ -317,14 +313,72 @@ export async function trimLineAiEvents(botId: string, rawEvents: unknown[]): Pro
   return parsed;
 }
 
-function isEligibleAssistantChat(bot: Doc<"lineBots">, chat: Doc<"lineChats"> | null, eventKind: Doc<"lineChats">["kind"], timestamp: number): chat is Doc<"lineChats"> {
+function fileScope(
+  bot: Doc<"lineBots">, chat: Doc<"lineChats">, authority: IntakeAuthority, senderDigest: string,
+) {
+  return {
+    botId: bot._id,
+    chatId: chat._id,
+    joinedAt: chat.joinedAt,
+    senderDigest,
+    chatRevision: chat.assistantRevision ?? 0,
+    botRevision: bot.assistantRevision ?? 0,
+    connectionRevision: authority.connectionRevision,
+    projectVisibilityVersion: authority.projectVisibilityVersion,
+  };
+}
+
+type FileScope = ReturnType<typeof fileScope>;
+
+function matchesFileScope(intake: Doc<"lineAiIntakes">, scope: FileScope) {
+  return intake.botId === scope.botId && intake.chatId === scope.chatId
+    && intake.joinedAt === scope.joinedAt && intake.senderDigest === scope.senderDigest
+    && intake.chatRevision === scope.chatRevision && intake.botRevision === scope.botRevision
+    && intake.connectionRevision === scope.connectionRevision
+    && intake.projectVisibilityVersion === scope.projectVisibilityVersion;
+}
+
+function newestTrigger(ctx: DbContext, scope: FileScope, messageTimestamp: number) {
+  return ctx.db.query("lineAiIntakes")
+    .withIndex("by_chat_sender_window", q => q
+      .eq("chatId", scope.chatId).eq("joinedAt", scope.joinedAt).eq("senderDigest", scope.senderDigest)
+      .lte("messageTimestamp", messageTimestamp))
+    .order("desc")
+    .first();
+}
+
+function recentFiles(ctx: DbContext, scope: FileScope, now: number) {
+  return ctx.db.query("lineAiRecentFiles").withIndex("by_scope_expiry", q => q
+    .eq("botId", scope.botId).eq("chatId", scope.chatId).eq("joinedAt", scope.joinedAt)
+    .eq("senderDigest", scope.senderDigest).eq("chatRevision", scope.chatRevision)
+    .eq("botRevision", scope.botRevision).eq("connectionRevision", scope.connectionRevision)
+    .eq("projectVisibilityVersion", scope.projectVisibilityVersion).gt("expiresAt", now))
+    .take(MAX_RECENT_FILES);
+}
+
+function recentFileByMessage(ctx: DbContext, botId: Id<"lineBots">, messageId: string) {
+  return ctx.db.query("lineAiRecentFiles")
+    .withIndex("by_bot_message", q => q.eq("botId", botId).eq("messageId", messageId))
+    .unique();
+}
+
+function attachedFileByMessage(ctx: DbContext, botId: Id<"lineBots">, messageId: string) {
+  return ctx.db.query("lineAiIntakeFiles")
+    .withIndex("by_bot_message", q => q.eq("botId", botId).eq("messageId", messageId))
+    .unique();
+}
+
+function isEligibleAssistantChat(
+  bot: Doc<"lineBots">, chat: Doc<"lineChats"> | null, eventKind: Doc<"lineChats">["kind"],
+  timestamp: number, projectVisibilityVersion: number,
+): chat is Doc<"lineChats"> {
   return Boolean(
     chat
     && chat.projectId === bot.projectId
     && chat.kind === eventKind
     && chat.state === "active"
     && chat.leftAt === undefined
-    && chat.assistantEnabled === true
+    && currentAssistantOptIn(chat, bot.assistantRevision ?? 0, projectVisibilityVersion)
     && timestamp >= Math.max(chat.joinedAt, chat.assistantEnabledAt ?? 0),
   );
 }
@@ -398,7 +452,8 @@ async function handleTextEvent(
   const chat = await ctx.db.query("lineChats")
     .withIndex("by_bot_chat", q => q.eq("botId", bot._id).eq("lineChatId", event.lineChatId))
     .unique();
-  if (!isEligibleAssistantChat(bot, chat, event.kind, event.timestamp)) return;
+  if (!isEligibleAssistantChat(bot, chat, event.kind, event.timestamp, authority.projectVisibilityVersion)
+    || !await currentLineLifecycle(ctx, chat)) return;
   if (await hasDedupEvent(ctx, bot._id, event.webhookEventId)) return;
   if (await isMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId)) return;
 
@@ -410,22 +465,16 @@ async function handleTextEvent(
   const windowEndsAt = event.timestamp + LINE_AI_FILE_WINDOW_MS;
   const expiresAt = now + LINE_AI_INTAKE_TTL_MS;
   const availableAt = Math.max(now, Math.min(windowEndsAt, now + LINE_AI_FILE_WINDOW_MS));
-  const intakeId = await ctx.db.insert("lineAiIntakes", {
+  const scope = fileScope(bot, chat, authority, event.senderDigest);
+  const intake = {
+    ...scope,
     projectId: bot.projectId,
-    botId: bot._id,
-    chatId: chat._id,
-    joinedAt: chat.joinedAt,
-    chatRevision: chat.assistantRevision ?? 0,
-    botRevision: bot.assistantRevision ?? 0,
-    connectionRevision: authority.connectionRevision,
-    projectVisibilityVersion: authority.projectVisibilityVersion,
     kind: chat.kind,
     webhookEventId: event.webhookEventId,
     messageId: event.messageId,
-    senderDigest: event.senderDigest,
     text,
     files: [],
-    state: "pending",
+    state: "pending" as const,
     messageTimestamp: event.timestamp,
     windowEndsAt,
     expiresAt,
@@ -433,9 +482,52 @@ async function handleTextEvent(
     attempt: 0,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  const intakeId = await ctx.db.insert("lineAiIntakes", intake);
   await recordDedupEvent(ctx, bot._id, event.webhookEventId, event.messageId, "created", now);
+  await reconcileRecentFiles(ctx, { ...intake, _id: intakeId }, now);
   if (onSchedule) await onSchedule(ctx, { intakeId, availableAt });
+}
+
+async function reconcileRecentFiles(
+  ctx: MutationCtx,
+  intake: Omit<Doc<"lineAiIntakes">, "_creationTime">,
+  now: number,
+) {
+  const recent = await recentFiles(ctx, intake, now);
+  const files: Doc<"lineAiIntakes">["files"] = [];
+  for (const file of recent.sort((a, b) => a.messageTimestamp - b.messageTimestamp)) {
+    if (file.messageTimestamp < intake.messageTimestamp || file.messageTimestamp > intake.windowEndsAt) continue;
+    // An unsent, paused or processed newer trigger still blocks fallback to an older one.
+    if ((await newestTrigger(ctx, intake, file.messageTimestamp))?._id !== intake._id) continue;
+    const link = await attachedFileByMessage(ctx, intake.botId, file.messageId);
+    if (link) {
+      // A delayed trigger may take over only before the older intake has started work.
+      const previous = await ctx.db.get(link.intakeId);
+      if (!previous || previous.state !== "pending" || previous.attempt !== 0
+        || previous.expiresAt <= now || !matchesFileScope(previous, intake)) continue;
+      await ctx.db.patch(previous._id, {
+        files: previous.files.filter(ref => ref.messageId !== file.messageId),
+        updatedAt: now,
+      });
+      if (files.length >= LINE_AI_MAX_FILES) {
+        await ctx.db.delete(link._id);
+        continue;
+      }
+      await ctx.db.patch(link._id, { intakeId: intake._id, expiresAt: intake.expiresAt });
+    } else {
+      if (files.length >= LINE_AI_MAX_FILES) continue;
+      await ctx.db.insert("lineAiIntakeFiles", {
+        botId: intake.botId, chatId: intake.chatId, joinedAt: intake.joinedAt,
+        messageId: file.messageId, intakeId: intake._id, expiresAt: intake.expiresAt,
+      });
+      if (!await hasDedupEvent(ctx, intake.botId, file.webhookEventId)) {
+        await recordDedupEvent(ctx, intake.botId, file.webhookEventId, file.messageId, "file_attached", now);
+      }
+    }
+    files.push({ messageId: file.messageId, type: file.type });
+  }
+  if (files.length) await ctx.db.patch(intake._id, { files });
 }
 
 async function handleFileEvent(
@@ -450,35 +542,30 @@ async function handleFileEvent(
   const chat = await ctx.db.query("lineChats")
     .withIndex("by_bot_chat", q => q.eq("botId", bot._id).eq("lineChatId", event.lineChatId))
     .unique();
-  if (!isEligibleAssistantChat(bot, chat, event.kind, event.timestamp)) return;
+  if (!isEligibleAssistantChat(bot, chat, event.kind, event.timestamp, authority.projectVisibilityVersion)
+    || !await currentLineLifecycle(ctx, chat)) return;
   if (await hasDedupEvent(ctx, bot._id, event.webhookEventId)) return;
   if (await isMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId)) return;
 
-  const alreadyAttached = await ctx.db.query("lineAiIntakeFiles")
-    .withIndex("by_bot_message", q => q.eq("botId", bot._id).eq("messageId", event.messageId))
-    .unique();
-  if (alreadyAttached) return;
+  if (await attachedFileByMessage(ctx, bot._id, event.messageId)) return;
+  if (await recentFileByMessage(ctx, bot._id, event.messageId)) return;
+  if (await ctx.db.query("lineAiRecentFiles").withIndex("by_bot_event", q => q
+    .eq("botId", bot._id).eq("webhookEventId", event.webhookEventId)).unique()) return;
 
-  // Match the latest trigger from the same bot, chat, active enrollment, and sender
-  // at or before this file's timestamp (rejects pre-trigger, cross-sender, and stale enrollment).
-  const candidate = await ctx.db.query("lineAiIntakes")
-    .withIndex("by_chat_sender_window", q => q
-      .eq("chatId", chat._id)
-      .eq("joinedAt", chat.joinedAt)
-      .eq("senderDigest", event.senderDigest)
-      .lte("messageTimestamp", event.timestamp))
-    .order("desc")
-    .first();
+  const scope = fileScope(bot, chat, authority, event.senderDigest);
+  const expiresAt = Math.min(now, event.timestamp) + LINE_AI_FILE_WINDOW_MS;
+  if (expiresAt > now && (await recentFiles(ctx, scope, now)).length < MAX_RECENT_FILES) {
+    await ctx.db.insert("lineAiRecentFiles", {
+      ...scope, messageId: event.messageId, webhookEventId: event.webhookEventId, type: event.fileType,
+      messageTimestamp: event.timestamp, expiresAt,
+    });
+  }
 
-  if (!candidate) return;
-  if (candidate.botId !== bot._id || candidate.projectId !== bot.projectId) return;
-  if (candidate.chatRevision !== (chat.assistantRevision ?? 0) || candidate.botRevision !== (bot.assistantRevision ?? 0)
-    || candidate.connectionRevision !== authority.connectionRevision
-    || candidate.projectVisibilityVersion !== authority.projectVisibilityVersion) return;
-  if (candidate.state !== "pending") return;
-  if (event.timestamp > candidate.windowEndsAt || now > candidate.expiresAt) return;
-  if (candidate.files.length >= LINE_AI_MAX_FILES) return;
-  if (candidate.files.some(file => file.messageId === event.messageId)) return;
+  const candidate = await newestTrigger(ctx, scope, event.timestamp);
+  if (!candidate || candidate.projectId !== bot.projectId || !matchesFileScope(candidate, scope)
+    || candidate.state !== "pending" || event.timestamp > candidate.windowEndsAt || now >= candidate.expiresAt
+    || candidate.files.length >= LINE_AI_MAX_FILES
+    || candidate.files.some(file => file.messageId === event.messageId)) return;
 
   const files = [...candidate.files, { messageId: event.messageId, type: event.fileType }];
   await ctx.db.patch(candidate._id, { files, updatedAt: now });
@@ -495,7 +582,7 @@ async function handleFileEvent(
 
 async function discardAssistantDraft(ctx: MutationCtx, intakeId: Id<"lineAiIntakes">) {
   const draft = await ctx.db.query("lineAiDrafts").withIndex("by_intake", q => q.eq("intakeId", intakeId)).unique();
-  if (draft?.state === "review") await ctx.db.delete(draft._id);
+  if (draft && draft.state !== "acted") await ctx.db.delete(draft._id);
 }
 
 async function handleUnsendEvent(
@@ -503,6 +590,8 @@ async function handleUnsendEvent(
   bot: Doc<"lineBots">,
   event: Extract<LineAiInboundEvent, { eventType: "unsend" }>,
   now: number,
+  enabled: boolean,
+  projectVisibilityVersion: number,
   onSchedule?: LineAiScheduleHook,
 ) {
   const chat = await ctx.db.query("lineChats")
@@ -526,7 +615,7 @@ async function handleUnsendEvent(
   if (triggerIntake) {
     if (!sameEnrollment(triggerIntake)) return;
     await ensureUnsendFence(ctx, bot._id, event.lineChatId, event.messageId, event.webhookEventId, event.timestamp, now);
-    if (triggerIntake.state !== "acted" && triggerIntake.state !== "ignored") {
+    if (triggerIntake.state !== "acted") {
       await discardAssistantDraft(ctx, triggerIntake._id);
       await ctx.db.patch(triggerIntake._id, {
         state: "ignored",
@@ -539,43 +628,55 @@ async function handleUnsendEvent(
       });
       const fileLinks = await ctx.db.query("lineAiIntakeFiles")
         .withIndex("by_intake", q => q.eq("intakeId", triggerIntake._id))
-        .collect();
-      for (const link of fileLinks) await ctx.db.delete(link._id);
+        .take(LINE_AI_MAX_FILES);
+      for (const link of fileLinks) {
+        const recent = await recentFileByMessage(ctx, bot._id, link.messageId);
+        if (recent) await ctx.db.delete(recent._id);
+        await ctx.db.delete(link._id);
+      }
     }
     await recordDedupEvent(ctx, bot._id, event.webhookEventId, event.messageId, "unsent", now);
     return;
   }
 
   // 2. Check whether the unsent message is an attached follow-up file.
-  const fileLink = await ctx.db.query("lineAiIntakeFiles")
-    .withIndex("by_bot_message", q => q.eq("botId", bot._id).eq("messageId", event.messageId))
-    .unique();
+  const fileLink = await attachedFileByMessage(ctx, bot._id, event.messageId);
   if (fileLink) {
     const intake = await ctx.db.get(fileLink.intakeId);
     if (!intake || !sameEnrollment(intake)) return;
     await ensureUnsendFence(ctx, bot._id, event.lineChatId, event.messageId, event.webhookEventId, event.timestamp, now);
-    if (intake.state !== "acted" && intake.state !== "ignored") {
+    if (intake.state !== "acted") {
       const files = intake.files.filter(file => file.messageId !== event.messageId);
+      await discardAssistantDraft(ctx, intake._id);
       if (intake.state === "draft" || intake.state === "processing") {
-        await discardAssistantDraft(ctx, intake._id);
         await ctx.db.patch(intake._id, {
           files, state: "pending", availableAt: now,
           leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now,
         });
-        if (onSchedule) await onSchedule(ctx, { intakeId: intake._id, availableAt: now });
+        if (enabled && onSchedule) await onSchedule(ctx, { intakeId: intake._id, availableAt: now });
       } else {
         await ctx.db.patch(intake._id, { files, updatedAt: now });
       }
+      const recent = await recentFileByMessage(ctx, bot._id, event.messageId);
+      if (recent) await ctx.db.delete(recent._id);
       await ctx.db.delete(fileLink._id);
     }
     await recordDedupEvent(ctx, bot._id, event.webhookEventId, event.messageId, "unsent", now);
     return;
   }
 
-  // 3. Out-of-order unsend before message delivery: only fence chats eligible for assistant intake.
-  if (!isEligibleAssistantChat(bot, chat, event.kind, event.timestamp)) return;
+  const recent = await recentFileByMessage(ctx, bot._id, event.messageId);
+  if (recent) {
+    if (recent.chatId !== chat._id || recent.joinedAt !== chat.joinedAt
+      || (event.senderDigest && recent.senderDigest !== event.senderDigest)) return;
+    await ctx.db.delete(recent._id);
+  } else {
+    // Fence a message whose delivery may still be pending only in an eligible chat.
+    if (!enabled || !isEligibleAssistantChat(bot, chat, event.kind, event.timestamp, projectVisibilityVersion)
+      || !await currentLineLifecycle(ctx, chat)) return;
+  }
   await ensureUnsendFence(ctx, bot._id, event.lineChatId, event.messageId, event.webhookEventId, event.timestamp, now);
-  await recordDedupEvent(ctx, bot._id, event.webhookEventId, event.messageId, "unsend_fenced", now);
+  await recordDedupEvent(ctx, bot._id, event.webhookEventId, event.messageId, recent ? "unsent" : "unsend_fenced", now);
 }
 
 /**
@@ -589,9 +690,10 @@ export async function acceptLineAiEvents(
 ) {
   const { bot, events, now } = input;
   if (!events.length || bot.state !== "active") return;
-  const project = await admittedLineAiProject(ctx, bot.projectId);
+  const project = await admittedLineProject(ctx, bot.projectId);
   if (!project) return;
-  const connection = await readLineAiConnection(ctx, bot.projectId);
+  const enabled = lineAiEnabled();
+  const connection = enabled ? await readLineAiConnection(ctx, bot.projectId) : null;
   const authority = connection?.enabled && connection.keyCipher ? {
     connectionRevision: connection.revision, connectionUpdatedAt: connection.updatedAt,
     projectVisibilityVersion: project.inboxVisibilityVersion ?? 0,
@@ -599,7 +701,7 @@ export async function acceptLineAiEvents(
 
   for (const event of events) {
     if (event.eventType === "unsend") {
-      await handleUnsendEvent(ctx, bot, event, now, options?.onSchedule);
+      await handleUnsendEvent(ctx, bot, event, now, enabled, project.inboxVisibilityVersion ?? 0, options?.onSchedule);
       continue;
     }
     if (!authority || event.timestamp < Math.max(authority.connectionUpdatedAt, now - LINE_AI_INTAKE_TTL_MS)
@@ -620,7 +722,9 @@ export async function cleanupExpiredLineAiRecords(
   ctx: MutationCtx,
   options?: { now?: number; limit?: number },
 ) {
-  if (retentionHeld(process.env)) return { deletedIntakes: 0, deletedFiles: 0, deletedEvents: 0, deletedUnsends: 0 };
+  if (retentionHeld(process.env)) {
+    return { deletedIntakes: 0, deletedFiles: 0, deletedRecentFiles: 0, deletedEvents: 0, deletedUnsends: 0 };
+  }
   const now = options?.now ?? Date.now();
   const rawLimit = options?.limit ?? LINE_AI_CLEANUP_BATCH;
   const limit = Number.isFinite(rawLimit)
@@ -638,7 +742,7 @@ export async function cleanupExpiredLineAiRecords(
     if (intake.state === "processing" && (intake.leaseExpiresAt ?? 0) > now) continue;
     const links = await ctx.db.query("lineAiIntakeFiles")
       .withIndex("by_intake", q => q.eq("intakeId", intake._id))
-      .collect();
+      .take(LINE_AI_MAX_FILES);
     for (const link of links) {
       await ctx.db.delete(link._id);
       deletedFiles++;
@@ -646,6 +750,11 @@ export async function cleanupExpiredLineAiRecords(
     await ctx.db.delete(intake._id);
     deletedIntakes++;
   }
+
+  const expiredRecentFiles = await ctx.db.query("lineAiRecentFiles")
+    .withIndex("by_expires_at", q => q.lte("expiresAt", now))
+    .take(limit);
+  for (const file of expiredRecentFiles) await ctx.db.delete(file._id);
 
   const expiredFiles = await ctx.db.query("lineAiIntakeFiles")
     .withIndex("by_expires_at", q => q.lte("expiresAt", now))
@@ -673,5 +782,5 @@ export async function cleanupExpiredLineAiRecords(
     deletedUnsends++;
   }
 
-  return { deletedIntakes, deletedFiles, deletedEvents, deletedUnsends };
+  return { deletedIntakes, deletedFiles, deletedRecentFiles: expiredRecentFiles.length, deletedEvents, deletedUnsends };
 }

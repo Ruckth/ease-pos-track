@@ -64,8 +64,8 @@ export const accept = internalJobMutation({
     const now = Date.now();
     await ctx.db.patch(botId, { lastWebhookAt: now });
     for (const fields of events) {
-      if (await ctx.db.query("lineInboundEvents").withIndex("by_event",
-        q => q.eq("webhookEventId", fields.webhookEventId)).unique()) continue;
+      if (await ctx.db.query("lineInboundEvents").withIndex("by_bot_event",
+        q => q.eq("botId", botId).eq("webhookEventId", fields.webhookEventId)).unique()) continue;
       const eventId = await ctx.db.insert("lineInboundEvents", {
         ...fields, botId, state: "pending", attempt: 0, createdAt: now, updatedAt: now,
       });

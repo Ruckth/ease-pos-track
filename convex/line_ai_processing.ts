@@ -16,6 +16,10 @@ const leaseMs = 90_000;
 const dayMs = 24 * 60 * 60_000;
 const scansPerProjectPerDay = 60;
 const maxAttempts = 2;
+const scanWarnings = new Set([
+  "LINE_AI_KEY_REJECTED", "LINE_AI_KEY_UNREADABLE", "LINE_AI_QUOTA_EXCEEDED", "LINE_AI_RATE_LIMITED",
+  "LINE_AI_DAILY_LIMIT", "LINE_AI_REQUEST_REJECTED", "LINE_AI_RESPONSE_INVALID",
+]);
 
 const manualSuggestion = {
   intent: "clarify", title: null, description: null, ticketNumber: null, reply: null, evidence: [],
@@ -41,6 +45,7 @@ export const recover = internalJobMutation({
 export const claim = internalJobMutation({
   name: "line_ai_processing:claim", args: intake,
   handler: async (ctx, { intakeId }) => {
+    if (!await lineAiReleaseEnabled(ctx)) return null;
     const row = await ctx.db.get(intakeId);
     const now = Date.now();
     if (!row || (row.state !== "pending" && row.state !== "processing") || row.expiresAt <= now
@@ -105,15 +110,17 @@ export const finish = internalJobMutation({
     const row = await ctx.db.get(intakeId);
     const now = Date.now();
     if (!row || row.state !== "processing" || row.leaseId !== leaseId || (row.leaseExpiresAt ?? 0) <= now) return;
+    if (!await lineAiReleaseEnabled(ctx)) return;
     const enrollment = await assistantEnrollment(ctx, { ...row, connectionRevision });
-    const gone = !enrollment || row.expiresAt <= now || suggestion.intent === "skip";
-    if (!gone) await ctx.db.insert("lineAiDrafts", {
+    const reviewable = !!enrollment && row.expiresAt > now && suggestion.intent !== "skip";
+    if (reviewable) await ctx.db.insert("lineAiDrafts", {
       intakeId, projectId: row.projectId, state: "review", suggestion: checkedSuggestion(suggestion, row.text),
-      warning, connectionRevision, createdAt: now, expiresAt: row.expiresAt,
+      warning, connectionRevision, authorizationRevision: enrollment.connection.authorizationRevision ?? 0,
+      createdAt: now, expiresAt: row.expiresAt,
     });
     await ctx.db.patch(intakeId, {
-      state: gone ? "ignored" : "draft", leaseId: undefined, leaseExpiresAt: undefined,
-      updatedAt: now, ...(gone ? { text: "", files: [] } : {}),
+      state: reviewable ? "draft" : "ignored", leaseId: undefined, leaseExpiresAt: undefined,
+      updatedAt: now, ...(reviewable ? {} : { text: "", files: [] }),
     });
   },
 });
@@ -133,10 +140,10 @@ export const process = internalJobAction({
       let fileBytes = 0;
       if (row.files.length) {
         const line = createLine(await openLineSecret(bot.tokenCipher));
-        if (!await ctx.runQuery(internal.line_ai_processing.authorizeDownload, { ...scope, tokenCipher: bot.tokenCipher })) {
-          throw new Error("LINE_AI_UNAVAILABLE");
-        }
         for (const file of row.files) {
+          if (!await ctx.runQuery(internal.line_ai_processing.authorizeDownload, { ...scope, tokenCipher: bot.tokenCipher })) {
+            throw new Error("LINE_AI_UNAVAILABLE");
+          }
           try {
             if (file.type === "video") throw new Error("LINE_CONTENT_UNSUPPORTED");
             const content = await line.getContent(file.messageId);
@@ -152,12 +159,13 @@ export const process = internalJobAction({
       if (!warning) {
         const apiKey = await openLineAiKey(connection);
         const authorization = await ctx.runMutation(internal.line_ai_processing.beginScan, scope);
+        if (authorization === "quota") throw new Error("LINE_AI_DAILY_LIMIT");
         if (authorization !== "approved") throw new Error("LINE_AI_UNAVAILABLE");
         suggestion = await scanLineRequest({ provider: connection.provider, model: connection.model, apiKey },
           { text: row.text, files });
       }
-    } catch {
-      warning = "LINE_AI_UNAVAILABLE";
+    } catch (error) {
+      warning = error instanceof Error && scanWarnings.has(error.message) ? error.message : "LINE_AI_UNAVAILABLE";
     }
     await ctx.runMutation(internal.line_ai_processing.finish, { ...scope, suggestion, warning });
   },

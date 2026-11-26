@@ -3,7 +3,7 @@ import { requireLocalFixtures } from "../local_fixtures";
 type Profile = { displayName: string; pictureUrl?: string };
 type BotInfo = Profile & { userId: string; basicId: string };
 type WebhookTest = { success: boolean; statusCode?: number; reason?: string };
-type PushResult = "accepted" | "unknown" | "rejected";
+type PushResult = "accepted" | "unknown" | "rejected" | "limited";
 const maxContentBytes = 8 * 1024 * 1024;
 
 export const localLineFixtureToken = "local-line-fixture-token";
@@ -112,6 +112,7 @@ export function createLine(token: string, transport: typeof fetch = fetch) {
         if (response.ok || (response.status === 409 && response.headers.has("x-line-accepted-request-id"))) {
           return "accepted";
         }
+        if (response.status === 429) return "limited";
         return response.status >= 500 ? "unknown" : "rejected";
       } catch {
         return "unknown";

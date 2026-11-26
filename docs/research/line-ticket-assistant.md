@@ -1,6 +1,6 @@
 # LINE Ticket assistant research
 
-The first implementation uses Gemini directly with `gemini-4-neon`. An Owner tests and saves one Project connection, then enables an approved LINE chat. Staff review a suggestion and can create or close a Ticket and queue the reply in one action. The [interactive preview](line-ticket-assistant-preview.html) uses synthetic data.
+The first implementation uses Gemini directly with `gemini-4-neon`. An Owner tests and saves one Project connection, then enables an approved LINE chat. Staff review a suggestion and can create or close a Ticket and queue the reply in one action. [Setup and verification](../line-bots.md#line-ticket-assistant)
 
 ## What the merged app already does
 
