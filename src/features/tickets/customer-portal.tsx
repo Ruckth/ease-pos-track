@@ -8,17 +8,16 @@ import { LanguageMenuGroup } from "@/components/language-menu";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { CustomerTicketWizard } from "./customer-ticket-wizard";
 import { useI18n } from "@/lib/i18n";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { ChevronDown, Loader2, LogOut, Plus, Search, UserRound } from "lucide-react";
+import { ChevronDown, ChevronRight, KeyRound, Loader2, LogOut, Plus, UserRound } from "lucide-react";
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useCustomerTickets, useCustomerTicketSearch, useWorkspaceTicket } from "./adapter";
-import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
+import { TicketSearchInput } from "./ticket-search-input";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
 import { customerQueue, customerQueueCounts, type CustomerQueueFilter } from "./customer-queue";
 import { useComposer } from "./use-composer";
@@ -121,7 +120,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         <CustomerAccount clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
       </Suspense>
     </Dialog>
-    <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
+    <div className="mx-auto max-w-6xl py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:py-5">
       {viewer.needsRecoveryCode && !ticket && <RecoveryReminder onOpen={() => setAccountOpen(true)} />}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
         <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
@@ -173,9 +172,16 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
 
 function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
   const { t } = useI18n();
-  return <div role="status" className={cn("mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100", className)}>
-    <span>{t("recoveryCodeNeeded")}</span>
-    <Button className="min-h-11 rounded-lg" onClick={onOpen}>{t("recoveryCodeCreate")}</Button>
+  return <div role="status" className={cn("mb-4", className)}>
+    <button type="button" onClick={onOpen} aria-label={t("recoveryCodeCreate")} aria-describedby="customer-recovery-hint"
+      className="aurora-inset flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-start hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <KeyRound aria-hidden className="size-5 shrink-0 text-amber-800 dark:text-amber-200" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold">{t("recoveryCodeCreate")}</span>
+        <span id="customer-recovery-hint" className="block text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</span>
+      </span>
+      <ChevronRight aria-hidden className="size-4 shrink-0" />
+    </button>
   </div>;
 }
 
@@ -232,21 +238,15 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{pending || invalidSearch ? "" : announcement}</span>
     <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
-      <label className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto">
-        <span>{t("customerQueueSearch")}</span>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input className="min-h-11 rounded-lg pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
-        </div>
-      </label>
-      <div className="grid gap-1 text-sm font-medium text-foreground">
+      <TicketSearchInput className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto"
+        value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
+      <div className="grid w-full gap-1 text-sm font-medium text-foreground sm:w-auto">
         <label htmlFor="customer-ticket-status">{t("ticketStatus")}</label>
         <select id="customer-ticket-status" ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
           {options.map(option => <option key={option.value} value={option.value}>{option.label}{!searching ? ` (${option.count})` : ""}</option>)}
         </select>
       </div>
     </div>
-    {!searching && page.status !== "Exhausted" ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p> : null}
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
       : pending ? <div className="ticket-surface flex items-center gap-2 p-5 text-sm" role="status"><Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />{t("syncingTickets")}</div>
       : !searching && tickets.length === 0 && page.status === "Exhausted" && (statusScope === "all" || statusScope === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>

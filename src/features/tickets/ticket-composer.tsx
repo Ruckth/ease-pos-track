@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/lib/i18n";
 import type { PendingMedia } from "@/lib/types";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { lazy, Suspense, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import type { DisposableTicketDraft } from "./draft";
@@ -80,7 +80,6 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
 
   return <>
     <form className="space-y-4" onSubmit={submit} noValidate aria-busy={isUploading}>
-      <p className="text-sm text-muted-foreground">{t("composerHint")}</p>
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span className="text-muted-foreground">{t("composerRequired")}</span></label>
         <Input disabled={isUploading} id={titleId} value={title} required aria-invalid={titleInvalid || undefined}
@@ -96,8 +95,6 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
         <Textarea disabled={isUploading} id={descriptionId} rows={4} maxLength={DESCRIPTION_MAX_LENGTH} value={description}
           placeholder={t("descriptionPlaceholder")} onChange={event => setDescription(event.target.value)} />
       </div>
-      <TicketRoutingFields projectId={owner.projectId} value={routingClassification}
-        onChange={owner.setRoutingClassification} disabled={isUploading} />
       {mediaEnabled && <div className="space-y-2">
         <p className="text-sm font-medium">{t("media")}</p>
         <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>}><MediaUploadField items={items} onItemsChange={setItems} onFilesAdded={owner.addFiles}
@@ -105,20 +102,27 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
           annotationCounts={annotationCounts} disabled={!active || isUploading} /></Suspense>
         {items.length ? <p className="text-sm leading-5 text-muted-foreground">{annotations.length ? t("pinSummary", { count: annotations.length }) : t("pinHint")}</p> : null}
       </div>}
-      <Button type="button" className="min-h-11" variant="ghost" disabled={isUploading} aria-expanded={preview} aria-controls={`${titleId}-preview`}
-        onClick={() => setPreview(value => !value)}>{t(preview ? "composerHidePreview" : "composerPreview")}</Button>
-      {preview ? <section id={`${titleId}-preview`} aria-label={t("composerPreview")} className="aurora-inset space-y-2 rounded-xl p-4">
-        <h3 className="break-words font-semibold">{title.trim() || t("composerUntitled")}</h3>
-        <p className="whitespace-pre-wrap break-words text-sm">{description.trim() || t("noDescription")}</p>
-        {mediaEnabled && <p className="text-sm text-muted-foreground">{t("reviewMedia", { count: items.length })} · {t("reviewPins", { count: annotations.length })}</p>}
-      </section> : null}
+      <TicketRoutingFields projectId={owner.projectId} value={routingClassification}
+        onChange={owner.setRoutingClassification} disabled={isUploading} />
+      <div className="rounded-md border border-border/60">
+        <Button type="button" className="group h-auto min-h-11 w-full justify-between gap-2 whitespace-normal px-3 py-2 text-left" variant="ghost"
+          disabled={isUploading} aria-expanded={preview} aria-controls={`${titleId}-preview`} onClick={() => setPreview(value => !value)}>
+          {t(preview ? "composerHidePreview" : "composerPreview")}
+          <ChevronDown aria-hidden="true" className="group-aria-expanded:rotate-180" />
+        </Button>
+        <section id={`${titleId}-preview`} aria-label={t("composerPreview")} hidden={!preview} className="space-y-2 px-3 pb-3">
+          <h3 className="break-words font-semibold">{title.trim() || t("composerUntitled")}</h3>
+          <p className="whitespace-pre-wrap break-words text-sm">{description.trim() || t("noDescription")}</p>
+          {mediaEnabled && <p className="text-sm text-muted-foreground">{t("reviewMedia", { count: items.length })} · {t("reviewPins", { count: annotations.length })}</p>}
+        </section>
+      </div>
       {mediaEnabled && progress !== null ? <div role="progressbar" aria-label={t("submitting")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-2 overflow-hidden rounded-full bg-muted">
         <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
       </div> : null}
       {(title || description || items.length > 0) && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
       {error && !titleInvalid ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <div className="aurora-dialog-edge sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap gap-2 border-t border-border/60 px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
-        <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t(role === "staff" ? "submit" : "submitTicket")}</Button>
+      <div className="aurora-composer-footer aurora-dialog-edge sticky bottom-0 z-10 -mx-4 flex flex-wrap gap-2 border-t border-border/60 px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
+        <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t("submitTicket")}</Button>
         {mediaEnabled && isUploading ? <Button type="button" variant="outline" className="min-h-11" onClick={() => owner.cancel()}>{t("cancelUpload")}</Button> : null}
       </div>
     </form>

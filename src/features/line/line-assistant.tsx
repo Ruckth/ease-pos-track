@@ -98,7 +98,7 @@ export function LineAiSetup({ projectId, settings, owner }: {
     {owner && <form className="grid gap-3" onSubmit={submit}>
       <label className="grid gap-1 text-sm font-medium">
         Provider
-        <select className="h-9 rounded-md border bg-background px-2 text-sm" value={provider}
+        <select className="h-9 rounded-md glass-field px-2 text-sm" value={provider}
           onChange={event => setProvider(event.target.value as Provider)} disabled={busy}>
           {Object.entries(providerNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
@@ -163,7 +163,7 @@ function ReviewSuggestion({ draft, onClose }: { draft: LineAiDraft; onClose: () 
     </ul>}
     <label className="grid gap-1 text-sm font-medium">
       Action
-      <select className="h-9 rounded-md border bg-background px-2 text-sm" value={mode}
+      <select className="h-9 rounded-md glass-field px-2 text-sm" value={mode}
         onChange={event => setMode(event.target.value as typeof mode)} disabled={busy}>
         {draft.canCreate && <option value="create">Create Ticket</option>}
         {draft.target && <option value="close">Close {draft.target.number}</option>}

@@ -1,7 +1,7 @@
 import { useT3Proof, useT3ReleaseAvailable } from "@/features/t3/adapters/connection";
 import { TicketInbox } from "./ticket-inbox";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Plus, Search } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
 import type { TicketSummary } from "../../../shared/ticket-contracts";
@@ -12,10 +12,9 @@ import { TicketExplorer } from "@/components/ticket-explorer";
 import { statuses } from "@/components/ticket-status";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
+import { TicketSearchInput } from "./ticket-search-input";
 import { queueNeighbors } from "@/lib/staff-ticket-queue";
 import { useStaffTickets, useTicketCapabilities, useTicketTags, useWorkspaceTicket } from "./adapter";
 import { SubmitTicket } from "./staff-composer";
@@ -227,10 +226,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
         {project === null ? <NoProjects action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
           project === undefined ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
             <div className={`aurora-toolbar relative z-20 md:sticky md:top-2 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
-              <label className="relative min-w-0 grow basis-full sm:basis-52">
-                <span className="sr-only">{t("search")}</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input className="min-h-11 rounded-lg pl-9 md:min-h-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
-              </label>
+              <TicketSearchInput className="min-w-0 grow basis-full sm:basis-52" value={searchInput} onChange={typeSearch} onClear={clearSearch} />
               {!showArchived && <label className="min-w-0 max-sm:flex-1"><span className="sr-only">{t("ticketStatus")}</span>
                 <select className={selectClass} value={filter} onChange={event => {
                   const status = event.target.value;
