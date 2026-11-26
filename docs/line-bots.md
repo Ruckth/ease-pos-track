@@ -8,6 +8,20 @@ In LINE Developers Console, enable **Use webhook**, **Webhook redelivery** and *
 
 A Project can connect multiple bots, each of which can join multiple chats. LINE allows one Official Account in each group or room at a time. [LINE group chats](https://developers.line.biz/en/docs/messaging-api/group-chats/#add-bot-group-chat)
 
+## LINE Ticket assistant
+
+The assistant is off by default. It requires a legacy or disposable deployment, `LINE_AI_ENABLED=true`, and the existing `LINE_SECRETS_KEY`. The named-account pilot keeps it unavailable. Use a test LINE channel and synthetic messages for verification.
+
+1. In **LINE**, the Owner chooses **Test and save** under **Project AI connection**. Google Gemini is the default. Gemini 4 Neon requires paid Gemini API access and uses the API key from Google AI Studio. OpenRouter, Anthropic Claude, and OpenAI each use their own API key. One tested connection serves the Project's bots. [Gemini API keys](https://aistudio.google.com/docs/api-key) · [Neon availability](https://aistudio.google.com/docs/whats-new-gemini-4-neon)
+2. Open the bot and choose **Enable assistant** on an approved chat. Group members mention the bot with their request. Opted-in one-to-one chats can send a direct request. Follow-up attachments must come from the same sender and chat.
+3. Open **LINE Ticket suggestions** to approve a draft, edit its reply, ask for details, or dismiss it. A closure must identify an active Ticket linked to that chat. **Create and send** and **Close and send** save the Ticket change and queue the approved reply together.
+
+**Pause assistant** on the Project keeps the tested key. Resuming applies to new intake. Key rotation preserves drafts awaiting review and approved replies. Ask senders to repeat requests that were still waiting for analysis when the key changed. **Disconnect provider** removes the stored key. The Project records successful connection changes with the acting staff account when available. A chat can be paused independently. Enable the chat again after reactivating its bot or restoring its Project. Review the enabled provider’s data handling, inform chat members before enabling live intake, and use only data approved for that provider.
+
+The assistant sends the reviewed outcome by push to the originating chat. **Reply accepted by LINE** records acceptance by the Messaging API. If a reply times out, staff can retry it from **Recent replies** for up to six hours. Use **Load more replies** for older entries. If LINE reports a limit, check the rate and available message quota before retrying. The retry reuses its original payload and LINE retry key. It never repeats the Ticket change. [LINE push](https://developers.line.biz/en/reference/messaging-api/#send-push-message) · [LINE API retry keys](https://developers.line.biz/en/docs/messaging-api/retrying-api-request/) · [LINE limits](https://developers.line.biz/en/docs/messaging-api/handling-http-429-errors/)
+
+Staff approval applies to the current Project, bot, chat enrollment and Ticket version. The assistant waits up to two minutes for follow-up files. It caps AI scans at 60 per Project per UTC day and analyzes up to two PNG, JPEG, or PDF attachments with an 8 MiB combined limit and 12 pages per PDF. PDFs that exceed the parsing limits or use unsupported encodings go to manual review. Files are used for analysis in memory. Staff can attach approved files through the existing Ticket attachment workflow. Keep AI requests and replies disabled while replacing deployment data. Before restoring a backup, pause the assistant, stop in-flight work, and re-establish the connection and chat opt-ins with a fresh cutover boundary.
+
 ## Local setup and replay
 
 Use a disposable worktree. Run `pnpm agent:setup`, then set a 32-byte base64 key and enable local fixtures.
@@ -30,4 +44,6 @@ pnpm line:replay fixtures/line/leave.json --bot "Replay bot POS"
 
 Replay signs a fixture with the selected local fixture bot's channel secret and posts to this worktree's loopback Convex site port. Fixture bots use a simulated LINE adapter. The follow and unfollow fixtures exercise 1:1 chats. Event IDs and timestamps are fixed so a repeat exercises deduplication. To exercise a new lifecycle, use fresh event IDs and increasing timestamps.
 
-The webhook records group, room and 1:1 lifecycle events. New groups and rooms need staff approval for their current enrollment. A newer join starts a fresh enrollment, even if it arrives before the preceding leave. Signed delivery for an archived Project is acknowledged without storing events. Queued events are checked again at claim and settlement. Staff can choose whether new 1:1 chats need approval and who owns future Tickets for an approved chat. The webhook discards messages and postbacks.
+For the assistant, set `LINE_AI_ENABLED=true` with `pnpm convex:local env set LINE_AI_ENABLED true` and enter `local-line-ai-fixture-key` in **Project AI connection**. This key is accepted only by the disposable fixture provider. Approve and enable the fixture chat, then replay a text event with a current timestamp, a fresh event and message ID, and a bot mention marked `isSelf: true`. The fixture model and LINE push run without external API requests.
+
+The webhook records group, room and 1:1 lifecycle events. New groups and rooms need staff approval for their current enrollment. A newer join starts a fresh enrollment, even if it arrives before the preceding leave. Signed delivery for an archived Project is acknowledged without storing events. Queued events are checked again at claim and settlement. Staff can choose whether new 1:1 chats need approval and who owns future Tickets for an approved chat. Message intake requires the assistant to be enabled for the chat.

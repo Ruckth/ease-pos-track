@@ -83,13 +83,17 @@ export const finish = internalJobMutation({
       if (members && chat) {
         await ctx.db.patch(chat._id, { ...known({ memberCount }), lastMembershipAt: timestamp });
       } else if (leaving) {
-        if (chat) await ctx.db.patch(chat._id, { state: "left", leftAt: timestamp, lastEventAt: timestamp });
+        if (chat) await ctx.db.patch(chat._id, {
+          state: "left", leftAt: timestamp, lastEventAt: timestamp,
+          assistantEnabled: false, assistantEnabledAt: undefined, assistantOptIn: undefined,
+          assistantRevision: (chat.assistantRevision ?? 0) + 1,
+        });
         else await ctx.db.insert("lineChats", {
           botId, projectId: bot.projectId, kind, lineChatId, name: fallbackName(kind),
           state: "left", joinedAt: timestamp, leftAt: timestamp, lastEventAt: timestamp, notify: "own", allowCreate: true,
         });
       } else {
-        const newJoin = !chat || chat.state === "left" || chat.state === "rejected" || timestamp > chat.joinedAt;
+        const newJoin = !chat || timestamp > chat.joinedAt;
         const state = kind === "user" && bot.allowDirectChats ? "active" : "pending";
         // A failed lookup keeps what is already known rather than clearing it.
         const fields = { name: name ?? chat?.name ?? fallbackName(kind), ...known({ pictureUrl, memberCount }), lastEventAt: timestamp };
@@ -101,7 +105,8 @@ export const finish = internalJobMutation({
           ...fields, ...(newJoin ? {
             state, joinedAt: timestamp, leftAt: undefined, approvedAt: undefined, approvedBy: undefined,
             ownerCustomerId: undefined, displayNameOverride: undefined, notify: "own" as const, allowCreate: true,
-            lastMembershipAt: undefined,
+            lastMembershipAt: undefined, assistantEnabled: false, assistantEnabledAt: undefined, assistantOptIn: undefined,
+            assistantRevision: (chat.assistantRevision ?? 0) + 1,
           } : {}),
         });
         reply = newJoin && type === "join";

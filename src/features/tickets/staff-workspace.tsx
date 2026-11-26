@@ -280,7 +280,8 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
       {nav.health && <StaffHealth />}
     </Dialog>}
     {lineEnabled && lineSettings && project && <Dialog open onOpenChange={() => onLineSettings?.(false)} title="LINE" mobileFullScreen>
-      <LineSettings key={project._id} project={project} selected={lineSettings.bot} onSelect={bot => onLineSettings?.(true, bot)} />
+      <LineSettings key={project._id} project={project} selected={lineSettings.bot} owner={viewer.role === "owner"}
+        onSelect={bot => onLineSettings?.(true, bot)} />
     </Dialog>}
     {tool === "routing" && project && routing && <Dialog open onOpenChange={() => setTool(null)} title={routingCopy.routing} mobileFullScreen>
       <RoutingWorkspace key={project._id} projectId={project._id} settings={routing} openTicket={id => {
