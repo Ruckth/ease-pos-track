@@ -69,7 +69,7 @@ test("named staff use rules, review, Mine and manual holds while the customer se
       await classification.waitFor();
       assert.equal(await product.isVisible(), false);
       assert.equal(await symptom.isVisible(), false);
-      assert.equal(await customer.page.getByRole("checkbox", { name: "จำกัดการเข้าถึง" }).isVisible(), true);
+      assert.equal(await customer.page.getByRole("checkbox", { name: "ให้เจ้าหน้าที่เลือกผู้รับผิดชอบเอง" }).isVisible(), true);
       await classification.press("Enter");
       await product.selectOption({ label: "เครื่องพิมพ์" });
       await symptom.selectOption({ label: "ใบเสร็จว่าง" });

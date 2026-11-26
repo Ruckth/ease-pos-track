@@ -85,7 +85,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       const composer = page.getByRole("dialog", { name: copy(language, "newTicket"), exact: true });
       assert.equal(await composer.getByRole("button", { name: copy(language, "next"), exact: true }).count(), 0);
       await title.fill(name);
-      await composer.getByRole("button", { name: copy(language, role === "staff" ? "submit" : "submitTicket"), exact: true }).click();
+      await composer.getByRole("button", { name: copy(language, "submitTicket"), exact: true }).click();
       await composer.waitFor({ state: "hidden" });
       await page.waitForFunction(() => new URL(location.href).searchParams.has("ticket"));
       const id = new URL(page.url()).searchParams.get("ticket") as Id<"tickets">;
@@ -119,7 +119,7 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
     assert.equal(await title.inputValue(), name);
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
-    await page.getByRole("button", { name: copy("en", role === "staff" ? "submit" : "submitTicket"), exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "submitTicket"), exact: true }).click();
     await page.getByRole("dialog", { name: copy("en", "newTicket"), exact: true }).waitFor({ state: "hidden" });
     const matches = await convex.query(api.tickets.searchTickets, { token: seed.sessions[role === "staff" ? 0 : 1], projectId: seed.projects.find(p => p.key === "POS")!.id, search: name, lifecycle: "active" });
     const created = matches.matches.find(item => item.title === name);
@@ -227,7 +227,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await page.getByPlaceholder(copy(language, "describeIssue")).fill("Keep this pin");
       await page.getByRole("button", { name: copy(language, "savePin"), exact: true }).click();
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).last().click();
-      const submit = page.getByRole("button", { name: copy(language, role === "staff" ? "submit" : "submitTicket"), exact: true });
+      const submit = page.getByRole("button", { name: copy(language, "submitTicket"), exact: true });
       await submit.click();
       await Promise.race([held, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Create response was not intercepted")), 8000))]);
       assert.equal(await page.getByRole("button", { name: copy(language, "discardDraft"), exact: true }).isDisabled(), true);
@@ -1392,7 +1392,7 @@ test("sign-out waits for the active draft to cancel with a live session", { time
     await page.getByRole("button", { name: "New Ticket", exact: true }).first().click();
     await title.fill("Sign-out during upload intent creation");
     await files(page);
-    await page.getByRole("button", { name: copy("en", "submit"), exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "submitTicket"), exact: true }).click();
     await page.getByRole("button", { name: copy("en", "cancelUpload") }).waitFor();
     releaseIntent = await intentResponse;
     // Back would leave the upload's Project. Declining keeps the draft active.

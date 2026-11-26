@@ -122,7 +122,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       {(title || description || items.length > 0) && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
       {error && !titleInvalid ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       <div className="aurora-composer-footer aurora-dialog-edge sticky bottom-0 z-10 -mx-4 flex flex-wrap gap-2 border-t border-border/60 px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
-        <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t(role === "staff" ? "submit" : "submitTicket")}</Button>
+        <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t("submitTicket")}</Button>
         {mediaEnabled && isUploading ? <Button type="button" variant="outline" className="min-h-11" onClick={() => owner.cancel()}>{t("cancelUpload")}</Button> : null}
       </div>
     </form>

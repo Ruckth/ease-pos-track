@@ -247,7 +247,6 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
         </select>
       </div>
     </div>
-    {!searching && page.status !== "Exhausted" ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p> : null}
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
       : pending ? <div className="ticket-surface flex items-center gap-2 p-5 text-sm" role="status"><Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />{t("syncingTickets")}</div>
       : !searching && tickets.length === 0 && page.status === "Exhausted" && (statusScope === "all" || statusScope === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
