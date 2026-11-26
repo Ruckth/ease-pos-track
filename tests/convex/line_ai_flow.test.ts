@@ -81,10 +81,12 @@ async function fixture() {
   const replyPage = (cursor: string | null = null) => t.query(api.line_ai_reviews.listReplies, {
     projectId, token, paginationOpts: { numItems: 20, cursor },
   });
-  type ReviewRow = Awaited<ReturnType<typeof page>>["page"][number];
-  type Reviewable = Extract<ReviewRow, { state: "review" }>;
   const review = async () => ({
-    drafts: (await page()).page.filter((item): item is Reviewable => item.state === "review"),
+    drafts: (await page()).page.flatMap(item => {
+      if (item.state !== "review") return [];
+      if (!item.replies) throw new Error("A reviewable suggestion is missing reply defaults");
+      return [{ ...item, replies: item.replies }];
+    }),
     replies: (await replyPage()).page,
   });
   const tickets = () => t.run(({ db }) => db.query("tickets").collect());
