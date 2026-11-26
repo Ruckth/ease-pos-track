@@ -7,7 +7,7 @@ import { supportsCamera } from "@/lib/camera";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Camera, FileImage, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
 const VIDEO_LIMIT = 3;
@@ -42,12 +42,19 @@ export function MediaUploadField({
   const positionId = useId();
   const positionIndex = items.findIndex(item => item.id === positioning);
   const field = useRef<HTMLDivElement>(null);
+  const returnToHandle = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (positioning !== null || returnToHandle.current === null) return;
+    field.current?.querySelector<HTMLButtonElement>(
+      `[data-order-handle="${CSS.escape(returnToHandle.current)}"]`,
+    )?.focus();
+    returnToHandle.current = null;
+  }, [positioning]);
 
   function closePosition(id: string) {
+    returnToHandle.current = id;
     setPositioning(null);
-    requestAnimationFrame(() => field.current?.querySelector<HTMLButtonElement>(
-      `[data-order-handle="${CSS.escape(id)}"]`,
-    )?.focus());
   }
 
   function placeFile(from: number, to: number) {
