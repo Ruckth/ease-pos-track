@@ -411,14 +411,16 @@ test("signed unsends scrub drafts and invalidate leases with intake and scheduli
   expect(previouslyLeased.leaseExpiresAt).toBeUndefined();
   expect(rows).toMatchObject({ drafts: [], recentFiles: [], fileLinks: [] });
   expect(rows.intakes).toHaveLength(3);
-  expect(rows.unsends).toHaveLength(4);
+  expect(rows.unsends).toHaveLength(5);
+  expect(rows.unsends).toContainEqual(expect.objectContaining({ messageId: "unknown" }));
 
   vi.stubEnv("LINE_AI_ENABLED", "true");
   expect((await f.send([
     groupMention({ userId: "Ubob", webhookEventId: "e-new-trigger", messageId: "new-trigger", text: "@Bot New request", timestamp: now + 390 }),
-    trigger("draft-trigger", now + 100), file("buffered-file", now + 400, "Ubob"),
+    trigger("draft-trigger", now + 100), file("buffered-file", now + 400, "Ubob"), trigger("unknown", now + 500),
   ])).status).toBe(200);
   expect((await f.rows()).intakes.find(row => row.messageId === "new-trigger")?.files).toEqual([]);
+  expect((await f.rows()).intakes.some(row => row.messageId === "unknown")).toBe(false);
   expect((await f.rows()).drafts).toEqual([]);
 });
 

@@ -307,6 +307,31 @@ test("resuming a paused connection does not send its earlier queued intake to an
   expect(fake.scan).toHaveBeenCalledOnce();
 });
 
+test("resuming a paused connection keeps its earlier draft and rate-limited reply blocked", async () => {
+  const f = await fixture();
+  await f.send([f.message("one", "@POS Help First printer"), f.message("two", "@POS Help Second printer")]);
+  await f.runJobs(LINE_AI_FILE_WINDOW_MS + 1);
+  const [first, second] = (await f.review()).drafts;
+  const decision = { type: "create" as const, title: "Printer offline", description: "Register", reply: first.replies.create };
+  fake.push.mockResolvedValueOnce("limited");
+  const reply = await f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: first._id, decision });
+  await f.runJobs();
+  expect((await f.review()).replies).toMatchObject([{ state: "limited", canRetry: true }]);
+
+  for (const [paused, expectedRevision] of [[true, 1], [false, 2]] as const) {
+    await f.t.mutation(api.line_ai_settings.setPaused, {
+      token: f.owner.session, projectId: f.projectId, paused, expectedRevision,
+    });
+  }
+  expect((await f.page()).page).toEqual([{ _id: second._id, state: "unavailable" }]);
+  expect((await f.review()).replies).toMatchObject([{ state: "limited", canRetry: false }]);
+  await expect(f.t.mutation(api.line_ai_reviews.approve, { token: f.token, draftId: second._id, decision }))
+    .rejects.toThrow("LINE_AI_DRAFT_UNAVAILABLE");
+  await expect(f.t.mutation(api.line_ai_reviews.retryReply, { token: f.token, replyId: reply._id }))
+    .rejects.toThrow("LINE_AI_REPLY_UNAVAILABLE");
+  expect(fake.push).toHaveBeenCalledOnce();
+});
+
 test.each(["leave", "join"])("signed %s revokes draft and leased reply authority before metadata settles", async type => {
   const f = await fixture();
   await f.send([f.message("one", "@POS Help First printer"), f.message("two", "@POS Help Second printer")]);

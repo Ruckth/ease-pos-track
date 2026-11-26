@@ -671,8 +671,8 @@ async function handleUnsendEvent(
       || (event.senderDigest && recent.senderDigest !== event.senderDigest)) return;
     await ctx.db.delete(recent._id);
   } else {
-    // Fence a message whose delivery may still be pending only in an eligible chat.
-    if (!enabled || !isEligibleAssistantChat(bot, chat, event.kind, event.timestamp, projectVisibilityVersion)
+    // Keep the withdrawal even during a deployment pause so delayed delivery cannot revive it.
+    if (!isEligibleAssistantChat(bot, chat, event.kind, event.timestamp, projectVisibilityVersion)
       || !await currentLineLifecycle(ctx, chat)) return;
   }
   await ensureUnsendFence(ctx, bot._id, event.lineChatId, event.messageId, event.webhookEventId, event.timestamp, now);
