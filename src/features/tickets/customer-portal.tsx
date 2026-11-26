@@ -239,12 +239,12 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
           <Input className="min-h-11 rounded-lg pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
         </div>
       </label>
-      <label className="grid gap-1 text-sm font-medium text-foreground">
-        <span>{t("ticketStatus")}</span>
-        <select ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
+      <div className="grid gap-1 text-sm font-medium text-foreground">
+        <label htmlFor="customer-ticket-status">{t("ticketStatus")}</label>
+        <select id="customer-ticket-status" ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
           {options.map(option => <option key={option.value} value={option.value}>{option.label}{!searching ? ` (${option.count})` : ""}</option>)}
         </select>
-      </label>
+      </div>
     </div>
     {!searching && page.status !== "Exhausted" ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{t("customerQueueCountsHint")}</p> : null}
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
