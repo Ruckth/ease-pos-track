@@ -63,8 +63,19 @@ test("named staff use rules, review, Mine and manual holds while the customer se
     const staff = await open(await browser.get(), "staff", "en");
     try {
       await customer.title.fill(title);
-      await customer.page.getByRole("combobox", { name: "ผลิตภัณฑ์", exact: true }).selectOption({ label: "เครื่องพิมพ์" });
-      await customer.page.getByRole("combobox", { name: "อาการ", exact: true }).selectOption({ label: "ใบเสร็จว่าง" });
+      const classification = customer.page.locator("summary").filter({ hasText: "ผลิตภัณฑ์และอาการ (ไม่บังคับ)" });
+      const product = customer.page.getByRole("combobox", { name: "ผลิตภัณฑ์", exact: true });
+      const symptom = customer.page.getByRole("combobox", { name: "อาการ", exact: true });
+      await classification.waitFor();
+      assert.equal(await product.isVisible(), false);
+      assert.equal(await symptom.isVisible(), false);
+      assert.equal(await customer.page.getByRole("checkbox", { name: "จำกัดการเข้าถึง" }).isVisible(), true);
+      await classification.press("Enter");
+      await product.selectOption({ label: "เครื่องพิมพ์" });
+      await symptom.selectOption({ label: "ใบเสร็จว่าง" });
+      await classification.press("Enter");
+      await classification.getByText("เครื่องพิมพ์ · ใบเสร็จว่าง", { exact: true }).waitFor();
+      assert.equal(await product.isVisible(), false);
       await customer.page.getByRole("button", { name: copy("th", "submitTicket"), exact: true }).click();
       await customer.page.waitForURL(/ticket=/);
       await customer.page.getByRole("heading", { name: title }).waitFor();
