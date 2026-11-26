@@ -387,7 +387,15 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
     await page.waitForFunction(id => document.activeElement?.getAttribute("data-ticket-id") === id, target._id);
     assert.equal(await query.inputValue(), reference);
 
-    await query.fill("");
+    const clear = page.getByRole("button", { name: copy("en", "clearSearch"), exact: true });
+    const clearSize = await clear.boundingBox();
+    assert.ok(clearSize && clearSize.width >= 44 && clearSize.height >= 44);
+    await clear.press("Enter");
+    await page.waitForURL(url => !url.searchParams.has("q"));
+    assert.equal(await query.inputValue(), "");
+    assert.equal(await status.inputValue(), "all");
+    assert.equal(await query.evaluate(input => input === document.activeElement), true);
+    await clear.waitFor({ state: "hidden" });
     await older.waitFor();
     assert.equal(await rows.count(), 20, "clearing search restores the first browse page");
     await older.click();
@@ -396,7 +404,7 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
 
     await query.fill(reference);
     await targetRow.waitFor();
-    await query.fill("");
+    await clear.click();
     await older.waitFor();
     assert.equal(await rows.count(), 40, "clearing search restores the loaded browse pages");
     assert.deepEqual(errors, []);
@@ -757,7 +765,14 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     await f.page.getByRole("option", { name: tagName, exact: true }).click();
     await f.page.keyboard.press("Escape");
     await search.fill("unmatchedfixturetext");
+    await f.page.waitForURL(url => url.searchParams.get("q") === "unmatchedfixturetext");
     await f.page.getByText("No Tickets match these filters.", { exact: true }).waitFor();
+    const clear = f.page.getByRole("button", { name: copy("en", "clearSearch"), exact: true });
+    await clear.click();
+    await f.page.waitForURL(url => !url.searchParams.has("q"));
+    assert.equal(await search.inputValue(), "");
+    assert.equal(await search.evaluate(input => input === document.activeElement), true);
+    await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).waitFor();
     assert.equal(await f.page.getByRole("group", { name: "Ticket view" }).getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
     await search.fill(name);
     const row = f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) });

@@ -8,17 +8,16 @@ import { LanguageMenuGroup } from "@/components/language-menu";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { CustomerTicketWizard } from "./customer-ticket-wizard";
 import { useI18n } from "@/lib/i18n";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { ChevronDown, Loader2, LogOut, Plus, Search, UserRound } from "lucide-react";
+import { ChevronDown, Loader2, LogOut, Plus, UserRound } from "lucide-react";
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useCustomerTickets, useCustomerTicketSearch, useWorkspaceTicket } from "./adapter";
-import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
+import { TicketSearchInput } from "./ticket-search-input";
 import { CustomerTicketDialog } from "./customer-ticket-dialog";
 import { customerQueue, customerQueueCounts, type CustomerQueueFilter } from "./customer-queue";
 import { useComposer } from "./use-composer";
@@ -232,13 +231,8 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{pending || invalidSearch ? "" : announcement}</span>
     <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
-      <label className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto">
-        <span>{t("customerQueueSearch")}</span>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input className="min-h-11 rounded-lg pl-9 font-normal" maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={query} onChange={event => onQuery(event.target.value)} placeholder={t("search")} />
-        </div>
-      </label>
+      <TicketSearchInput className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto"
+        value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
       <div className="grid gap-1 text-sm font-medium text-foreground">
         <label htmlFor="customer-ticket-status">{t("ticketStatus")}</label>
         <select id="customer-ticket-status" ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
