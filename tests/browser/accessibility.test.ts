@@ -40,6 +40,36 @@ test("axe configuration reports a deliberately unnamed control", async () => {
 });
 
 for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
+  test(`${role} ${language}: Ticket inbox puts updates before keyboard-accessible notification settings`, async () => {
+    const { page, context, errors } = await open(role, language);
+    try {
+      await page.getByRole("dialog").getByRole("button", { name: copy(language, "closeDialog") }).click();
+      const trigger = page.getByRole("button", { name: copy(language, "ticketInbox"), exact: true });
+      await trigger.press("Enter");
+      const inbox = page.getByRole("dialog", { name: copy(language, "ticketInbox"), exact: true });
+      const updates = inbox.getByRole("region", { name: copy(language, "inboxUpdates"), exact: true });
+      const settings = inbox.locator("summary").filter({ hasText: copy(language, "inboxSettings") });
+      await updates.waitFor();
+      const summary = await settings.elementHandle();
+      assert.ok(await updates.evaluate((element, control) => element.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING, summary));
+      assert.equal(await inbox.getByRole("checkbox").count(), 0);
+      await settings.press("Enter");
+      const firstPreference = inbox.getByRole("checkbox", { name: copy(language, role === "staff" ? "inboxIntake" : "statusInboxPreference"), exact: true });
+      await firstPreference.waitFor();
+      await page.waitForFunction(element => element instanceof HTMLInputElement && !element.disabled, await firstPreference.elementHandle());
+      assert.equal(await inbox.getByRole("checkbox").count(), role === "staff" ? 2 : 1);
+      await page.keyboard.press("Tab");
+      assert.equal(await isFocused(firstPreference), true);
+      await expectAccessible(page, `${role} ${language} Ticket inbox settings`);
+      await page.keyboard.press("Escape");
+      await inbox.waitFor({ state: "hidden" });
+      await page.waitForFunction(element => element === document.activeElement, await trigger.elementHandle());
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+}
+
+for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
   test(`${role} ${language}: keyboard-only Ticket creation recovers from a validation error with predictable focus`, async () => {
     const { page, context, title, token, errors, uploads } = await open(role, language);
     try {
