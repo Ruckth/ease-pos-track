@@ -19,7 +19,7 @@ function ConversationDisclosure(props: Extract<Props, { role: "staff" }>) {
   const [open, setOpen] = useState(props.ticket.status === "waiting");
   // Preserve the draft while collapsing this section. Subscribe only after first opening it.
   const [visited, setVisited] = useState(open);
-  return <section className="space-y-2 rounded-lg border border-transparent bg-muted/40 p-3">
+  return <section className="aurora-inset space-y-2 rounded-xl p-3">
     <button type="button" className="min-h-10 w-full text-left font-semibold underline-offset-4 hover:underline"
       aria-expanded={open} onClick={() => { setVisited(true); setOpen(!open); }}>
       {t(props.ticket.status !== "done" && !open ? "askCustomer" : "ticketConversation")}
@@ -107,7 +107,7 @@ function ConversationThread({ ticket, role, children }: Props) {
   </div>;
   return <>
     {(pendingQuestion || body || error || sent || (waiting && latest?.role === "customer")) && <section
-      aria-label={t("ticketConversation")} className="space-y-3 rounded-lg border bg-muted/40 p-3">
+      aria-label={t("ticketConversation")} className="aurora-inset space-y-3 rounded-xl p-3">
       {pendingQuestion && <div>
         <p className="text-sm font-semibold">{t("staffQuestion")}</p>
         <p className="text-xs text-muted-foreground">{formatDate(pendingQuestion._creationTime)}</p>

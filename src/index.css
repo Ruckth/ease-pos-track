@@ -105,7 +105,7 @@
       radial-gradient(ellipse 48rem 36rem at 45% 30rem, var(--aurora-glow-c), transparent 85%);
   }
 
-  .aurora-panel, .aurora-toolbar, .aurora-ticket {
+  .aurora-panel, .aurora-toolbar, .aurora-ticket, .aurora-dialog {
     border: 1px solid var(--glass-rim);
     box-shadow: inset 0 1px var(--glass-glint), 0 6px 20px -7px var(--glass-shadow);
   }
@@ -119,6 +119,16 @@
     background-color: hsl(var(--card) / 0.96);
     color: hsl(var(--card-foreground));
     border-radius: 0.75rem;
+  }
+
+  .aurora-dialog, .aurora-dialog-edge, .aurora-inset {
+    background-color: rgb(var(--glass-fill));
+    color: hsl(var(--card-foreground));
+  }
+
+  .aurora-inset {
+    border: 1px solid var(--glass-rim);
+    box-shadow: inset 0 1px var(--glass-glint);
   }
 
   .ticket-lane {
@@ -170,6 +180,24 @@
       -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
     }
+    .aurora-dialog {
+      background-color: rgb(var(--glass-fill) / 0.85);
+      background-image:
+        radial-gradient(ellipse 38rem 19rem at 0 0, var(--aurora-glow-a), transparent 78%),
+        radial-gradient(ellipse 34rem 24rem at 100% 85%, var(--aurora-glow-c), transparent 82%);
+      -webkit-backdrop-filter: blur(24px);
+      backdrop-filter: blur(24px);
+    }
+    .aurora-dialog-edge {
+      background-color: rgb(var(--glass-fill) / 0.94);
+    }
+    /* The parent supplies the blur. Insets and scrolling rows only composite fills. */
+    .aurora-inset {
+      background: linear-gradient(135deg, hsl(var(--primary) / 0.09), rgb(var(--glass-fill) / 0.77));
+    }
+    .ticket-surface:not(.ticket-surface-selected) {
+      background: linear-gradient(135deg, rgb(var(--ticket-paper) / 0.9), rgb(var(--ticket-paper) / 0.69));
+    }
     /* Reading surface: denser fill keeps long Ticket text legible on the glow. */
     .aurora-ticket {
       background-color: rgb(var(--glass-fill) / 0.82);
@@ -191,11 +219,11 @@
   }
 
   @media (prefers-reduced-transparency: reduce) {
-    .ticket-lane, .ticket-surface {
+    .ticket-lane, .ticket-surface, .ticket-surface:not(.ticket-surface-selected) {
       background: hsl(var(--card));
     }
-    .aurora-panel, .aurora-toolbar, .aurora-ticket {
-      background-color: rgb(var(--glass-fill));
+    .aurora-panel, .aurora-toolbar, .aurora-ticket, .aurora-dialog, .aurora-dialog-edge, .aurora-inset {
+      background: rgb(var(--glass-fill));
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
