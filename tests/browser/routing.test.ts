@@ -14,6 +14,32 @@ async function routingDialog(page: Page) {
   return page.getByRole("dialog", { name: "Ticket routing" });
 }
 
+test("staff board loads full routing settings only when routing is opened", async () => {
+  await capture("workflows", "staff routing query is on demand", async () => {
+    let settingsSubscriptions = 0;
+    const { context, page } = await open(await browser.get(), "staff", "en", async context => {
+      context.on("page", page => page.on("websocket", socket => {
+        if (!new URL(socket.url()).pathname.endsWith("/sync")) return;
+        socket.on("framesent", ({ payload }) => {
+          const message = JSON.parse(String(payload));
+          if (message.type !== "ModifyQuerySet") return;
+          settingsSubscriptions += message.modifications.filter((change: { type: string; udfPath?: string }) =>
+            change.type === "Add" && change.udfPath === "ticket_routing:getSettings").length;
+        });
+      }));
+    });
+    try {
+      await page.getByRole("dialog").getByRole("button", { name: copy("en", "closeDialog") }).click();
+      await page.locator("#staff-ticket-results button[data-ticket-id]").first().waitFor();
+      await page.getByRole("combobox", { name: "Assignment", exact: true }).waitFor();
+      assert.equal(settingsSubscriptions, 0);
+      const routing = await routingDialog(page);
+      await routing.getByRole("button", { name: "Availability", exact: true }).waitFor();
+      assert.equal(settingsSubscriptions, 1);
+    } finally { await context.close(); }
+  });
+});
+
 test("named staff use rules, review, Mine and manual holds while the customer sees only status", async () => {
   await capture("workflows", "named staff routing and customer privacy", async () => {
     const project = seed.projects[0];
