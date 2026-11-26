@@ -240,7 +240,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                   {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
                 </select>
               </label>}
-              {!showArchived && <label className="min-w-0 max-sm:flex-1"><span className="sr-only">{routingCopy.assignment}</span>
+              {!showArchived && <label className="min-w-0 max-sm:flex-[1.3]"><span className="sr-only">{routingCopy.assignment}</span>
                 <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
                   const scope = event.target.value;
                   withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });

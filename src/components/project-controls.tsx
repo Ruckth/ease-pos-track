@@ -52,19 +52,25 @@ export function ProjectSwitcher({
   current,
   onSelect,
   onCreate,
+  compact = false,
 }: {
   projects: ProjectSummary[];
   current: ProjectSummary;
   onSelect: (key: string) => void;
   onCreate?: () => void;
+  compact?: boolean;
 }) {
   const { t } = useI18n();
   const menu = useMenuAction();
+  const visibleLabel = compact ? <>
+    <span className="min-[480px]:hidden">{current.key}</span>
+    <span className="hidden truncate min-[480px]:block">{projectLabel(current)}</span>
+  </> : <span className="truncate">{projectLabel(current)}</span>;
   if (projects.length === 1) {
     return (
       <span className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium" title={projectLabel(current)}>
         <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{projectLabel(current)}</span>
+        {visibleLabel}
       </span>
     );
   }
@@ -73,7 +79,7 @@ export function ProjectSwitcher({
       <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left" />}
         aria-label={`${t("chooseProject")}: ${projectLabel(current)}`} title={projectLabel(current)}>
         <FolderKanban className="text-muted-foreground" aria-hidden="true" />
-        <span className="min-w-0 truncate">{projectLabel(current)}</span>
+        {visibleLabel}
         <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56 min-w-0 max-w-[var(--available-width)]">

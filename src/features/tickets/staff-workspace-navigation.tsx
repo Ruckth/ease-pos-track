@@ -66,7 +66,7 @@ export function StaffWorkspaceNavigation({ inbox, projects, current, archived, h
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 sm:px-4 sm:gap-x-4">
       <ProductWordmark compact={Boolean(current)} />
       {projects && current && <div className="min-w-0 max-w-full flex-1 xl:flex-none">
-        <ProjectSwitcher projects={projects} current={current} onSelect={onSelectProject} onCreate={owner && legacyToolsEnabled ? () => onTool("project") : undefined} />
+        <ProjectSwitcher compact projects={projects} current={current} onSelect={onSelectProject} onCreate={owner && legacyToolsEnabled ? () => onTool("project") : undefined} />
       </div>}
       {current && <nav aria-label={t("project")} className="ml-auto hidden gap-1 xl:flex">{pageButtons.map(({ archived: isArchive, Icon, label }) => <Button type="button" key={label} variant="ghost"
         aria-current={archived === isArchive ? "page" : undefined}
