@@ -34,7 +34,7 @@
     --canvas-opacity: .66;
     --sheet-light: .79;
     --sheet-shade: .57;
-    --edge-fill: .22;
+    --edge-tint: 158 190 241;
     --field: 216 33% 93%;
     --surface-shadow: 0 1px 2px rgb(36 49 73 / 6%), 0 4px 16px -8px rgb(36 49 73 / 22%);
     --surface-shadow-raised: 0 0 0 1px rgb(36 49 73 / 7%), 0 14px 36px -10px rgb(36 49 73 / 32%);
@@ -70,7 +70,7 @@
     --canvas-opacity: .65;
     --sheet-light: .74;
     --sheet-shade: .59;
-    --edge-fill: .26;
+    --edge-tint: 49 75 120;
     --field: 218 27% 23%;
     --surface-shadow: 0 1px 2px rgb(2 7 19 / 30%), 0 6px 18px -8px rgb(2 7 19 / 55%);
     --surface-shadow-raised: 0 0 0 1px rgb(169 200 232 / 10%), 0 16px 36px -10px rgb(2 7 19 / 75%);
@@ -173,7 +173,7 @@
         backdrop-filter: blur(19px) saturate(1.6);
       }
       .aurora-dialog-edge {
-        background: rgb(var(--glass-fill) / var(--edge-fill));
+        background: rgb(var(--edge-tint) / .28);
         -webkit-backdrop-filter: blur(12px);
         backdrop-filter: blur(12px);
       }
