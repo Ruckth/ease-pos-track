@@ -170,6 +170,8 @@ test("reduced transparency gives the Ticket form opaque fields and surfaces", as
   try {
     const emulation = await context.newCDPSession(page);
     const dialog = page.getByRole("dialog");
+    const canvas = page.locator(".aurora-canvas");
+    assert.match(await canvas.evaluate(element => getComputedStyle(element).filter), /blur/);
     await emulation.send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-reduced-transparency", value: "reduce" }],
     });
@@ -182,7 +184,8 @@ test("reduced transparency gives the Ticket form opaque fields and surfaces", as
       assert.equal(style.image, "none");
       assert.match(style.color, /^rgb\(/);
     }
-    assert.equal(await page.locator(".aurora-canvas").evaluate(element =>
+    assert.equal(await canvas.evaluate(element => getComputedStyle(element).filter), "none");
+    assert.equal(await canvas.evaluate(element =>
       getComputedStyle(element, "::before").backgroundImage), "none");
   } finally { await context.close(); }
 });

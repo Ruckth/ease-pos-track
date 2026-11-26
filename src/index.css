@@ -150,10 +150,13 @@
     .aurora-ticket, .aurora-popover {
       background-color: rgb(var(--glass-fill) / .44);
     }
+    /* Soften the page itself so portal composition cannot leave sharp text
+       visible through the sheet. Dialogs and notifications stay in focus. */
+    body:has(> [data-base-ui-portal] > .aurora-dialog[data-open]) .aurora-canvas {
+      filter: var(--modal-page-filter, blur(4px));
+    }
     .aurora-scrim {
       background: linear-gradient(140deg, rgb(var(--canvas-wash) / .19), rgb(20 41 85 / .34));
-      -webkit-backdrop-filter: blur(4px);
-      backdrop-filter: blur(4px);
     }
     .aurora-dialog, .aurora-popover {
       box-shadow: inset 0 1px 1px var(--glass-glint), inset 0 -1px 1px var(--glass-rim),
@@ -196,6 +199,7 @@
   /* Apply the fallback only on an explicit preference. Some engines support blur
      before they recognize the transparency media feature. */
   @media (prefers-reduced-transparency: reduce) {
+    .aurora-canvas { --modal-page-filter: none; }
     .aurora-canvas::before, .aurora-scrim::after { background: none; }
     .aurora-panel, .aurora-toolbar, .aurora-ticket, .aurora-dialog, .aurora-popover,
     .aurora-dialog-edge, .aurora-inset, .aurora-control, .glass-field, .ticket-lane, .ticket-surface {
