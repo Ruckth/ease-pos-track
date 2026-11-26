@@ -13,7 +13,7 @@ import { useI18n } from "@/lib/i18n";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { ChevronDown, Loader2, LogOut, Plus, UserRound } from "lucide-react";
+import { ChevronDown, ChevronRight, KeyRound, Loader2, LogOut, Plus, UserRound } from "lucide-react";
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useCustomerTickets, useCustomerTicketSearch, useWorkspaceTicket } from "./adapter";
@@ -120,7 +120,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         <CustomerAccount clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
       </Suspense>
     </Dialog>
-    <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
+    <div className="mx-auto max-w-6xl py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:py-5">
       {viewer.needsRecoveryCode && !ticket && <RecoveryReminder onOpen={() => setAccountOpen(true)} />}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
         <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
@@ -172,9 +172,16 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
 
 function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
   const { t } = useI18n();
-  return <div role="status" className={cn("mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100", className)}>
-    <span>{t("recoveryCodeNeeded")}</span>
-    <Button className="min-h-11 rounded-lg" onClick={onOpen}>{t("recoveryCodeCreate")}</Button>
+  return <div role="status" className={cn("mb-4", className)}>
+    <button type="button" onClick={onOpen} aria-label={t("recoveryCodeCreate")} aria-describedby="customer-recovery-hint"
+      className="aurora-inset flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-start hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <KeyRound aria-hidden className="size-5 shrink-0 text-amber-800 dark:text-amber-200" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold">{t("recoveryCodeCreate")}</span>
+        <span id="customer-recovery-hint" className="block text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</span>
+      </span>
+      <ChevronRight aria-hidden className="size-4 shrink-0" />
+    </button>
   </div>;
 }
 
@@ -233,7 +240,7 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
     <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
       <TicketSearchInput className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto"
         value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
-      <div className="grid gap-1 text-sm font-medium text-foreground">
+      <div className="grid w-full gap-1 text-sm font-medium text-foreground sm:w-auto">
         <label htmlFor="customer-ticket-status">{t("ticketStatus")}</label>
         <select id="customer-ticket-status" ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
           {options.map(option => <option key={option.value} value={option.value}>{option.label}{!searching ? ` (${option.count})` : ""}</option>)}
