@@ -1,4 +1,3 @@
-import { optimizeBrowserImage } from "@/lib/optimize-image";
 import type { Id } from "@convex/_generated/dataModel";
 import type { AnnotationDraftInput, AnnotationUpdateInput, PendingMedia } from "@/lib/types";
 import { withoutPendingAnnotationsForMedia } from "@/lib/pending-annotations";
@@ -18,7 +17,8 @@ export class DisposableTicketDraft {
   private submittedId: Id<"tickets"> | undefined;
   get lastSubmittedId() { return this.submittedId; }
   constructor(readonly projectId: Id<"projects">, private resources: Resources = {
-    prepareImage: optimizeBrowserImage, createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
+    prepareImage: async file => (await import("@/lib/optimize-image")).optimizeBrowserImage(file),
+    createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
     requestKey: () => crypto.randomUUID(), now: () => Date.now(),
   }) {
     this.state = this.empty();
@@ -27,6 +27,11 @@ export class DisposableTicketDraft {
     return { title: "", description: "", routingClassification: undefined, items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null };
   }
   getSnapshot = () => this.state;
+  hasContent = () => {
+    const { title, description, routingClassification, items, annotations } = this.state;
+    return Boolean(title || description || routingClassification || items.length || annotations.length);
+  };
+  isSubmitting = () => this.state.progress !== null;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private change(patch: Partial<DraftSnapshot>) {
     if (this.disposed) return;

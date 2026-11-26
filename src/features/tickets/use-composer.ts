@@ -5,12 +5,11 @@ import { pendingAnnotationsForViewer, pendingMediaForViewer } from "@/lib/pendin
 import { toast } from "sonner";
 import { useDraftAdapter, useTicketCapabilities } from "./adapter";
 import { useAccessToken } from "@/app/adapter";
-import { DisposableTicketDraft, type DraftSnapshot } from "./draft";
+import { DisposableTicketDraft } from "./draft";
 import { useDraftGuard } from "./use-draft-guard";
 
-const idle: DraftSnapshot = { idempotencyKey: "", error: null, title: "", description: "", items: [], annotations: [], progress: null };
 const subscribeIdle = () => () => {};
-const getIdle = () => idle;
+const getFalse = () => false;
 
 /** Project identity is captured when opening; hiding a composer preserves its draft. */
 export function useComposer(project: ProjectSummary | null | undefined, logout: () => Promise<void>) {
@@ -28,9 +27,9 @@ export function useComposer(project: ProjectSummary | null | undefined, logout: 
       });
     };
   }, []);
-  const state = useSyncExternalStore(entry?.owner.subscribe ?? subscribeIdle, entry?.owner.getSnapshot ?? getIdle);
-  const busy = state.progress !== null;
-  const hasDraft = Boolean(state.title || state.description || state.routingClassification || state.items.length || state.annotations.length);
+  const subscribe = entry?.owner.subscribe ?? subscribeIdle;
+  const hasDraft = useSyncExternalStore(subscribe, entry?.owner.hasContent ?? getFalse);
+  const busy = useSyncExternalStore(subscribe, entry?.owner.isSubmitting ?? getFalse);
   const signOut = useDraftGuard(hasDraft, busy, async () => { await lifetime.current.entry?.owner.cancelAndSettle(); }, logout);
   function replace(next: typeof entry) {
     lifetime.current.entry?.owner.dispose();
@@ -47,7 +46,7 @@ export function useComposer(project: ProjectSummary | null | undefined, logout: 
       }
       if (entry || project) setOpen(true);
     },
-    setOpen(next: boolean) { if (next || state.progress === null) setOpen(next); },
+    setOpen(next: boolean) { if (next || !busy) setOpen(next); },
     discard() { if (!busy) complete(); },
     complete,
   };

@@ -14,7 +14,7 @@ import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
 import { ChevronDown, Loader2, LogOut, Plus, Search, UserRound } from "lucide-react";
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useCustomerTickets, useWorkspaceTicket } from "./adapter";
 import { MAX_WORKSPACE_QUERY_LENGTH } from "@/app/workspace-search";
@@ -25,8 +25,9 @@ import { CustomerTicketRow } from "./customer-ticket-row";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, useMenuAction,
 } from "@/components/ui/dropdown-menu";
-import { CustomerAccountDialog } from "@/components/account-dialogs";
 import { useWorkspaceNavigation } from "./use-workspace-navigation";
+
+const CustomerAccount = lazy(() => import("@/components/account-dialogs").then(module => ({ default: module.CustomerAccount })));
 
 export function CustomerPortal({ viewer, onLogout }: {
   viewer: { username: string; displayName: string; clerkManaged?: boolean; needsRecoveryCode: boolean }; onLogout: () => Promise<void>;
@@ -112,7 +113,11 @@ export function CustomerPortal({ viewer, onLogout }: {
         </div>
       </div>
     </header>
-    <CustomerAccountDialog open={accountOpen} onOpenChange={setAccountOpen} username={viewer.username} clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
+    <Dialog open={accountOpen} onOpenChange={setAccountOpen} title={t("accountTitle")} description={t("accountSignedInAs", { username: viewer.username })}>
+      <Suspense fallback={<p role="status">{t("syncing")}</p>}>
+        <CustomerAccount clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
+      </Suspense>
+    </Dialog>
     <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
       {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
         <span>{t("recoveryCodeNeeded")}</span>

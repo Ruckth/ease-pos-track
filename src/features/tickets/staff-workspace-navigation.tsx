@@ -43,7 +43,6 @@ type StaffNavigationProps = {
   lineEnabled?: boolean;
   hideOnPhone: boolean;
   t3Available: boolean;
-  routingAvailable?: boolean;
   onArchive: (value: boolean) => void;
   onSelectProject: (key: string) => void;
   onTool: (tool: ProjectTool) => void;
@@ -53,7 +52,7 @@ type StaffNavigationProps = {
   signedInAs: string;
 };
 
-export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPhone, legacyToolsEnabled, lineEnabled, t3Available, routingAvailable, onArchive, onSelectProject, onTool, onLogout, owner, signedInAs }: StaffNavigationProps) {
+export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPhone, legacyToolsEnabled, lineEnabled, t3Available, onArchive, onSelectProject, onTool, onLogout, owner, signedInAs }: StaffNavigationProps) {
   const { t } = useI18n();
   const { copy: routingCopy } = useRoutingCopy();
   const copy = useExplorerCopy();
@@ -92,7 +91,7 @@ export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPh
           {current && lineEnabled && <DropdownMenuItem onClick={() => openTool("line")}><Plug aria-hidden />LINE</DropdownMenuItem>}
           {current && <DropdownMenuItem onClick={() => openTool("members")}><Users aria-hidden />{t("projectMembers")}</DropdownMenuItem>}
           {legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("health")}><HeartPulse aria-hidden />{t("healthTitle")}</DropdownMenuItem>}
-          {current && routingAvailable && <DropdownMenuItem onClick={() => openTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}
+          {current && <DropdownMenuItem onClick={() => openTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}
           {t3Available && <DropdownMenuItem onClick={() => openTool("t3")}><Plug aria-hidden />{t("connectT3")}</DropdownMenuItem>}
           <DropdownMenuSeparator />
           <LanguageMenuGroup />

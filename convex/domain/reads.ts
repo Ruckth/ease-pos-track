@@ -1,7 +1,7 @@
 import { isTicketSearchWithinLimits } from "../../shared/ticket-contracts";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { ticketStatus } from "../schema";
 import { parseTicketReference } from "../../shared/ticket-numbers";
@@ -11,9 +11,37 @@ import { legacyMediaEnabled } from "../pilot_access";
 import { requireUsableProject } from "./projects";
 
 type PublicTag = Pick<Doc<"ticketTags">, "_id" | "name" | "color">;
-export async function resolveTicketTags(ctx: QueryCtx | MutationCtx, row: Doc<"tickets">): Promise<PublicTag[]> {
-  const tags = await Promise.all((row.tagIds ?? []).map(id => ctx.db.get(id)));
-  return tags.flatMap(tag => tag ? [{ _id: tag._id, name: tag.name, color: tag.color }] : []);
+
+function ticketTagResolver(ctx: QueryCtx | MutationCtx) {
+  // Share in-flight reads within this query, including IDs whose tag was deleted.
+  const reads = new Map<Id<"ticketTags">, Promise<PublicTag | null>>();
+  return async (row: Doc<"tickets">): Promise<PublicTag[]> => {
+    const tags = await Promise.all((row.tagIds ?? []).map(id => {
+      let read = reads.get(id);
+      if (!read) {
+        read = ctx.db.get(id).then(tag => tag && { _id: tag._id, name: tag.name, color: tag.color });
+        reads.set(id, read);
+      }
+      return read;
+    }));
+    return tags.filter(tag => tag !== null);
+  };
+}
+
+export function resolveTicketTags(ctx: QueryCtx | MutationCtx, row: Doc<"tickets">) {
+  return ticketTagResolver(ctx)(row);
+}
+
+function ticketExcerpt(description: string) {
+  const limit = 200;
+  if (description.length <= limit) return description;
+  let end = 0;
+  let count = 0;
+  for (const character of description) {
+    end += character.length;
+    if (++count === limit) break;
+  }
+  return description.slice(0, end);
 }
 
 export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
@@ -22,7 +50,7 @@ export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
   return {
     _id: row._id, projectId: row.projectId, projectKey: row.projectKey,
     ticketNumber: row.ticketNumber, version: row.version, title: row.title,
-    excerpt: Array.from(row.description).slice(0, 200).join(""), status: row.status,
+    excerpt: ticketExcerpt(row.description), status: row.status,
     urgencyScore: row.urgencyScore, lifecycle: row.lifecycle,
     tagIds: row.tagIds ?? [], tags,
     archivedAt: row.archivedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
@@ -90,18 +118,20 @@ const pageTicketRows = queryOperation({
 
 export const pageTickets = {
   ...pageTicketRows,
-  handler: async (...args: Parameters<typeof pageTicketRows.handler>) => {
-    const result = await pageTicketRows.handler(...args);
-    return { ...result, page: await Promise.all(result.page.map(async row => ticketSummary(row, await resolveTicketTags(args[0], row)))) };
+  handler: async (ctx: Parameters<typeof pageTicketRows.handler>[0], args: Parameters<typeof pageTicketRows.handler>[1]) => {
+    const result = await pageTicketRows.handler(ctx, args);
+    const resolveTags = ticketTagResolver(ctx);
+    return { ...result, page: await Promise.all(result.page.map(async row => ticketSummary(row, await resolveTags(row)))) };
   },
 };
 
 /** Staff tools need full descriptions and annotation counts in one bounded read. */
 export const pageTicketDetails = {
   ...pageTicketRows,
-  handler: async (...args: Parameters<typeof pageTicketRows.handler>) => {
-    const result = await pageTicketRows.handler(...args);
-    return { ...result, page: await Promise.all(result.page.map(async row => ticketDetail(row, await resolveTicketTags(args[0], row)))) };
+  handler: async (ctx: Parameters<typeof pageTicketRows.handler>[0], args: Parameters<typeof pageTicketRows.handler>[1]) => {
+    const result = await pageTicketRows.handler(ctx, args);
+    const resolveTags = ticketTagResolver(ctx);
+    return { ...result, page: await Promise.all(result.page.map(async row => ticketDetail(row, await resolveTags(row)))) };
   },
 };
 
@@ -177,7 +207,8 @@ export const searchTickets = queryOperation({
     const rows = args.activeOnly
       ? await mergeRankedLanes(OPEN_STATUSES.map(searchLane))
       : await searchLane(args.status).take(SEARCH_LIMIT + 1);
-    const matches = await Promise.all(rows.slice(0, SEARCH_LIMIT).map(async row => ticketSummary(row, await resolveTicketTags(ctx, row))));
+    const resolveTags = ticketTagResolver(ctx);
+    const matches = await Promise.all(rows.slice(0, SEARCH_LIMIT).map(async row => ticketSummary(row, await resolveTags(row))));
     return { matches, hasMore: rows.length > SEARCH_LIMIT };
   },
 });

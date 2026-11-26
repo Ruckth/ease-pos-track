@@ -5,7 +5,6 @@ import { useChangePassword, useConfirmRecoveryEnrollment, useCreateRecoveryCode,
 import { PrivacyNoticeLink } from "@/components/privacy-notice-link";
 import { PasswordInput } from "@/components/auth-screens";
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { staffGoogleChangeIntent } from "../../shared/staff-google-change";
@@ -110,19 +109,15 @@ function ChangePasswordForm() {
   </form>;
 }
 
-export function CustomerAccountDialog({ open, onOpenChange, username, hasRecoveryCode, clerkManaged }: {
-  open: boolean; onOpenChange: (open: boolean) => void; username: string; hasRecoveryCode: boolean; clerkManaged?: boolean;
-}) {
+export function CustomerAccount({ hasRecoveryCode, clerkManaged }: { hasRecoveryCode: boolean; clerkManaged?: boolean }) {
   const { t } = useI18n();
-  return <Dialog open={open} onOpenChange={onOpenChange} title={t("accountTitle")} description={t("accountSignedInAs", { username })}>
-    <div className="space-y-6">
-      {clerkManaged ? <p>{t("clerkAccountRecovery")}</p> : <>
-        <RecoveryCodePanel hasCode={hasRecoveryCode} />
-        <ChangePasswordForm />
-      </>}
-      <PrivacyNoticeLink />
-    </div>
-  </Dialog>;
+  return <div className="space-y-6">
+    {clerkManaged ? <p>{t("clerkAccountRecovery")}</p> : <>
+      <RecoveryCodePanel hasCode={hasRecoveryCode} />
+      <ChangePasswordForm />
+    </>}
+    <PrivacyNoticeLink />
+  </div>;
 }
 
 type TeamAdmin = ReturnType<typeof useTeamAdministration>;
@@ -187,7 +182,7 @@ function GoogleBindingForm({ member, ownAccount, onRequest, onCancel }: {
   </form>;
 }
 
-export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; onClose: () => void }) {
+export function TeamAdministration({ ownerStaffId }: { ownerStaffId: string }) {
   const { t } = useI18n();
   const admin = useTeamAdministration(true);
   const [email, setEmail] = useState("");
@@ -265,7 +260,7 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
     });
   }
   const staff = admin.team?.staff ?? [];
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }} title={t("teamTitle")} description={t("teamDescription")}>
+  return (
     <div className="space-y-6">
       <form className="space-y-2" onSubmit={onInvite} aria-labelledby="invite-staff-heading">
         <h3 id="invite-staff-heading" className="font-medium">{t("inviteStaff")}</h3>
@@ -362,5 +357,5 @@ export function TeamDialog({ ownerStaffId, onClose }: { ownerStaffId: string; on
         </ul>
       </section> : null}
     </div>
-  </Dialog>;
+  );
 }

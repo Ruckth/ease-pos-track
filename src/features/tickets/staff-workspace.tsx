@@ -1,16 +1,12 @@
-import { LineSettings } from "@/features/line/line-settings";
-import { ConnectT3Code } from "@/features/t3/connect-t3-code";
 import { useT3Proof, useT3ReleaseAvailable } from "@/features/t3/adapters/connection";
 import { TicketInbox } from "./ticket-inbox";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
 import type { TicketSummary } from "../../../shared/ticket-contracts";
 import { useRoutingSettings } from "@/features/routing/adapters/convex";
-import { RoutingWorkspace } from "@/features/routing/routing-workspace";
 import { useRoutingCopy } from "@/features/routing/routing-copy";
-import { StaffHealth } from "@/features/operations/staff-health";
 import { NewProjectDialog, NoProjects, ProjectMembersDialog, useCurrentProject } from "@/components/project-controls";
 import { TicketExplorer } from "@/components/ticket-explorer";
 import { statuses } from "@/components/ticket-status";
@@ -27,10 +23,15 @@ import { StaffTicketDialog } from "./staff-ticket-dialog";
 import { useComposer } from "./use-composer";
 import { useTicketOperations } from "./use-ticket-operations";
 import { useWorkspaceNavigation, type ListView } from "./use-workspace-navigation";
-import { TeamDialog } from "@/components/account-dialogs";
 import { StaffViewSwitcher, StaffWorkspaceNavigation, type ProjectTool } from "./staff-workspace-navigation";
 import { useTicketStatusMoves } from "./use-ticket-status-moves";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
+
+const LineSettings = lazy(() => import("@/features/line/line-settings").then(module => ({ default: module.LineSettings })));
+const ConnectT3Code = lazy(() => import("@/features/t3/connect-t3-code").then(module => ({ default: module.ConnectT3Code })));
+const RoutingWorkspace = lazy(() => import("@/features/routing/routing-workspace").then(module => ({ default: module.RoutingWorkspace })));
+const StaffHealth = lazy(() => import("@/features/operations/staff-health").then(module => ({ default: module.StaffHealth })));
+const TeamAdministration = lazy(() => import("@/components/account-dialogs").then(module => ({ default: module.TeamAdministration })));
 
 const selectClass = "aurora-control min-h-11 max-w-full rounded-lg px-2.5 text-sm md:min-h-9";
 type TicketId = Id<"tickets">;
@@ -65,7 +66,9 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const inFlight = useRef(new Set<string>());
   const moves = useTicketStatusMoves(project?._id, operations.status);
   const busy = useMemo(() => new Set([...moves.busy, ...restoring]), [moves.busy, restoring]);
-  const routing = useRoutingSettings(project?._id);
+  // The signed-in staff viewer and active Project list already gate routing navigation.
+  // The routing panel and assignment editor subscribe to the full settings when used.
+  const routing = useRoutingSettings(tool === "routing" ? project?._id : undefined);
   // The T3 tool is a route, so the signed kit's settingsUrl opens it directly.
   const openTool = (next: ProjectTool) => {
     if (next === "t3") onT3Settings?.(true);
@@ -105,7 +108,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const filter = nav.filter;
   const showArchived = filter === "archive";
   const listView = showArchived && nav.listView === "board" ? "table" : nav.listView;
-  const assignmentFilter = !showArchived && routing ? nav.assignment : undefined;
+  const assignmentFilter = !showArchived && project ? nav.assignment : undefined;
   const data = useStaffTickets(project?._id, listView, filter, query, assignmentFilter);
   const allTags = useTicketTags(filtersOpen);
   const tags = useMemo(() => allTags ?? data.items.flatMap(item => item.tags), [allTags, data.items]);
@@ -189,6 +192,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const inlineDetail = listView === "queue";
   const split = inlineDetail && Boolean(ticket);
   const single = nav.view === "focus" && split;
+  const toolLoading = <p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>;
   const detail = <StaffTicketDialog ticket={selected} ticketId={ticket} onClose={nav.closeTicket} inline={inlineDetail} focusMode={nav.view === "focus"}
     inResults={selectedId && !data.loading ? order.includes(selectedId) : undefined}
     onToggleFocus={nav.view === "focus" ? nav.leaveFocus : nav.enterFocus}
@@ -204,7 +208,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 pt-3 sm:px-5 xl:px-7"}>
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation projects={projects} current={project} archived={showArchived} hideOnPhone={split}
-        legacyToolsEnabled={legacyToolsEnabled} lineEnabled={lineEnabled} t3Available={t3Available} routingAvailable={!!routing}
+        legacyToolsEnabled={legacyToolsEnabled} lineEnabled={lineEnabled} t3Available={t3Available}
         onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : undefined); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
       <div className="mx-auto w-full min-w-0 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-5">
@@ -237,7 +241,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                   {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
                 </select>
               </label>}
-              {!showArchived && routing && <label className="min-w-0"><span className="sr-only">{routingCopy.assignment}</span>
+              {!showArchived && <label className="min-w-0"><span className="sr-only">{routingCopy.assignment}</span>
                 <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
                   const scope = event.target.value;
                   withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });
@@ -274,24 +278,30 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
       {composer.hasDraft && <DiscardTicketDraft busy={composer.busy} onDiscard={composer.discard} />}
     </Dialog>
     {t3Settings && <Dialog open onOpenChange={() => onT3Settings?.(false)} title={t("connectT3")}>
-      <ConnectT3Code key={viewer.staffId} requestProof={requestT3Proof} />
+      <Suspense fallback={toolLoading}><ConnectT3Code key={viewer.staffId} requestProof={requestT3Proof} /></Suspense>
     </Dialog>}
     {legacyToolsEnabled && <Dialog open={nav.health} onOpenChange={nav.setHealth} title={t("healthTitle")} description={t("healthDescription")}>
-      {nav.health && <StaffHealth />}
+      {nav.health && <Suspense fallback={toolLoading}><StaffHealth /></Suspense>}
     </Dialog>}
     {lineEnabled && lineSettings && project && <Dialog open onOpenChange={() => onLineSettings?.(false)} title="LINE" mobileFullScreen>
-      <LineSettings key={project._id} project={project} selected={lineSettings.bot} owner={viewer.role === "owner"}
-        onSelect={bot => onLineSettings?.(true, bot)} />
+      <Suspense fallback={toolLoading}>
+        <LineSettings key={project._id} project={project} selected={lineSettings.bot} owner={viewer.role === "owner"}
+          onSelect={bot => onLineSettings?.(true, bot)} />
+      </Suspense>
     </Dialog>}
-    {tool === "routing" && project && routing && <Dialog open onOpenChange={() => setTool(null)} title={routingCopy.routing} mobileFullScreen>
-      <RoutingWorkspace key={project._id} projectId={project._id} settings={routing} openTicket={id => {
-        setTool(null);
-        onSelect(id);
-      }} />
+    {tool === "routing" && project && routing !== null && <Dialog open onOpenChange={() => setTool(null)} title={routingCopy.routing} mobileFullScreen>
+      {routing === undefined ? toolLoading : <Suspense fallback={toolLoading}>
+        <RoutingWorkspace key={project._id} projectId={project._id} settings={routing} openTicket={id => {
+          setTool(null);
+          onSelect(id);
+        }} />
+      </Suspense>}
     </Dialog>}
     {owner && legacyToolsEnabled && <NewProjectDialog open={tool === "project"} onOpenChange={() => setTool(null)} onCreated={chooseProject} />}
     {tool === "members" && project && <ProjectMembersDialog project={project} owner={owner} open onOpenChange={() => setTool(null)} />}
-    {owner && tool === "team" && <TeamDialog ownerStaffId={viewer.staffId} onClose={() => setTool(null)} />}
+    {owner && tool === "team" && <Dialog open onOpenChange={() => setTool(null)} title={t("teamTitle")} description={t("teamDescription")}>
+      <Suspense fallback={toolLoading}><TeamAdministration ownerStaffId={viewer.staffId} /></Suspense>
+    </Dialog>}
     {!inlineDetail && detail}
 
   </main>;

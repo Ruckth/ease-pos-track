@@ -1,4 +1,3 @@
-import { preparePageAsset } from "@/lib/optimize-image";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { localizeError, useI18n } from "@/lib/i18n";
@@ -53,7 +52,7 @@ export function TicketPages({ ticket }: { ticket: Ticket }) {
       // The request id and image policy stay with this selection, so a retry
       // resends the same bytes and never publishes twice.
       const { url } = await publishPageSelection(selection, {
-        prepare: preparePageAsset,
+        prepare: async (file, type) => (await import("@/lib/optimize-image")).preparePageAsset(file, type),
         onPolicy: policy => setSelection(current => current?.requestId === selection.requestId ? { ...current, policy } : current),
         send: (entry, files, prepared) => publishTicketPage(target.siteUrl, accessToken, {
           ticket: formatTicketNumber(ticket.ticketNumber, ticket.projectKey), requestId: selection.requestId, entry, files, prepared,

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
 import { modules } from "./modules";
+import { pageTicketDetails, pageTickets, searchTickets } from "../../convex/domain/reads";
+import { requireActor } from "../../convex/session_auth";
 
 beforeEach(() => {
   vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true");
@@ -57,4 +59,38 @@ test("detail, paginated summaries and indexed search resolve reusable tag metada
   expect(page.page.find(row => row._id === id)).toMatchObject(expected);
   const search = await t.query(api.tickets.searchTickets, { token: staff, projectId: seed.projects[0].id, lifecycle: "active", search: "POS-0001" });
   expect(search.matches.find(row => row._id === id)).toMatchObject(expected);
+});
+
+test("each Ticket page or search reads a shared tag once and preserves each Ticket's tag order", async () => {
+  const { t, staff, seed } = await fixture();
+  const create = (name: string) => t.mutation(api.tickets.createTicketTag, { token: staff, name, color: "red" });
+  const [first, second, missing] = await Promise.all([create("First"), create("Second"), create("Missing")]);
+  const tags = [[first, missing, second], [second, first, missing], []];
+  await t.run(async ({ db }) => {
+    await db.delete(missing);
+    for (const [index, id] of seed.tickets.slice(0, 3).entries()) {
+      await db.patch(id, { tagIds: tags[index], searchText: "tagprobe" });
+    }
+  });
+  const scope = { projectId: seed.projects[0].id, lifecycle: "active" as const };
+  const paginated = { ...scope, paginationOpts: { cursor: null, numItems: 20 } };
+  const target = t.raw.withIdentity({ subject: staff });
+  for (const read of [
+    async (ctx: Parameters<typeof pageTickets.handler>[0]) => (await pageTickets.handler(ctx, paginated)).page,
+    async (ctx: Parameters<typeof pageTickets.handler>[0]) => (await pageTicketDetails.handler(ctx, paginated)).page,
+    async (ctx: Parameters<typeof pageTickets.handler>[0]) => (await searchTickets.handler(ctx, { ...scope, search: "tagprobe" })).matches,
+  ]) {
+    await target.run(async ctx => {
+      const access = await requireActor(ctx);
+      const get = vi.spyOn(ctx.db, "get");
+      const rows = await read({ ...ctx, ...access });
+      const tagReads = get.mock.calls.flat().filter(value => value === first || value === second || value === missing);
+      expect(tagReads.sort()).toEqual([first, second, missing].sort());
+      for (const [index, id] of seed.tickets.slice(0, 3).entries()) {
+        const row = rows.find(row => row._id === id);
+        expect(row?.tagIds).toEqual(tags[index]);
+        expect(row?.tags.map(tag => tag._id)).toEqual(tags[index].filter(tag => tag !== missing));
+      }
+    });
+  }
 });
