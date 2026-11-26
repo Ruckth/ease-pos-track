@@ -11,7 +11,7 @@ import type { ProjectSummary } from "@/lib/types";
 import { useLineActions, useLineAiSettings, useLineBots, useLineChats, type LineBot, type LineChat } from "./adapters/convex";
 import { LineAiReviews, LineAiSetup } from "./line-assistant";
 
-const selectClass = "h-9 w-full rounded-md border bg-background px-2 text-sm";
+const selectClass = "h-9 w-full rounded-md glass-field px-2 text-sm";
 const errors: Record<string, string> = {
   LINE_WEBHOOK_HTTPS_REQUIRED: "LINE requires an HTTPS webhook URL.",
   LINE_API_RATE_LIMITED: "LINE is rate-limiting requests. Try again later.",

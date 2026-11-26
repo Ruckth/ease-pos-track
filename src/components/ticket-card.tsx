@@ -32,7 +32,7 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
   const archived = item.lifecycle === "archived";
 
   return (
-    <article className={`ticket-surface min-w-0 p-3 ${inLane ? "" : "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "border-primary bg-primary/5" : ""}`}>
+    <article className={`ticket-surface min-w-0 p-3 ${inLane ? "" : "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "ticket-surface-selected" : ""}`}>
       {inLane && <div className="mb-1 flex min-w-0 items-start justify-between gap-1.5">
         {item.tags?.length ? <TicketTagList tags={item.tags} plain /> : <span className="font-mono text-xs text-muted-foreground">{reference}</span>}
         {handle}

@@ -40,27 +40,29 @@ export function Dialog({ open, onOpenChange, title, description, keepMounted = f
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseDialog.Portal keepMounted={keepMounted}>
-        <BaseDialog.Backdrop className="fixed inset-0 z-50 min-h-dvh bg-black/45 backdrop-blur-[2px] transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <BaseDialog.Backdrop className="fixed inset-0 z-50 min-h-dvh aurora-scrim transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <BaseDialog.Popup initialFocus={initialFocus} finalFocus={finalFocus} className={cn(
           "aurora-dialog fixed z-50 overflow-auto outline-none",
-          (side || placement === "fullscreen" || mobileFullScreen)
+          (side || placement === "fullscreen")
             ? "inset-0 max-h-dvh rounded-none"
-            : "bottom-0 left-0 right-0 max-h-[calc(100dvh-0.5rem)] rounded-t-2xl",
+            : mobileFullScreen
+            ? "inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] max-h-[calc(100dvh-max(.75rem,env(safe-area-inset-top))-max(.5rem,env(safe-area-inset-bottom)))] rounded-[1.25rem]"
+            : "inset-x-2 bottom-2 max-h-[calc(100dvh-1rem)] rounded-2xl",
           side
             ? "md:left-auto md:w-[min(42rem,75%)]"
-            : placement === "center" && "sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl",
+            : placement === "center" && "sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-h-[calc(100dvh-2rem)] sm:rounded-[1.25rem]",
           "motion-safe:transition-[transform,opacity] data-ending-style:opacity-0 data-starting-style:opacity-0",
         )}>
           <div className="aurora-dialog-edge sticky top-0 z-20 flex items-start justify-between gap-3 border-b border-border/50 px-4 py-3.5 sm:px-5 sm:py-4">
             <div className="min-w-0">
-              <BaseDialog.Title className="break-words text-base font-semibold leading-6">{title}</BaseDialog.Title>
+              <BaseDialog.Title className="break-words text-xl font-semibold leading-6 tracking-tight">{title}</BaseDialog.Title>
               {description ? <BaseDialog.Description className="mt-1 text-sm text-muted-foreground">{description}</BaseDialog.Description> : null}
             </div>
-            <BaseDialog.Close className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-field hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("closeDialog")}>
+            <BaseDialog.Close className="aurora-control inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-field hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("closeDialog")}>
               <X className="size-4" />
             </BaseDialog.Close>
           </div>
-          <div className={cn("p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5", placement === "fullscreen" && "mx-auto max-w-4xl")}>{children}</div>
+          <div className={cn("aurora-dialog-body p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5", placement === "fullscreen" && "mx-auto max-w-4xl")}>{children}</div>
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

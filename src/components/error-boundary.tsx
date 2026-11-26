@@ -19,8 +19,8 @@ class ErrorBoundaryView extends Component<ErrorBoundaryProps, ErrorBoundaryState
   render() {
     if (this.state.failed) {
       return (
-        <main className="grid min-h-screen place-items-center p-6">
-          <div className="max-w-md space-y-3 rounded-lg border bg-card p-6 text-center shadow-sm">
+        <main className="aurora-canvas grid min-h-screen place-items-center p-6">
+          <div className="max-w-md space-y-3 aurora-panel p-6 text-center shadow-sm">
             <h1 className="text-xl font-semibold">{this.props.title}</h1>
             <p className="text-sm text-muted-foreground">{this.props.description}</p>
             <Button type="button" onClick={() => window.location.reload()}>{this.props.reload}</Button>
