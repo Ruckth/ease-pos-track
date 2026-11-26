@@ -33,7 +33,7 @@ const RoutingWorkspace = lazy(() => import("@/features/routing/routing-workspace
 const StaffHealth = lazy(() => import("@/features/operations/staff-health").then(module => ({ default: module.StaffHealth })));
 const TeamAdministration = lazy(() => import("@/components/account-dialogs").then(module => ({ default: module.TeamAdministration })));
 
-const selectClass = "aurora-control min-h-11 max-w-full rounded-lg px-2.5 text-sm md:min-h-9";
+const selectClass = "aurora-control min-h-11 max-w-full rounded-lg px-2.5 text-sm max-sm:w-full md:min-h-9";
 type TicketId = Id<"tickets">;
 const emptyTickets: TicketSummary[] = [];
 
@@ -207,7 +207,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     }}>{t("queueSkip")}</a>}
     <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 pt-3 sm:px-5 xl:px-7"}>
       <div className={single ? "hidden" : "contents"}>
-      <StaffWorkspaceNavigation projects={projects} current={project} archived={showArchived} hideOnPhone={split}
+      <StaffWorkspaceNavigation inbox={project && <TicketInbox compact key={project._id} role="staff" projectId={project._id} projectKey={project.key} openTicket={onSelect} />} projects={projects} current={project} archived={showArchived} hideOnPhone={split}
         legacyToolsEnabled={legacyToolsEnabled} lineEnabled={lineEnabled} t3Available={t3Available}
         onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : undefined); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
@@ -215,7 +215,6 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
         <div className={`mb-3 flex-wrap items-center justify-between gap-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
           <h1 className="text-2xl font-semibold tracking-tight">{showArchived ? t("archive") : nav.listView === "queue" ? t("queueTitle") : copy.results}</h1>
           {(project || composer.owner) && <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {project && <TicketInbox key={project._id} role="staff" projectId={project._id} projectKey={project.key} openTicket={onSelect} />}
             {composer.hasDraft && composer.project && <span id="staff-draft-project" className="max-w-32 truncate text-xs font-medium text-muted-foreground" title={composer.project.name}>
               {composer.project.name} ({composer.project.key})
             </span>}
@@ -232,7 +231,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                 <span className="sr-only">{t("search")}</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input className="min-h-11 rounded-lg pl-9 md:min-h-9" placeholder={t("search")} maxLength={MAX_WORKSPACE_QUERY_LENGTH} value={searchInput} onChange={event => typeSearch(event.target.value)} />
               </label>
-              {!showArchived && <label className="min-w-0"><span className="sr-only">{t("ticketStatus")}</span>
+              {!showArchived && <label className="min-w-0 max-sm:flex-1"><span className="sr-only">{t("ticketStatus")}</span>
                 <select className={selectClass} value={filter} onChange={event => {
                   const status = event.target.value;
                   withSearch(() => { void nav.setFilter(status); });
@@ -241,7 +240,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                   {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
                 </select>
               </label>}
-              {!showArchived && <label className="min-w-0"><span className="sr-only">{routingCopy.assignment}</span>
+              {!showArchived && <label className="min-w-0 max-sm:flex-1"><span className="sr-only">{routingCopy.assignment}</span>
                 <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
                   const scope = event.target.value;
                   withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });
@@ -250,7 +249,9 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                   <option value="unassigned">{routingCopy.unassigned}</option>
                 </select>
               </label>}
-              <StaffViewSwitcher archived={showArchived} view={listView} onSelect={view => withSearch(() => { void nav.setView(view); })} />
+              <div className="max-sm:basis-full">
+                <StaffViewSwitcher archived={showArchived} view={listView} onSelect={view => withSearch(() => { void nav.setView(view); })} />
+              </div>
             </div>
             <div id="staff-ticket-results" data-dialog-return-focus tabIndex={-1} className={split && !single ? "lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start lg:gap-4" : undefined}>
               <div className={single ? "hidden" : split ? "hidden lg:block" : "min-w-0"}>

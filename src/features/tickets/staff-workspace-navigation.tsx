@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Archive, Columns3, FolderPlus, HeartPulse, List, LogOut, MoreHorizontal, Plug, Route, Table2, Tickets, Users, UserCog } from "lucide-react";
 import { LanguageMenuGroup } from "@/components/language-menu";
 import {
@@ -36,6 +37,7 @@ export function StaffViewSwitcher({ view, archived, onSelect }: { view: ListView
 }
 
 type StaffNavigationProps = {
+  inbox: ReactNode;
   projects?: ProjectSummary[];
   current?: ProjectSummary | null;
   archived: boolean;
@@ -52,7 +54,7 @@ type StaffNavigationProps = {
   signedInAs: string;
 };
 
-export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPhone, legacyToolsEnabled, lineEnabled, t3Available, onArchive, onSelectProject, onTool, onLogout, owner, signedInAs }: StaffNavigationProps) {
+export function StaffWorkspaceNavigation({ inbox, projects, current, archived, hideOnPhone, legacyToolsEnabled, lineEnabled, t3Available, onArchive, onSelectProject, onTool, onLogout, owner, signedInAs }: StaffNavigationProps) {
   const { t } = useI18n();
   const { copy: routingCopy } = useRoutingCopy();
   const copy = useExplorerCopy();
@@ -62,43 +64,46 @@ export function StaffWorkspaceNavigation({ projects, current, archived, hideOnPh
   return <header className={cn("aurora-toolbar relative z-30 min-w-0",
     hideOnPhone && "hidden lg:block")}>
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 sm:px-4 sm:gap-x-4">
-      <ProductWordmark />
-      {projects && current && <div className="order-last min-w-0 max-w-full basis-full pb-1 min-[480px]:order-none min-[480px]:basis-auto min-[480px]:flex-1 min-[480px]:pb-0 xl:flex-none">
+      <ProductWordmark compact={Boolean(current)} />
+      {projects && current && <div className="min-w-0 max-w-full flex-1 xl:flex-none">
         <ProjectSwitcher projects={projects} current={current} onSelect={onSelectProject} onCreate={owner && legacyToolsEnabled ? () => onTool("project") : undefined} />
       </div>}
       {current && <nav aria-label={t("project")} className="ml-auto hidden gap-1 xl:flex">{pageButtons.map(({ archived: isArchive, Icon, label }) => <Button type="button" key={label} variant="ghost"
         aria-current={archived === isArchive ? "page" : undefined}
         className={cn("h-auto min-h-11 justify-start", archived === isArchive && "bg-primary/15 font-semibold text-primary hover:bg-primary/15 hover:text-primary")}
         onClick={() => onArchive(isArchive)}><Icon aria-hidden />{label}</Button>)}</nav>}
-      <DropdownMenu {...menu.root}>
-        <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="ghost" className="ml-auto min-h-11 min-w-11 gap-2 px-2 xl:ml-0 xl:px-3" />}
-          aria-label={t("queueMore")} title={t("queueMore")}>
-          <MoreHorizontal aria-hidden className="!size-5" /><span className="hidden sm:inline">{t("queueMore")}</span>
-        </DropdownMenuTrigger>
-        {/* Kept mounted so sign-out stays wired while a modal owns pointer input. */}
-        <DropdownMenuContent keepMounted align="end" className="w-64">
-          {current && <DropdownMenuGroup className="xl:hidden">
-            <DropdownMenuRadioGroup value={archived ? "archive" : "results"} onValueChange={value => menu.run(() => onArchive(value === "archive"))}>
-              {pageButtons.map(({ archived: isArchive, Icon, label }) => <DropdownMenuRadioItem key={label} value={isArchive ? "archive" : "results"} closeOnClick>
-                <Icon aria-hidden />{label}
-              </DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 xl:ml-0">
+        {inbox}
+        <DropdownMenu {...menu.root}>
+          <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="ghost" className="min-h-11 min-w-11 gap-2 px-2 xl:px-3" />}
+            aria-label={t("queueMore")} title={t("queueMore")}>
+            <MoreHorizontal aria-hidden className="!size-5" /><span className="hidden sm:inline">{t("queueMore")}</span>
+          </DropdownMenuTrigger>
+          {/* Kept mounted so sign-out stays wired while a modal owns pointer input. */}
+          <DropdownMenuContent keepMounted align="end" className="w-64">
+            {current && <DropdownMenuGroup className="xl:hidden">
+              <DropdownMenuRadioGroup value={archived ? "archive" : "results"} onValueChange={value => menu.run(() => onArchive(value === "archive"))}>
+                {pageButtons.map(({ archived: isArchive, Icon, label }) => <DropdownMenuRadioItem key={label} value={isArchive ? "archive" : "results"} closeOnClick>
+                  <Icon aria-hidden />{label}
+                </DropdownMenuRadioItem>)}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+            </DropdownMenuGroup>}
+            <p className="truncate px-2.5 py-1.5 text-xs text-muted-foreground" title={signedInAs}>{signedInAs}</p>
+            {owner && legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("project")}><FolderPlus aria-hidden />{t("newProject")}</DropdownMenuItem>}
+            {owner && <DropdownMenuItem onClick={() => openTool("team")}><UserCog aria-hidden />{t("teamTitle")}</DropdownMenuItem>}
+            {current && lineEnabled && <DropdownMenuItem onClick={() => openTool("line")}><Plug aria-hidden />LINE</DropdownMenuItem>}
+            {current && <DropdownMenuItem onClick={() => openTool("members")}><Users aria-hidden />{t("projectMembers")}</DropdownMenuItem>}
+            {legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("health")}><HeartPulse aria-hidden />{t("healthTitle")}</DropdownMenuItem>}
+            {current && <DropdownMenuItem onClick={() => openTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}
+            {t3Available && <DropdownMenuItem onClick={() => openTool("t3")}><Plug aria-hidden />{t("connectT3")}</DropdownMenuItem>}
             <DropdownMenuSeparator />
-          </DropdownMenuGroup>}
-          <p className="truncate px-2.5 py-1.5 text-xs text-muted-foreground" title={signedInAs}>{signedInAs}</p>
-          {owner && legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("project")}><FolderPlus aria-hidden />{t("newProject")}</DropdownMenuItem>}
-          {owner && <DropdownMenuItem onClick={() => openTool("team")}><UserCog aria-hidden />{t("teamTitle")}</DropdownMenuItem>}
-          {current && lineEnabled && <DropdownMenuItem onClick={() => openTool("line")}><Plug aria-hidden />LINE</DropdownMenuItem>}
-          {current && <DropdownMenuItem onClick={() => openTool("members")}><Users aria-hidden />{t("projectMembers")}</DropdownMenuItem>}
-          {legacyToolsEnabled && <DropdownMenuItem onClick={() => openTool("health")}><HeartPulse aria-hidden />{t("healthTitle")}</DropdownMenuItem>}
-          {current && <DropdownMenuItem onClick={() => openTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}
-          {t3Available && <DropdownMenuItem onClick={() => openTool("t3")}><Plug aria-hidden />{t("connectT3")}</DropdownMenuItem>}
-          <DropdownMenuSeparator />
-          <LanguageMenuGroup />
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => menu.run(() => { void onLogout(); })}><LogOut aria-hidden />{t("signOut")}</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <LanguageMenuGroup />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => menu.run(() => { void onLogout(); })}><LogOut aria-hidden />{t("signOut")}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   </header>;
 }
