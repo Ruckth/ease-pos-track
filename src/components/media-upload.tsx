@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { supportsCamera } from "@/lib/camera";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { Camera, FileImage, GripVertical, ImagePlus, Info, MapPin, PlayCircle, Upload, X } from "lucide-react";
+import { Camera, FileImage, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
@@ -138,7 +138,7 @@ export function MediaUploadField({
 
   return (
     <div
-      className="space-y-3"
+      className={cn("space-y-3 rounded-xl", isDragging && "ring-2 ring-primary/50")}
       ref={field}
       onDragEnter={(event) => {
         event.preventDefault();
@@ -197,22 +197,10 @@ export function MediaUploadField({
           type="button"
           disabled={disabled}
           onClick={() => uploadInputRef.current?.click()}
-          className={cn(
-            "grid min-h-52 w-full place-items-center rounded-2xl border-2 border-dashed bg-muted/30 px-5 py-8 text-sm text-muted-foreground transition-all hover:border-primary/60 hover:bg-primary/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            isDragging && "scale-[1.01] border-primary bg-primary/5 text-primary",
-          )}
+          className="hidden min-h-16 w-full items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
         >
-          <span className="text-center">
-            <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-              <FileImage className="size-6" aria-hidden="true" />
-            </span>
-            <span className="block font-semibold text-foreground">{t("addPhotosTitle")}</span>
-            <span className="mt-1 block leading-5">{t("dropMedia")}</span>
-            <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs shadow-sm">
-              <Info className="size-3.5" aria-hidden="true" />
-              {t("uploadLimits")}
-            </span>
-          </span>
+          <FileImage className="size-5 shrink-0" aria-hidden="true" />
+          {t("dropMedia")}
         </button>
       ) : (
         <>
@@ -239,7 +227,7 @@ export function MediaUploadField({
             onValueChange={onItemsChange}
             getItemValue={(item) => item.id}
             strategy="grid"
-            className={cn("grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4", isDragging && "rounded-xl ring-2 ring-primary/50")}
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4"
           >
             {items.map((item, index) => (
               <SortableItem key={item.id} value={item.id} disabled={disabled}>
@@ -308,10 +296,10 @@ export function MediaUploadField({
               </span>
             </button>
           </Sortable>
-          <p className="text-xs leading-5 text-muted-foreground">{t("uploadLimits")}</p>
         </>
       )}
 
+      <p className="text-xs leading-5 text-muted-foreground">{t("uploadLimits")}</p>
       {errors.length > 0 ? (
         <div role="alert" className="space-y-1 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           {errors.map((message) => (
