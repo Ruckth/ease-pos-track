@@ -74,6 +74,17 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   const lane = status => board.locator(`[data-slot="kanban-column"][data-value="${status}"]`);
   const shortcuts = page.getByRole("group", { name: "Show tickets by status" });
   const shortcut = name => shortcuts.getByRole("button", { name, exact: true });
+  async function expectPhoneShortcuts(group, labels) {
+    assert.equal(await group.getByRole("button").count(), labels.length);
+    const boxes = await Promise.all(labels.map(async ([name, visibleLabel = name]) => {
+      const control = group.getByRole("button", { name, exact: true });
+      assert.equal(await control.innerText(), visibleLabel);
+      return control.boundingBox();
+    }));
+    const strip = await group.boundingBox();
+    assert.ok(strip && boxes.every(box => box && box.width >= 44 && box.height >= 44 && Math.abs(box.y - boxes[0].y) < 1));
+    assert.ok(boxes.every(box => box.x >= strip.x - 1 && box.x + box.width <= strip.x + strip.width + 1), "each shortcut is fully visible without scrolling the strip");
+  }
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   // A constrained search keeps this standalone harness independent of Convex.
@@ -96,6 +107,8 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await shortcut("New").click();
+  const englishShortcuts = [["New"], ["Acknowledged", "Ack."], ["In progress"], ["Waiting for customer", "Waiting"], ["Resolved"]];
+  await expectPhoneShortcuts(shortcuts, englishShortcuts);
   assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 5);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await board.getByRole("button", { name: /Drag ticket/ }).count(), 0);
@@ -109,6 +122,11 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await board.evaluate(el => { el.scrollLeft = 0; });
   await shortcut("New").and(page.locator('[aria-pressed="true"]')).waitFor();
   await page.screenshot({ path: shot("board-mobile"), fullPage: true });
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expectPhoneShortcuts(shortcuts, englishShortcuts);
+  await button("Language").click();
+  await expectPhoneShortcuts(page.getByRole("group", { name: "แสดงรายการตามสถานะ" }), [["ใหม่"], ["รับเรื่องแล้ว", "รับเรื่อง"], ["กำลังดำเนินการ"], ["รอข้อมูลลูกค้า", "รอข้อมูล"], ["แก้ไขแล้ว"]]);
+  await button("Language").click();
 
   // Browse counts and capped indexed search have different denominators.
   await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html?partial`);

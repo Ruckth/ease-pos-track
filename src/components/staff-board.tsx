@@ -38,6 +38,10 @@ import { useI18n } from "@/lib/i18n";
 
 type LaneCounts = Partial<Record<TicketStatus, number>>;
 type LanePage = { status: string; loadMore: (count: number) => void };
+const compactStatusLabels: Partial<Record<TicketStatus, Record<"en" | "th", string>>> = {
+  acknowledged: { en: "Ack.", th: "รับเรื่อง" },
+  waiting: { en: "Waiting", th: "รอข้อมูล" },
+};
 
 /**
  * The staff board.
@@ -64,7 +68,7 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
   onSelect: OpenTicket;
   onMoveCard: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
 }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
@@ -179,20 +183,25 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
       }}
     >
       {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} entry={entry} onObserve={observe} />)}
-      {hasOverflow && <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label={t("boardStatusTabs")}>
+      {hasOverflow && <div className="mb-3 flex flex-wrap gap-0.5 md:gap-1.5" role="group" aria-label={t("boardStatusTabs")}>
         {visibleStatuses.map(status => {
           const meta = statusMeta(status);
           const Icon = meta.icon;
+          const label = t(meta.labelKey);
+          const compactLabel = compactStatusLabels[status]?.[language];
           return <Button key={status} type="button" variant={status === currentStatus ? "secondary" : "outline"} size="sm"
-            className="min-h-11"
+            className="h-auto min-h-11 min-w-11 flex-[1_1_0] flex-col gap-0.5 whitespace-normal px-px py-1.5 text-center text-[0.6875rem] leading-tight md:flex-none md:flex-row md:gap-2 md:whitespace-nowrap md:px-3 md:text-xs"
+            aria-label={label}
             aria-pressed={status === currentStatus}
             aria-controls={`${boardId}-${status}`}
+            title={label}
             onClick={() => {
               scrollToStatus(status);
               onChooseStatus(status);
             }}>
             <Icon aria-hidden="true" />
-            {t(meta.labelKey)}
+            {compactLabel && <span className="md:hidden">{compactLabel}</span>}
+            <span className={cn("[overflow-wrap:anywhere]", compactLabel && "hidden md:inline")}>{label}</span>
           </Button>;
         })}
       </div>}
@@ -277,12 +286,12 @@ function BoardColumn({
 
   return (
     <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane relative min-w-0 snap-start overflow-hidden">
-      <div className="flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 px-3.5 pb-1 pt-3">
+      <div className="flex min-h-12 items-center justify-between gap-2 px-3.5 pb-1 pt-3">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className={cn("size-[1.125rem] shrink-0", meta.text)} aria-hidden="true" />
-          <h2 className="break-words text-xs font-semibold uppercase leading-5 tracking-wide">{label}</h2>
+          <h2 className="text-xs font-semibold uppercase leading-5 tracking-wide [overflow-wrap:anywhere]">{label}</h2>
         </div>
-        <Badge variant="outline" className="rounded-full border-border/50 bg-card/50 px-1.5 font-medium tabular-nums text-muted-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
+        <Badge variant="outline" className="shrink-0 rounded-full border-border/50 bg-card/50 px-1.5 font-medium tabular-nums text-muted-foreground" aria-label={t("boardColumnCards", { count, status: label })}>
           {count}
         </Badge>
       </div>
