@@ -28,6 +28,9 @@ function useReturnFocus(open: boolean) {
   wasOpen.current = open;
   return React.useCallback(() => {
     const element = opener.current;
+    // A closing popup can finish after the user has entered another dialog.
+    const activeDialog = document.activeElement?.closest('[role="dialog"][data-open], [role="alertdialog"][data-open]');
+    if (activeDialog && !activeDialog.contains(element)) return false;
     if (element?.isConnected && element.getClientRects().length) return element;
     return document.querySelector<HTMLElement>("[data-dialog-return-focus]") ?? true;
   }, []);
