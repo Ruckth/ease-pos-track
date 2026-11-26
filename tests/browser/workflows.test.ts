@@ -342,6 +342,67 @@ test("customer navigation does not expose staff health", async () => {
   } finally { await f.context.close(); }
 });
 
+test("customer search finds older Tickets and can include resolved Tickets", async () => {
+  const { page, context, token, errors } = await open("customer");
+  try {
+    await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    const query = page.getByLabel(copy("en", "customerQueueSearch"), { exact: true });
+    const status = page.getByLabel(copy("en", "ticketStatus"), { exact: true });
+    const older = page.getByRole("button", { name: copy("en", "loadOlder"), exact: true });
+    const rows = page.locator("button[data-ticket-id]");
+    const projectId = seed.projects.find(project => project.key === "POS")!.id;
+    const scope = { projectId, lifecycle: "active" as const };
+    const resolved = await convex.query(api.tickets.searchTickets, { ...scope, token, status: "done", search: "Printer queue fixture" });
+    const target = resolved.matches.find(ticket => ticket.title === "Printer queue fixture 4");
+    assert.ok(target, "seeded older resolved Ticket");
+    const reference = formatTicketNumber(target.ticketNumber, target.projectKey);
+    const targetRow = page.locator(`button[data-ticket-id="${target._id}"]`);
+    const noMatches = page.getByText(copy("en", "customerQueueSearchEmpty"), { exact: true });
+
+    await status.selectOption("all");
+    await older.waitFor();
+    assert.equal(await targetRow.count(), 0, "the resolved Ticket lies beyond the first page");
+    await status.selectOption("active");
+    await query.fill("quartz");
+    await rows.filter({ hasText: "Printer calibration" }).waitFor();
+    assert.equal(await rows.filter({ hasText: "quartz calibration" }).count(), 0, "the other customer's Ticket stays hidden");
+    assert.equal(await older.count(), 0, "search has its own result cap");
+    await query.fill("Printer queue fixture");
+    await rows.nth(1).waitFor();
+    const nextId = await rows.nth(1).getAttribute("data-ticket-id");
+    await rows.first().click();
+    await page.getByRole("button", { name: copy("en", "detailNext"), exact: true }).click();
+    await page.waitForFunction(id => new URL(location.href).searchParams.get("ticket") === id, nextId);
+    await page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+
+    await query.fill(reference);
+    await noMatches.waitFor();
+    await page.getByRole("button", { name: copy("en", "customerQueueSearchAllStatuses"), exact: true }).click();
+    await targetRow.waitFor();
+    assert.equal(await status.inputValue(), "all");
+    assert.equal(await query.inputValue(), reference);
+    await targetRow.click();
+    await page.getByRole("heading", { name: target.title, exact: true }).waitFor();
+    await page.goBack();
+    await page.waitForFunction(id => document.activeElement?.getAttribute("data-ticket-id") === id, target._id);
+    assert.equal(await query.inputValue(), reference);
+
+    await query.fill("");
+    await older.waitFor();
+    assert.equal(await rows.count(), 20, "clearing search restores the first browse page");
+    await older.click();
+    await page.waitForFunction(() => document.querySelectorAll("button[data-ticket-id]").length === 40);
+    assert.equal(await targetRow.count(), 0, "the resolved Ticket lies beyond the first 40 rows");
+
+    await query.fill(reference);
+    await targetRow.waitFor();
+    await query.fill("");
+    await older.waitFor();
+    assert.equal(await rows.count(), 40, "clearing search restores the loaded browse pages");
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
 for (const language of ["en", "th"] as const) test(`${language}: staff question and customer reply share one Ticket and preserve Waiting`, async () => {
   const customer = await open("customer", language);
   let staff: Awaited<ReturnType<typeof open>> | undefined;

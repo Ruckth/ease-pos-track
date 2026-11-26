@@ -6,6 +6,7 @@ import { useStaffLanes } from "./lane-adapter";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { customerSearchScope, type CustomerQueueFilter } from "./customer-queue";
 import { isTicketSearchWithinLimits } from "../../../shared/ticket-contracts";
 
 /** Browser mutation transport. Operations and rendering never construct clients. */
@@ -59,6 +60,11 @@ export function useCustomerTickets(projectId: Id<"projects"> | undefined) {
   return usePaginatedQuery(api.tickets.pageTickets, projectId ? { projectId, lifecycle: "active" } : "skip", { initialNumItems: 20 });
 }
 
+export function useCustomerTicketSearch(projectId: Id<"projects"> | undefined, query: string, filter: CustomerQueueFilter) {
+  return useQuery(api.tickets.searchTickets, projectId && query ? {
+    projectId, lifecycle: "active", search: query, ...customerSearchScope(filter),
+  } : "skip");
+}
 
 export function useStaffTickets(projectId: Id<"projects"> | undefined, view: string, filter: string, query: string, assignmentFilter?: TicketAssignmentFilter) {
   const invalidSearch = !isTicketSearchWithinLimits(query);
