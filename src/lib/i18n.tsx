@@ -34,7 +34,6 @@ const en = {
   // Single-form composer and compact customer workspace
   statusWriting: "Updating status…", statusChecking: "Checking current status…", statusNeedsConnection: "Reconnect to check the current status.", statusCheckAgain: "Check again",
   draftDiscardDescription: "Discard the text, files and notes in this draft?", draftSessionHint: "Your draft stays in this tab until you reload or sign out.", copyTicketLink: "Copy Ticket link",
-  composerHint: "Only a topic is required. Add details or files when they help explain the Ticket.",
   composerRequired: "(required)",
   composerPreview: "Preview Ticket (optional)",
   composerHidePreview: "Hide preview",
@@ -496,7 +495,6 @@ const th: Record<keyof typeof en, string> = {
   // Single-form composer and compact customer workspace
   statusWriting: "กำลังอัปเดตสถานะ…", statusChecking: "กำลังตรวจสอบสถานะล่าสุด…", statusNeedsConnection: "เชื่อมต่ออีกครั้งเพื่อตรวจสอบสถานะ", statusCheckAgain: "ตรวจสอบอีกครั้ง",
   draftDiscardDescription: "ลบข้อความ ไฟล์ และหมายเหตุในฉบับร่างนี้หรือไม่", draftSessionHint: "ฉบับร่างนี้เก็บไว้ในหน้านี้จนกว่าจะรีโหลดหรือออกจากระบบ", copyTicketLink: "คัดลอกลิงก์ Ticket",
-  composerHint: "กรอกเฉพาะหัวข้อก็ส่ง Ticket ได้ เพิ่มรายละเอียดหรือไฟล์เมื่อช่วยอธิบายได้ชัดเจนขึ้น",
   composerRequired: "(จำเป็น)",
   composerPreview: "ดูตัวอย่าง Ticket (ไม่บังคับ)",
   composerHidePreview: "ซ่อนตัวอย่าง",

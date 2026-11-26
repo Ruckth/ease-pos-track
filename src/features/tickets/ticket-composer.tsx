@@ -80,7 +80,6 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
 
   return <>
     <form className="space-y-4" onSubmit={submit} noValidate aria-busy={isUploading}>
-      <p className="text-sm text-muted-foreground">{t("composerHint")}</p>
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span className="text-muted-foreground">{t("composerRequired")}</span></label>
         <Input disabled={isUploading} id={titleId} value={title} required aria-invalid={titleInvalid || undefined}
