@@ -170,6 +170,13 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
     finally { setBusy(false); }
   }
 
+  const description = <>
+    <TicketTagList tags={ticket.tags} />
+    {archived && <p className="text-sm font-medium">{t("archivedOn", { date: formatDate(ticket.archivedAt ?? ticket.updatedAt) })}</p>}
+    {ticket.description ? <DescriptionWithTags text={ticket.description} annotations={annotations} onFocus={focusPin} />
+      : <p className="text-sm text-muted-foreground">{t("noDescription")}</p>}
+  </>;
+
   return <div className="min-w-0 space-y-4 [overflow-wrap:anywhere] [&_button:not(.absolute)]:min-h-11">
     <header className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -180,11 +187,9 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
         <Badge variant="outline" className={meta.tone}>{t(!staff && ticket.status === "waiting" ? "customerQueueWaiting" : meta.labelKey)}</Badge>
       </div>
       <h2 id={props.heading} className="text-xl font-semibold leading-tight">{ticket.title}</h2>
-      <TicketTagList tags={ticket.tags} />
-      {archived && <p className="text-sm font-medium">{t("archivedOn", { date: formatDate(ticket.archivedAt ?? ticket.updatedAt) })}</p>}
-      {ticket.description ? <DescriptionWithTags text={ticket.description} annotations={annotations} onFocus={focusPin} />
-        : <p className="text-sm text-muted-foreground">{t("noDescription")}</p>}
+      {staff && description}
     </header>
+    {!staff && <TicketConversation ticket={ticket} role="customer">{description}</TicketConversation>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
       <div className="flex flex-wrap items-center gap-2">
@@ -194,7 +199,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
-      <TicketConversation ticket={ticket} role={props.role} />
+      {staff && <TicketConversation ticket={ticket} role="staff" />}
     </>}
     {staff && <TicketAssignment ticket={ticket} />}
     <div>

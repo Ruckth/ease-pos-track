@@ -122,10 +122,7 @@ export function CustomerPortal({ viewer, onLogout }: {
       </Suspense>
     </Dialog>
     <div className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
-      {viewer.needsRecoveryCode ? <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
-        <span>{t("recoveryCodeNeeded")}</span>
-        <Button className="min-h-11 rounded-lg" onClick={() => setAccountOpen(true)}>{t("recoveryCodeCreate")}</Button>
-      </div> : null}
+      {viewer.needsRecoveryCode && !ticket && <RecoveryReminder onOpen={() => setAccountOpen(true)} />}
       <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
         <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
         <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
@@ -145,6 +142,7 @@ export function CustomerPortal({ viewer, onLogout }: {
           inline initialSection={navigation.section} onPrevious={previousId ? () => navigation.changeTicket(previousId) : undefined}
           onNext={nextId ? () => navigation.changeTicket(nextId) : undefined} /> : null}
       </div>
+      {viewer.needsRecoveryCode && ticket && <RecoveryReminder className="mt-4" onOpen={() => setAccountOpen(true)} />}
     </div>
     <Dialog open={composer.open} mobileFullScreen initialFocus={() => document.getElementById("customer-ticket-title")} onOpenChange={composer.setOpen}
       title={t("newTicket")} description={composer.project ? `${composer.project.name} (${composer.project.key})` : t("customerPortalSubtitle")}>
@@ -171,6 +169,14 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
     return { denied: true };
   }
   render() { return this.state.denied ? <ProjectUnavailable /> : this.props.children; }
+}
+
+function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
+  const { t } = useI18n();
+  return <div role="status" className={cn("mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-transparent bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100", className)}>
+    <span>{t("recoveryCodeNeeded")}</span>
+    <Button className="min-h-11 rounded-lg" onClick={onOpen}>{t("recoveryCodeCreate")}</Button>
+  </div>;
 }
 
 function ProjectUnavailable() {
