@@ -164,3 +164,25 @@ for (const language of ["en", "th"] as const) {
     } finally { await context.close(); }
   });
 }
+
+test("reduced transparency gives the Ticket form opaque fields and surfaces", async () => {
+  const { page, context } = await open("customer");
+  try {
+    const emulation = await context.newCDPSession(page);
+    const dialog = page.getByRole("dialog");
+    await emulation.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-transparency", value: "reduce" }],
+    });
+    for (const surface of [dialog, dialog.locator("#customer-ticket-title")]) {
+      const style = await surface.evaluate(element => {
+        const css = getComputedStyle(element);
+        return { blur: css.backdropFilter, image: css.backgroundImage, color: css.backgroundColor };
+      });
+      assert.equal(style.blur, "none");
+      assert.equal(style.image, "none");
+      assert.match(style.color, /^rgb\(/);
+    }
+    assert.equal(await page.locator(".aurora-canvas").evaluate(element =>
+      getComputedStyle(element, "::before").backgroundImage), "none");
+  } finally { await context.close(); }
+});
