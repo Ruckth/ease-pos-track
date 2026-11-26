@@ -73,6 +73,7 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
   const enableDrag = useMediaQuery("(min-width: 1024px)");
+  const standardShortcuts = useMediaQuery("(min-width: 768px)");
   const c = useExplorerCopy();
   const boardId = useId();
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -188,10 +189,11 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
           const meta = statusMeta(status);
           const Icon = meta.icon;
           const label = t(meta.labelKey);
-          const compactLabel = compactStatusLabels[status]?.[language];
+          const visibleLabel = (!standardShortcuts && compactStatusLabels[status]?.[language]) || label;
+          const accessibleLabel = label === visibleLabel || label.startsWith(`${visibleLabel} `) ? label : `${visibleLabel} (${label})`;
           return <Button key={status} type="button" variant={status === currentStatus ? "secondary" : "outline"} size="sm"
             className="h-auto min-h-11 min-w-11 flex-[1_1_0] flex-col gap-0.5 whitespace-normal px-px py-1.5 text-center text-[0.6875rem] leading-tight md:flex-none md:flex-row md:gap-2 md:whitespace-nowrap md:px-3 md:text-xs"
-            aria-label={label}
+            aria-label={accessibleLabel}
             aria-pressed={status === currentStatus}
             aria-controls={`${boardId}-${status}`}
             title={label}
@@ -200,8 +202,7 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
               onChooseStatus(status);
             }}>
             <Icon aria-hidden="true" />
-            {compactLabel && <span className="md:hidden">{compactLabel}</span>}
-            <span className={cn("[overflow-wrap:anywhere]", compactLabel && "hidden md:inline")}>{label}</span>
+            <span className="[overflow-wrap:anywhere]">{visibleLabel}</span>
           </Button>;
         })}
       </div>}

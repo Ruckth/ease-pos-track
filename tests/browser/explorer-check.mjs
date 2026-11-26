@@ -107,7 +107,7 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await shortcut("New").click();
-  const englishShortcuts = [["New"], ["Acknowledged", "Ack."], ["In progress"], ["Waiting for customer", "Waiting"], ["Resolved"]];
+  const englishShortcuts = [["New"], ["Ack. (Acknowledged)", "Ack."], ["In progress"], ["Waiting for customer", "Waiting"], ["Resolved"]];
   await expectPhoneShortcuts(shortcuts, englishShortcuts);
   assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 5);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -125,7 +125,7 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await page.setViewportSize({ width: 320, height: 720 });
   await expectPhoneShortcuts(shortcuts, englishShortcuts);
   await button("Language").click();
-  await expectPhoneShortcuts(page.getByRole("group", { name: "แสดงรายการตามสถานะ" }), [["ใหม่"], ["รับเรื่องแล้ว", "รับเรื่อง"], ["กำลังดำเนินการ"], ["รอข้อมูลลูกค้า", "รอข้อมูล"], ["แก้ไขแล้ว"]]);
+  await expectPhoneShortcuts(page.getByRole("group", { name: "แสดงรายการตามสถานะ" }), [["ใหม่"], ["รับเรื่อง (รับเรื่องแล้ว)", "รับเรื่อง"], ["กำลังดำเนินการ"], ["รอข้อมูล (รอข้อมูลลูกค้า)", "รอข้อมูล"], ["แก้ไขแล้ว"]]);
   await button("Language").click();
 
   // Browse counts and capped indexed search have different denominators.
@@ -147,7 +147,7 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await search.fill("POS-0002");
   await button("Board").click();
   await lane("new").getByRole("button", { name: "Acknowledge · POS-0002", exact: true }).click();
-  await shortcut("Acknowledged").click();
+  await shortcut("Ack. (Acknowledged)").click();
   await lane("acknowledged").getByRole("button", { name: "Start work · POS-0002", exact: true }).waitFor();
   assert.deepEqual(errors,[]); console.log("Explorer browser checks passed: table, board, filters, dates, urgency, pagination, archives, details, Thai and mobile.");
 }); } catch (error) { console.error(error); process.exitCode = 1; } finally { await browser.close(); }
