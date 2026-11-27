@@ -1122,6 +1122,34 @@ test("customer navigation does not expose staff health", async () => {
   } finally { await f.context.close(); }
 });
 
+for (const language of ["en", "th"] as const) test(`customer ${language}: Ticket header fits in one phone row`, async () => {
+  const { page, context } = await open("customer", language);
+  try {
+    await page.goto(`${baseURL}/customer?project=POS&ticket=${seed.tickets[1]}`);
+    await page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).waitFor();
+    const header = page.locator("main > header");
+    const wordmark = header.getByText(copy(language, "appName"), { exact: true });
+    const project = projectSwitcher(page, language);
+    const inbox = header.getByRole("button", { name: copy(language, "ticketInbox"), exact: true });
+    const account = header.getByRole("button", { name: copy(language, "customerQueueMore"), exact: true });
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await wordmark.isVisible(), false);
+      assert.equal(await project.innerText(), "POS");
+      const toolbar = await header.boundingBox();
+      assert.ok(toolbar && toolbar.height <= 64, `Header height at ${width}px: ${toolbar?.height}`);
+      for (const control of [project, inbox, account]) {
+        const box = await control.boundingBox();
+        assert.ok(box && box.height >= 44 && box.x >= 0 && box.x + box.width <= width);
+        assert.ok(Math.abs(box.y + box.height / 2 - (toolbar.y + toolbar.height / 2)) <= 1);
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await wordmark.waitFor();
+    assert.match(await project.innerText(), /\(POS\)/);
+  } finally { await context.close(); }
+});
+
 for (const language of ["en", "th"] as const) test(`customer ${language}: phone filters preserve search and restore the linked status on Back`, async () => {
   const { page, context } = await open("customer", language);
   try {
