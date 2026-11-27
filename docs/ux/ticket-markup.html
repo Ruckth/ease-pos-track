@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>Ticket screenshot markup</title>
+<style>
+:root{font-family:var(--font-sans,"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);color:var(--foreground, #202532);--ink:#233247;--paper:#fff;--edge:var(--border,#cdd3da);--mint:#a6f1ce;--red:#bd3928}
+*{box-sizing:border-box}body{margin:0}main{width:min(100%,820px);margin:0 auto}button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:3px solid var(--ring,#428ac9);outline-offset:3px}
+header,.foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}header{padding:8px 0 12px;font-size:.86rem}.file{display:flex;gap:8px;align-items:center;font-weight:650}.file svg{width:19px;height:19px}.label{font-size:.8rem;opacity:.8}
+.stage{background:#d8e5df;background-image:radial-gradient(#a4bab1 1px,transparent 1px);background-size:10px 10px;padding:clamp(12px,3vw,26px);border-radius:var(--radius,12px);overflow:hidden;position:relative}
+.shot{display:block;width:100%;aspect-ratio:720/350;overflow:hidden;border:1px solid #bbcac3;border-radius:8px;box-shadow:0 5px 16px #223b332b;background:#fff}
+.shot text{font-family:Arial,sans-serif;fill:var(--ink)}.shot .small{font-size:13px}.shot .body{font-size:18px}.shot .bold{font-weight:700}.shot .faint{fill:#556574}.shot .white{fill:#fff}.shot .side{fill:#d6e1ed}
+.shot .frame,.shot .mask,.shot .pin{opacity:0}.shot[data-step="1"] .frame,.shot[data-step="2"] .mask,.shot[data-step="3"] .mask,.shot[data-step="3"] .pin{opacity:1}
+.shot[data-step="2"] .scene,.shot[data-step="3"] .scene{clip-path:url(#receipt-crop)}.draw{stroke-dasharray:1;stroke-dashoffset:0}.shot[data-step="0"] .draw{animation:draw 1.2s ease-out both}.shot[data-step="1"] .frame{animation:appear .45s ease-out both}.shot[data-step="2"] .mask{transform-box:fill-box;transform-origin:left;animation:cover .52s ease-out both}.shot[data-step="3"] .pin{animation:appear .4s ease-out both}
+@keyframes draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes appear{from{opacity:0}to{opacity:1}}@keyframes cover{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:10px 0 16px}.steps button,.play{background:transparent;border:1px solid var(--edge);min-height:44px;border-radius:7px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:.86rem;font-weight:600}.steps svg,.play svg{width:17px;height:17px;flex:none}.steps button[aria-current="step"]{background:var(--mint);border:2px solid #267453;color:#183e30}
+h1{font-size:clamp(1.25rem,3vw,1.7rem);line-height:1.18;letter-spacing:-.035em;margin:0 0 6px}p{margin:0;line-height:1.5}.caption{min-height:80px}.foot{margin:10px 0 2px;padding:12px 0;border-top:1px solid var(--edge)}.play{padding:0 15px}.counter{font-family:var(--font-mono,monospace);font-size:.78rem}.sr{position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden}
+@media(max-width:480px){.shot{aspect-ratio:460/330}.stage{padding:10px}.steps button{flex-direction:column;gap:4px;padding:7px 0}.caption{min-height:92px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important}}
+@media(prefers-color-scheme:dark){:root{color:var(--foreground,#e1e6eb);--edge:var(--border,#53606e)}}
+
+[hidden]{display:none!important}
+.modes,.tools,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
+.modes button,.tools button,.actions button,.shortcut{border:1px solid var(--edge);background:transparent;border-radius:7px;padding:6px 13px;min-height:44px;font-weight:600}
+button[aria-pressed=true],.actions .primary{background:var(--mint);color:#183e30;border-color:#267453}
+button:disabled{opacity:.45;cursor:default}
+#practice h2{font-size:1.15rem;margin:12px 0 5px}
+#practice canvas,#result-image{width:100%;height:auto;display:block;background:white;max-height:430px;object-fit:contain}
+#practice canvas{max-height:none;cursor:crosshair;touch-action:manipulation}
+#practice .stage{padding:8px}
+#practice textarea{width:100%;font:inherit;padding:9px;border:1px solid var(--edge);border-radius:6px;background:transparent;color:inherit;resize:vertical}
+#hint{margin:8px 0}.shortcut{margin-bottom:10px;font-weight:500}.note-label{display:block;margin:10px 0 5px;font-weight:650}
+#notice{font-size:.9rem;min-height:1.4em}#result-text{white-space:pre-wrap;overflow-wrap:anywhere}
+</style></head><body><main>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="photo" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.5"/><path d="m4 17 5-5 4 3 4-6 4 6"/></symbol>
+<symbol id="circle" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="9" ry="7" transform="rotate(-15 12 12)"/></symbol>
+<symbol id="crop" viewBox="0 0 24 24"><path d="M6 2v15h16M2 6h15v16"/></symbol>
+<symbol id="hide" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="m6 14 4-4m1 4 4-4m1 4 2-2"/></symbol>
+<symbol id="review" viewBox="0 0 24 24"><path d="M5 3h14v14l-4 4H5zM8 12l3 3 5-7"/></symbol>
+</defs></svg>
+<header><span class="file"><svg fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#photo"/></svg>checkout.png</span><span class="label">Ticket markup preview</span></header>
+<nav class="modes" aria-label="Preview mode"><button id="watch" aria-pressed="true">Walkthrough</button><button id="try" aria-pressed="false">Try it yourself</button></nav>
+<section id="walk"><div class="stage">
+<svg class="shot" data-step="0" viewBox="0 0 720 350" role="img" aria-labelledby="scene-title scene-desc">
+<title id="scene-title">Cash payment receipt</title><desc id="scene-desc">An oval marks ฿0 change due on a ฿180 sale paid with ฿200.</desc>
+<defs><clipPath id="receipt-crop"><rect x="201" y="68" width="489" height="249"/></clipPath></defs><g class="scene"><rect width="720" height="350" fill="#f1f4f7"/>
+<rect width="169" height="350" fill="#233247"/><g transform="translate(16 27)"><path d="M0 12 7 0h8L8 12zM11 12l7-12h5l-7 12z" fill="#a6f1ce"/><text x="31" y="12" class="bold white" font-size="19">Ease POS</text></g>
+<rect x="10" y="83" rx="5" width="149" height="34" fill="#43536b"/><g class="small"><text x="22" y="104" class="white">Checkout</text><text x="22" y="144" class="side">Orders</text><text x="22" y="184" class="side">Products</text></g>
+<text x="198" y="40" class="bold" font-size="21">Checkout</text><text x="698" y="40" text-anchor="end" class="small faint">Register 02</text>
+<rect x="192" y="58" width="507" height="273" rx="10" fill="white" stroke="#ccd6db"/>
+<text x="216" y="91" class="bold" font-size="22">Cash payment</text><text x="216" y="120" class="small faint">Order #1048</text><text x="675" y="120" text-anchor="end" class="small faint">Customer 000-555-0142</text>
+<path d="M216 140H675M216 244H675" stroke="#d5dcdf"/>
+<g class="body"><text x="216" y="177">Total</text><text x="675" y="177" text-anchor="end">฿180.00</text><text x="216" y="218">Cash received</text><text x="675" y="218" text-anchor="end">฿200.00</text></g>
+<text x="216" y="286" class="bold" font-size="23">Change due</text><text x="665" y="286" text-anchor="end" class="bold" font-size="27">฿0.00</text>
+<g transform="rotate(-5 626 277)" fill="none" stroke-linecap="round"><ellipse class="draw" pathLength="1" cx="626" cy="277" rx="55" ry="27" stroke="white" stroke-width="8"/><ellipse class="draw" pathLength="1" cx="626" cy="277" rx="55" ry="27" stroke="#c6432d" stroke-width="4.5"/></g>
+<g class="frame"><path fill="#10241f" opacity=".5" fill-rule="evenodd" d="M0 0H720V350H0z M201 68H690V317H201z"/><rect x="201" y="68" width="489" height="249" fill="none" stroke="#1c674b"/><path d="M201 87V68h19m451 0h19v19m0 211v19h-19m-451 0h-19v-19" stroke="#164e3c" stroke-width="5" fill="none"/></g>
+<rect class="mask" x="580" y="105" width="97" height="20" rx="2" fill="#182330"/>
+<g class="pin"><circle cx="564" cy="257" r="14" fill="#95301e" stroke="white" stroke-width="3"/><text x="564" y="262" text-anchor="middle" class="bold white" font-size="15">1</text></g>
+</g></svg></div>
+<nav class="steps" aria-label="Preview steps"></nav>
+<section class="caption"><h1 id="heading">Circle the wrong amount</h1><p id="caption">The customer paid ฿200 for a ฿180 sale. Circle the ฿0 change amount so support sees the problem immediately.</p></section>
+<div class="foot"><button class="play" type="button"></button><span class="counter"></span></div><span class="sr" id="announcement" aria-live="polite"></span>
+</section>
+<section id="practice" hidden aria-label="Practice on the sample receipt">
+<div id="edit" inert>
+<h2>Edit the sample receipt</h2>
+<p>Show support what went wrong with the change. Keep the amounts they need and hide the customer number.</p>
+<div class="tools" aria-label="Image tools"><button data-tool="circle">Circle</button><button data-tool="crop">Crop</button><button data-tool="mask">Hide details</button></div>
+<div class="stage"><canvas id="surface" tabindex="0" width="720" height="350" aria-label="Sample receipt. Total ฿180. Cash received ฿200. Change due ฿0. Use the suggested selection button below the image or tap the image."></canvas></div>
+<p id="hint"></p><small id="key-help" hidden>Arrow keys move the crosshair. Hold Shift for a larger step. Enter places a point. Escape cancels the first corner.</small><button class="shortcut" id="preset"></button><p role="status" id="notice"></p>
+<label class="note-label" for="note">What did you expect to happen?</label><textarea id="note" rows="2" maxlength="2000"></textarea>
+<div class="actions"><button id="undo">Undo edit</button><button id="redo">Redo edit</button><button class="primary" id="apply">Review attachment</button></div>
+</div>
+<div id="reviewed" hidden><h2 tabindex="-1" id="result-heading">What support would see</h2>
+<div class="stage"><img id="result-image" alt="Your edited sample receipt"></div>
+<p id="result-meta" class="label"></p><p id="result-text"></p><div class="actions"><button id="back">Back to editing</button></div>
+</div></section></main>
+<script>
+const steps = [
+  ['Circle','circle','Circle the wrong amount','The customer paid ฿200 for a ฿180 sale. Circle the ฿0 change amount so support sees the problem immediately.'],
+  ['Crop','crop','Keep the numbers that explain it','Frame the receipt so the total, cash received, and change due stay together. The register sidebar falls outside the crop.'],
+  ['Hide details','hide','Cover the customer number','An opaque mask covers the phone number. Support can still read the three amounts needed to check the calculation.'],
+  ['Review','review','See what support receives','Note [1] “I expected ฿20 change after entering ฿200 cash. The register showed ฿0.”']
+];
+const shot=document.querySelector('.shot'), nav=document.querySelector('.steps'), play=document.querySelector('.play');
+const compact=matchMedia('(max-width:480px)'), reduced=matchMedia('(prefers-reduced-motion:reduce)');
+const icon=id=>'<svg aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><use href="#'+id+'"/></svg>';
+let step=0, running=false, timer, frame;
+function frameFor(index){
+  if(index>=2)return [201,68,489,249];
+  return compact.matches?[181,41,533,302]:[0,0,720,350];
+}
+function setFrame(animate){
+  cancelAnimationFrame(frame);
+  const box=shot.viewBox.baseVal, start=[box.x,box.y,box.width,box.height], end=frameFor(step);
+  const t0=performance.now();
+  function draw(now){
+    const t=animate&&!reduced.matches?Math.min(1,(now-t0)/570):1;
+    shot.setAttribute('viewBox',start.map((n,i)=>n+(end[i]-n)*(1-(1-t)**3)).join(' '));
+    if(t<1)frame=requestAnimationFrame(draw);
+  }
+  draw(t0);
+}
+function render(animate=false,announce=false){
+  const [, ,title,caption]=steps[step];
+  shot.dataset.step=step;setFrame(animate);
+  document.querySelector('#heading').textContent=title;
+  document.querySelector('#caption').textContent=caption;
+  document.querySelector('#scene-desc').textContent=caption;
+  document.querySelector('.counter').textContent='Step '+(step+1)+' of '+steps.length;
+  Array.from(nav.children).forEach((b,i)=>i===step?b.setAttribute('aria-current','step'):b.removeAttribute('aria-current'));
+  play.textContent=running?'Ⅱ  Pause walkthrough':step===3?'↻  Replay walkthrough':'▷  Play walkthrough';
+  if(announce)document.querySelector('#announcement').textContent=title+'. '+caption;
+}
+function schedule(){
+  clearTimeout(timer);
+  if(!running)return;
+  timer=setTimeout(()=>{
+    step++;running=step<steps.length-1;render(true);schedule();
+  },4200);
+}
+steps.forEach(([name,id],i)=>{
+  const b=document.createElement('button');b.type='button';b.innerHTML=icon(id)+name;
+  b.onclick=()=>{clearTimeout(timer);running=false;step=i;render(true,true)};
+  nav.append(b);
+});
+play.onclick=()=>{
+  if(!running&&step===3)step=0;
+  running=!running;render();schedule();
+};
+compact.addEventListener('change',()=>setFrame(false));
+reduced.addEventListener('change',()=>{if(reduced.matches){running=false;clearTimeout(timer);render()}});
+running=!reduced.matches;render();schedule();
+</script>
+<script>
+const byId = id => document.getElementById(id);
+const surface = byId('surface');
+const brush = surface.getContext('2d');
+const receipt = new Image();
+const full = {x:0, y:0, w:720, h:350};
+const presets = {
+  circle: {label:'Circle change due', hint:'Tap the amount to draw an oval, or use the suggested selection below.', x:626, y:277},
+  crop: {label:'Crop to receipt', hint:'Tap two opposite corners of the area to keep, or use the receipt frame.', x:201, y:68, w:489, h:249},
+  mask: {label:'Cover customer number', hint:'Tap two opposite corners around private text, or cover the sample number below.', x:580, y:105, w:97, h:20}
+};
+let tool = 'circle';
+let edits = [], position = 0;
+let firstCorner = null, keyboardPoint = null, previewUrl = null, sampleLoading;
+function loadSample() {
+  if (sampleLoading) return sampleLoading;
+  const graphic = shot.cloneNode(true);
+  graphic.removeAttribute('class');
+  graphic.setAttribute('width',720);
+  graphic.setAttribute('height',350);
+  graphic.setAttribute('viewBox','0 0 720 350');
+  graphic.querySelector('.draw').parentElement.remove();
+  graphic.querySelectorAll('.frame,.pin,.mask').forEach(el=>el.remove());
+  const style = document.createElementNS('http://www.w3.org/2000/svg','style');
+  style.textContent = 'text{font-family:Arial,sans-serif;fill:#233247}.small{font-size:13px}.body{font-size:18px}.bold{font-weight:bold}.white{fill:white}.side{fill:#d6e1ed}.faint{fill:#556574}';
+  graphic.prepend(style);
+  receipt.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(graphic));
+  sampleLoading = receipt.decode();
+  return sampleLoading;
+}
+function cropBounds() {
+  return edits.slice(0,position).findLast(edit => edit.tool === 'crop') || full;
+}
+function drawReceipt(guides=true) {
+  const bounds = cropBounds();
+  surface.width = bounds.w;
+  surface.height = bounds.h;
+  brush.translate(-bounds.x,-bounds.y);
+  brush.drawImage(receipt,0,0);
+  const active = edits.slice(0,position);
+  for (const edit of active.filter(edit=>edit.tool==='circle')) {
+    brush.beginPath();
+    brush.ellipse(edit.x,edit.y,54,26,-0.08,0,Math.PI*2);
+    brush.lineWidth=7; brush.strokeStyle='white'; brush.stroke();
+    brush.lineWidth=4; brush.strokeStyle='#bd3928'; brush.stroke();
+  }
+  brush.fillStyle='#182330';
+  for (const box of active.filter(edit=>edit.tool==='mask')) brush.fillRect(box.x,box.y,box.w,box.h);
+  if (guides) {
+    for (const point of [firstCorner,keyboardPoint].filter(Boolean)) {
+      brush.strokeStyle='#08834f'; brush.lineWidth=3;
+      brush.strokeRect(point.x-6,point.y-6,12,12);
+    }
+  }
+  byId('undo').disabled = position === 0;
+  byId('redo').disabled = position === edits.length;
+}
+function selectTool(next) {
+  tool=next;
+  firstCorner=null;
+  document.querySelectorAll('[data-tool]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.tool===tool)));
+  byId('hint').textContent=presets[tool].hint;
+  byId('preset').textContent=presets[tool].label;
+  byId('notice').textContent='';
+  if(receipt.naturalWidth) drawReceipt();
+}
+function place(edit) {
+  const bounds = cropBounds();
+  if (tool !== 'circle') {
+    const right = Math.min(bounds.x+bounds.w,edit.x+edit.w);
+    const bottom = Math.min(bounds.y+bounds.h,edit.y+edit.h);
+    const x = Math.max(edit.x,bounds.x), y = Math.max(edit.y,bounds.y);
+    if (right-x<4 || bottom-y<4) {
+      byId('notice').textContent='Choose a larger area inside the current image.';
+      return;
+    }
+    edit={x,y,w:right-x,h:bottom-y};
+  } else if(edit.x<bounds.x || edit.x>=bounds.x+bounds.w || edit.y<bounds.y || edit.y>=bounds.y+bounds.h) {
+    byId('notice').textContent='The amount is outside this crop. Undo the crop to include it.';
+    return;
+  }
+  edits=edits.slice(0,position);
+  edits.push({...edit,tool});
+  position=edits.length;
+  firstCorner=null; keyboardPoint=null;
+  byId('hint').textContent=presets[tool].hint;
+  byId('notice').textContent={circle:'Circle added.',crop:'Crop applied.',mask:'Selected pixels covered.'}[tool];
+  drawReceipt();
+}
+function mark(point) {
+  if(tool==='circle') { place(point); return; }
+  if(!firstCorner) {
+    firstCorner=point;
+    byId('hint').textContent='Choose the opposite corner to finish the selection.';
+    drawReceipt();
+    return;
+  }
+  place({x:Math.min(firstCorner.x,point.x), y:Math.min(firstCorner.y,point.y),
+    w:Math.abs(point.x-firstCorner.x)+1, h:Math.abs(point.y-firstCorner.y)+1});
+}
+surface.onclick = event => {
+  const rect=surface.getBoundingClientRect(), b=cropBounds();
+  const x=Math.round((event.clientX-rect.left)*b.w/rect.width);
+  const y=Math.round((event.clientY-rect.top)*b.h/rect.height);
+  mark({x:b.x+Math.min(b.w-1,Math.max(0,x)),y:b.y+Math.min(b.h-1,Math.max(0,y))});
+};
+surface.onfocus = () => {byId('key-help').hidden=false};
+surface.onblur = () => {byId('key-help').hidden=true; keyboardPoint=null; if(receipt.naturalWidth)drawReceipt()};
+surface.onkeydown = event => {
+  const b=cropBounds();
+  if(event.key==='Escape'){selectTool(tool);return}
+  const directions={ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowDown:[0,1],ArrowUp:[0,-1]};
+  if(event.key!=='Enter' && !directions[event.key])return;
+  event.preventDefault();
+  keyboardPoint??={x:b.x+Math.floor(b.w/2),y:b.y+Math.floor(b.h/2)};
+  if(event.key==='Enter'){mark({...keyboardPoint});return}
+  const [dx,dy]=directions[event.key], speed=event.shiftKey?16:1;
+  keyboardPoint={x:Math.max(b.x,Math.min(b.x+b.w-1,keyboardPoint.x+dx*speed)),y:Math.max(b.y,Math.min(b.y+b.h-1,keyboardPoint.y+dy*speed))};
+  drawReceipt();
+};
+document.querySelectorAll('[data-tool]').forEach(button=>button.onclick=()=>selectTool(button.dataset.tool));
+byId('preset').onclick=()=>place(presets[tool]);
+for(const [id,delta] of [['undo',-1],['redo',1]]) {
+  byId(id).onclick=()=>{position+=delta;keyboardPoint=null;selectTool(tool);byId('notice').textContent=delta===1?'Edit restored.':'Edit undone.';};
+}
+function switchMode(practice) {
+  running=false; clearTimeout(timer);render();
+  byId('walk').hidden=practice;
+  byId('practice').hidden=!practice;
+  byId('try').setAttribute('aria-pressed',String(practice));
+  byId('watch').setAttribute('aria-pressed',String(!practice));
+  if(practice)loadSample().then(()=>{byId('edit').inert=false;selectTool(tool)}).catch(()=>{byId('notice').textContent='The sample image could not open. Reopen the HTML to try again.'});
+}
+byId('watch').onclick=()=>switchMode(false);
+byId('try').onclick=()=>switchMode(true);
+byId('apply').onclick=async()=>{
+  if(firstCorner){byId('notice').textContent='Finish the selection or choose a tool to cancel it.';return}
+  drawReceipt(false);
+  const blob = await new Promise(resolve=>surface.toBlob(resolve,'image/png'));
+  if(!blob){byId('notice').textContent='Export failed. Your edits are still here.';return;}
+  if(previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl=URL.createObjectURL(blob);
+  byId('result-image').src=previewUrl;
+  byId('result-meta').textContent=surface.width+' × '+surface.height+' px · PNG · Sample Ticket attachment';
+  byId('result-text').textContent=byId('note').value.trim();
+  byId('edit').hidden=true;
+  byId('reviewed').hidden=false;
+  byId('result-heading').focus();
+};
+byId('back').onclick=()=>{
+  byId('reviewed').hidden=true;byId('edit').hidden=false;
+  drawReceipt();byId('apply').focus();
+};
+if(location.hash==='#practice')switchMode(true);
+</script></body></html>
