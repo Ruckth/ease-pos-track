@@ -1137,6 +1137,7 @@ for (const language of ["en", "th"] as const) test(`customer ${language}: Ticket
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 });
       assert.equal(await wordmark.isVisible(), false);
+      await project.getByText("POS", { exact: true }).waitFor();
       assert.equal(await project.innerText(), "POS");
       const toolbar = await header.boundingBox();
       assert.ok(toolbar && toolbar.height <= 64, `Header height at ${width}px: ${toolbar?.height}`);
@@ -1148,6 +1149,7 @@ for (const language of ["en", "th"] as const) test(`customer ${language}: Ticket
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await wordmark.waitFor();
+    await project.getByText(/\(POS\)/).waitFor();
     assert.match(await project.innerText(), /\(POS\)/);
   } finally { await context.close(); }
 });
