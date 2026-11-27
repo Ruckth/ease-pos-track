@@ -2487,8 +2487,7 @@ test("Owner verifies staff invitation creation and reissue, then replaces and re
     const team = page.getByRole("dialog", { name: copy("en", "teamTitle"), exact: true });
     const codeField = team.getByRole("textbox", { name: copy("en", "verificationCode"), exact: true });
     async function confirm(purpose: string, testError = false) {
-      await codeField.waitFor();
-      assert.equal(await codeField.evaluate(element => element === document.activeElement), true);
+      await codeField.and(page.locator(":focus")).waitFor();
       const delivery = await admin(internal.identity.readLocalDelivery, { to: fixture.ownerEmail });
       if (!delivery) throw new Error("Local verification delivery missing");
       assert.equal(delivery.purpose, purpose);
