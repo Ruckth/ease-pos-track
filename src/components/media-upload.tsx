@@ -1,3 +1,5 @@
+import { AttachmentFilename } from "@/components/attachment-filename";
+import { attachmentName } from "@/lib/attachment-names";
 import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
 import { canMarkupImage, type PendingMedia } from "@/lib/types";
 import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
@@ -16,6 +18,8 @@ const VIDEO_MAX_BYTES = 64 * 1024 * 1024;
 
 export function MediaUploadField({
   items,
+  ticketTitle,
+  onRenameAttachment,
   onItemsChange,
   onFilesAdded,
   onPreviewItem,
@@ -25,6 +29,8 @@ export function MediaUploadField({
   disabled = false,
 }: {
   items: PendingMedia[];
+  ticketTitle: string;
+  onRenameAttachment: (id: string, name?: string) => void;
   onItemsChange: (items: PendingMedia[]) => void;
   onFilesAdded: (files: File[]) => void;
   onEditImage?: (item: PendingMedia) => void;
@@ -228,7 +234,7 @@ export function MediaUploadField({
             onKeyDown={event => {
               if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePosition(items[positionIndex].id); }
             }}>
-            <legend className="px-1 text-sm">{t("filePosition", { name: items[positionIndex].file.name })}</legend>
+            <legend className="px-1 text-sm">{t("filePosition", { name: attachmentName(items[positionIndex]) })}</legend>
             {items.map((file, index) => <button type="button" key={file.id} autoFocus={index === positionIndex}
               aria-pressed={index === positionIndex} className="min-h-11 min-w-11 rounded-md border border-transparent bg-muted/40 px-2 aria-pressed:bg-muted focus-visible:ring-2"
               onClick={() => placeFile(positionIndex, index)}>{index + 1}</button>)}
@@ -247,7 +253,7 @@ export function MediaUploadField({
                     type="button"
                     disabled={disabled}
                     onClick={() => onPreviewItem?.(item)}
-                    aria-label={t("openMedia", { name: item.file.name })}
+                    aria-label={t("openMedia", { name: attachmentName(item) })}
                     className="absolute inset-0 block h-full w-full disabled:cursor-not-allowed"
                   >
                     {item.isVideo ? (
@@ -256,7 +262,7 @@ export function MediaUploadField({
                         <PlayCircle className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 text-white" />
                       </>
                     ) : (
-                      <img className="h-full w-full object-cover" src={item.previewUrl} alt={item.file.name} />
+                      <img className="h-full w-full object-cover" src={item.previewUrl} alt={attachmentName(item)} />
                     )}
                   </button>
                   {index === 0 ? (
@@ -271,7 +277,7 @@ export function MediaUploadField({
                     </span>
                   ) : null}
                   {items.length > 1 && <SortableItemHandle render={<button type="button" disabled={disabled} />}
-                    data-order-handle={item.id} aria-label={t("reorderFile", { name: item.file.name })} aria-describedby={orderHint}
+                    data-order-handle={item.id} aria-label={t("reorderFile", { name: attachmentName(item) })} aria-describedby={orderHint}
                     aria-expanded={positioning === item.id} aria-controls={positionId}
                     onClick={() => setPositioning(current => current === item.id ? null : item.id)}
                     onKeyDownCapture={event => {
@@ -286,15 +292,17 @@ export function MediaUploadField({
                     type="button"
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
-                    aria-label={t("removeFile", { name: item.file.name })}
+                    aria-label={t("removeFile", { name: attachmentName(item) })}
                     className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="size-4" />
                   </button>
                 </div>
+                <AttachmentFilename item={item} ticketTitle={ticketTitle} position={index + 1}
+                  onRename={onRenameAttachment} disabled={disabled} />
                 {onEditImage && canMarkupImage(item.file) && (
                   <Button type="button" size="sm" variant="ghost" className="min-h-11 w-full" disabled={disabled}
-                    aria-label={t("editImageNamed", { name: item.file.name })} onClick={() => onEditImage(item)}>
+                    aria-label={t("editImageNamed", { name: attachmentName(item) })} onClick={() => onEditImage(item)}>
                     <Pencil aria-hidden="true" /> {t("editDraftImage")}
                   </Button>
                 )}
@@ -305,7 +313,7 @@ export function MediaUploadField({
               disabled={disabled}
               onClick={() => uploadInputRef.current?.click()}
               aria-label={t("addMedia")}
-              className="grid aspect-square place-items-center rounded-xl border-2 border-dashed text-muted-foreground transition-colors hover:border-primary hover:bg-primary/[0.03] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="grid aspect-square self-start place-items-center rounded-xl border-2 border-dashed text-muted-foreground transition-colors hover:border-primary hover:bg-primary/[0.03] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <span className="flex flex-col items-center gap-1 text-xs font-medium">
                 <ImagePlus className="size-5" />

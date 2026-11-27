@@ -1,3 +1,4 @@
+import { attachmentName } from "@/lib/attachment-names";
 import { TicketRoutingFields } from "@/features/routing/ticket-routing-fields";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -129,10 +130,10 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
     </Dialog>;
 
   const viewed = items[viewIndex];
-  const generatedName = /^image-[a-f\d-]{36}\.(?:png|jpg)$/i.test(viewed?.file.name ?? "");
+  const generatedName = !viewed?.name && /^image-[a-f\d-]{36}\.(?:png|jpg)$/i.test(viewed?.file.name ?? "");
   const mediaTitle = generatedName
     ? t(viewed?.isVideo ? "attachmentVideo" : "attachmentPhoto", { number: viewIndex + 1 })
-    : viewed?.file.name ?? t("annotateMedia");
+    : (viewed ? attachmentName(viewed) : t("annotateMedia"));
 
   return <>
     <form className="space-y-4" onSubmit={submit} noValidate aria-busy={isUploading}>
@@ -153,7 +154,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       </div>
       {mediaEnabled && <div className="space-y-2">
         <p className="text-sm font-medium">{t("media")}</p>
-        <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>}><MediaUploadField items={items} onItemsChange={setItems} onFilesAdded={owner.addFiles}
+        <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>}><MediaUploadField items={items} ticketTitle={title} onRenameAttachment={owner.renameAttachment} onItemsChange={setItems} onFilesAdded={owner.addFiles}
           onEditImage={setEditingItem} onPreviewItem={openMedia} onRequestRemove={requestPendingItemRemoval}
           annotationCounts={annotationCounts} disabled={!active || editsDisabled} /></Suspense>
         {items.length ? <p className="text-sm leading-5 text-muted-foreground">{annotations.length ? t("pinSummary", { count: annotations.length }) : t("pinHint")}</p> : null}
@@ -170,6 +171,9 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
           <h3 className="break-words font-semibold">{title.trim() || t("composerUntitled")}</h3>
           <p className="whitespace-pre-wrap break-words text-sm">{description.trim() || t("noDescription")}</p>
           {mediaEnabled && <p className="text-sm text-muted-foreground">{t("reviewMedia", { count: items.length })} · {t("reviewPins", { count: annotations.length })}</p>}
+          {mediaEnabled && items.length > 0 && <ul className="space-y-1 text-sm text-muted-foreground">
+            {items.map(item => <li key={item.id} className="[overflow-wrap:anywhere]">{attachmentName(item)}</li>)}
+          </ul>}
         </section>
       </div>
       {mediaEnabled && progress !== null ? <div role="progressbar" aria-label={t("submitting")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-2 overflow-hidden rounded-full bg-muted">
@@ -201,7 +205,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
     </Dialog>
     {selectedMediaId === null && markupDialog}
     <AlertDialog open={active && pendingRemoval !== null} onOpenChange={open => !open && setPendingRemoval(null)} title={t("removeMediaPins")}
-      description={t("removeMediaDescription", { name: pendingRemoval?.file.name ?? t("media"), count: pendingRemoval ? annotationCounts[pendingRemoval.id] ?? 0 : 0 })}
+      description={t("removeMediaDescription", { name: pendingRemoval ? attachmentName(pendingRemoval) : t("media"), count: pendingRemoval ? annotationCounts[pendingRemoval.id] ?? 0 : 0 })}
       confirmLabel={t("removeMedia")} onConfirm={() => { if (pendingRemoval) removePendingItem(pendingRemoval); }} /></>}
   </>;
 }

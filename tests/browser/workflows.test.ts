@@ -2536,3 +2536,34 @@ test("staff: the real sample page publishes, renders every screenshot and opens 
     if (process.env.PAGE_SAMPLE_EVIDENCE) await writeFile(process.env.PAGE_SAMPLE_EVIDENCE, JSON.stringify(evidence, null, 2));
   } finally { await f.context.close(); }
 });
+
+for (const role of ["staff", "customer"] as const) {
+  test(`${role}: thumbnail pencil renames the attachment beside its filename`, async () => {
+    const device = role === "customer" ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : {};
+    const { context, page, title, errors, uploads } = await openWith(await browsers.get(), role, "en", undefined, device);
+    const button = (name: string) => page.getByRole("button", { name, exact: true });
+    try {
+      await title.fill("Payment screen freezes");
+      await files(page, "checkout.png");
+      const rename = button("Rename checkout.png");
+      assert.equal(await rename.textContent(), "");
+      assert.equal(await rename.locator("svg.lucide-pencil").count(), 1);
+      assert.equal(await button("Use suggestion").count(), 0);
+      await rename.click();
+      const field = page.getByRole("textbox", { name: "File name", exact: true });
+      await button("Use suggestion").click();
+      assert.equal(await field.inputValue(), "Payment screen freezes - Photo 1");
+      await field.fill("Checkout error.png");
+      await field.press("Enter");
+      await button("Rename Checkout error.png").waitFor();
+      await button(copy("en", "composerPreview")).click();
+      const review = page.getByRole("region", { name: copy("en", "composerPreview") });
+      assert.equal(await review.getByText("Checkout error.png", { exact: true }).count(), 1);
+      await button("Rename Checkout error.png").click();
+      await button("Restore original").click();
+      await rename.waitFor();
+      assert.equal(uploads(), 0);
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+}
