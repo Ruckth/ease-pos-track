@@ -1456,6 +1456,10 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
       await staff.page.getByRole("button", { name: copy(language, "threadOpenAttachment", { name: receipt.name }), exact: true }).waitFor();
     }
 
+    if (language === "en") {
+      await customer.page.getByRole("button", { name: copy(language, "loadOlderMessages"), exact: true }).click();
+      await sharedPage.waitFor();
+    }
     await convex.mutation(api.pages.revokeTicketPage, { token: staff.token, pageId: published._id });
     await customer.page.getByText(copy(language, "threadPageUnavailable"), { exact: true }).waitFor();
     assert.equal(await sharedPage.count(), 0);

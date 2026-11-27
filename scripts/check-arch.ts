@@ -181,6 +181,7 @@ export const PUBLIC_REGISTRATIONS: Record<string, string> = {
   "auth.ts:signUpWithInvitation": "authMethod:customer-sign-up",
   "auth.ts:startSignInWithClerk": "authPackage:google-start",
   "conversations.ts:page": "actorQuery",
+  "conversations.ts:openRequest": "actorQuery",
   "conversations.ts:send": "actorMutation",
   "identity.ts:acceptStaffInvitation": "pendingIdentityMutation",
   "identity.ts:createCustomerInvitation": "ownerMutation",
