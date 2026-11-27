@@ -318,7 +318,7 @@ export const MediaViewer = forwardRef<
 
       {actionError ? <p role="alert" className="shrink-0 text-sm text-destructive">{actionError}</p> : null}
 
-      <Carousel setApi={setMainApi} opts={carouselOpts}
+      <Carousel setApi={setMainApi} opts={carouselOpts} keyboardNavigation={!mediaLocked}
         className={cn("overflow-hidden rounded-lg border bg-black", workspace && "max-sm:min-h-14 max-sm:flex-1 max-sm:[&>div:first-child]:h-full")}>
         <CarouselContent className={cn("-ml-0", workspace && "max-sm:h-full")}>
           {media.map((item, index) => {

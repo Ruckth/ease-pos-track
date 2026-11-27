@@ -467,7 +467,7 @@ export function ImageMarkupCanvas({
   const handleSize = s(10), handleHit = s(coarse ? 44 : 32);
 
   return (
-    <div className="grid gap-2 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col">
+    <div className="grid gap-2 max-sm:flex max-sm:min-h-[6.25rem] max-sm:flex-1 max-sm:flex-col">
       <ZoomControls zoom={zoom} labels={labels} />
       <div
         ref={viewport}

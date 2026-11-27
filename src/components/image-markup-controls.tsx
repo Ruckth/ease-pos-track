@@ -212,7 +212,7 @@ export function ImageMarkupInspector({ marks, selected, labels, nameOf, step, im
   const d = fine ? 1 : step;
   const removeLabel = selected?.kind === "crop" ? labels.resetCrop : labels.removeSelected;
   return (
-    <div className="grid gap-2">
+    <div className="grid shrink-0 gap-2">
       {circle && <CircleSize sizing={circle} labels={labels} />}
       {(marks.length > 0 || showStroke) && (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -239,7 +239,7 @@ export function ImageMarkupInspector({ marks, selected, labels, nameOf, step, im
         </div>
       )}
       {precise && (selected || showStroke) && (
-        <div id="image-markup-precise" className="grid min-w-0 gap-2 rounded-md border p-2 max-sm:max-h-[min(27dvh,12rem)] max-sm:overflow-auto" role="group" aria-label={labels.fineTune}>
+        <div id="image-markup-precise" className="grid min-w-0 gap-2 rounded-md border p-2" role="group" aria-label={labels.fineTune}>
           {showStroke && <StrokePicker value={strokeChoice} labels={labels} onChange={onStroke} />}
           {selected && <div key={selected.id} className="grid min-w-0 gap-2">
             <div>

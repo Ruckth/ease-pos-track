@@ -17,6 +17,7 @@ type CarouselProps = {
   opts?: CarouselOptions
   plugins?: CarouselPlugin
   orientation?: "horizontal" | "vertical"
+  keyboardNavigation?: boolean
   setApi?: (api: CarouselApi) => void
 }
 
@@ -48,6 +49,7 @@ const Carousel = React.forwardRef<
   (
     {
       orientation = "horizontal",
+      keyboardNavigation = true,
       opts,
       setApi,
       plugins,
@@ -86,7 +88,7 @@ const Carousel = React.forwardRef<
 
     const handleKeyDown = React.useCallback(
       (event: React.KeyboardEvent<HTMLDivElement>) => {
-        if ((event.target as Element).closest("input,textarea,video,[data-pin-surface]")) return
+        if (!keyboardNavigation || (event.target as Element).closest("input,textarea,video,[data-pin-surface]")) return
         if (event.key === "ArrowLeft") {
           event.preventDefault()
           scrollPrev()
@@ -95,7 +97,7 @@ const Carousel = React.forwardRef<
           scrollNext()
         }
       },
-      [scrollPrev, scrollNext]
+      [keyboardNavigation, scrollPrev, scrollNext]
     )
 
     React.useEffect(() => {

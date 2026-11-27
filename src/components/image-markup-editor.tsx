@@ -365,7 +365,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
         </> : corner ? labels.hintSecondCorner : hints[tool]}
       </p>
       <p id="image-markup-keyboard-hint" className="sr-only">{labels.keyboardHint}</p>
-      <div inert={busy || undefined} className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2">
+      <div inert={busy || undefined} className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:overflow-y-auto">
         <ImageMarkupCanvas
           image={image} marks={marks} selectedId={selectedId} tool={tool} pins={placedPins} corner={corner} minSize={minSize} labels={labels}
           onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
@@ -374,26 +374,26 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
           onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
           onWheelEnd={() => endGroup("wheel")}
         />
-      <p className={needsAction ? "text-sm" : "sr-only"} role="status">{notice}</p>
-      {excluded.length > 0 && (
-        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-          <AlertTriangle aria-hidden="true" className="size-4 shrink-0 text-destructive" />
-          <span className="min-w-0 flex-1">{labels.pinsOutside(excluded.map((p) => `[${p.label}]`).join(", "))}</span>
-          <Button type="button" size="touch" variant="outline" onClick={expandCrop}><Maximize2 aria-hidden="true" />{labels.expandCrop}</Button>
-        </div>
-      )}
-      <ImageMarkupInspector
-        marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
-        strokeChoice={selected?.kind === "circle" ? choiceOf(selected.stroke) : strokeChoice}
-        showStroke={tool === "circle" || !!circleSelected}
-        circle={circle}
-        onSelect={select}
-        onResize={(dw, dh) => adjustSelected(dw ? "e" : "s", dw, dh)}
-        onMove={(dx, dy) => adjustSelected("move", dx, dy)}
-        onSet={setGeometry}
-        onStroke={changeStroke}
-        onRemove={() => erase(selected)}
-      />
+        <p className={needsAction ? "text-sm" : "sr-only"} role="status">{notice}</p>
+        {excluded.length > 0 && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+            <AlertTriangle aria-hidden="true" className="size-4 shrink-0 text-destructive" />
+            <span className="min-w-0 flex-1">{labels.pinsOutside(excluded.map((p) => `[${p.label}]`).join(", "))}</span>
+            <Button type="button" size="touch" variant="outline" onClick={expandCrop}><Maximize2 aria-hidden="true" />{labels.expandCrop}</Button>
+          </div>
+        )}
+        <ImageMarkupInspector
+          marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
+          strokeChoice={selected?.kind === "circle" ? choiceOf(selected.stroke) : strokeChoice}
+          showStroke={tool === "circle" || !!circleSelected}
+          circle={circle}
+          onSelect={select}
+          onResize={(dw, dh) => adjustSelected(dw ? "e" : "s", dw, dh)}
+          onMove={(dx, dy) => adjustSelected("move", dx, dy)}
+          onSet={setGeometry}
+          onStroke={changeStroke}
+          onRemove={() => erase(selected)}
+        />
       </div>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="flex shrink-0 flex-wrap justify-end gap-2 max-sm:border-t max-sm:pt-2">

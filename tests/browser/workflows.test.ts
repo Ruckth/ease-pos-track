@@ -444,6 +444,26 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     await dialog.getByRole("group", { name: labels.outline, exact: true }).waitFor();
     await assertNoOverflow("expanded fine-tune");
 
+    // Model a software keyboard shrinking the visual viewport independently of CSS layout.
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Object.defineProperty(viewport, "height", { configurable: true, value: 320 });
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    const widthField = dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true });
+    await widthField.scrollIntoViewIfNeeded();
+    const previousWidth = Number(await widthField.inputValue());
+    await widthField.fill(String(previousWidth + 5));
+    await widthField.press("Enter");
+    assert.equal(Number(await widthField.inputValue()), previousWidth + 5);
+    const reviewAction = (await control(labels.review).boundingBox())!;
+    assert.ok(reviewAction.y + reviewAction.height <= 320);
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Reflect.deleteProperty(viewport, "height");
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    await control(labels.fineTune).tap();
     await selectMarkupMenu(page, labels.moreTools, labels.eraser);
     const boxNow = (await surface.boundingBox())!;
     await surface.tap({ position: { x: boxNow.width * 0.5, y: boxNow.height * 0.5 } });
@@ -544,6 +564,7 @@ test("mobile receipt note stays readable and editable outside the image", async 
   try {
     const text = "The receipt shows the error near the top. The amount was not charged and the order stayed open.";
     await attachLongReceipt(page, "receipt.png");
+    await files(page, "other-attachment.png");
     await page.getByRole("button", { name: copy("en", "openMedia", { name: "receipt.png" }), exact: true }).tap();
     const photo = page.getByRole("dialog", { name: "receipt.png" });
     await photo.getByRole("button", { name: copy("en", "addPin"), exact: true }).tap();
@@ -560,6 +581,9 @@ test("mobile receipt note stays readable and editable outside the image", async 
     const editLabel = copy("en", "editComment", { label: 1 });
     await photo.getByRole("button", { name: editLabel, exact: true }).tap();
     await photo.getByRole("textbox", { name: editLabel }).fill("Corrected receipt note");
+    await photo.locator("button[data-pin-id]").press("ArrowRight");
+    assert.equal(await photo.getByRole("textbox", { name: editLabel }).inputValue(), "Corrected receipt note");
+    assert.equal(await photo.locator('img[alt="receipt.png"]').count(), 1);
     await photo.getByRole("button", { name: copy("en", "save"), exact: true }).tap();
     await photo.getByText("Corrected receipt note", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
