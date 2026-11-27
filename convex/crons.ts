@@ -17,6 +17,12 @@ crons.interval("reconcile page writes", { minutes: 5 }, internal.pages.reconcile
 crons.interval("reclaim page storage", { minutes: 5 }, internal.pages.reclaim);
 crons.interval("expire approved pilot records", { hours: 1 }, internal.pilot_retention.expire);
 crons.interval("expire LINE assistant records", { minutes: 5 }, internal.line_ai_retention.expire);
+crons.interval("expire manual LINE intake", { minutes: 5 }, internal.line_capture.cleanup, {});
+crons.interval("recover LINE capture media", { minutes: 1 }, internal.line_capture_media.recoverStaging, {});
+crons.interval("reconcile LINE capture media writes", { minutes: 5 }, internal.line_capture_media.reconcileWrites);
+crons.interval("expire LINE capture media", { minutes: 5 }, internal.line_capture_media.expireMedia, {});
+// Fixture-only bounded reclaim; deletes only owned fixture blobs and keeps real MEDIA_CLEANUP_ENABLED off.
+crons.interval("reclaim fixture LINE capture media", { minutes: 5 }, internal.line_capture_media.reclaimFixture, {});
 crons.interval("expire LINE intake", { minutes: 5 }, internal.line_webhook.cleanupExpiredAiIntake, {});
 crons.interval("recover LINE analysis", { minutes: 1 }, internal.line_ai_processing.recover);
 crons.interval("recover LINE replies", { minutes: 1 }, internal.line_ai_delivery.recover);

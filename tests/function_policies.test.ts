@@ -77,6 +77,8 @@ test("HTTP routes cannot hide an untagged handler inside the router", () => {
   assert.deepEqual(routeViolations("http.ts", router).sort(), [
     "http.ts:GET /bypass: untagged HTTP route",
     "http.ts:GET /p/*: missing manifest route",
+    "http.ts:GET /v1/line-capture/media/*: missing manifest route",
+    "http.ts:OPTIONS /v1/line-capture/media/*: missing manifest route",
     "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /integrations/t3/doctor: missing manifest route",
     "http.ts:POST /line/webhook/*: missing manifest route",
@@ -89,6 +91,8 @@ test("a tagged doctor handler cannot be mounted at another method or path", () =
   router.route({ ...t3DoctorHttp(async () => new Response()), path: "/integrations/t3/other" });
   assert.deepEqual(routeViolations("http.ts", router).sort(), [
     "http.ts:GET /p/*: missing manifest route",
+    "http.ts:GET /v1/line-capture/media/*: missing manifest route",
+    "http.ts:OPTIONS /v1/line-capture/media/*: missing manifest route",
     "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /integrations/t3/doctor: missing manifest route",
     "http.ts:POST /integrations/t3/other: unexpected HTTP policy http:t3-doctor:t3_doctor:verify",
@@ -105,6 +109,8 @@ test("HTTP routes are enumerated: page serving cannot be relabelled, widened or 
   router.route({ ...pageHttp("publish", handler), method: "PUT" });
   assert.deepEqual(routeViolations("http.ts", router).sort(), [
     "http.ts:GET /p/*: unexpected HTTP policy http:convex-auth:pages:publish",
+    "http.ts:GET /v1/line-capture/media/*: missing manifest route",
+    "http.ts:OPTIONS /v1/line-capture/media/*: missing manifest route",
     "http.ts:OPTIONS /v1/tickets/*: missing manifest route",
     "http.ts:POST /line/webhook/*: missing manifest route",
     "http.ts:POST /v1/tickets/*: missing manifest route",

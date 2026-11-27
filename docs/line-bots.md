@@ -47,3 +47,19 @@ Replay signs a fixture with the selected local fixture bot's channel secret and 
 For the assistant, set `LINE_AI_ENABLED=true` with `pnpm convex:local env set LINE_AI_ENABLED true` and enter `local-line-ai-fixture-key` in **Project AI connection**. This key is accepted only by the disposable fixture provider. Approve and enable the fixture chat, then replay a text event with a current timestamp, a fresh event and message ID, and a bot mention marked `isSelf: true`. The fixture model and LINE push run without external API requests.
 
 The webhook records group, room and 1:1 lifecycle events. New groups and rooms need staff approval for their current enrollment. A newer join starts a fresh enrollment, even if it arrives before the preceding leave. Signed delivery for an archived Project is acknowledged without storing events. Queued events are checked again at claim and settlement. Staff can choose whether new 1:1 chats need approval and who owns future Tickets for an approved chat. Message intake requires the assistant to be enabled for the chat.
+
+## Manual LINE intake rehearsal
+
+In the local preview, a named Owner can enable manual intake in the Project’s LINE settings. Open the fixture bot and enable capture on its approved group. This admits one Project and one group. The group must permit Ticket creation to show the Create action. Staff can also link a message to an existing active Ticket in the same Project or dismiss it. A Project with pending assistant work must finish that work before switching writers.
+
+Open **LINE intake → Awaiting review** and select **Review intake**. Check the group text and staged screenshots, then enter a Ticket title and description or select **Link to Ticket** and confirm the matching reference and title. **History** shows the saved Ticket reference. A later edit to a linked message appears there for review. Customers can still submit directly in the portal.
+
+This milestone uses a signed synthetic group webhook, a disposable backend and the staff app. JPEG and PNG screenshots stay private to staff and expire after 24 hours, including after linking. They are not copied to the customer’s Ticket. File warnings ask staff to check the group. The fixture sends no group replies and requires no model key.
+
+The [local preview instructions](local-preview.md) describe the stable URL and separate backend slots. To seed and exercise the capture candidate, run this from the integration checkout, substituting the inactive slot and its own prepared worktree:
+
+```sh
+pnpm preview:local launch b ../ticket-preview-b line_capture_fixture:seed scripts/preview/capture-smoke.mjs
+```
+
+The fixture replays each signed delivery twice. The browser check opens both images with named staff credentials, creates a Ticket on desktop, links another intake on mobile and checks the saved receipts. The bilingual example remains available for a manual walkthrough.

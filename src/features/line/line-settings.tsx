@@ -8,7 +8,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ProjectSummary } from "@/lib/types";
-import { useLineActions, useLineAiSettings, useLineBots, useLineChats, type LineBot, type LineChat } from "./adapters/convex";
+import { useCaptureSettings, useLineActions, useLineAiSettings, useLineBots, useLineChats, type LineBot, type LineChat } from "./adapters/convex";
+import { ChatCaptureSwitch, LineCapture } from "./line-capture";
 import { LineAiReviews, LineAiSetup } from "./line-assistant";
 
 const selectClass = "h-9 w-full rounded-md glass-field px-2 text-sm";
@@ -126,6 +127,7 @@ function ChatSettings({ chat, projectId, close }: { chat: LineChat; projectId: P
 
 function BotDetail({ bot, back, assistantReady }: { bot: LineBot; back: () => void; assistantReady: boolean }) {
   const chats = useLineChats(bot._id);
+  const capture = useCaptureSettings(bot.projectId);
   const actions = useLineActions();
   const [editingCredentials, setEditingCredentials] = useState(false);
   const [editing, setEditing] = useState<LineChat>();
@@ -190,7 +192,9 @@ function BotDetail({ bot, back, assistantReady }: { bot: LineBot; back: () => vo
                   {{ pending: "Reject", active: "Mute", muted: "Unmute" }[state]}
                 </Button>;
               })}
-              {chat.state === "active" && ((assistantReady && bot.state === "active") || chat.assistantEnabled) &&
+              {capture?.projectEnabled && chat.kind === "group" && chat.state === "active" && bot.state === "active" &&
+                <ChatCaptureSwitch chat={chat} enabled={capture.chats.some(item => item.chatId === chat._id && item.joinedAt === chat.joinedAt && item.enabled)} />}
+              {chat.state === "active" && !capture?.projectEnabled && ((assistantReady && bot.state === "active") || chat.assistantEnabled) &&
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => actions.setAssistantEnabled({
                   chatId: chat._id, joinedAt: chat.joinedAt, enabled: !chat.assistantEnabled,
                 }))}>{chat.assistantEnabled ? "Pause assistant" : "Enable assistant"}</Button>}
@@ -245,6 +249,7 @@ export function LineSettings({ project, selected, onSelect, owner }: {
         <span>{bot.name} <span className="text-sm text-muted-foreground">{bot.basicId}</span></span><Badge variant="outline">{bot.state}</Badge>
       </button>
     </li>)}</ul>
+    <LineCapture project={project} owner={owner} />
     {ai?.releaseEnabled && <>
       <LineAiSetup projectId={project._id} settings={ai} owner={owner && ai.canManage} />
       <LineAiReviews projectId={project._id} />

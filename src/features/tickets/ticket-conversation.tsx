@@ -9,7 +9,7 @@ import { useConversation } from "./adapters/conversation";
 type Props = { ticket: Ticket } & ({ role: "staff"; children?: never } | { role: "customer"; children: ReactNode });
 
 export function TicketConversation(props: Props) {
-  if (props.ticket.origin !== "customer" || props.ticket.lifecycle !== "active") return props.children;
+  if (!props.ticket.hasCustomerOwner || props.ticket.lifecycle !== "active") return props.children;
   if (props.role === "customer") return <ConversationThread key={props.ticket._id} {...props} />;
   return <ConversationDisclosure key={props.ticket._id} {...props} />;
 }

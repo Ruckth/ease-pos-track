@@ -12,6 +12,8 @@ import {
   type LineAiScheduleHook,
 } from "./domain/line_ai_intake";
 import { inbound } from "./line_schema";
+import { acceptLineCaptureEvents, captureMediaEvent, captureProject, lineCaptureEvent, trimLineCaptureEvents } from "./domain/line_capture";
+import { ingestCaptureMediaEvents } from "./line_capture_media_domain";
 import { hasLegacyAccess } from "./pilot_access";
 
 const event = v.object(inbound);
@@ -52,15 +54,17 @@ export const accept = internalJobMutation({
     verifiedSecretCipher: v.string(),
     events: v.array(event),
     assistantEvents: v.optional(v.array(lineAiInboundEvent)),
+    captureEvents: v.optional(v.array(lineCaptureEvent)),
+    mediaEvents: v.optional(v.array(captureMediaEvent)),
   },
-  handler: async (ctx, { botId, slug, destination, verifiedSecretCipher, events, assistantEvents }) => {
+  handler: async (ctx, { botId, slug, destination, verifiedSecretCipher, events, assistantEvents, captureEvents, mediaEvents }) => {
     const bot = await ctx.db.get(botId);
     if (!bot || bot.webhookSlug !== slug) return 404;
     if (bot.lineUserId !== destination) return 401;
     if (bot.state === "disabled" || !await admittedLineProject(ctx, bot.projectId)) return 200;
     if (bot.secretCipher !== verifiedSecretCipher) return 503;
     // LINE can deliver once the endpoint is saved, before setup settles. Ask it to retry rather than drop the events.
-    if (bot.state === "setup") return (events.length || (assistantEvents?.length ?? 0)) ? 503 : 200;
+    if (bot.state === "setup") return (events.length || (assistantEvents?.length ?? 0) || (captureEvents?.length ?? 0) || (mediaEvents?.length ?? 0)) ? 503 : 200;
     const now = Date.now();
     await ctx.db.patch(botId, { lastWebhookAt: now });
     for (const fields of events) {
@@ -73,9 +77,14 @@ export const accept = internalJobMutation({
       // A scheduled action can be interrupted before it obtains a lease.
       await ctx.scheduler.runAfter(45_000, internal.line_jobs.process, { eventId });
     }
-    if (assistantEvents?.length) {
-      await acceptLineAiEvents(ctx, { bot, events: assistantEvents, now }, { onSchedule: scheduleLineAiIntake });
+    // A Project switched to capture has one intake writer; legacy AI still records unsend fences.
+    const aiEvents = assistantEvents && await captureProject(ctx, bot.projectId)
+      ? assistantEvents.filter(row => row.eventType === "unsend") : assistantEvents;
+    if (aiEvents?.length) {
+      await acceptLineAiEvents(ctx, { bot, events: aiEvents, now }, { onSchedule: scheduleLineAiIntake });
     }
+    if (captureEvents?.length) await acceptLineCaptureEvents(ctx, { bot, events: captureEvents, now });
+    if (mediaEvents?.length) await ingestCaptureMediaEvents(ctx, { botId, events: mediaEvents });
     return 200;
   },
 });
@@ -148,14 +157,18 @@ export async function receiveLineWebhook(ctx: ActionCtx, request: Request) {
     return trimmed ? [trimmed] : [];
   });
   let assistantEvents;
+  let capture;
   try {
     assistantEvents = await trimLineAiEvents(bot._id, body.events);
+    capture = await trimLineCaptureEvents(bot._id, body.events);
   } catch {
     return new Response("LINE webhook credentials unavailable", { status: 503 });
   }
   const status = await ctx.runMutation(internal.line_webhook.accept, {
     botId: bot._id, slug, destination: body.destination, verifiedSecretCipher: bot.secretCipher, events,
     ...(assistantEvents.length ? { assistantEvents } : {}),
+    ...(capture.capture.length ? { captureEvents: capture.capture } : {}),
+    ...(capture.media.length ? { mediaEvents: capture.media } : {}),
   });
   return new Response(null, { status });
 }

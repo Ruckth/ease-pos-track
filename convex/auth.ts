@@ -103,6 +103,7 @@ export const startSignInWithClerk = wrapPackageMutation("google-start", clerk.st
   name: "auth:startSignInWithClerk",
   args: { redirectTo: v.string() },
   handler: async (ctx, args) => {
+    if (process.env.TICKET_LOCAL_PREVIEW === "true") throw new Error("AUTH_PROVIDER_UNAVAILABLE");
     const target = new URL(args.redirectTo);
     if (!["/", "/staff/login", "/staff/invite", "/customer/login", "/customer/join", "/customer/recover"].includes(target.pathname)
       || args.redirectTo !== target.origin + target.pathname) throw new Error("INVALID_INPUT");

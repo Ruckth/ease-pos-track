@@ -21,6 +21,8 @@ export function createLine(token: string, transport: typeof fetch = fetch) {
   if (token === localLineFixtureToken) {
     requireLocalFixtures();
     transport = fixtureTransport;
+  } else if (process.env.TICKET_LOCAL_PREVIEW === "true") {
+    throw new Error("LINE_PREVIEW_REQUIRES_FIXTURE");
   }
   function send(host: "api.line.me" | "api-data.line.me", path: string, method: string, body?: object, retryKey?: string) {
     return transport(`https://${host}/v2/bot/${path}`, {

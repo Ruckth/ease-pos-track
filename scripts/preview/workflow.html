@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track Ease workflow preview</title>
+<style>
+  :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif }
+  body { margin: 0; padding: 5vw }
+  main { max-width: 40rem; margin: auto }
+  label, output { display: block; margin-block: 1rem }
+  select, button { font: inherit; padding: .55rem; max-width: 100% }
+</style>
+<main>
+  <p>Offline prototype · Synthetic data</p>
+  <h1>Track Ease workflow preview</h1>
+  <label>Workflow
+    <select id="journey">
+      <option>Staff reviews LINE intake</option>
+      <option>Customer submits a portal Ticket</option>
+    </select>
+  </label>
+  <output id="state" aria-live="polite"></output>
+  <button id="advance">Next step</button>
+  <p><a href="/__preview">Live preview status</a></p>
+</main>
+<script>
+  const journeys = [
+    ["A fixture group sends a LINE mention and two screenshots.", "Staff reviews the screenshots and description.", "Staff creates or links a Ticket and sees the receipt."],
+    ["A customer signs in to the portal.", "The customer writes and submits a Ticket.", "The portal shows the new Ticket receipt."],
+  ];
+  const journey = document.querySelector("#journey");
+  const state = document.querySelector("#state");
+  const advance = document.querySelector("#advance");
+  let step = 0;
+  function render() { state.textContent = journeys[journey.selectedIndex][step]; advance.textContent = step === 2 ? "Start over" : "Next step"; }
+  journey.addEventListener("change", () => { step = 0; render(); });
+  advance.addEventListener("click", () => { step = (step + 1) % 3; render(); });
+  render();
+</script>
+</html>

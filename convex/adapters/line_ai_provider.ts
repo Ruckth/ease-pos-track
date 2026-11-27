@@ -315,6 +315,7 @@ export async function scanLineRequest(connection: LineAiConnection, input: LineA
       ticketNumber: null, reply: null, evidence: ["Local fixture provider"],
     }));
   }
+  if (process.env.TICKET_LOCAL_PREVIEW === "true") fail("LINE_AI_PREVIEW_REQUIRES_FIXTURE");
   const { url, headers, body } = request(connection, prepared);
   try {
     const response = await transport(url, {

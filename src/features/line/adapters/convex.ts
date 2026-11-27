@@ -53,3 +53,28 @@ export function useLineAiReviewActions() {
     retryReply: useMutation(api.line_ai_reviews.retryReply),
   };
 }
+
+export function useCaptureSettings(projectId: Id<"projects">) {
+  return useQuery(api.line_capture.settings, { projectId });
+}
+export function useCaptureIntakes(projectId: Id<"projects">, view: "open" | "done") {
+  return usePaginatedQuery(api.line_capture.list, { projectId, view }, { initialNumItems: 10 });
+}
+export type CaptureIntake = ReturnType<typeof useCaptureIntakes>["results"][number];
+
+export function useCaptureActions() {
+  return {
+    setProject: useMutation(api.line_capture.setProjectCapture),
+    setChat: useMutation(api.line_capture.setChatCapture),
+    finish: useMutation(api.line_capture.finish),
+    acknowledge: useMutation(api.line_capture.acknowledgeCorrection),
+  };
+}
+
+export function useCaptureLinkTarget(projectKey: string, ticketNumber?: number) {
+  return useQuery(api.tickets.getTicketByTicketNumber, ticketNumber === undefined ? "skip" : { projectKey, ticketNumber });
+}
+
+export function useCaptureMedia(intakeId: Id<"lineCaptureIntakes">) {
+  return useQuery(api.line_capture_media.list, { intakeId });
+}

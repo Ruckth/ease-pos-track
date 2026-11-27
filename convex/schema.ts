@@ -1,6 +1,8 @@
 import { lineTables } from "./line_schema";
 import { lineAiTables } from "./line_ai_provider_schema";
 import { lineAiReviewTables } from "./line_ai_review_schema";
+import { lineCaptureMediaTables } from "./line_capture_media_schema";
+import { lineCaptureTables } from "./line_capture_schema";
 
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
@@ -120,6 +122,8 @@ export default defineSchema({
   ...lineTables,
   ...lineAiTables,
   ...lineAiReviewTables,
+  ...lineCaptureTables,
+  ...lineCaptureMediaTables,
 
   imageChunks: defineTable({ bytes: v.bytes() }),
   projectIntakeStaff: defineTable({

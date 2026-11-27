@@ -65,3 +65,15 @@ test("workspace links handle malformed, wrong-Project and inaccessible Ticket ID
   await t.run(ctx => ctx.db.patch(args.projectId, { archivedAt: Date.now() }));
   expect(await t.query(api.tickets.getWorkspaceTicket, args)).toBeNull();
 });
+
+test("staff-created Tickets expose the conversation only to staff and their mapped customer", async () => {
+  const { t, seed, id, staff, alice, bob, question, page } = await fixture();
+  await t.run(ctx => ctx.db.patch(id, { origin: "staff", createdVia: "line" }));
+  const get = (token: string, ticketId = id) => t.query(api.tickets.getTicket, { token, id: ticketId });
+  expect(await get(alice)).toMatchObject({ hasCustomerOwner: true, origin: "staff" });
+  expect(await get(staff, seed.tickets[0])).toMatchObject({ hasCustomerOwner: false });
+  expect(await get(bob)).toBeNull();
+  await t.mutation(api.conversations.send, question);
+  expect((await page(alice)).page).toHaveLength(1);
+  expect((await page(bob)).page).toHaveLength(0);
+});
