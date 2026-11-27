@@ -38,7 +38,7 @@ export function ImageMarkupToolbar({ tool, labels, onTool, canUndo, canRedo, onU
         ))}
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button type="button" size="icon-touch" className="shrink-0 sm:hidden" variant="outline" />}
+            render={<Button type="button" size="icon-touch" className="shrink-0 sm:hidden" variant={primary(tool) || tool === "select" ? "outline" : "default"} />}
             disabled={disabled} aria-label={labels.moreTools}
           ><Ellipsis aria-hidden="true" /></DropdownMenuTrigger>
           <DropdownMenuContent>

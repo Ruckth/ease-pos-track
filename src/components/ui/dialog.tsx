@@ -41,9 +41,9 @@ export function Dialog({ open, onOpenChange, title, description, keepMounted = f
   const { t } = useI18n();
   const finalFocus = useReturnFocus(open);
   const side = placement === "side";
-  const popup = React.useRef<HTMLDivElement>(null);
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null);
   React.useEffect(() => {
-    const element = popup.current;
+    const element = popup;
     const viewport = window.visualViewport;
     if (!open || !mobileWorkspace || !element || !viewport) return;
     const fitViewport = () => {
@@ -59,12 +59,12 @@ export function Dialog({ open, onOpenChange, title, description, keepMounted = f
       viewport.removeEventListener("resize", fitViewport);
       viewport.removeEventListener("scroll", fitViewport);
     };
-  }, [open, mobileWorkspace]);
+  }, [open, mobileWorkspace, popup]);
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseDialog.Portal keepMounted={keepMounted}>
         <BaseDialog.Backdrop className="fixed inset-0 z-50 min-h-dvh aurora-scrim transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <BaseDialog.Popup ref={popup} initialFocus={initialFocus} finalFocus={finalFocus} className={cn(
+        <BaseDialog.Popup ref={mobileWorkspace ? setPopup : undefined} initialFocus={initialFocus} finalFocus={finalFocus} className={cn(
           "aurora-dialog fixed z-50 overflow-auto outline-none",
           (side || placement === "fullscreen")
             ? "inset-0 max-h-dvh rounded-none"

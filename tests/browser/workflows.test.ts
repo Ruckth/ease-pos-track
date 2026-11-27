@@ -586,6 +586,19 @@ test("mobile receipt note stays readable and editable outside the image", async 
     assert.equal(await photo.locator('img[alt="receipt.png"]').count(), 1);
     await photo.getByRole("button", { name: copy("en", "save"), exact: true }).tap();
     await photo.getByText("Corrected receipt note", { exact: true }).waitFor();
+    const deleteLabel = copy("en", "deleteComment", { label: 1 });
+    const deleteNote = photo.getByRole("button", { name: deleteLabel, exact: true });
+    const confirmation = page.getByRole("alertdialog", { name: deleteLabel });
+    await deleteNote.tap();
+    await confirmation.waitFor();
+    await page.keyboard.press("Escape");
+    await confirmation.waitFor({ state: "hidden" });
+    assert.ok(await photo.getByText("Corrected receipt note", { exact: true }).isVisible());
+    await deleteNote.tap();
+    await confirmation.getByRole("button", { name: deleteLabel, exact: true }).tap();
+    await photo.getByText("Corrected receipt note", { exact: true }).waitFor({ state: "hidden" });
+    const add = photo.getByRole("button", { name: copy("en", "addPin"), exact: true });
+    await page.waitForFunction(button => document.activeElement === button, await add.elementHandle());
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });

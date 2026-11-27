@@ -182,7 +182,15 @@ export const MediaViewer = forwardRef<
   function closeNote() {
     setOpenId(null);
     setEditText(null);
-    requestAnimationFrame(() => noteListButton.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      const marker = openId && fieldset.current?.querySelector<HTMLElement>(`[data-pin-id="${CSS.escape(openId)}"]`);
+      (noteListButton.current || marker || addButton.current)?.focus({ preventScroll: true });
+    });
+  }
+
+  function endRepositioning() {
+    setRepositioning(false);
+    requestAnimationFrame(() => noteInput.current?.focus({ preventScroll: true }));
   }
 
   function selectNote(id: string | null, highlight = false) {
@@ -199,10 +207,7 @@ export const MediaViewer = forwardRef<
   function beginDraft(target: DraftTarget) {
     setOpenId(null);
     setDraft(target);
-    if (repositioning) {
-      setRepositioning(false);
-      requestAnimationFrame(() => noteInput.current?.focus({ preventScroll: true }));
-    }
+    if (repositioning) endRepositioning();
   }
 
   function startMoving(annotationId: string) {
@@ -286,9 +291,12 @@ export const MediaViewer = forwardRef<
   return (
     <fieldset ref={fieldset} disabled={disabled} className={cn("min-w-0 space-y-2", workspace && "max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:space-y-0")} onKeyDown={event => {
       if (event.key !== "Escape" || discard || !(mediaLocked || openId)) return;
+      // Confirmation dialogs render in portals. Their Escape belongs to that dialog.
+      if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
-      requestNoteChange(mediaLocked && editText === null ? finishPlacement : closeNote);
+      if (repositioning) endRepositioning();
+      else requestNoteChange(mediaLocked && editText === null ? finishPlacement : closeNote);
     }}>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         <p className="mr-auto text-sm leading-5 text-muted-foreground">
@@ -297,7 +305,7 @@ export const MediaViewer = forwardRef<
         </p>
         {!mediaLocked && !readOnly && renderImageAction?.(selectedIndex)}
         {repositioning && <Button type="button" size="touch" variant="ghost" className="shrink-0"
-          onClick={() => setRepositioning(false)}>{t("cancelMove")}</Button>}
+          onClick={endRepositioning}>{t("cancelMove")}</Button>}
         {!readOnly && (movingId || annotateMode) && !draft &&
           <Button type="button" size="touch" variant="ghost" className="shrink-0"
             onClick={() => requestNoteChange(finishPlacement)} disabled={saving}>
@@ -377,9 +385,9 @@ export const MediaViewer = forwardRef<
 
       {!annotateMode && !movingId && currentNotes.length > 0 && (
         <div className={cn("shrink-0", workspace && "max-sm:max-h-[52%] max-sm:overflow-y-auto")}>
-          <Button type="button" size="touch" ref={noteListButton} variant="ghost" aria-expanded={listOpen}
-            onClick={() => setListOpen(!listOpen)}>{t("noteListCount", { count: currentNotes.length })}</Button>
-          {listOpen && (
+          {workspace && <Button type="button" size="touch" ref={noteListButton} variant="ghost" aria-expanded={listOpen}
+            onClick={() => setListOpen(!listOpen)}>{t("noteListCount", { count: currentNotes.length })}</Button>}
+          {workspace && listOpen && (
             <ul className="flex max-h-24 flex-wrap gap-1 overflow-y-auto pb-1">
               {currentNotes.map(note => (
                 <li key={note.id}>
