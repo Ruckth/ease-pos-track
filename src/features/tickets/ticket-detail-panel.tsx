@@ -207,7 +207,9 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
       <div className="flex flex-wrap items-center gap-2">
-        {props.role === "staff" && <Button disabled={props.statusBusy} aria-label={t(primary.label) + " · " + number} onClick={() => props.onMove(ticket._id, primary.status)}>{t(primary.label)}<ArrowRight /></Button>}
+        {props.role === "staff" && <Button aria-disabled={props.statusBusy || undefined} className={busyControl} aria-label={t(primary.label) + " · " + number} onClick={() => {
+          if (!props.statusBusy) props.onMove(ticket._id, primary.status);
+        }}>{t(primary.label)}<ArrowRight /></Button>}
         <Button type="button" variant="outline" ref={editButton} onClick={() => setEdit("content")}><Pencil />{t(staff ? "edit" : "editTicket")}</Button>
       </div>
       {props.role === "staff" && props.statusRecovery}
@@ -267,23 +269,28 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   </div>;
 }
 
+/** A status control stays focusable while its move saves, so keyboard focus
+ * is not dropped to the page; `aria-disabled` blocks and announces it. */
+const busyControl = "aria-disabled:cursor-progress aria-disabled:opacity-60";
+
 /** Staff status popup: every workflow state, current one checked. Moves go
  * through the caller so busy, conflict and undo rules stay shared. */
 function StatusMenu({ status, busy, number, onSelect }: { status: TicketStatus; busy?: boolean; number: string; onSelect: (status: TicketStatus) => void }) {
   const { t } = useI18n();
+  const [open, setOpen] = useState(false);
   const meta = statusMeta(status);
   const Icon = meta.icon;
   const label = t(meta.labelKey);
-  return <DropdownMenu>
-    <DropdownMenuTrigger disabled={busy} aria-label={`${t("detailStatus")} · ${label} · ${number}`} title={t("detailStatus")}
-      className={cn("aurora-control inline-flex min-h-11 items-center gap-1.5 rounded-full ps-3 pe-2.5 text-sm font-medium transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 data-[popup-open]:border-primary/60", meta.text)}>
+  return <DropdownMenu open={open} onOpenChange={next => { if (!next || !busy) setOpen(next); }}>
+    <DropdownMenuTrigger aria-disabled={busy || undefined} aria-label={`${t("detailStatus")} · ${label} · ${number}`} title={t("detailStatus")}
+      className={cn("aurora-control inline-flex min-h-11 items-center gap-1.5 rounded-full ps-3 pe-2.5 text-sm font-medium transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:border-primary/60", busyControl, meta.text)}>
       <Icon aria-hidden className="size-4 shrink-0" />{label}
       {busy ? <LoaderCircle aria-hidden className="size-4 animate-spin text-muted-foreground" /> : <ChevronDown aria-hidden className="size-4 text-muted-foreground" />}
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="w-60">
       <DropdownMenuRadioGroup value={status} onValueChange={value => {
         const next = statuses.find(option => option.value === value);
-        if (next && next.value !== status) onSelect(next.value);
+        if (next && next.value !== status && !busy) onSelect(next.value);
       }}>
         <DropdownMenuLabel>{t("detailStatus")}</DropdownMenuLabel>
         {statuses.map(option => {
