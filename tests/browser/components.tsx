@@ -82,6 +82,7 @@ function NoteChanges() {
   const media = [1, 2].map(index => ({ key: String(index), name: `Attachment ${index}.png`, size: 100, type: "image/png", url: photoUrl }));
   return <section aria-label="Live note changes">
     <button type="button" onClick={() => setNotes([])}>Remove note remotely</button>
+    <button type="button" onClick={() => setArchived(true)}>Archive remotely</button>
     <button type="button" onClick={() => viewer.current?.requestClose(() => setArchived(true))}>Archive in place</button>
     {archived && <p>Archived</p>}
     <MediaViewer ref={viewer} media={media} annotations={notes} readOnly={archived}

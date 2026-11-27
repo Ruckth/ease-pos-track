@@ -54,6 +54,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
   const exportToken = useRef(0);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
+  const editBody = useRef<HTMLDivElement>(null);
   const group = useRef<OpenGroup | null>(null);
   const marks = history.stack[history.pos];
   const marksRef = useRef(marks);
@@ -154,6 +155,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
 
   function chooseTool(next: MarkupTool) {
     endGroup();
+    if (next !== tool && editBody.current) editBody.current.scrollTop = 0;
     setTool(next);
     setCorner(null);
     if (next !== "select" && next !== "erase" && next !== "pan") setSelectedId(null);
@@ -365,7 +367,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
         </> : corner ? labels.hintSecondCorner : hints[tool]}
       </p>
       <p id="image-markup-keyboard-hint" className="sr-only">{labels.keyboardHint}</p>
-      <div inert={busy || undefined} className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:overflow-y-auto">
+      <div ref={editBody} inert={busy || undefined} className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:overflow-y-auto">
         <ImageMarkupCanvas
           image={image} marks={marks} selectedId={selectedId} tool={tool} pins={placedPins} corner={corner} minSize={minSize} labels={labels}
           onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
@@ -383,7 +385,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
           </div>
         )}
         <ImageMarkupInspector
-          marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
+          key={tool} marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
           strokeChoice={selected?.kind === "circle" ? choiceOf(selected.stroke) : strokeChoice}
           showStroke={tool === "circle" || !!circleSelected}
           circle={circle}

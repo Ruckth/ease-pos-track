@@ -41,25 +41,28 @@ async function assertInViewport(page: Page, label: string) {
   assert.ok(box.scroll <= box.layoutWidth, `${label}: page-wide overflow ${box.scroll} > ${box.layoutWidth}`);
 }
 
-test("a remotely removed note leaves a copyable draft and a way back to the attachments", async () => {
-  const { context, page, errors } = await harness("case=removed-note", { width: 390, height: 664 }, "en", { isMobile: true, hasTouch: true });
-  try {
-    await page.getByRole("button", { name: "Comment 1: Original note", exact: true }).tap();
-    const editLabel = copy("en", "editComment", { label: 1 });
-    await page.getByRole("button", { name: editLabel, exact: true }).tap();
-    await page.getByRole("textbox", { name: editLabel }).fill("My unsaved note text");
-    await page.getByRole("button", { name: "Remove note remotely" }).click();
-    const recovered = page.getByRole("textbox", { name: copy("en", "unsavedNoteText") });
-    assert.equal(await recovered.inputValue(), "My unsaved note text");
-    await page.getByRole("button", { name: copy("en", "closeNote") }).tap();
-    await page.getByRole("alertdialog").getByRole("button", { name: copy("en", "discardChanges") }).tap();
-    await recovered.waitFor({ state: "hidden" });
-    await page.getByRole("button", { name: copy("en", "addPin"), exact: true }).waitFor();
-    await page.getByRole("button", { name: copy("en", "mediaNumber", { number: 2 }), exact: true }).tap();
-    await page.getByRole("img", { name: "Attachment 2.png", exact: true }).waitFor();
-    assert.deepEqual(errors, []);
-  } finally { await context.close(); }
-});
+for (const change of ["Remove note remotely", "Archive remotely"] as const) {
+  test(`${change} preserves unsaved note text and lets the viewer return to attachments`, async () => {
+    const { context, page, errors } = await harness("case=removed-note", { width: 390, height: 664 }, "en", { isMobile: true, hasTouch: true });
+    try {
+      await page.getByRole("button", { name: "Comment 1: Original note", exact: true }).tap();
+      const editLabel = copy("en", "editComment", { label: 1 });
+      await page.getByRole("button", { name: editLabel, exact: true }).tap();
+      await page.getByRole("textbox", { name: editLabel }).fill("My unsaved note text");
+      await page.getByRole("button", { name: change }).click();
+      const recovered = page.getByRole("textbox", { name: copy("en", "unsavedNoteText") });
+      assert.equal(await recovered.inputValue(), "My unsaved note text");
+      await page.getByRole("button", { name: copy("en", "closeNote") }).tap();
+      await page.getByRole("alertdialog").getByRole("button", { name: copy("en", "discardChanges") }).tap();
+      await recovered.waitFor({ state: "hidden" });
+      const addNote = page.getByRole("button", { name: copy("en", "addPin"), exact: true });
+      await addNote.waitFor({ state: change === "Remove note remotely" ? "visible" : "hidden" });
+      await page.getByRole("button", { name: copy("en", "mediaNumber", { number: 2 }), exact: true }).tap();
+      await page.getByRole("img", { name: "Attachment 2.png", exact: true }).waitFor();
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+}
 
 test("discarding an unsaved note resets the viewer when a Ticket stays open after archive", async () => {
   const { context, page, errors } = await harness("case=removed-note");

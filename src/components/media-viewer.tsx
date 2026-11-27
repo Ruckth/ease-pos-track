@@ -13,7 +13,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { formatClock, isVideoMedia, type Annotation, type MediaItem, type AnnotationDraftInput, type AnnotationUpdateInput } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { EmblaCarouselType } from "embla-carousel";
-import { Loader2, MapPin, PlayCircle } from "lucide-react";
+import { Loader2, MapPin, MessageSquareText, PlayCircle } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -67,6 +67,7 @@ export const MediaViewer = forwardRef<
   const [listOpen, setListOpen] = useState(false);
   const [editText, setEditText] = useState<string | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [discard, setDiscard] = useState<{ action: () => void } | null>(null);
   const noteInput = useRef<HTMLTextAreaElement>(null);
   const noteListButton = useRef<HTMLButtonElement>(null);
@@ -82,8 +83,9 @@ export const MediaViewer = forwardRef<
   mediaLockedRef.current = mediaLocked;
   const currentNotes = annotations.filter(note => note.mediaIndex === selectedIndex);
   const selectedNote = currentNotes.find(note => note.id === openId);
+  const confirmingDeletion = Boolean(selectedNote && selectedNote.id === confirmDeleteId);
   const placing = !disabled && !readOnly && !saving && (Boolean(movingId) || (annotateMode && (!draft || repositioning)));
-  const noteRemovedWhileEditing = editText !== null && !selectedNote;
+  const noteUnavailableWhileEditing = editText !== null && (!selectedNote || readOnly);
   const dirty = Boolean(draftText.trim()) || (editText !== null && editText !== selectedNote?.text);
 
   const requestNoteChange = useCallback((action: () => void) => {
@@ -143,6 +145,7 @@ export const MediaViewer = forwardRef<
     setDraftText("");
     setRepositioning(false);
     setEditText(null);
+    setConfirmDeleteId(null);
     setOpenId(null);
     setListOpen(false);
     setFocus(null);
@@ -191,6 +194,7 @@ export const MediaViewer = forwardRef<
   }
 
   function closeNote() {
+    setConfirmDeleteId(null);
     setOpenId(null);
     setEditText(null);
     requestAnimationFrame(() => {
@@ -300,7 +304,7 @@ export const MediaViewer = forwardRef<
 
   return (
     <fieldset ref={fieldset} disabled={disabled} className={cn("min-w-0 space-y-2", workspace && "max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:space-y-0")} onKeyDown={event => {
-      if (event.key !== "Escape" || discard || !(mediaLocked || openId)) return;
+      if (event.key !== "Escape" || discard || confirmingDeletion || !(mediaLocked || selectedNote)) return;
       // Confirmation dialogs render in portals. Their Escape belongs to that dialog.
       if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
       event.preventDefault();
@@ -331,6 +335,11 @@ export const MediaViewer = forwardRef<
             }}>
             <MapPin aria-hidden="true" />{t("addPin")}
           </Button>
+        )}
+        {workspace && !annotateMode && !movingId && !noteUnavailableWhileEditing && currentNotes.length > 0 && (
+          <Button type="button" size="icon-touch" ref={noteListButton} variant="outline" aria-expanded={listOpen}
+            aria-label={t("noteListCount", { count: currentNotes.length })} title={t("noteListCount", { count: currentNotes.length })}
+            onClick={() => setListOpen(open => !open)}><MessageSquareText aria-hidden="true" /></Button>
         )}
       </div>
 
@@ -393,17 +402,15 @@ export const MediaViewer = forwardRef<
         </Carousel>
       ) : null}
 
-      {noteRemovedWhileEditing && (
-        <div className="shrink-0 space-y-2 border-t pt-2">
-          <p role="status" className="text-sm">{t("removedNoteDraft")}</p>
+      {noteUnavailableWhileEditing && (
+        <div className={cn("shrink-0 space-y-2 border-t pt-2", workspace && "max-sm:max-h-[calc(100%-4rem)] max-sm:overflow-y-auto")}>
+          <p role="status" className="text-sm">{t(readOnly ? "readOnlyNoteDraft" : "removedNoteDraft")}</p>
           <Textarea rows={2} readOnly value={editText} aria-label={t("unsavedNoteText")} className="min-h-16" />
           <Button type="button" size="touch" variant="outline" onClick={() => requestNoteChange(closeNote)}>{t("closeNote")}</Button>
         </div>
       )}
-      {!noteRemovedWhileEditing && !annotateMode && !movingId && currentNotes.length > 0 && (
+      {!noteUnavailableWhileEditing && !annotateMode && !movingId && (selectedNote || (listOpen && currentNotes.length > 0)) && (
         <div className={cn("shrink-0", workspace && "max-sm:max-h-[52%] max-sm:overflow-y-auto")}>
-          {workspace && <Button type="button" size="touch" ref={noteListButton} variant="ghost" aria-expanded={listOpen}
-            onClick={() => setListOpen(!listOpen)}>{t("noteListCount", { count: currentNotes.length })}</Button>}
           {workspace && listOpen && (
             <ul className="flex max-h-24 flex-wrap gap-1 overflow-y-auto pb-1">
               {currentNotes.map(note => (
@@ -419,12 +426,13 @@ export const MediaViewer = forwardRef<
           {selectedNote && <PinDetails key={selectedNote.id} annotation={selectedNote} readOnly={readOnly}
             editText={editText} setEditText={setEditText} onCancelEdit={() => requestNoteChange(() => setEditText(null))}
             onClose={() => requestNoteChange(closeNote)} onUpdate={onUpdateAnnotation} onMove={startMoving}
-            onDelete={onDeleteAnnotation} onDeleted={closeNote} onBusyChange={setPanelBusy} />}
+            onDelete={onDeleteAnnotation} onDeleted={closeNote} onBusyChange={setPanelBusy}
+            confirmDelete={confirmingDeletion} onConfirmDeleteChange={open => setConfirmDeleteId(open ? selectedNote.id : null)} />}
         </div>
       )}
 
       {draft && !repositioning && (
-        <div className="shrink-0 space-y-2 border-t pt-2">
+        <div className={cn("shrink-0 space-y-2 border-t pt-2", workspace && "max-sm:max-h-[calc(100%-4rem)] max-sm:overflow-y-auto")}>
           {draft.time !== undefined && <p className="text-sm text-muted-foreground">{t("pinAtTime", { time: formatClock(draft.time) })}</p>}
           <Textarea
             ref={noteInput}

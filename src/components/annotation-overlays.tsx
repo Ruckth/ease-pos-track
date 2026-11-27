@@ -57,6 +57,7 @@ export function DraftPin({ x, y }: { x: number; y: number }) {
 
 export function PinDetails({
   annotation, readOnly, editText, setEditText, onCancelEdit, onClose, onUpdate, onMove, onDelete, onDeleted, onBusyChange,
+  confirmDelete, onConfirmDeleteChange,
 }: {
   annotation: Annotation;
   readOnly: boolean;
@@ -69,9 +70,10 @@ export function PinDetails({
   onDelete: (annotationId: string) => Promise<void>;
   onDeleted: () => void;
   onBusyChange: (busy: boolean) => void;
+  confirmDelete: boolean;
+  onConfirmDeleteChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const editButton = useRef<HTMLButtonElement>(null);
@@ -105,7 +107,7 @@ export function PinDetails({
             <Button type="button" size="icon-touch" variant="ghost" aria-label={t("repositionPin")} disabled={pending}
               onClick={() => onMove(annotation.id)}><Move aria-hidden="true" /></Button>
             <Button type="button" size="icon-touch" variant="ghost" aria-label={t("deleteComment", { label: annotation.label })} disabled={pending}
-              onClick={() => setConfirmDelete(true)}><Trash2 aria-hidden="true" /></Button>
+              onClick={() => onConfirmDeleteChange(true)}><Trash2 aria-hidden="true" /></Button>
           </>}
           <Button type="button" size="icon-touch" variant="ghost" aria-label={t("closeNote")} disabled={pending} onClick={onClose}><X aria-hidden="true" /></Button>
         </div>
@@ -126,7 +128,7 @@ export function PinDetails({
         </div>
       ) : <p className="whitespace-pre-wrap break-words pb-2 text-sm leading-5">{annotation.text}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}
+      <AlertDialog open={confirmDelete} onOpenChange={onConfirmDeleteChange}
         title={t("deleteComment", { label: annotation.label })}
         description={t("deleteCommentConfirm", { label: annotation.label })}
         confirmLabel={t("deleteComment", { label: annotation.label })}

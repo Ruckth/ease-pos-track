@@ -662,6 +662,22 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       const control = (name: string) => dialog.getByRole("button", { name, exact: true });
       const surface = dialog.getByRole("application", { name: labels.canvasLabel });
       async function place(x: number, y: number) {
+        await surface.scrollIntoViewIfNeeded();
+        // Tool and inspector changes can resize the canvas on the next animation frame.
+        const settled = await surface.evaluate(async element => {
+          const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          let previous = element.getBoundingClientRect();
+          let stable = 0;
+          for (let frame = 0; frame < 20 && stable < 2; frame++) {
+            await nextFrame();
+            const current = element.getBoundingClientRect();
+            stable = current.width === previous.width && current.height === previous.height
+              && current.x === previous.x && current.y === previous.y ? stable + 1 : 0;
+            previous = current;
+          }
+          return stable === 2;
+        });
+        assert.ok(settled, "The markup canvas should settle after switching tools");
         const box = await surface.boundingBox();
         assert.ok(box);
         const position = { x: box.width * x, y: box.height * y };
