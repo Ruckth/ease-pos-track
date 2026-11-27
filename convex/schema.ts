@@ -42,6 +42,11 @@ export const messageLinkValidator = v.union(
   v.object({ kind: v.literal("page"), pageId: v.id("ticketPages") }),
 );
 
+export const messageEvidenceValidator = v.union(
+  v.object({ kind: v.literal("media"), mediaKey: v.string() }),
+  v.object({ kind: v.literal("annotation"), annotationId: v.string() }),
+);
+
 export const pendingFileValidator = v.object({
   name: v.string(),
   size: v.number(),
@@ -428,6 +433,7 @@ export default defineSchema({
     // Thread additions; absent on legacy rows. `requestReply` is set only on staff messages.
     requestReply: v.optional(v.boolean()),
     link: v.optional(messageLinkValidator),
+    evidence: v.optional(messageEvidenceValidator),
     // Keys into the Ticket's own `media` ledger, hydrated on read.
     mediaKeys: v.optional(v.array(v.string())),
     uploadIntentId: v.optional(v.id("uploadIntents")),

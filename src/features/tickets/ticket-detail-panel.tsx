@@ -17,8 +17,9 @@ import { staffTicketActions } from "@/lib/staff-ticket-queue";
 import { type Annotation, isActiveAnnotation, type Ticket, type TicketStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatTicketNumber } from "../../../shared/ticket-numbers";
+import type { MessageEvidenceInput } from "../../../shared/ticket-evidence";
 import { TicketAssignment } from "@/features/routing/ticket-assignment";
-import { TicketConversation } from "./ticket-conversation";
+import { TicketConversation, type AvailableMessageEvidence } from "./ticket-conversation";
 import { DetailEdit } from "./ticket-detail-edit";
 import { TicketHistory } from "./ticket-history";
 import { useTicketOperations } from "./use-ticket-operations";
@@ -132,6 +133,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   const [busy, setBusy] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(initialSection === "media");
   const [mediaIndex, setMediaIndex] = useState(0);
+  const [evidenceRequest, setEvidenceRequest] = useState<{ item: MessageEvidenceInput; nonce: number } | null>(null);
   const mediaButton = useRef<HTMLButtonElement>(null);
   const mediaId = useId();
   const pendingPin = useRef<Annotation | null>(null);
@@ -139,6 +141,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   const deleted = (ticket.annotations ?? []).filter(note => !isActiveAnnotation(note));
   const editButton = useRef<HTMLButtonElement>(null);
   const urgencyButton = useRef<HTMLButtonElement>(null);
+  const canQuoteEvidence = ticket.hasCustomerOwner && !archived && ticket.status !== "done";
 
   useEffect(() => {
     if (initialSection === "media") {
@@ -161,10 +164,26 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   }
 
   function focusPin(note: Annotation) {
+    setMediaIndex(note.mediaIndex);
     setMediaOpen(true);
     mediaButton.current?.scrollIntoView({ block: "start" });
     if (viewer.current) viewer.current.focusAnnotation(note);
     else pendingPin.current = note;
+  }
+
+  function openThreadEvidence(evidence: AvailableMessageEvidence) {
+    if (evidence.kind === "media") {
+      openThreadMedia(evidence.mediaKey);
+      return;
+    }
+    const note = annotations.find(item => item.id === evidence.annotationId);
+    if (note) focusPin(note);
+    else openThreadMedia(evidence.mediaKey);
+  }
+
+  function quoteEvidence(item: MessageEvidenceInput) {
+    if (!canQuoteEvidence) return;
+    setEvidenceRequest(previous => ({ item, nonce: (previous?.nonce ?? 0) + 1 }));
   }
 
   function finishEdit() {
@@ -219,7 +238,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       </div>}
       {staff && description}
     </header>
-    {!staff && <TicketConversation ticket={ticket} role="customer" onOpenMedia={openThreadMedia}>{description}</TicketConversation>}
+    {!staff && <TicketConversation ticket={ticket} role="customer" onOpenMedia={openThreadMedia} onOpenEvidence={openThreadEvidence} evidenceRequest={evidenceRequest}>{description}</TicketConversation>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
       <div className="flex flex-wrap items-center gap-2">
@@ -230,7 +249,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
-      {staff && <TicketConversation ticket={ticket} role="staff" onOpenMedia={openThreadMedia} />}
+      {staff && <TicketConversation ticket={ticket} role="staff" onOpenMedia={openThreadMedia} onOpenEvidence={openThreadEvidence} evidenceRequest={evidenceRequest} />}
     </>}
     {staff && <TicketAssignment ticket={ticket} />}
     <div className="aurora-inset rounded-xl px-3 [&>section+section]:border-t [&>section+section]:border-border/60">
@@ -247,10 +266,13 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
             viewer.current = handle;
             if (handle && pendingPin.current) { handle.focusAnnotation(pendingPin.current); pendingPin.current = null; }
           }} media={ticket.media} initialIndex={mediaIndex} annotations={annotations} readOnly={archived}
+            onQuoteMedia={canQuoteEvidence ? index => { const file = ticket.media[index]; if (file) quoteEvidence({ kind: "media", mediaKey: file.key }); } : undefined}
+            onQuoteAnnotation={canQuoteEvidence ? note => quoteEvidence({ kind: "annotation", annotationId: note.id }) : undefined}
             onCreateAnnotation={async input => { await operations.addAnnotation(ticket, input); }}
             onUpdateAnnotation={async input => { await operations.updateAnnotation(ticket, input); }}
             onDeleteAnnotation={id => operations.removeAnnotation(ticket, id)} />
           <AnnotationList annotations={annotations} deletedAnnotations={deleted} readOnly={archived} onFocus={focusPin}
+            onQuote={canQuoteEvidence ? note => quoteEvidence({ kind: "annotation", annotationId: note.id }) : undefined}
             onUpdate={async (annotationId, text) => { await operations.updateAnnotation(ticket, { annotationId, text }); }}
             onDelete={id => operations.removeAnnotation(ticket, id)} onRestore={id => operations.restoreAnnotation(ticket, id)} />
         </Suspense>}</div>

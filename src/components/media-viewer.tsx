@@ -13,7 +13,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { formatClock, isVideoMedia, type Annotation, type MediaItem, type AnnotationDraftInput, type AnnotationUpdateInput } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { EmblaCarouselType } from "embla-carousel";
-import { Loader2, MapPin, MessageSquareText, PlayCircle } from "lucide-react";
+import { Loader2, MapPin, MessageCircle, MessageSquareText, PlayCircle } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -48,11 +48,13 @@ export const MediaViewer = forwardRef<
     workspace?: boolean;
     onMediaChange?: (index: number) => void;
     renderImageAction?: (index: number) => ReactNode;
+    onQuoteMedia?: (index: number) => void;
+    onQuoteAnnotation?: (annotation: Annotation) => void;
     onCreateAnnotation: (input: AnnotationDraftInput) => Promise<void>;
     onUpdateAnnotation: (input: AnnotationUpdateInput) => Promise<void>;
     onDeleteAnnotation: (annotationId: string) => Promise<void>;
   }
->(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, workspace = false, onMediaChange, renderImageAction, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
+>(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, workspace = false, onMediaChange, renderImageAction, onQuoteMedia, onQuoteAnnotation, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
   const { t } = useI18n();
   const [mainApi, setMainApi] = useState<CarouselApi>();
   const [thumbApi, setThumbApi] = useState<CarouselApi>();
@@ -331,6 +333,13 @@ export const MediaViewer = forwardRef<
             onClick={() => requestNoteChange(finishPlacement)} disabled={saving}>
             {t(movingId ? "cancelMove" : "placementDone")}
           </Button>}
+        {!readOnly && !mediaLocked && onQuoteMedia && media[selectedIndex] && (
+          <Button type="button" size="touch" variant="outline"
+            title={media[selectedIndex].name}
+            onClick={() => onQuoteMedia(selectedIndex)}>
+            <MessageCircle aria-hidden="true" />{t("threadQuoteFile")}
+          </Button>
+        )}
         {!readOnly && !mediaLocked && (
           <Button type="button" size="touch" ref={addButton} variant="outline"
             onClick={() => {
@@ -433,7 +442,8 @@ export const MediaViewer = forwardRef<
             editText={editText} setEditText={setEditText} onCancelEdit={() => requestNoteChange(() => setEditText(null))}
             onClose={() => requestNoteChange(closeNote)} onUpdate={onUpdateAnnotation} onMove={startMoving}
             onDelete={onDeleteAnnotation} onDeleted={closeNote} onBusyChange={setPanelBusy}
-            confirmDelete={confirmingDeletion} onConfirmDeleteChange={open => setConfirmDeleteId(open ? selectedNote.id : null)} />}
+            confirmDelete={confirmingDeletion} onConfirmDeleteChange={open => setConfirmDeleteId(open ? selectedNote.id : null)}
+            onQuote={onQuoteAnnotation} />}
         </div>
       )}
 

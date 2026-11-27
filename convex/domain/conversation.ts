@@ -4,10 +4,11 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { actorFields } from "../authz";
 import { hasLegacyAccess, requireLegacyMedia } from "../pilot_access";
-import { mediaItemValidator, messageLinkValidator } from "../schema";
+import { mediaItemValidator, messageEvidenceValidator, messageLinkValidator } from "../schema";
 import { requireCurrentVersion } from "../../shared/ticket-state";
 import { validateMediaItems } from "../../shared/media-policy";
 import { pageUrl } from "../../shared/ticket-pages";
+import { messageEvidenceKey, normalizeMessageEvidence } from "../../shared/ticket-evidence";
 import { normalizeTicketReplyUrl } from "../../shared/ticket-reply-link";
 import { normalizeRequestId } from "../ticket_requests";
 import { attachIntentAssets, requireOwnedUploadIntent, verifyAssetReceipts, verifyPendingUploadIntent } from "./media";
@@ -23,9 +24,27 @@ const QUOTE_EXCERPT = 200;
 
 type Message = Doc<"ticketMessages">;
 type StoredLink = NonNullable<Message["link"]>;
+type StoredEvidence = NonNullable<Message["evidence"]>;
 export type HydratedLink =
   | { kind: "external"; url: string }
   | { kind: "page"; pageId: Id<"ticketPages">; title: string; url?: string };
+
+export type HydratedEvidence =
+  | { kind: "media"; available: true; mediaKey: string; mediaName: string; mediaType: string }
+  | { kind: "media"; available: false }
+  | {
+      kind: "annotation";
+      available: true;
+      annotationId: string;
+      annotationKind: "point" | "time";
+      label: number;
+      mediaKey: string;
+      mediaName: string;
+      mediaType: string;
+      text: string;
+      time?: number;
+    }
+  | { kind: "annotation"; available: false };
 
 function normalizeLink(link: StoredLink | undefined): StoredLink | undefined {
   if (!link) return undefined;
@@ -39,6 +58,30 @@ const sameKeys = (a: string[] | undefined, b: string[]) => (a ?? []).length === 
 /** Staff messages default to requesting a reply, as legacy clients expect. */
 const effectiveRequestReply = (row: Pick<Message, "role" | "requestReply">) =>
   row.role === "staff" ? row.requestReply ?? true : undefined;
+
+function hydrateEvidence(ticket: Doc<"tickets">, evidence: StoredEvidence | undefined, legacyAccess: boolean): HydratedEvidence | undefined {
+  if (!evidence || !legacyAccess) return undefined;
+  if (evidence.kind === "media") {
+    const file = ticket.media.find(item => item.key === evidence.mediaKey);
+    if (!file) return { kind: "media", available: false };
+    return { kind: "media", available: true, mediaKey: file.key, mediaName: file.name, mediaType: file.type };
+  }
+  const note = ticket.annotations.find(item => item.id === evidence.annotationId && item.deletedAt === undefined);
+  const file = note ? ticket.media[note.mediaIndex] : undefined;
+  if (!note || !file) return { kind: "annotation", available: false };
+  return {
+    kind: "annotation",
+    available: true,
+    annotationId: note.id,
+    annotationKind: note.kind,
+    label: note.label,
+    mediaKey: file.key,
+    mediaName: file.name,
+    mediaType: file.type,
+    text: ticketExcerpt(note.text, QUOTE_EXCERPT),
+    ...(note.kind === "time" && note.time !== undefined ? { time: note.time } : {}),
+  };
+}
 
 async function hydrateLink(ctx: QueryCtx, ticketId: Id<"tickets">, link: StoredLink | undefined, hostedPagesEnabled: boolean): Promise<HydratedLink | undefined> {
   if (!link) return undefined;
@@ -76,12 +119,14 @@ export const pageMessages = queryOperation({
         ...(quoted.mediaKeys?.some(key => mediaByKey.has(key)) ? { hasMedia: true } : {}),
       } : undefined;
       const link = await hydrateLink(ctx, ticket._id, row.link, legacyAccess);
+      const evidence = hydrateEvidence(ticket, row.evidence, legacyAccess);
       const requestReply = effectiveRequestReply(row);
       return {
         _id: row._id, _creationTime: row._creationTime, role: row.role, body: row.body,
         ...(row.inReplyTo ? { inReplyTo: row.inReplyTo } : {}),
         ...(quote ? { quote } : {}),
         ...(link ? { link } : {}),
+        ...(evidence ? { evidence } : {}),
         media: (row.mediaKeys ?? []).flatMap(key => mediaByKey.get(key) ?? []),
         ...(requestReply === undefined ? {} : { requestReply }),
       };
@@ -96,6 +141,7 @@ export const sendMessage = mutationOperation({
     expectedVersion: v.number(), inReplyTo: v.optional(v.id("ticketMessages")),
     requestReply: v.optional(v.boolean()),
     link: v.optional(messageLinkValidator),
+    evidence: v.optional(messageEvidenceValidator),
     media: v.optional(v.array(mediaItemValidator)),
     uploadIntentId: v.optional(v.id("uploadIntents")),
     uploadIntentSecret: v.optional(v.string()),
@@ -113,7 +159,12 @@ export const sendMessage = mutationOperation({
     if (actor.role === "customer" && (args.requestReply === true || args.link?.kind === "page")) throw new Error("STAFF_ONLY");
     const requestReply = actor.role === "staff" ? args.requestReply ?? true : undefined;
     const link = normalizeLink(args.link);
+    const evidence = normalizeMessageEvidence(args.evidence);
     if (body.length > MAX_BODY || (!body && !link && !hasMedia)) throw new Error("INVALID_INPUT");
+    if (evidence) {
+      requireLegacyMedia();
+      if (!await hasLegacyAccess(ctx)) throw new Error("PILOT_MEDIA_DISABLED");
+    }
     if (hasMedia) {
       requireLegacyMedia();
       if (!media.length) throw new Error("UPLOAD_INCOMPLETE");
@@ -127,7 +178,8 @@ export const sendMessage = mutationOperation({
     if (previous) {
       if (previous.role !== actor.role || previous.customerId !== actor.customerId || previous.staffId !== actor.staffId
         || previous.body !== body || previous.inReplyTo !== args.inReplyTo || effectiveRequestReply(previous) !== requestReply
-        || linkKey(previous.link) !== linkKey(link) || !sameKeys(previous.mediaKeys, mediaKeys)
+        || linkKey(previous.link) !== linkKey(link) || messageEvidenceKey(previous.evidence) !== messageEvidenceKey(evidence)
+        || !sameKeys(previous.mediaKeys, mediaKeys)
         || previous.uploadIntentId !== args.uploadIntentId) throw new Error("REQUEST_ID_CONFLICT");
       if (hasMedia) {
         requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId!), actor, args.uploadIntentSecret!);
@@ -145,6 +197,12 @@ export const sendMessage = mutationOperation({
       if (!await hasLegacyAccess(ctx)) throw new Error("PAGE_UNAVAILABLE");
       const page = await ctx.db.get(link.pageId);
       if (!page || page.ticketId !== ticket._id || page.state !== "published") throw new Error("PAGE_UNAVAILABLE");
+    }
+    if (evidence?.kind === "media") {
+      if (!ticket.media.some(item => item.key === evidence.mediaKey)) throw new Error("MEDIA_UNAVAILABLE");
+    } else if (evidence?.kind === "annotation") {
+      const note = ticket.annotations.find(item => item.id === evidence.annotationId && item.deletedAt === undefined);
+      if (!note || !ticket.media[note.mediaIndex]) throw new Error("COMMENT_NOT_FOUND");
     }
     // Ticket state changes keep the optimistic version guard; plain thread posts do not.
     if (requestReply || hasMedia) requireCurrentVersion(ticket, args.expectedVersion);
@@ -184,6 +242,7 @@ export const sendMessage = mutationOperation({
       body, requestId, inReplyTo: args.inReplyTo,
       ...(requestReply === undefined ? {} : { requestReply }),
       ...(link ? { link } : {}),
+      ...(evidence ? { evidence } : {}),
       ...(intent ? { mediaKeys, uploadIntentId: intent._id } : {}),
     });
   },

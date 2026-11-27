@@ -199,7 +199,9 @@ export const run = internalJobAction({
       if (token === alice) await denied(() => call.mutation(token, api.tickets.restoreTicket, { id, expectedVersion: 4 }), "STAFF_ONLY", "customer restore denied");
       await call.mutation(staff, api.tickets.restoreTicket, { id, expectedVersion: 4 });
       const detail = await call.query(token, api.tickets.getTicket, { id });
-      check(detail?.version === 5 && detail.lifecycle === "active" && detail.archivedAt === undefined && detail.status === "acknowledged" && detail.urgencyScore === 42, "edit/status/urgency/archive/restore");
+      const staffDetail = token === staff ? detail : await call.query(staff, api.tickets.getTicket, { id });
+      check(detail?.version === 5 && detail.lifecycle === "active" && detail.archivedAt === undefined && detail.status === "acknowledged"
+        && staffDetail?.urgencyScore === 42 && (token === staff || detail.urgencyScore === undefined), "edit/status/urgency/archive/restore");
     }
     const id = await ctx.runMutation(internal.local_smoke.annotationFixture, { session: alice });
     await denied(() => call.mutation(bob, api.annotations.addAnnotation, { id, expectedVersion: 0, kind: "point", mediaIndex: 0, x: 0.5, y: 0.5, text: "Denied" }), "TICKET_UNAVAILABLE", "foreign customer annotation denied");

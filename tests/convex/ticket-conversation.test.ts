@@ -174,3 +174,152 @@ test("staff-created Tickets expose the conversation only to staff and their mapp
   expect((await page(alice)).page).toHaveLength(1);
   expect((await page(bob)).page).toHaveLength(0);
 });
+
+test("evidence quotes reference same-Ticket active files, notes and video moments with replay and safe unavailability", async () => {
+  const { t, seed, id, staff, alice, bob, page } = await fixture();
+  const foreignId = seed.tickets[2]; // Bob's Ticket
+  const photo = { key: "fake-ev-photo", name: "checkout-receipt.jpg", size: 1200, type: "image/jpeg", url: "https://fixture.invalid/receipt.jpg" };
+  const video = { key: "fake-ev-video", name: "till-print.mp4", size: 6800, type: "video/mp4", url: "https://fixture.invalid/print.mp4" };
+  const foreignFile = { key: "fake-ev-foreign", name: "bob-only.png", size: 500, type: "image/png", url: "https://fixture.invalid/bob.png" };
+
+  await t.run(async ctx => {
+    await ctx.db.patch(id, { media: [photo, video] });
+    await ctx.db.patch(foreignId, { media: [foreignFile] });
+  });
+  const pointNote = await t.mutation(api.annotations.addAnnotation, {
+    token: alice, id, expectedVersion: 0, mediaIndex: 0, kind: "point", x: 0.77, y: 0.44, text: "MEMBER -100 printed twice",
+  });
+  const videoMoment = await t.mutation(api.annotations.addAnnotation, {
+    token: alice, id, expectedVersion: pointNote.version, mediaIndex: 1, kind: "time", x: 0.5, y: 0.5, time: 11, text: "Printer pauses here",
+  });
+  const foreignNote = await t.mutation(api.annotations.addAnnotation, {
+    token: bob, id: foreignId, expectedVersion: 0, mediaIndex: 0, kind: "point", x: 0.2, y: 0.2, text: "Bob private note",
+  });
+
+  // Malformed or empty-body evidence messages are rejected.
+  await expect(t.mutation(api.conversations.send, {
+    token: alice, id, body: "   ", requestId: "ev-empty", expectedVersion: videoMoment.version,
+    evidence: { kind: "media", mediaKey: photo.key },
+  })).rejects.toThrow("INVALID_INPUT");
+  await expect(t.mutation(api.conversations.send, {
+    token: alice, id, body: "Bad key", requestId: "ev-bad-shape", expectedVersion: videoMoment.version,
+    evidence: { kind: "media", mediaKey: " padded " },
+  })).rejects.toThrow("INVALID_INPUT");
+
+  // Cross-Ticket files, cross-Ticket notes and unauthorized actors are rejected.
+  await expect(t.mutation(api.conversations.send, {
+    token: alice, id, body: "Wrong file", requestId: "ev-foreign-file", expectedVersion: videoMoment.version,
+    evidence: { kind: "media", mediaKey: foreignFile.key },
+  })).rejects.toThrow("MEDIA_UNAVAILABLE");
+  await expect(t.mutation(api.conversations.send, {
+    token: alice, id, body: "Wrong note", requestId: "ev-foreign-note", expectedVersion: videoMoment.version,
+    evidence: { kind: "annotation", annotationId: foreignNote.annotationId },
+  })).rejects.toThrow("COMMENT_NOT_FOUND");
+  await expect(t.mutation(api.conversations.send, {
+    token: bob, id, body: "Intruder", requestId: "ev-bob", expectedVersion: videoMoment.version,
+    evidence: { kind: "media", mediaKey: photo.key },
+  })).rejects.toThrow("TICKET_UNAVAILABLE");
+
+  // Authorized exact-file, photo note and saved video moment quotes succeed and replay consistently.
+  const fileArgs = {
+    token: alice, id, body: "See the full receipt", requestId: "ev-file-1", expectedVersion: videoMoment.version,
+    evidence: { kind: "media" as const, mediaKey: photo.key },
+  };
+  const fileMsg = await t.mutation(api.conversations.send, fileArgs);
+  expect(await t.mutation(api.conversations.send, fileArgs)).toBe(fileMsg);
+  await expect(t.mutation(api.conversations.send, { ...fileArgs, evidence: { kind: "media", mediaKey: video.key } }))
+    .rejects.toThrow("REQUEST_ID_CONFLICT");
+  await expect(t.mutation(api.conversations.send, { ...fileArgs, evidence: undefined }))
+    .rejects.toThrow("REQUEST_ID_CONFLICT");
+
+  const noteArgs = {
+    token: staff, id, body: "I see the duplicate discount line", requestId: "ev-note-1", expectedVersion: videoMoment.version,
+    requestReply: false, evidence: { kind: "annotation" as const, annotationId: pointNote.annotationId },
+  };
+  const noteMsg = await t.mutation(api.conversations.send, noteArgs);
+  const momentMsg = await t.mutation(api.conversations.send, {
+    token: staff, id, body: "That pause is the template bug", requestId: "ev-moment-1", expectedVersion: videoMoment.version,
+    requestReply: false, evidence: { kind: "annotation", annotationId: videoMoment.annotationId },
+  });
+
+  const byId = async (token: string) => Object.fromEntries((await page(token)).page.map(row => [row._id, row]));
+  let view = await byId(alice);
+  expect(view[fileMsg].evidence).toEqual({
+    kind: "media", available: true, mediaKey: photo.key, mediaName: photo.name, mediaType: photo.type,
+  });
+  expect(view[noteMsg].evidence).toEqual({
+    kind: "annotation", available: true, annotationId: pointNote.annotationId, annotationKind: "point",
+    label: 1, mediaKey: photo.key, mediaName: photo.name, mediaType: photo.type, text: "MEMBER -100 printed twice",
+  });
+  expect(view[momentMsg].evidence).toEqual({
+    kind: "annotation", available: true, annotationId: videoMoment.annotationId, annotationKind: "time",
+    label: 2, time: 11, mediaKey: video.key, mediaName: video.name, mediaType: video.type, text: "Printer pauses here",
+  });
+  expect(await byId(staff)).toEqual(view);
+
+  // Soft-deleting the origin note blocks new references, preserves idempotent replay, and redacts hydrated text safely.
+  const removed = await t.mutation(api.annotations.removeAnnotation, {
+    token: alice, id, expectedVersion: videoMoment.version, annotationId: pointNote.annotationId,
+  });
+  await expect(t.mutation(api.conversations.send, {
+    token: staff, id, body: "Late reference", requestId: "ev-note-deleted", expectedVersion: removed.version,
+    requestReply: false, evidence: { kind: "annotation", annotationId: pointNote.annotationId },
+  })).rejects.toThrow("COMMENT_NOT_FOUND");
+  expect(await t.mutation(api.conversations.send, noteArgs)).toBe(noteMsg);
+
+  view = await byId(alice);
+  expect(view[noteMsg].evidence).toEqual({ kind: "annotation", available: false });
+  expect(JSON.stringify(view[noteMsg])).not.toContain("MEMBER -100 printed twice");
+
+  // Restoring the note restores live evidence hydration.
+  await t.mutation(api.annotations.restoreAnnotation, {
+    token: staff, id, expectedVersion: removed.version, annotationId: pointNote.annotationId,
+  });
+  view = await byId(alice);
+  expect(view[noteMsg].evidence).toMatchObject({ kind: "annotation", available: true, annotationId: pointNote.annotationId });
+
+  // Removing a file from the Ticket ledger renders both file and dependent note evidence safely unavailable.
+  await t.run(ctx => ctx.db.patch(id, { media: [] }));
+  view = await byId(alice);
+  expect(view[fileMsg].evidence).toEqual({ kind: "media", available: false });
+  expect(view[noteMsg].evidence).toEqual({ kind: "annotation", available: false });
+  expect(JSON.stringify(view)).not.toMatch(/checkout-receipt\.jpg|fake-ev-photo|MEMBER -100 printed twice/);
+});
+
+test("Ticket purge retention deletes conversation messages containing evidence references", async () => {
+  const { t, id, alice, staff } = await fixture();
+  vi.stubEnv("UPLOAD_CALLBACK_SECRET", "fake-callback-secret");
+  vi.stubEnv("MEDIA_CLEANUP_ENABLED", "true");
+  const photo = { key: "fake-purge-ev", name: "purge-receipt.png", size: 1, type: "image/png", url: "https://fixture.invalid/purge.png" };
+  const intent = await t.mutation(api.uploads.createUploadIntent, {
+    token: alice, idempotencyKey: "purge-evidence-upload", files: [{ name: photo.name, size: photo.size, type: photo.type }],
+  });
+  await t.mutation(api.uploads.recordUploadedFile, {
+    intentId: intent.intentId, secret: intent.secret, file: photo, callbackToken: "fake-callback-secret",
+  });
+  const attachMsg = await t.mutation(api.conversations.send, {
+    token: alice, id, body: "Receipt attached", requestId: "purge-ev-1", expectedVersion: 0,
+    media: [photo], uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret,
+  });
+  const note = await t.mutation(api.annotations.addAnnotation, {
+    token: alice, id, expectedVersion: 1, mediaIndex: 0, kind: "point", x: 0.3, y: 0.3, text: "Check line item",
+  });
+  const citeMsg = await t.mutation(api.conversations.send, {
+    token: staff, id, body: "Checking this note", requestId: "purge-ev-2", expectedVersion: note.version,
+    requestReply: false, evidence: { kind: "annotation", annotationId: note.annotationId },
+  });
+  await t.mutation(api.tickets.archiveTicket, { token: staff, id, expectedVersion: note.version });
+  await t.run(ctx => ctx.db.patch(id, { archivedAt: Date.now() - 31 * 24 * 60 * 60 * 1000 }));
+  expect(await t.mutation(internal.retention.claimPurges, {})).toBe(1);
+  const job = await t.run(ctx => ctx.db.query("mediaJobs").withIndex("by_scope", q => q.eq("resourceScope", `ticket:${id}`)).unique());
+  expect(job).toBeTruthy();
+  const claimed = await t.mutation(internal.retention.claim, { jobId: job!._id });
+  expect(claimed?.leaseId).toBeTruthy();
+  const fence = { jobId: job!._id, attempt: claimed!.attempt, leaseId: claimed!.leaseId! };
+  expect(await t.mutation(internal.retention.checkpoint, { ...fence, key: photo.key, outcome: "deleted" })).toBe(true);
+  // Advance through delete_media -> delete_ticket -> delete_events -> complete.
+  for (let step = 0; step < 4; step++) await t.mutation(internal.retention.advance, fence);
+  expect(await t.run(ctx => ctx.db.get(attachMsg))).toBeNull();
+  expect(await t.run(ctx => ctx.db.get(citeMsg))).toBeNull();
+  expect(await t.run(ctx => ctx.db.get(id))).toBeNull();
+});

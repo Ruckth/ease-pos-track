@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Id } from "@convex/_generated/dataModel";
+import type { MessageEvidenceInput } from "../../../shared/ticket-evidence";
 import type { TicketMessage } from "./adapters/conversation";
 import { DisposableTicketDraft } from "./draft";
 
@@ -7,6 +8,7 @@ export type ReplyLink = { kind: "external"; url: string } | { kind: "page"; page
 
 type ReplySelection = {
   replyTo?: TicketMessage;
+  evidence?: MessageEvidenceInput;
   link?: ReplyLink;
   requestReply: boolean;
 };
@@ -32,7 +34,7 @@ export class TicketReplyDraft {
     this.listeners.forEach(listener => listener());
   };
 
-  clear = () => this.update({ replyTo: undefined, link: undefined, requestReply: false });
+  clear = () => this.update({ replyTo: undefined, evidence: undefined, link: undefined, requestReply: false });
 }
 
 const ReplyDrafts = createContext<Map<Id<"tickets">, TicketReplyDraft> | null>(null);
