@@ -184,16 +184,14 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
 
 function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
   const { t } = useI18n();
-  return <div role="status" className={cn("mb-4", className)}>
-    <button type="button" onClick={onOpen} aria-label={t("recoveryCodeCreate")} aria-describedby="customer-recovery-hint"
-      className="aurora-inset flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-start hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+  return <div role="status" className={cn("aurora-inset mb-4 rounded-xl px-3 pb-2", className)}>
+    <button type="button" onClick={onOpen} aria-describedby="customer-recovery-hint"
+      className="flex min-h-11 w-full items-center gap-3 rounded-xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <KeyRound aria-hidden className="size-5 shrink-0 text-amber-800 dark:text-amber-200" />
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold">{t("recoveryCodeCreate")}</span>
-        <span id="customer-recovery-hint" className="block text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</span>
-      </span>
+      <span className="min-w-0 flex-1 text-sm font-semibold">{t("recoveryCodeCreate")}</span>
       <ChevronRight aria-hidden className="size-4 shrink-0" />
     </button>
+    <p id="customer-recovery-hint" className="pl-8 text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</p>
   </div>;
 }
 

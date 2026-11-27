@@ -13,6 +13,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { pickProject } from "@/lib/projects";
+import { useMediaQuery } from "@/lib/use-media-query";
 import type { ListView } from "@/app/workspace-search";
 
 import type { ProjectSummary } from "@/lib/types";
@@ -62,10 +63,9 @@ export function ProjectSwitcher({
 }) {
   const { t } = useI18n();
   const menu = useMenuAction();
-  const visibleLabel = compact ? <>
-    <span className="truncate min-[480px]:hidden">{current.key}</span>
-    <span className="hidden truncate min-[480px]:block">{projectLabel(current)}</span>
-  </> : <span className="truncate">{projectLabel(current)}</span>;
+  const wideHeader = useMediaQuery("(min-width: 480px)");
+  const visibleName = compact && !wideHeader ? current.key : projectLabel(current);
+  const visibleLabel = <span className="truncate">{visibleName}</span>;
   if (projects.length === 1) {
     return (
       <span className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium" title={projectLabel(current)}>
@@ -77,7 +77,7 @@ export function ProjectSwitcher({
   return (
     <DropdownMenu {...menu.root}>
       <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left" />}
-        aria-label={`${t("chooseProject")}: ${projectLabel(current)}`} title={projectLabel(current)}>
+        aria-label={`${t("chooseProject")}: ${visibleName}`} title={projectLabel(current)}>
         <FolderKanban className="text-muted-foreground" aria-hidden="true" />
         {visibleLabel}
         <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
