@@ -57,7 +57,7 @@ export function resetWorkspaceFilters(search: WorkspaceSearch, defaultFilter: "a
   const current = search.filter ?? (search.archived ? "archive" : defaultFilter);
   if (current === "archive" || (!search.filter && !search.assignment)) return search;
   const ticket = current === defaultFilter ? {} : { ticket: undefined, section: undefined };
-  return { ...search, ...ticket, filter: undefined, assignment: undefined };
+  return { ...search, ...ticket, archived: undefined, filter: undefined, assignment: undefined };
 }
 
 // Search parameters are scalars. Keep text such as "null", "007" and quoted

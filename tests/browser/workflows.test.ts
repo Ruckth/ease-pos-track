@@ -395,6 +395,21 @@ for (const language of ["en", "th"] as const) test(`customer ${language}: phone 
   } finally { await context.close(); }
 });
 
+test("customer filter panel closes when resizing hides the list beside an open Ticket", async () => {
+  const { page, context } = await open("customer");
+  try {
+    await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.locator("button[data-ticket-id]").first().click();
+    await page.waitForURL(url => url.searchParams.has("ticket"));
+    await openFilters(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await filterPanel(page).waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    assert.equal(await filterTrigger(page).getAttribute("aria-expanded"), "false");
+  } finally { await context.close(); }
+});
+
 test("customer search finds older Tickets and can include resolved Tickets", async () => {
   const { page, context, token, errors } = await open("customer");
   try {

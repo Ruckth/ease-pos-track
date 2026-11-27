@@ -6,6 +6,7 @@ import { ProductWordmark } from "@/components/product-wordmark";
 import { queueNeighbors } from "@/lib/staff-ticket-queue";
 import { LanguageMenuGroup } from "@/components/language-menu";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { FilterChoices, TicketFilterPopover } from "@/components/ticket-filter-popover";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -202,6 +203,7 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   const counts = useMemo(() => customerQueueCounts(tickets), [tickets]);
   const statusScope = filter === "all" || filter === "waiting" || filter === "done" ? filter : "active";
   const activeFilterCount = statusScope === "active" ? 0 : 1;
+  const desktop = useMediaQuery("(min-width: 1024px)");
   const browseTickets = useMemo(() => customerQueue(tickets, statusScope), [tickets, statusScope]);
   const text = query.trim();
   const searching = text.length > 0;
@@ -242,10 +244,10 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
     <div className="aurora-toolbar mb-3 flex items-end gap-2 p-3 sm:gap-3">
       <TicketSearchInput className="min-w-0 flex-1 space-y-1 text-sm font-medium text-foreground"
         value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
-      <TicketFilterPopover activeCount={activeFilterCount} triggerRef={filterTrigger} onClear={onResetFilters}>
+      {(!ticketOpen || desktop) && <TicketFilterPopover activeCount={activeFilterCount} triggerRef={filterTrigger} onClear={onResetFilters}>
         <FilterChoices label={t("ticketStatus")} value={statusScope} onChange={onFilter}
           options={options.map(option => ({ ...option, count: searching ? undefined : option.count }))} />
-      </TicketFilterPopover>
+      </TicketFilterPopover>}
     </div>
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
       : pending ? <div className="ticket-surface flex items-center gap-2 p-5 text-sm" role="status"><Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />{t("syncingTickets")}</div>
