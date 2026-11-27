@@ -91,13 +91,13 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
       {item.mediaCount ? (
         <span className="inline-flex items-center gap-1">
           <Images className="size-3.5 shrink-0" aria-hidden="true" />
-          {t("reviewMedia", { count: item.mediaCount })}
+          {t("detailMedia", { count: item.mediaCount })}
         </span>
       ) : null}
       {item.annotationCount ? (
         <span className="inline-flex items-center gap-1">
           <MapPin className="size-3.5 shrink-0" aria-hidden="true" />
-          {t("reviewPins", { count: item.annotationCount })}
+          {t("noteListCount", { count: item.annotationCount })}
         </span>
       ) : null}
       <span className="ml-auto inline-flex items-center gap-1">
