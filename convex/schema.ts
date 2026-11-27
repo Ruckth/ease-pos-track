@@ -224,7 +224,7 @@ export default defineSchema({
     purgeBlocked: v.optional(v.boolean()),
     inboxVisibilityVersion: v.optional(v.number()),
     replyMediaKeys: v.optional(v.array(v.string())),
-    latestReply: v.optional(v.object({ role: actorRole, at: v.number(), excerpt: v.string(), awaitingCustomer: v.boolean() })),
+    latestReply: v.optional(v.object({ role: actorRole, at: v.number(), excerpt: v.string(), awaitingCustomer: v.boolean(), hasLink: v.optional(v.boolean()) })),
     ownerCustomerId: v.optional(v.id("customers")),
     origin: actorRole,
     createdVia: v.optional(ticketCreatedVia),

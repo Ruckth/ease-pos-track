@@ -165,12 +165,14 @@ export const sendMessage = mutationOperation({
       });
       await attachIntentAssets(ctx, intent, doc._id, media);
     }
+    // Thread activity has its own timestamp and leaves the Ticket version alone.
     await ctx.db.patch(ticket._id, {
       ...(intent ? { replyMediaKeys: [...(ticket.replyMediaKeys ?? []), ...mediaKeys] } : {}),
       latestReply: {
         role: actor.role,
         at: Date.now(),
         excerpt: ticketExcerpt(body),
+        ...(link ? { hasLink: true } : {}),
         awaitingCustomer: actor.role === "staff" && (requestReply === true || (ticket.status === "waiting" && ticket.latestReply?.awaitingCustomer === true)),
       },
     });

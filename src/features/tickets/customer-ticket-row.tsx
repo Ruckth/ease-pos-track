@@ -40,7 +40,7 @@ export function CustomerTicketRow({ item, selected, onSelect, authorName }: {
   const reply = item.latestReply;
   const excerpt = reply ? t("feedLatestReply", {
     name: t(reply.role === "staff" ? "threadTeam" : "threadYou"),
-    reply: reply.excerpt || t("feedAttachmentReply"),
+    reply: reply.excerpt || t(reply.hasLink ? "feedLinkReply" : "feedAttachmentReply"),
   }) : item.excerpt;
   const updatedAt = Math.max(item.updatedAt, reply?.at ?? 0);
   const updatedLater = updatedAt - item.createdAt >= 60_000;

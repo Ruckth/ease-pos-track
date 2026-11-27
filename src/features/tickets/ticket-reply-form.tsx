@@ -79,6 +79,12 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     } catch { owner.setError(new Error("INVALID_LINK")); return false; }
   }
 
+  function clearComposer() {
+    clearReply();
+    setLink(undefined);
+    setRequestReply(false);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage) return;
@@ -97,9 +103,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
       onCleanupError: error => toast.error(localizeError(error, t)),
     });
     if (ok) {
-      clearReply();
-      setLink(undefined);
-      setRequestReply(false);
+      clearComposer();
       setSent(requestReply ? "questionSent" : "replySent");
     }
   }
@@ -208,9 +212,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     {state.retryLocked && !busy && <Button type="button" variant="outline" size="sm" onClick={() => {
       if (!window.confirm(t("threadDiscardReplyConfirm"))) return;
       owner.discard();
-      clearReply();
-      setLink(undefined);
-      setRequestReply(false);
+      clearComposer();
     }}>{t("discardDraft")}</Button>}
     {state.error != null && <p role="alert" className="text-sm text-destructive">{localizeError(state.error, t)}</p>}
     {busy && state.items.length > 0 && <progress className="w-full" aria-label={t("submitting")} value={progress} max={100} />}

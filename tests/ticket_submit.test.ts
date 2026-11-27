@@ -248,6 +248,7 @@ test("a definitive reply rejection after response loss unlocks the same draft", 
   const draft = { title: "", description: "Test reply", items: [], annotations: [], idempotencyKey: "test-reply-key" };
   let renewals = 0;
   let calls = 0;
+  let code = "TICKET_UNAVAILABLE";
   const deps = {
     token: "session",
     mediaEnabled: false,
@@ -256,11 +257,14 @@ test("a definitive reply rejection after response loss unlocks the same draft", 
     createUploadIntent: async () => assert.fail("Text reply cannot create an upload"),
     createTicket: async () => {
       if (++calls <= 2) throw new Error("Response lost");
-      throw new ConvexError({ code: "PAGE_UNAVAILABLE" });
+      throw new ConvexError({ code });
     },
   };
   await assert.rejects(submitTicketDraft(deps, draft), /UPLOAD_WRITE_UNKNOWN/);
   assert.equal(renewals, 0);
+  await assert.rejects(submitTicketDraft({ ...deps, reconciling: true }, draft), /TICKET_UNAVAILABLE/);
+  assert.equal(renewals, 0, "A Ticket that vanished before the receipt lookup leaves the prior outcome unknown");
+  code = "PAGE_UNAVAILABLE";
   await assert.rejects(submitTicketDraft({ ...deps, reconciling: true }, draft), /PAGE_UNAVAILABLE/);
   assert.equal(renewals, 1);
 });

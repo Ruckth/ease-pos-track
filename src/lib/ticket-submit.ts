@@ -61,7 +61,7 @@ export type SubmitTicketDeps = {
   signal?: AbortSignal;
   /** A previous attempt may have written against this request key. */
   reconciling?: boolean;
-  /** Other mutation-specific codes emitted only when an identical write has no committed receipt. */
+  /** Override the new-Ticket error codes when submitting to a different mutation. */
   noReceiptErrors?: ReadonlySet<string>;
   /** Reports a cleanup failure without masking the original error. */
   onCleanupError?: (error: unknown) => void;
@@ -117,7 +117,7 @@ const createErrorsWithoutReceipt = new Set([
   "COMMENT_TEXT_REQUIRED", "COMMENT_TOO_LONG", "INVALID_MEDIA_INDEX", "INVALID_ANNOTATION_KIND",
   "INVALID_ANNOTATION_POSITION", "INVALID_ANNOTATION_TIME", "INVALID_COMMENT_LABEL", "ANNOTATION_LIMIT_EXCEEDED",
   "IMAGE_VIDEO_ONLY", "MEDIA_LIMIT_EXCEEDED", "IMAGE_TOO_LARGE", "VIDEO_TOO_LARGE", "INVALID_FILE_METADATA",
-  "INVALID_MEDIA_REFERENCE", "UPLOAD_INCOMPLETE",
+  "INVALID_MEDIA_REFERENCE", "UPLOAD_INCOMPLETE", "TICKET_UNAVAILABLE",
 ]);
 
 export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDraft) {
@@ -197,7 +197,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     const code = errorCode(error);
     // An earlier write stays uncertain until the server reaches its receipt check.
     const resolvedRetry = creating && code !== undefined
-      && (createErrorsWithoutReceipt.has(code) || deps.noReceiptErrors?.has(code) || code === "REQUEST_ID_CONFLICT" || code === "TICKET_UNAVAILABLE");
+      && (code === "REQUEST_ID_CONFLICT" || (deps.noReceiptErrors ?? createErrorsWithoutReceipt).has(code));
     const rejected = definitiveUploadRejection(error) && (!deps.reconciling || resolvedRetry);
     if (rejected) deps.onRequestConflict?.();
     if (activeIntent && ((abortedBeforeCreate && !deps.reconciling) || rejected)) {
