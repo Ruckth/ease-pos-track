@@ -23,58 +23,66 @@ export function StaffHealth() {
   const [view, setView] = useState<"failed" | "pending" | "expired">("failed");
   const currentView = diagnosticViews.find(option => option.value === view) ?? diagnosticViews[0];
   const counts = useId();
-  if (!health) return <p role="status">{t("syncing")}</p>;
-  return <section className="space-y-4">
+  if (!health) return <p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>;
+  return <section className="space-y-3">
     <dl className="aurora-inset divide-y divide-border/60 rounded-xl px-3 text-sm">
       {([ ["healthStorage", health.configuration.uploadThingToken], ["healthCallback", health.configuration.callbackSecret],
         ["healthCleanup", health.configuration.mediaCleanupEnabled] ] as const).map(([label, enabled]) =>
-        <div className="flex min-h-11 items-center justify-between gap-3 py-2" key={label}>
-          <dt className="min-w-0">{t(label)}</dt>
+        <div className="flex min-h-9 items-center justify-between gap-3 py-1.5" key={label}>
+          <dt className="min-w-0 leading-5">{t(label)}</dt>
           <dd className={cn("ticket-chip shrink-0 text-xs font-semibold", enabled ? "text-emerald-700 dark:text-emerald-300" : "text-amber-800 dark:text-amber-300")}>
             {enabled ? <CircleCheck aria-hidden className="size-3.5" /> : <CircleSlash aria-hidden className="size-3.5" />}{t(enabled ? "healthYes" : "healthNo")}
           </dd>
         </div>)}
-      <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
-        <dt className="min-w-0">{t("healthOldest")}</dt>
-        <dd className="inline-flex items-center gap-1.5 text-muted-foreground"><Clock3 aria-hidden className="size-3.5" />
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-1.5">
+        <dt className="min-w-0 leading-5">{t("healthOldest")}</dt>
+        <dd className="inline-flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums sm:text-sm"><Clock3 aria-hidden className="size-3.5 shrink-0" />
           {health.oldestPendingAt === null ? t("healthNone") : formatDate(health.oldestPendingAt)}</dd>
       </div>
     </dl>
-    {/* A table from `sm`; below it each kind becomes a card of labelled counts.
-        Explicit roles keep table semantics through the display change. */}
-    <table role="table" aria-labelledby={counts} className="block w-full text-sm sm:aurora-inset sm:table sm:overflow-hidden sm:rounded-xl">
-      <caption id={counts} className="sr-only">{t("healthCounts")}</caption>
-      <thead role="rowgroup" className="sr-only sm:not-sr-only sm:table-header-group">
-        <tr role="row">
-          <th role="columnheader" scope="col" className="px-3 py-2 text-start align-bottom text-xs font-medium text-muted-foreground">{t("healthKind")}</th>
-          {Object.values(states).map(label => <th role="columnheader" scope="col" key={label}
-            className="px-2 py-2 text-end align-bottom text-xs font-medium leading-4 text-muted-foreground">{t(label)}</th>)}
-        </tr>
-      </thead>
-      <tbody role="rowgroup" className="grid gap-2 sm:table-row-group">
-        {Object.entries(kinds).map(([kind, label]) => <tr role="row" key={kind}
-          className="aurora-inset flex flex-wrap gap-1.5 rounded-xl p-2.5 sm:table-row sm:rounded-none sm:border-0 sm:bg-transparent sm:bg-none sm:p-0 sm:shadow-none">
-          <th role="rowheader" scope="row" className="w-full px-0.5 text-start font-semibold sm:w-auto sm:border-t sm:border-border/60 sm:px-3 sm:py-2.5 sm:font-medium">{t(label)}</th>
-          {Object.entries(states).map(([state, stateLabel]) => {
-            const value = health.counts[`${kind}:${state}`] ?? 0;
-            const alert = state === "failed" && value > 0;
-            return <td role="cell" key={state} className={cn("ticket-chip min-h-8 text-muted-foreground sm:table-cell sm:rounded-none sm:border-t sm:border-border/60 sm:bg-transparent sm:px-2 sm:py-2.5 sm:text-end",
-              alert && "text-destructive")}>
-              <span aria-hidden className="text-xs sm:hidden">{t(stateLabel)}</span>
-              <span className={cn("font-semibold tabular-nums", value > 0 && !alert && "text-foreground")}>{value}</span>
-            </td>;
-          })}
-        </tr>)}
-      </tbody>
-    </table>
-    <div className="flex items-center justify-between gap-3">
-      <h3 className="min-w-0 text-sm font-semibold text-foreground">{t(currentView.labelKey)}</h3>
-      <TicketFilterPopover activeCount={view === "failed" ? 0 : 1} onClear={() => setView("failed")}>
-        <FilterChoices label={t("healthDiagnosticView")} value={view} onChange={setView}
-          options={diagnosticViews.map(option => ({ value: option.value, label: t(option.labelKey) }))} />
-      </TicketFilterPopover>
+    {/* A table from `md` (enough width for six columns in EN and TH); below it each kind
+        becomes a compact row of labelled counts inside one inset container. Explicit roles
+        keep table semantics through the display change. */}
+    <div className="aurora-inset overflow-x-auto rounded-xl">
+      <table role="table" aria-labelledby={counts} className="relative block w-full text-sm md:table">
+        <caption id={counts} className="sr-only">{t("healthCounts")}</caption>
+        <thead role="rowgroup" className="sr-only md:not-sr-only md:table-header-group">
+          <tr role="row">
+            <th role="columnheader" scope="col" className="py-2 pe-2 ps-3 text-start align-bottom text-xs font-medium text-muted-foreground">{t("healthKind")}</th>
+            {Object.values(states).map((label, index, all) => <th role="columnheader" scope="col" key={label}
+              className={cn("py-2 text-end align-bottom text-xs font-medium leading-4 text-muted-foreground", index === all.length - 1 ? "ps-2 pe-3" : "px-2")}>{t(label)}</th>)}
+          </tr>
+        </thead>
+        <tbody role="rowgroup" className="block divide-y divide-border/60 md:table-row-group md:divide-y-0">
+          {Object.entries(kinds).map(([kind, label]) => <tr role="row" key={kind}
+            className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-3 py-2 md:table-row md:p-0">
+            <th role="rowheader" scope="row" className="w-full pb-0.5 text-start text-[13px] font-semibold leading-5 md:w-auto md:border-t md:border-border/60 md:py-2.5 md:pe-2 md:ps-3 md:text-sm md:font-medium">{t(label)}</th>
+            {Object.entries(states).map(([state, stateLabel], index, all) => {
+              const value = health.counts[`${kind}:${state}`] ?? 0;
+              const alert = state === "failed" && value > 0;
+              return <td role="cell" key={state} className={cn(
+                "ticket-chip py-0.5 text-xs leading-4 text-muted-foreground md:table-cell md:rounded-none md:border-t md:border-border/60 md:bg-transparent md:py-2.5 md:text-end md:text-sm md:leading-5",
+                index === all.length - 1 ? "md:ps-2 md:pe-3" : "md:px-2",
+                alert && "text-destructive",
+              )}>
+                <span aria-hidden className="md:hidden">{t(stateLabel)}</span>
+                <span className={cn("font-semibold tabular-nums", value > 0 && !alert && "text-foreground")}>{value}</span>
+              </td>;
+            })}
+          </tr>)}
+        </tbody>
+      </table>
     </div>
-    <JobDiagnostics key={view} view={view} />
+    <div className="space-y-2 pt-0.5">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="min-w-0 text-sm font-semibold text-foreground">{t(currentView.labelKey)}</h3>
+        <TicketFilterPopover activeCount={view === "failed" ? 0 : 1} onClear={() => setView("failed")}>
+          <FilterChoices label={t("healthDiagnosticView")} value={view} onChange={setView}
+            options={diagnosticViews.map(option => ({ value: option.value, label: t(option.labelKey) }))} />
+        </TicketFilterPopover>
+      </div>
+      <JobDiagnostics key={view} view={view} />
+    </div>
   </section>;
 }
 
@@ -93,20 +101,28 @@ function JobDiagnostics({ view }: { view: "failed" | "pending" | "expired" }) {
     catch (error) { toast.error(localizeError(error, t)); }
     finally { setBusy(null); }
   }
-  return <div className="space-y-3" aria-live="polite">
-    <p className="text-xs leading-5 text-muted-foreground">{t("healthPageHint")}</p>
-    {jobs.status === "LoadingFirstPage" ? <p className="text-sm">{t("syncing")}</p>
-      : jobs.results.length === 0 ? <p className="rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-sm text-muted-foreground">{t("healthNone")}</p>
+  return <div className="space-y-2.5" aria-live="polite">
+    <p className="text-xs leading-4 text-muted-foreground">{t("healthPageHint")}</p>
+    {jobs.status === "LoadingFirstPage" ? <p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>
+      : jobs.results.length === 0 ? <p className="rounded-xl border border-dashed border-border/70 px-3 py-3 text-center text-sm text-muted-foreground">{t("healthNone")}</p>
       : <ul className="space-y-2">
-      {jobs.results.map(job => <li key={job.jobId} className={cn("aurora-inset flex flex-wrap items-start justify-between gap-x-3 gap-y-2 rounded-xl p-3 text-sm", job.state === "failed" && "border-destructive/40")}>
+      {jobs.results.map(job => <li key={job.jobId} className={cn("aurora-inset flex flex-col gap-2.5 rounded-xl p-3 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3", job.state === "failed" && "border-destructive/40")}>
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="font-semibold leading-5">{t(kinds[job.kind])} <span className="font-normal text-muted-foreground">· {t(states[job.state])}</span></p>
-          <p className="text-xs leading-5 text-muted-foreground">{t("healthAttempt", { attempt: job.attempt, max: job.maxAttempts })}{job.exhausted ? ` · ${t("healthExhausted")}` : ""}
-            {" · "}{t(view === "expired" ? "healthLeaseTime" : "healthAvailable", { date: formatDate(view === "expired" ? job.leaseExpiresAt! : job.availableAt) })}</p>
-          {job.lastOutcome ? <p className="leading-5">{t(outcomes[job.lastOutcome])}</p> : null}
-          {job.purgeBlocked ? <p className="flex items-start gap-1.5 leading-5 text-destructive"><ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0" />{t("healthPurgeBlocked")}</p> : null}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="font-semibold leading-5 text-foreground">{t(kinds[job.kind])}</p>
+            <span className={cn("ticket-chip py-0 text-xs font-medium leading-5", job.state === "failed" ? "text-destructive" : "text-muted-foreground")}>
+              {t(states[job.state])}
+            </span>
+          </div>
+          {job.lastOutcome ? <p className="text-[13px] leading-5 text-foreground">{t(outcomes[job.lastOutcome])}</p> : null}
+          {job.purgeBlocked ? <p className="flex items-start gap-1.5 text-xs font-medium leading-4 text-destructive"><ShieldAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" /><span>{t("healthPurgeBlocked")}</span></p> : null}
+          <p className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs leading-4 text-muted-foreground tabular-nums">
+            <span>{t("healthAttempt", { attempt: job.attempt, max: job.maxAttempts })}</span>
+            {job.exhausted ? <span className="font-medium text-destructive">{t("healthExhausted")}</span> : null}
+            <span>{t(view === "expired" ? "healthLeaseTime" : "healthAvailable", { date: formatDate(view === "expired" ? job.leaseExpiresAt! : job.availableAt) })}</span>
+          </p>
         </div>
-        {job.state === "failed" ? <Button variant="outline" className="min-h-11 shrink-0" disabled={busy !== null} onClick={() => void requeue(job)}>
+        {job.state === "failed" ? <Button variant="outline" className="min-h-11 w-full sm:w-auto sm:shrink-0" aria-busy={busy === job.jobId} disabled={busy !== null} onClick={() => void requeue(job)}>
           {busy === job.jobId ? <LoaderCircle aria-hidden className="animate-spin" /> : <RotateCcw aria-hidden />}{t("healthRequeue")}
         </Button> : null}
       </li>)}

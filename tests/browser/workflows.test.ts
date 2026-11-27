@@ -1400,6 +1400,135 @@ for (const language of ["en", "th"] as const) {
   });
 }
 
+for (const language of ["en", "th"] as const) {
+  test(`staff ${language}: operations health stays compact and unclipped across phone, sm and desktop viewports`, async () => {
+    // Exercise populated counts, diagnostic states and paging with a transport fixture; never schedule deletion.
+    const f = await open("staff", language, async context => {
+      await context.route("**/src/features/operations/adapters/health.ts", route => route.fulfill({
+        contentType: "application/javascript",
+        body: `window.healthLoadMore = [];
+          const counts = {
+            "cancellation:pending": 4, "cancellation:running": 2, "cancellation:completed": 12, "cancellation:failed": 1, "cancellation:superseded": 0,
+            "intent_expiry:pending": 3, "intent_expiry:running": 1, "intent_expiry:completed": 8, "intent_expiry:failed": 0, "intent_expiry:superseded": 0,
+            "rejected_upload:pending": 2, "rejected_upload:running": 0, "rejected_upload:completed": 5, "rejected_upload:failed": 1, "rejected_upload:superseded": 0,
+            "ticket_purge:pending": 1, "ticket_purge:running": 1, "ticket_purge:completed": 3, "ticket_purge:failed": 1, "ticket_purge:superseded": 2,
+          };
+          const byView = {
+            failed: [
+              { jobId: "f-cancel", kind: "cancellation", state: "failed", attempt: 3, maxAttempts: 8, availableAt: 1795700400000, lastOutcome: "failed_permanent", exhausted: false, purgeBlocked: false },
+              { jobId: "f-purge", kind: "ticket_purge", state: "failed", attempt: 8, maxAttempts: 8, availableAt: 1795700400000, lastOutcome: "ownership_conflict", exhausted: true, purgeBlocked: true },
+            ],
+            pending: [
+              { jobId: "p-expiry", kind: "intent_expiry", state: "pending", attempt: 1, maxAttempts: 8, availableAt: 1795700460000, lastOutcome: "failed_retryable", exhausted: false, purgeBlocked: false },
+            ],
+            expired: [
+              { jobId: "e-cancel", kind: "cancellation", state: "running", attempt: 2, maxAttempts: 8, availableAt: 1795700400000, leaseExpiresAt: 1795701180000, exhausted: false, purgeBlocked: false },
+            ],
+          };
+          export const useHealth = () => ({ counts, oldestPendingAt: 1795698180000,
+            configuration: { uploadThingToken: false, callbackSecret: true, mediaCleanupEnabled: false } });
+          export const useJobDiagnostics = view => ({ status: "CanLoadMore",
+            loadMore(count) { window.healthLoadMore.push({ view, count }); },
+            results: byView[view] ?? [],
+            requeue: async () => true });`,
+      }));
+    });
+    try {
+      await f.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      await openHeaderMenu(f.page, copy(language, "queueMore"));
+      await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
+      const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
+      const table = dialog.getByRole("table", { name: copy(language, "healthCounts") });
+      await table.waitFor();
+
+      for (const viewport of [
+        { width: 320, height: 568 },
+        { width: 360, height: 740 },
+        { width: 390, height: 844 },
+        { width: 640, height: 800 },
+        { width: 768, height: 800 },
+        { width: 1280, height: 900 },
+      ]) {
+        await f.page.setViewportSize(viewport);
+        const layout = await dialog.evaluate(el => {
+          const tableEl = el.querySelector("table")!;
+          const wrap = tableEl.parentElement!;
+          const dialogRect = el.getBoundingClientRect();
+          const cells = [...tableEl.querySelectorAll("td")];
+          const maxCellRight = Math.max(...cells.map(cell => cell.getBoundingClientRect().right));
+          return {
+            tableDisplay: getComputedStyle(tableEl).display,
+            docOverflow: document.documentElement.scrollWidth - window.innerWidth,
+            dialogOverflow: el.scrollWidth - el.clientWidth,
+            tableOverflow: wrap.scrollWidth - wrap.clientWidth,
+            cellsBeyondDialog: maxCellRight - dialogRect.right,
+            columnHeaders: tableEl.querySelectorAll('[role="columnheader"]').length,
+            rowHeaders: tableEl.querySelectorAll('[role="rowheader"]').length,
+            cells: cells.length,
+          };
+        });
+        assert.equal(layout.tableDisplay, viewport.width >= 768 ? "table" : "block");
+        assert.ok(layout.docOverflow <= 0, `${language} ${viewport.width}px: document overflow ${layout.docOverflow}`);
+        assert.ok(layout.dialogOverflow <= 0, `${language} ${viewport.width}px: dialog overflow ${layout.dialogOverflow}`);
+        assert.ok(layout.tableOverflow <= 0, `${language} ${viewport.width}px: table wrapper overflow ${layout.tableOverflow}`);
+        assert.ok(layout.cellsBeyondDialog <= 1, `${language} ${viewport.width}px: cell extends past dialog by ${layout.cellsBeyondDialog}`);
+        assert.equal(layout.columnHeaders, 6);
+        assert.equal(layout.rowHeaders, 4);
+        assert.equal(layout.cells, 20);
+      }
+
+      // Phone compactness: on a 390x844 phone, the Diagnostics heading and filter stay above the fold.
+      await f.page.setViewportSize({ width: 390, height: 844 });
+      const failedHeading = dialog.getByRole("heading", { name: copy(language, "healthFailed"), exact: true });
+      const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
+      const headingBox = (await failedHeading.boundingBox())!;
+      const triggerBox = (await trigger.boundingBox())!;
+      assert.ok(headingBox.y + headingBox.height <= 844, `${language} 390x844: diagnostics heading sits above the fold`);
+      assert.ok(triggerBox.y + triggerBox.height <= 844 && triggerBox.height >= 44 && triggerBox.width >= 44, `${language} 390x844: filter button is touch-sized above the fold`);
+
+      // Narrow phone failed card: Requeue stacks below full-width text without crushing metadata/warnings.
+      await f.page.setViewportSize({ width: 320, height: 568 });
+      const blockedItem = dialog.locator("ul > li").nth(1);
+      await blockedItem.scrollIntoViewIfNeeded();
+      await blockedItem.getByText(copy(language, "healthPurgeBlocked"), { exact: true }).waitFor();
+      await blockedItem.getByText(copy(language, "healthExhausted"), { exact: true }).waitFor();
+      const cardMetrics = await blockedItem.evaluate(el => {
+        const textBlock = el.firstElementChild!.getBoundingClientRect();
+        const button = el.querySelector("button")!.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const innerWidth = el.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        return { textWidthRatio: textBlock.width / innerWidth, buttonBelowText: button.top >= textBlock.bottom - 1, buttonHeight: button.height };
+      });
+      assert.ok(cardMetrics.textWidthRatio >= 0.9, `${language} 320px: job text spans full card width (${cardMetrics.textWidthRatio.toFixed(2)})`);
+      assert.equal(cardMetrics.buttonBelowText, true, `${language} 320px: Requeue stacks below text`);
+      assert.ok(cardMetrics.buttonHeight >= 44, `${language} 320px: Requeue keeps 44px touch height`);
+
+      // Filter popover fits within 320px and switches to populated Pending and Expired views; paging fires loadMore(25).
+      const loadMore = dialog.getByRole("button", { name: copy(language, "loadOlder"), exact: true });
+      await loadMore.scrollIntoViewIfNeeded();
+      assert.ok((await loadMore.boundingBox())!.height >= 44);
+      await loadMore.click();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      const panel = filterPanel(f.page);
+      await panel.waitFor();
+      const panelBox = (await panel.boundingBox())!;
+      assert.ok(panelBox.x >= 0 && panelBox.x + panelBox.width <= 320.5, `${language} 320px: filter popover fits viewport`);
+      await panel.getByRole("radio", { name: copy(language, "healthPending"), exact: true }).click();
+      await closeFilters(f.page);
+      await dialog.getByText(copy(language, "healthRetry"), { exact: true }).waitFor();
+      await trigger.click();
+      await panel.getByRole("radio", { name: copy(language, "healthExpired"), exact: true }).click();
+      await closeFilters(f.page);
+      await dialog.getByRole("heading", { name: copy(language, "healthExpired"), exact: true }).waitFor();
+      const loadCalls = await f.page.evaluate(() => (window as unknown as { healthLoadMore: unknown[] }).healthLoadMore);
+      assert.deepEqual(loadCalls, [{ view: "failed", count: 25 }]);
+      assert.deepEqual(f.errors, []);
+      assert.equal(f.uploads(), 0);
+    } finally { await f.context.close(); }
+  });
+}
+
 test("customer sign-in masks a wrong password, then admits the named customer through the real form", async () => {
   const context = await newContext(await browsers.get());
   try {
