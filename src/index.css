@@ -263,6 +263,16 @@
     gap: 0.625rem;
   }
 
+  /* Keep actionable notices at full contrast while they move into place. */
+  :root [data-sonner-toast].app-toast:has(.app-toast-action) {
+    transition-property: transform, height, box-shadow;
+  }
+
+  :root [data-sonner-toast][data-removed="true"] .app-toast-action,
+  :root [data-sonner-toast][data-front="false"][data-expanded="false"] .app-toast-action {
+    visibility: hidden;
+  }
+
   :root [data-sonner-toast] .app-toast-description {
     color: hsl(var(--muted-foreground));
   }
@@ -275,6 +285,7 @@
     color: hsl(var(--foreground));
     font-weight: 600;
     border: 1px solid transparent;
+    transition-property: box-shadow;
   }
 
   @media (pointer: coarse) {
