@@ -82,7 +82,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
   }
 
   const markupDialog = <Dialog open={active && editingItem !== null} onOpenChange={open => { if (!open) setEditingItem(null); }}
-      title={t("editDraftImage")} mobileFullScreen>
+      title={t("editDraftImage")} placement="fullscreen">
       {active && editingItem && <Suspense fallback={<p role="status">{t("syncing")}</p>}>
         <ImageMarkupEditor key={editingItem.previewUrl} item={editingItem}
           pins={viewerAnnotations.filter(pin => items[pin.mediaIndex]?.id === editingItem.id)}

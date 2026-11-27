@@ -33,23 +33,27 @@ async function closeFilters(page: Page) {
   await filterPanel(page).waitFor({ state: "hidden" });
 }
 
+async function attachLongReceipt(page: Page, name: string) {
+  const data = await page.evaluate(() => {
+    const c = document.createElement("canvas");
+    c.width = 1080; c.height = 6000;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#111"; ctx.font = "32px sans-serif";
+    for (let y = 60; y < c.height; y += 100) ctx.fillText(`Receipt line ${y}`, 32, y);
+    return c.toDataURL("image/png").split(",")[1];
+  });
+  await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(data, "base64") });
+}
+
 test("mobile screenshot markup pans a long receipt and reviews the mask at its source position", async () => {
   const { context, page, errors, uploads } = await openWith(await browsers.get(), "customer", "en", undefined, {
     viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
   });
   try {
     const labels = markupLabels("en");
-    const data = await page.evaluate(() => {
-      const c = document.createElement("canvas");
-      c.width = 1080; c.height = 6000;
-      const ctx = c.getContext("2d")!;
-      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
-      ctx.fillStyle = "#111"; ctx.font = "32px sans-serif";
-      for (let y = 60; y < c.height; y += 100) ctx.fillText(`Receipt line ${y}`, 32, y);
-      return c.toDataURL("image/png").split(",")[1];
-    });
     const name = "long-receipt.png";
-    await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(data, "base64") });
+    await attachLongReceipt(page, name);
     await page.getByRole("button", { name: copy("en", "editImageNamed", { name }), exact: true }).tap();
     const editor = page.getByRole("dialog", { name: copy("en", "editDraftImage"), exact: true });
     const button = (name: string) => editor.getByRole("button", { name, exact: true });
@@ -95,6 +99,343 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
   } finally { await context.close(); }
 });
 
+test("screenshot markup wheel resizes a newly placed circle in one undo step while keeping receipt scroll, Pan, modifiers and Eraser intact", async () => {
+  const { context, page, errors, uploads } = await open("customer", "en");
+  try {
+    const labels = markupLabels("en");
+    const name = "wheel-receipt.png";
+    await attachLongReceipt(page, name);
+    await page.getByRole("button", { name: copy("en", "editImageNamed", { name }), exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: copy("en", "editDraftImage"), exact: true });
+    const control = (label: string) => dialog.getByRole("button", { name: label, exact: true });
+    const surface = dialog.getByRole("application", { name: labels.canvasLabel });
+    const viewport = surface.locator("../..");
+    const slider = dialog.getByRole("slider", { name: labels.circleSize, exact: true });
+    const readCircle = () => surface.locator("ellipse").first().evaluate(el => ({
+      cx: Number(el.getAttribute("cx")),
+      cy: Number(el.getAttribute("cy")),
+      width: Math.round(Number(el.getAttribute("rx")) * 2),
+      height: Math.round(Number(el.getAttribute("ry")) * 2),
+    }));
+    const waitForWidth = (value: number, direction: "larger" | "smaller") =>
+      page.waitForFunction(({ value, direction }) => {
+        const mark = document.querySelector('[role="application"] ellipse');
+        const width = Number(mark?.getAttribute("rx")) * 2;
+        return mark && (direction === "larger" ? width > value : width < value);
+      }, { value, direction });
+    const screenPoint = (sourceX: number, sourceY: number) => surface.evaluate((el, pt) => {
+      const rect = el.getBoundingClientRect();
+      const [, , W, H] = (el.getAttribute("viewBox") ?? "0 0 1 1").split(" ").map(Number);
+      return { x: rect.left + (pt.x / W) * rect.width, y: rect.top + (pt.y / H) * rect.height };
+    }, { x: sourceX, y: sourceY });
+
+    await control(labels.fitWidth).click();
+    await viewport.scrollIntoViewIfNeeded();
+    await viewport.evaluate(el => { el.scrollTop = 500; });
+    const visible = (await viewport.boundingBox())!;
+    assert.ok(await viewport.evaluate(el => el.scrollHeight > el.clientHeight * 3));
+
+    // Place a circle in the default Circle tool: it is immediately selected without an extra click.
+    assert.equal(await control(labels.circle).getAttribute("aria-pressed"), "true");
+    const placePoint = { x: visible.x + visible.width / 2, y: visible.y + visible.height * 0.6 };
+    await page.mouse.click(placePoint.x, placePoint.y);
+    assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
+    await dialog.getByText(labels.hintResizeCircle, { exact: true }).waitFor();
+    await slider.waitFor();
+    assert.equal(await control(labels.fineTune).getAttribute("aria-expanded"), "false");
+    assert.equal(await dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true }).count(), 0);
+    const initial = await readCircle();
+    assert.equal(Number(await slider.inputValue()), initial.width);
+    assert.equal(await slider.getAttribute("aria-valuetext"), labels.sizeValue(initial.width, initial.height));
+
+    // Wheel UP burst with the mouse stationary where the circle was placed (no extra click or move):
+    // grows proportionally around center in one undo unit.
+    const scrollBeforeWheel = await viewport.evaluate(el => el.scrollTop);
+    await page.mouse.wheel(0, -120);
+    await waitForWidth(initial.width, "larger");
+    await control(labels.undo).click();
+    assert.equal((await readCircle()).width, initial.width);
+    // Dispatch a single burst in the browser. A busy CI scheduler can pause between driver commands.
+    await surface.evaluate((el, point) => {
+      for (let i = 0; i < 4; i++) {
+        const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y, deltaY: -60 });
+        if (el.dispatchEvent(event)) throw new Error("Selected circle did not consume the resize gesture");
+      }
+    }, placePoint);
+    await waitForWidth(initial.width + 20, "larger");
+    const grown = await readCircle();
+    assert.ok(grown.width > initial.width + 20 && grown.height > initial.height + 10, `wheel up grew circle (${initial.width}x${initial.height} -> ${grown.width}x${grown.height})`);
+    assert.ok(Math.abs(grown.cx - initial.cx) <= 1 && Math.abs(grown.cy - initial.cy) <= 1, "wheel up preserved center");
+    assert.ok(Math.abs(grown.width / grown.height - initial.width / initial.height) < 0.05, "wheel up preserved aspect ratio");
+    assert.equal(await viewport.evaluate(el => el.scrollTop), scrollBeforeWheel, "wheel over selected circle did not scroll receipt");
+    assert.equal(Number(await slider.inputValue()), grown.width);
+    await dialog.getByRole("status").filter({ hasText: labels.resized(labels.markName("circle", 1), grown.width, grown.height) }).waitFor();
+
+    await control(labels.undo).click();
+    const afterUndo = await readCircle();
+    assert.deepEqual({ width: afterUndo.width, height: afterUndo.height }, { width: initial.width, height: initial.height });
+    await control(labels.redo).click();
+    const afterRedo = await readCircle();
+    assert.deepEqual({ width: afterRedo.width, height: afterRedo.height }, { width: grown.width, height: grown.height });
+
+    // Wheel DOWN burst shrinks the circle around the same center.
+    const grownCenter = await screenPoint(grown.cx, grown.cy);
+    await page.mouse.move(grownCenter.x, grownCenter.y);
+    await page.mouse.wheel(0, 120);
+    await waitForWidth(grown.width - 15, "smaller");
+    const shrunk = await readCircle();
+    assert.ok(shrunk.width < grown.width - 15 && shrunk.height < grown.height - 5, `wheel down shrank circle (${grown.width}x${grown.height} -> ${shrunk.width}x${shrunk.height})`);
+    assert.ok(Math.abs(shrunk.cx - initial.cx) <= 1 && Math.abs(shrunk.cy - initial.cy) <= 1, "wheel down preserved center");
+    await dialog.getByRole("status").filter({ hasText: labels.resized(labels.markName("circle", 1), shrunk.width, shrunk.height) }).waitFor();
+
+    // Modified (pinch/Ctrl/Meta/Alt/Shift) and horizontal wheel events pass through without preventDefault or resizing.
+    const shrunkCenter = await screenPoint(shrunk.cx, shrunk.cy);
+    for (const init of [
+      { deltaY: -120, ctrlKey: true },
+      { deltaY: -120, metaKey: true },
+      { deltaY: -120, altKey: true },
+      { deltaY: -120, shiftKey: true },
+      { deltaX: 120, deltaY: -20 },
+    ]) {
+      const notCanceled = await surface.evaluate((el, opts) =>
+        el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ...opts })), { ...init, clientX: shrunkCenter.x, clientY: shrunkCenter.y });
+      assert.equal(notCanceled, true, `modified/horizontal wheel not prevented: ${JSON.stringify(init)}`);
+    }
+    await page.mouse.move(shrunkCenter.x, shrunkCenter.y);
+    await page.mouse.wheel(120, -20);
+    assert.equal((await readCircle()).width, shrunk.width);
+    await page.waitForTimeout(300);
+
+    // Wheel outside the circle scrolls the receipt; continuing that burst over the circle still scrolls instead of resizing.
+    await viewport.scrollIntoViewIfNeeded();
+    const visibleForOutside = (await viewport.boundingBox())!;
+    const outside = { x: visibleForOutside.x + 16, y: visibleForOutside.y + 16 };
+    const scrollBeforeOutside = await viewport.evaluate(el => el.scrollTop);
+    await page.mouse.move(outside.x, outside.y);
+    await page.mouse.wheel(0, 120);
+    await page.waitForFunction(({ el, prev }) => el.scrollTop > prev + 40, { el: (await viewport.elementHandle())!, prev: scrollBeforeOutside });
+    const circleAfterOutsideScroll = await screenPoint(shrunk.cx, shrunk.cy);
+    await page.mouse.move(circleAfterOutsideScroll.x, circleAfterOutsideScroll.y);
+    await page.mouse.wheel(0, -100);
+    assert.equal((await readCircle()).width, shrunk.width, "momentum crossing circle from outside burst did not resize");
+    await page.waitForTimeout(300);
+
+    // One-click Pan mode leaves wheel scrolling over the circle intact.
+    await control(labels.pan).click();
+    assert.equal(await control(labels.pan).getAttribute("aria-pressed"), "true");
+    await viewport.scrollIntoViewIfNeeded();
+    const panCircleCenter = await screenPoint(shrunk.cx, shrunk.cy);
+    const scrollBeforePan = await viewport.evaluate(el => el.scrollTop);
+    await page.mouse.move(panCircleCenter.x, panCircleCenter.y);
+    await page.mouse.wheel(0, 120);
+    await page.waitForFunction(({ el, prev }) => el.scrollTop > prev + 40, { el: (await viewport.elementHandle())!, prev: scrollBeforePan });
+    assert.equal((await readCircle()).width, shrunk.width, "wheel over circle in Pan mode did not resize");
+    await page.waitForTimeout(300);
+
+    // Switch back to Select and exercise the Circle size slider (wheel over slider, drag undo grouping, buttons, keyboard).
+    await control(labels.select).click();
+    assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
+    await slider.scrollIntoViewIfNeeded();
+    const sliderBox = (await slider.boundingBox())!;
+    await page.mouse.move(sliderBox.x + sliderBox.width / 2, sliderBox.y + sliderBox.height / 2);
+    await page.mouse.wheel(0, -100);
+    await waitForWidth(shrunk.width, "larger");
+    const afterSliderWheel = await readCircle();
+    assert.ok(afterSliderWheel.width > shrunk.width, "wheel over Circle size control grew circle");
+    await dialog.getByRole("status").filter({ hasText: labels.resized(labels.markName("circle", 1), afterSliderWheel.width, afterSliderWheel.height) }).waitFor();
+
+    await control(labels.larger).click();
+    const afterLarger = await readCircle();
+    assert.ok(afterLarger.width > afterSliderWheel.width);
+    await control(labels.smaller).click();
+    const afterSmaller = await readCircle();
+    assert.ok(afterSmaller.width < afterLarger.width);
+
+    // Slider drag across multiple values groups into one undo unit.
+    const preDragWidth = afterSmaller.width;
+    const minVal = Number(await slider.getAttribute("min"));
+    const maxVal = Number(await slider.getAttribute("max"));
+    const frac = (preDragWidth - minVal) / Math.max(1, maxVal - minVal);
+    const dragStart = frac < 0.5 ? 0.6 : 0.4;
+    const dragMid = frac < 0.5 ? 0.72 : 0.28;
+    const dragEnd = frac < 0.5 ? 0.85 : 0.15;
+    const dragBox = (await slider.boundingBox())!;
+    await page.mouse.move(dragBox.x + dragBox.width * dragStart, dragBox.y + dragBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dragBox.x + dragBox.width * dragMid, dragBox.y + dragBox.height / 2, { steps: 3 });
+    await page.mouse.move(dragBox.x + dragBox.width * dragEnd, dragBox.y + dragBox.height / 2, { steps: 3 });
+    await page.mouse.up();
+    const afterDrag = await readCircle();
+    assert.notEqual(afterDrag.width, preDragWidth);
+    await control(labels.undo).click();
+    assert.equal((await readCircle()).width, preDragWidth, "one Undo reversed multi-step slider drag");
+
+    await slider.focus();
+    await slider.press("PageUp");
+    const afterPageUp = await readCircle();
+    assert.ok(afterPageUp.width > preDragWidth);
+
+    // Fine-tune disclosure exposes exact dimensions and independent width editing.
+    const fineTune = control(labels.fineTune);
+    await fineTune.click();
+    assert.equal(await fineTune.getAttribute("aria-expanded"), "true");
+    const widthInput = dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true });
+    const heightInput = dialog.getByRole("spinbutton", { name: `${labels.height} (px)`, exact: true });
+    assert.equal(Number(await widthInput.inputValue()), afterPageUp.width);
+    assert.equal(Number(await heightInput.inputValue()), afterPageUp.height);
+    await widthInput.fill(String(afterPageUp.width + 12));
+    await widthInput.press("Enter");
+    assert.equal(Number(await widthInput.inputValue()), afterPageUp.width + 12);
+    assert.equal(Number(await heightInput.inputValue()), afterPageUp.height);
+    await dialog.getByRole("group", { name: labels.outline, exact: true }).waitFor();
+
+    // Mask hides Circle size slider; Eraser ignores wheel resize, erases circle, and Undo restores it.
+    await control(labels.mask).click();
+    await viewport.evaluate((el, top) => { el.scrollTop = top; }, scrollBeforeWheel);
+    await viewport.scrollIntoViewIfNeeded();
+    const refreshedVisible = (await viewport.boundingBox())!;
+    await page.mouse.click(refreshedVisible.x + 40, refreshedVisible.y + 40);
+    await page.mouse.click(refreshedVisible.x + 140, refreshedVisible.y + 90);
+    assert.equal(await slider.count(), 0, "Circle size slider is hidden when a mask is selected");
+
+    await control(labels.eraser).click();
+    assert.equal(await control(labels.eraser).getAttribute("aria-pressed"), "true");
+    await viewport.evaluate((el, top) => { el.scrollTop = top; }, scrollBeforeWheel);
+    await viewport.scrollIntoViewIfNeeded();
+    const beforeErase = await readCircle();
+    const scrollBeforeEraseWheel = await viewport.evaluate(el => el.scrollTop);
+    const eraseWheelPoint = await screenPoint(beforeErase.cx, beforeErase.cy);
+    await page.mouse.move(eraseWheelPoint.x, eraseWheelPoint.y);
+    await page.mouse.wheel(0, -100);
+    await page.waitForFunction(({ el, prev }) => el.scrollTop < prev - 40, { el: (await viewport.elementHandle())!, prev: scrollBeforeEraseWheel });
+    assert.equal((await readCircle()).width, beforeErase.width, "wheel in Eraser mode did not resize circle");
+    await page.waitForTimeout(300);
+    const eraseClickPoint = await screenPoint(beforeErase.cx, beforeErase.cy);
+    await page.mouse.click(eraseClickPoint.x, eraseClickPoint.y);
+    assert.equal(await surface.locator("ellipse").count(), 0, "Eraser removed the circle");
+    await control(labels.undo).click();
+    assert.equal(await surface.locator("ellipse").count(), 2, "Undo restored the erased circle");
+
+    // Immediate Review after a wheel burst flushes and exports the resized circle without waiting for quiet.
+    await viewport.scrollIntoViewIfNeeded();
+    const restored = await readCircle();
+    const circleStroke = await surface.locator("ellipse").nth(1).evaluate(el => Number(el.getAttribute("stroke-width")));
+    const restoredCenter = await screenPoint(restored.cx, restored.cy);
+    await page.mouse.move(restoredCenter.x, restoredCenter.y);
+    for (let i = 0; i < 2; i++) await page.mouse.wheel(0, -100);
+    await waitForWidth(restored.width + 40, "larger");
+    const flushed = await readCircle();
+    assert.ok(flushed.width > restored.width + 40);
+    await control(labels.review).click();
+    const preview = dialog.getByRole("img", { name: labels.reviewTitle });
+    await preview.waitFor();
+    const redExtent = await preview.evaluate(async element => {
+      const img = element as HTMLImageElement;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, c.width, c.height).data;
+      let count = 0, minX = c.width, maxX = -1;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 140 && data[i + 1] < 100 && data[i + 2] < 100) {
+          count++;
+          const x = (i / 4) % c.width;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+      return { count, spanX: maxX >= minX ? maxX - minX + 1 : 0, naturalWidth: c.width };
+    });
+    const scaleX = redExtent.naturalWidth / 1080;
+    const expectedWidth = flushed.width * scaleX;
+    const tolerance = Math.max(6, circleStroke * scaleX + 6);
+    assert.ok(redExtent.count > 50, `reviewed image contains exported circle pixels (${redExtent.count})`);
+    assert.ok(
+      Math.abs(redExtent.spanX - expectedWidth) <= tolerance,
+      `exported red span ${redExtent.spanX} px matches resized circle ${expectedWidth.toFixed(1)} px (±${tolerance.toFixed(1)} px)`,
+    );
+    assert.ok(
+      redExtent.spanX > restored.width * scaleX + 6,
+      `exported red span ${redExtent.spanX} px exceeds pre-burst width ${(restored.width * scaleX).toFixed(1)} px`,
+    );
+    assert.equal(uploads(), 0);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("narrow touch screenshot markup keeps one-tap modes, Circle size slider and Fine-tune within 320 px", async () => {
+  const { context, page, errors, uploads } = await openWith(await browsers.get(), "customer", "en", undefined, {
+    viewport: { width: 320, height: 680 }, hasTouch: true, isMobile: true,
+  });
+  try {
+    const labels = markupLabels("en");
+    await files(page);
+    await page.getByRole("button", { name: copy("en", "editImageNamed", { name: "draft.png" }), exact: true }).tap();
+    const dialog = page.getByRole("dialog", { name: copy("en", "editDraftImage"), exact: true });
+    const control = (label: string) => dialog.getByRole("button", { name: label, exact: true });
+    const surface = dialog.getByRole("application", { name: labels.canvasLabel });
+    const assertNoOverflow = async (stage: string) => {
+      const overflow = await dialog.evaluate(el => ({
+        doc: document.documentElement.scrollWidth - window.innerWidth,
+        dialog: el.scrollWidth - el.clientWidth,
+      }));
+      assert.ok(overflow.doc <= 0, `${stage}: document overflow ${overflow.doc}`);
+      assert.ok(overflow.dialog <= 0, `${stage}: dialog overflow ${overflow.dialog}`);
+    };
+
+    await surface.waitFor();
+    await assertNoOverflow("initial 320px editor");
+    for (const label of [labels.select, labels.pan, labels.circle, labels.crop, labels.mask, labels.eraser]) {
+      const box = await control(label).boundingBox();
+      assert.ok(box && box.height >= 44, `${label} has a 44 px touch target height`);
+    }
+    const circleBoxBefore = (await control(labels.circle).boundingBox())!;
+    await control(labels.pan).tap();
+    assert.equal(await control(labels.pan).getAttribute("aria-pressed"), "true");
+    const circleBoxAfterPan = (await control(labels.circle).boundingBox())!;
+    assert.ok(Math.abs(circleBoxAfterPan.x - circleBoxBefore.x) <= 1 && Math.abs(circleBoxAfterPan.y - circleBoxBefore.y) <= 1, "mode switch kept toolbar buttons stationary");
+    await control(labels.circle).tap();
+    assert.equal(await control(labels.circle).getAttribute("aria-pressed"), "true");
+
+    const surfaceBox = (await surface.boundingBox())!;
+    await surface.tap({ position: { x: surfaceBox.width * 0.5, y: surfaceBox.height * 0.5 } });
+    assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
+    const slider = dialog.getByRole("slider", { name: labels.circleSize, exact: true });
+    await slider.waitFor();
+    assert.equal(await control(labels.fineTune).getAttribute("aria-expanded"), "false");
+    await assertNoOverflow("selected circle at 320px");
+    await dialog.getByText(labels.hintTouchSize, { exact: true }).waitFor();
+
+    for (const label of [labels.smaller, labels.larger]) {
+      const box = await control(label).boundingBox();
+      assert.ok(box && box.width >= 44 && box.height >= 44, `${label} has a 44 px touch target`);
+    }
+    const beforeSize = Number(await slider.inputValue());
+    await control(labels.larger).tap();
+    const largerSize = Number(await slider.inputValue());
+    assert.ok(largerSize > beforeSize);
+    await control(labels.smaller).tap();
+    assert.ok(Number(await slider.inputValue()) < largerSize);
+
+    await control(labels.fineTune).tap();
+    assert.equal(await control(labels.fineTune).getAttribute("aria-expanded"), "true");
+    await dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true }).waitFor();
+    await dialog.getByRole("group", { name: labels.outline, exact: true }).waitFor();
+    await assertNoOverflow("expanded fine-tune");
+
+    await control(labels.eraser).tap();
+    const boxNow = (await surface.boundingBox())!;
+    await surface.tap({ position: { x: boxNow.width * 0.5, y: boxNow.height * 0.5 } });
+    assert.equal(await surface.locator("ellipse").count(), 0);
+    await control(labels.undo).tap();
+    assert.equal(await surface.locator("ellipse").count(), 2);
+    assert.equal(uploads(), 0);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
 for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
   test(`${role} ${language}: screenshot markup reviews and applies the exact edited attachment`, async () => {
     const device = role === "customer" ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : {};
@@ -127,8 +468,17 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       }
       await control(labels.circle).click();
       await place(0.72, 0.66);
+      assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
+      await dialog.getByRole("slider", { name: labels.circleSize, exact: true }).waitFor();
+      const fineTune = control(labels.fineTune);
+      assert.equal(await fineTune.getAttribute("aria-expanded"), "false");
       const width = dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true });
       const height = dialog.getByRole("spinbutton", { name: `${labels.height} (px)`, exact: true });
+      assert.equal(await width.count(), 0);
+      assert.equal(await dialog.getByRole("group", { name: labels.outline, exact: true }).count(), 0);
+      await fineTune.click();
+      assert.equal(await fineTune.getAttribute("aria-expanded"), "true");
+      await dialog.getByRole("group", { name: labels.outline, exact: true }).waitFor();
       const originalWidth = Number(await width.inputValue()), originalHeight = Number(await height.inputValue());
       await control(labels.fineSteps).click();
       await control(`${labels.width}: ${labels.wider}`).click();

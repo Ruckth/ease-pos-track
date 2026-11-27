@@ -4,6 +4,7 @@ import {
 import type { MarkupLabels } from "@/lib/markup-labels";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { ZoomControls } from "./image-markup-controls";
+import { useWheelResize } from "./image-markup-wheel";
 
 export type MarkupTool = "select" | "pan" | "circle" | "crop" | "mask" | "erase";
 export type MarkupPoint = { x: number; y: number };
@@ -164,7 +165,7 @@ type Gesture =
 
 export function ImageMarkupCanvas({
   image, marks, selectedId, tool, pins, corner, minSize, labels,
-  onSelect, onCommit, onPlace, onRect, onErase, onMoveSelected, onEscape,
+  onSelect, onCommit, onPlace, onRect, onErase, onMoveSelected, onEscape, onWheelResize, onWheelEnd,
 }: {
   image: ImageBitmap;
   marks: readonly MarkupMark[];
@@ -182,6 +183,10 @@ export function ImageMarkupCanvas({
   onErase: (mark: MarkupMark) => void;
   onMoveSelected: (dx: number, dy: number) => void;
   onEscape: () => void;
+  /** Wheel steps over the selected circle in Select mode (positive grows). */
+  onWheelResize: (steps: number) => void;
+  /** The wheel burst went quiet: one undo unit ends. */
+  onWheelEnd: () => void;
 }) {
   const W = image.width, H = image.height;
   const zoom = useMarkupZoom(W, H);
@@ -270,13 +275,25 @@ export function ImageMarkupCanvas({
     if (left !== el.scrollLeft || top !== el.scrollTop) el.scrollTo({ left, top });
   };
   const selectedMark = marks.find((m) => m.id === selectedId);
+  // Only the visible, topmost selected circle starts a resize burst; other bursts scroll the view.
+  const wheelOwner = useRef<number | null>(null);
+  const resizing = useWheelResize(svg, {
+    owns: (event) => {
+      const hit = tool === "select" && selected?.kind === "circle" ? hitMark(shown, pointAt(event), edgePad, false) : undefined;
+      wheelOwner.current = hit && hit.id === selectedId ? hit.id : null;
+      return wheelOwner.current !== null;
+    },
+    active: () => tool === "select" && !gesture.current && selectedId !== null && selectedId === wheelOwner.current,
+    step: onWheelResize,
+    end: onWheelEnd,
+  });
   const revealKey = selectedMark ? `${selectedMark.id}:${selectedMark.x},${selectedMark.y},${selectedMark.width},${selectedMark.height}` : "";
   const selectedMarkRef = useRef(selectedMark);
   selectedMarkRef.current = selectedMark;
   useEffect(() => {
     const m = selectedMarkRef.current;
-    if (m && !gesture.current) reveal.current(m);
-  }, [revealKey]);
+    if (m && !gesture.current && !resizing.current) reveal.current(m);
+  }, [revealKey, resizing]);
   useEffect(() => {
     if (cursor) reveal.current({ x: cursor.x, y: cursor.y, width: 0, height: 0 });
   }, [cursor]);

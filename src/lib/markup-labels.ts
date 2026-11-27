@@ -16,12 +16,14 @@ export type MarkupLabels = {
   tools: string; select: string; pan: string; hintPan: string;
   view: string; zoomIn: string; zoomOut: string; zoomLevel: string; fitImage: string; fitWidth: string; previewRegion: string;
   fineSteps: string; position: string; left: string; top: string; circle: string; crop: string; mask: string; eraser: string;
-  hintSelect: string; hintCircle: string; hintCrop: string; hintMask: string; hintErase: string; hintSecondCorner: string;
+  hintSelect: string; hintResizeCircle: string; hintTouchSize: string; hintCircle: string; hintCrop: string; hintMask: string; hintErase: string; hintSecondCorner: string;
   canvasLabel: string; keyboardHint: string;
   marks: string; chooseMark: string; markName: (kind: "circle" | "mask" | "crop", n: number) => string;
   resize: string; width: string; height: string; narrower: string; wider: string; shorter: string; taller: string;
   move: string; moveLeft: string; moveRight: string; moveUp: string; moveDown: string;
   outline: string; thin: string; medium: string; thick: string;
+  circleSize: string; smaller: string; larger: string; fineTune: string; sizeValue: (w: number, h: number) => string;
+  resized: (name: string, w: number, h: number) => string;
   removeSelected: string; resetCrop: string; undo: string; redo: string; cancel: string;
   review: string; reviewing: string; reviewTitle: string; reviewHint: string; backToEdit: string; apply: string; applying: string;
   outputMeta: (w: number, h: number, size: string, type: string) => string;
@@ -44,15 +46,16 @@ const en: MarkupLabels = {
     ? "The edited image is over 8 MB. Crop to a smaller area, then review again. Your edits are still here."
     : en.exportFailed,
   tools: "Editing tools", select: "Select", pan: "Pan", circle: "Circle", crop: "Crop", mask: "Hide details", eraser: "Eraser",
-  hintPan: "Drag to move the view. With any tool, drag with two fingers to move the view.",
+  hintPan: "Drag to move the view. Two fingers move it with any tool.",
   view: "View", zoomIn: "Zoom in", zoomOut: "Zoom out", zoomLevel: "Zoom level", fitImage: "Fit image", fitWidth: "Fit width",
   previewRegion: "Attachment preview. Swipe, scroll or use the arrow keys to move around.",
   fineSteps: "1 px steps", position: "Position", left: "Left", top: "Top",
-  hintSelect: "Tap a mark to select it. Drag a handle to resize it, or use the controls below.",
-  hintCircle: "Tap the area you want to point out to draw an oval.",
-  hintCrop: "Drag across the area to keep, or tap two opposite corners.",
-  hintMask: "Drag across private details, or tap two opposite corners. The covered pixels are removed from the attachment.",
-  hintErase: "Tap a circle or mask to erase it. For overlapping marks, choose one from the list.",
+  hintSelect: "Tap a mark to select it. Drag a handle to resize it.",
+  hintResizeCircle: "Scroll over the circle to resize.", hintTouchSize: "Drag the slider or tap + or −.",
+  hintCircle: "Tap what you want to circle.",
+  hintCrop: "Drag over the area to keep, or tap two corners.",
+  hintMask: "Drag over private details, or tap two corners. Covered pixels are removed.",
+  hintErase: "Tap a circle or mask to erase it.",
   hintSecondCorner: "Now choose the opposite corner.",
   canvasLabel: "Image editing area",
   keyboardHint: "Use the arrow keys to move the cursor or the selected mark. Hold Shift for larger steps or Alt for single pixels. Press + or - to zoom and 0 to fit. Press Enter to place, Delete to remove, Escape to cancel.",
@@ -61,6 +64,8 @@ const en: MarkupLabels = {
   resize: "Resize", width: "Width", height: "Height", narrower: "Narrower", wider: "Wider", shorter: "Shorter", taller: "Taller",
   move: "Move", moveLeft: "Move left", moveRight: "Move right", moveUp: "Move up", moveDown: "Move down",
   outline: "Outline", thin: "Thin", medium: "Medium", thick: "Thick",
+  circleSize: "Circle size", smaller: "Smaller", larger: "Larger", fineTune: "Fine-tune",
+  sizeValue: (w, h) => `${w} × ${h} px`, resized: (name, w, h) => `${name}: ${w} × ${h} px.`,
   removeSelected: "Remove selected mark", resetCrop: "Reset crop", undo: "Undo", redo: "Redo", cancel: "Cancel",
   review: "Review", reviewing: "Preparing…", reviewTitle: "Review the attachment",
   reviewHint: "This is the exact image that will replace the attachment. Hidden details can't be recovered after you apply.",
@@ -88,15 +93,16 @@ const th: MarkupLabels = {
     ? "รูปภาพที่แก้ไขแล้วใหญ่เกิน 8 MB ครอบตัดให้เล็กลงแล้วตรวจทานอีกครั้ง การแก้ไขของคุณยังอยู่"
     : th.exportFailed,
   tools: "เครื่องมือแก้ไข", select: "เลือก", pan: "เลื่อนมุมมอง", circle: "วงกลม", crop: "ครอบตัด", mask: "ปิดบังข้อมูล", eraser: "ยางลบ",
-  hintPan: "ลากเพื่อเลื่อนมุมมอง ใช้สองนิ้วลากเพื่อเลื่อนมุมมองได้กับทุกเครื่องมือ",
+  hintPan: "ลากเพื่อเลื่อนมุมมอง ใช้สองนิ้วได้กับทุกเครื่องมือ",
   view: "มุมมอง", zoomIn: "ซูมเข้า", zoomOut: "ซูมออก", zoomLevel: "ระดับการซูม", fitImage: "พอดีกรอบ", fitWidth: "พอดีความกว้าง",
   previewRegion: "ตัวอย่างไฟล์แนบ ปัด เลื่อน หรือใช้ปุ่มลูกศรเพื่อดูส่วนอื่นของรูป",
   fineSteps: "ทีละ 1 พิกเซล", position: "ตำแหน่ง", left: "ซ้าย", top: "บน",
-  hintSelect: "แตะเครื่องหมายเพื่อเลือก ลากจุดจับเพื่อปรับขนาด หรือใช้ปุ่มด้านล่าง",
-  hintCircle: "แตะจุดที่ต้องการชี้เพื่อวาดวงรี",
-  hintCrop: "ลากคลุมส่วนที่ต้องการเก็บไว้ หรือแตะมุมตรงข้ามสองมุม",
-  hintMask: "ลากคลุมข้อมูลส่วนตัว หรือแตะมุมตรงข้ามสองมุม พิกเซลที่ถูกปิดจะถูกลบออกจากไฟล์แนบ",
-  hintErase: "แตะวงกลมหรือแถบปิดบังเพื่อลบ หากเครื่องหมายซ้อนกัน ให้เลือกจากรายการ",
+  hintSelect: "แตะเครื่องหมายเพื่อเลือก ลากจุดจับเพื่อปรับขนาด",
+  hintResizeCircle: "เลื่อนลูกกลิ้งบนวงกลมเพื่อปรับขนาด", hintTouchSize: "เลื่อนแถบปรับขนาด หรือแตะ + หรือ −",
+  hintCircle: "แตะจุดที่ต้องการวงไว้",
+  hintCrop: "ลากคลุมส่วนที่ต้องการเก็บ หรือแตะสองมุม",
+  hintMask: "ลากคลุมข้อมูลส่วนตัว หรือแตะสองมุม พิกเซลที่ถูกปิดจะถูกลบออก",
+  hintErase: "แตะวงกลมหรือแถบปิดบังเพื่อลบ",
   hintSecondCorner: "เลือกมุมตรงข้าม",
   canvasLabel: "พื้นที่แก้ไขรูปภาพ",
   keyboardHint: "ใช้ปุ่มลูกศรเพื่อเลื่อนเคอร์เซอร์หรือเครื่องหมายที่เลือก กด Shift ค้างไว้เพื่อเลื่อนทีละมาก หรือ Alt เพื่อเลื่อนทีละพิกเซล กด + หรือ - เพื่อซูม และ 0 เพื่อพอดีกรอบ กด Enter เพื่อวาง Delete เพื่อลบ Escape เพื่อยกเลิก",
@@ -105,6 +111,8 @@ const th: MarkupLabels = {
   resize: "ปรับขนาด", width: "ความกว้าง", height: "ความสูง", narrower: "แคบลง", wider: "กว้างขึ้น", shorter: "เตี้ยลง", taller: "สูงขึ้น",
   move: "ย้าย", moveLeft: "ย้ายไปซ้าย", moveRight: "ย้ายไปขวา", moveUp: "ย้ายขึ้น", moveDown: "ย้ายลง",
   outline: "เส้นขอบ", thin: "บาง", medium: "กลาง", thick: "หนา",
+  circleSize: "ขนาดวงกลม", smaller: "เล็กลง", larger: "ใหญ่ขึ้น", fineTune: "ปรับละเอียด",
+  sizeValue: (w, h) => `${w} × ${h} พิกเซล`, resized: (name, w, h) => `${name}: ${w} × ${h} พิกเซล`,
   removeSelected: "ลบเครื่องหมายที่เลือก", resetCrop: "รีเซ็ตการครอบตัด", undo: "เลิกทำ", redo: "ทำซ้ำ", cancel: "ยกเลิก",
   review: "ตรวจทาน", reviewing: "กำลังเตรียม…", reviewTitle: "ตรวจทานไฟล์แนบ",
   reviewHint: "นี่คือรูปภาพที่จะใช้แทนไฟล์แนบเดิม ข้อมูลที่ปิดบังจะกู้คืนไม่ได้หลังจากใช้การแก้ไข",
