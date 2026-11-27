@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { formatClock, type Annotation } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Move, Pencil, Trash2, X } from "lucide-react";
+import { Loader2, MessageCircle, Move, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function PinMarker({
@@ -57,7 +57,7 @@ export function DraftPin({ x, y }: { x: number; y: number }) {
 
 export function PinDetails({
   annotation, readOnly, editText, setEditText, onCancelEdit, onClose, onUpdate, onMove, onDelete, onDeleted, onBusyChange,
-  confirmDelete, onConfirmDeleteChange,
+  confirmDelete, onConfirmDeleteChange, onQuote,
 }: {
   annotation: Annotation;
   readOnly: boolean;
@@ -72,6 +72,7 @@ export function PinDetails({
   onBusyChange: (busy: boolean) => void;
   confirmDelete: boolean;
   onConfirmDeleteChange: (open: boolean) => void;
+  onQuote?: (annotation: Annotation) => void;
 }) {
   const { t } = useI18n();
   const [pending, setPending] = useState(false);
@@ -126,7 +127,17 @@ export function PinDetails({
             </Button>
           </div>
         </div>
-      ) : <p className="whitespace-pre-wrap break-words pb-2 text-sm leading-5">{annotation.text}</p>}
+      ) : <>
+        <p className="whitespace-pre-wrap break-words pb-2 text-sm leading-5">{annotation.text}</p>
+        {onQuote && <div className="pb-2">
+          <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => onQuote(annotation)}>
+            <MessageCircle aria-hidden="true" />
+            {annotation.kind === "time"
+              ? t("threadQuoteMoment", { time: formatClock(annotation.time ?? 0) })
+              : t("threadQuoteNote")}
+          </Button>
+        </div>}
+      </>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <AlertDialog open={confirmDelete} onOpenChange={onConfirmDeleteChange}
         title={t("deleteComment", { label: annotation.label })}

@@ -3,13 +3,21 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNod
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import type { Id } from "@convex/_generated/dataModel";
-import type { MediaItem, Ticket } from "@/lib/types";
+import { formatClock, type MediaItem, type Ticket } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { MessageEvidenceInput } from "../../../shared/ticket-evidence";
 import { TicketReplyForm } from "./ticket-reply-form";
-import { useConversation, type TicketMessage as Message } from "./adapters/conversation";
-import { DisposableTicketDraft } from "./draft";
+import { useConversation, useOpenReplyRequest, type TicketMessage as Message } from "./adapters/conversation";
+import { useTicketReplyDraft, type QuotedTicketMessage } from "./reply-drafts";
 
-type Props = { ticket: Ticket; onOpenMedia: (key: string) => void } & (
+export type AvailableMessageEvidence = Extract<NonNullable<Message["evidence"]>, { available: true }>;
+
+type Props = {
+  ticket: Ticket;
+  onOpenMedia: (key: string) => void;
+  onOpenEvidence: (evidence: AvailableMessageEvidence) => void;
+  evidenceRequest?: { item: MessageEvidenceInput; nonce: number } | null;
+} & (
   { role: "staff"; children?: never } | { role: "customer"; children: ReactNode }
 );
 
@@ -26,6 +34,11 @@ function ConversationDisclosure(props: Extract<Props, { role: "staff" }>) {
   const [open, setOpen] = useState(props.ticket.status === "waiting" || customerReplied);
   const [visited, setVisited] = useState(open);
   const id = useId();
+  useEffect(() => {
+    if (!props.evidenceRequest) return;
+    setVisited(true);
+    setOpen(true);
+  }, [props.evidenceRequest]);
   return <section className="aurora-inset rounded-xl px-3">
     <Button type="button" variant="ghost" className="w-full justify-start px-0" aria-controls={id}
       aria-expanded={open} onClick={() => { setVisited(true); setOpen(!open); }}>
@@ -38,22 +51,15 @@ function ConversationDisclosure(props: Extract<Props, { role: "staff" }>) {
   </section>;
 }
 
-function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
+function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidence, evidenceRequest }: Props) {
   const { t, formatDate } = useI18n();
   const id = useId();
   const textarea = useRef<HTMLTextAreaElement>(null);
   const list = useRef<HTMLOListElement>(null);
   const { messages, send } = useConversation(ticket._id, true);
-  const [replyTo, setReplyTo] = useState<Message>();
-  const [owner] = useState(() => new DisposableTicketDraft(ticket.projectId));
-  const lifetime = useRef({ generation: 0 });
-  useEffect(() => {
-    const active = lifetime.current;
-    const generation = ++active.generation;
-    return () => queueMicrotask(() => {
-      if (generation === active.generation) owner.dispose();
-    });
-  }, [owner]);
+  const replyDraft = useTicketReplyDraft(ticket._id, ticket.projectId);
+  const { owner } = replyDraft;
+  const handledEvidence = useRef(0);
   const draft = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const loading = messages.status === "LoadingFirstPage";
   const writable = ticket.status !== "done";
@@ -61,9 +67,25 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
   const mediaFromReplies = new Set(ticket.replyMediaKeys ?? []);
   const openingMedia = role === "customer" ? ticket.media.filter(file => !mediaFromReplies.has(file.key)) : [];
   const visibleIds = new Set(messages.results.map(message => message._id));
+  const needsReply = role === "customer" && ticket.status === "waiting" && ticket.latestReply?.awaitingCustomer === true;
+  const questionInPage = needsReply ? messages.results.find(message => message.role === "staff" && message.requestReply) : undefined;
+  const needsLookup = needsReply && !loading && !questionInPage;
+  const openRequest = useOpenReplyRequest(ticket._id, needsLookup);
+  const question = questionInPage ?? openRequest;
 
-  function focusReply(message: Message) {
-    setReplyTo(message);
+  useEffect(() => {
+    if (loading || !evidenceRequest || evidenceRequest.nonce === handledEvidence.current) return;
+    handledEvidence.current = evidenceRequest.nonce;
+    if (!canQuote) return;
+    replyDraft.update({ evidence: evidenceRequest.item });
+    requestAnimationFrame(() => {
+      textarea.current?.scrollIntoView({ block: "nearest" });
+      textarea.current?.focus();
+    });
+  }, [evidenceRequest, canQuote, loading, replyDraft]);
+
+  function focusReply(message: QuotedTicketMessage) {
+    replyDraft.update({ replyTo: message });
     textarea.current?.focus();
   }
 
@@ -73,6 +95,16 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
   }
 
   return <div className="min-w-0 space-y-4">
+    {needsReply && <aside aria-label={t("feedNeedsReply")} className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4">
+      <div className="min-w-0 flex-1 basis-52 space-y-1">
+        <p className="text-sm font-semibold">{t("feedNeedsReply")}</p>
+        {question?.body && <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">{question.body}</p>}
+      </div>
+      <Button type="button" className="min-h-11" disabled={loading || !canQuote || (needsLookup && openRequest === undefined)} onClick={() => {
+        if (question) focusReply(question);
+        else textarea.current?.focus();
+      }}>{t("threadAnswerQuestion")}</Button>
+    </aside>}
     {role === "customer" && <article className="aurora-inset min-w-0 space-y-3 rounded-xl p-3 sm:p-4">
       <PostAuthor label={t(ticket.origin === "staff" ? "threadTeam" : "threadYou")} role={ticket.origin} time={formatDate(ticket.createdAt)} />
       {children}
@@ -92,12 +124,12 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
             {[...messages.results].reverse().map(message => <ThreadMessage key={message._id}
               message={message} viewerRole={role} onReply={canQuote ? () => focusReply(message) : undefined}
               onJump={message.inReplyTo && visibleIds.has(message.inReplyTo) ? () => focusMessage(message.inReplyTo!) : undefined}
-              onOpenMedia={onOpenMedia} />)}
+              onOpenMedia={onOpenMedia} onOpenEvidence={onOpenEvidence} />)}
           </ol>
           : <p className="text-sm text-muted-foreground">{t("noTicketMessages")}</p>}
       </>}
-      {!loading && <TicketReplyForm owner={owner} state={draft} ticket={ticket} role={role} writable={writable}
-        replyTo={replyTo} clearReply={() => setReplyTo(undefined)} textarea={textarea} send={send} />}
+      {!loading && <TicketReplyForm draft={replyDraft} state={draft} ticket={ticket} role={role} writable={writable}
+        textarea={textarea} send={send} />}
     </section>
   </div>;
 }
@@ -113,9 +145,9 @@ function PostAuthor({ label, role, time }: { label: string; role: Message["role"
   </div>;
 }
 
-function ThreadMessage({ message, viewerRole, onReply, onJump, onOpenMedia }: {
+function ThreadMessage({ message, viewerRole, onReply, onJump, onOpenMedia, onOpenEvidence }: {
   message: Message; viewerRole: Message["role"]; onReply?: () => void;
-  onJump?: () => void; onOpenMedia: (key: string) => void;
+  onJump?: () => void; onOpenMedia: (key: string) => void; onOpenEvidence: (evidence: AvailableMessageEvidence) => void;
 }) {
   const { t, formatDate } = useI18n();
   const author = (role: Message["role"]) => t(role === viewerRole && role === "customer" ? "threadYou" : role === "staff" ? "threadTeam" : "threadCustomer");
@@ -133,6 +165,7 @@ function ThreadMessage({ message, viewerRole, onReply, onJump, onOpenMedia }: {
           <span className="line-clamp-2">{quoteText}</span>
         </button>
         : <p className="line-clamp-2 rounded-md border-l-2 border-primary/40 bg-muted/60 px-2 py-1 text-xs text-muted-foreground">{quoteText}</p>)}
+      {message.evidence && <MessageEvidence evidence={message.evidence} onOpen={onOpenEvidence} />}
       {message.body && <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>}
       {message.link && <MessageLink link={message.link} onQuote={onReply} />}
       {message.media.length > 0 && <ul className="flex flex-wrap gap-2" aria-label={t("detailMedia", { count: message.media.length })}>
@@ -171,6 +204,46 @@ function MessageLink({ link, onQuote }: { link: NonNullable<Message["link"]>; on
       {hosted && link.url && onQuote && <Button type="button" variant="ghost" size="sm" onClick={onQuote} aria-label={t("threadQuoteLinkNamed", { name: title })}>{t("threadQuoteLink")}</Button>}
     </div>
   </div>;
+}
+
+function MessageEvidence({ evidence, onOpen }: {
+  evidence: NonNullable<Message["evidence"]>;
+  onOpen: (evidence: AvailableMessageEvidence) => void;
+}) {
+  const { t } = useI18n();
+  if (!evidence.available) {
+    return <p className="rounded-md border-l-2 border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+      {t(evidence.kind === "annotation" ? "threadQuotedNoteUnavailable" : "threadQuotedFileUnavailable")}
+    </p>;
+  }
+  if (evidence.kind === "media") {
+    return <button type="button" onClick={() => onOpen(evidence)}
+      className="block w-full rounded-r-md border-l-2 border-primary bg-primary/10 px-2.5 py-1.5 text-start text-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <span className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
+        {evidence.mediaType.startsWith("video/")
+          ? <PlayCircle className="size-3.5 shrink-0 text-primary" aria-hidden />
+          : <Paperclip className="size-3.5 shrink-0 text-primary" aria-hidden />}
+        <span className="min-w-0 font-mono [overflow-wrap:anywhere]">{evidence.mediaName}</span>
+        <span className="ml-auto shrink-0 font-semibold text-primary">{t("threadShowSource")}<span aria-hidden> →</span></span>
+      </span>
+    </button>;
+  }
+  const isMoment = evidence.annotationKind === "time";
+  const time = isMoment ? formatClock(evidence.time ?? 0) : "";
+  const heading = isMoment
+    ? t("threadAboutMoment", { file: evidence.mediaName, time })
+    : t("threadAboutNote", { file: evidence.mediaName, label: evidence.label });
+  return <button type="button" onClick={() => onOpen(evidence)}
+    className="block w-full space-y-1 rounded-r-md border-l-2 border-primary bg-primary/10 px-2.5 py-1.5 text-start text-xs transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <span className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
+      {isMoment
+        ? <span className="inline-flex shrink-0 items-center rounded bg-primary px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary-foreground">{time}</span>
+        : <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">{evidence.label}</span>}
+      <span className="min-w-0 [overflow-wrap:anywhere]">{heading}</span>
+      <span className="ml-auto shrink-0 font-semibold text-primary">{t("threadShowSource")}<span aria-hidden> →</span></span>
+    </span>
+    <span className="line-clamp-2 block text-muted-foreground">{evidence.text}</span>
+  </button>;
 }
 
 function ReplyMedia({ file, open }: { file: MediaItem; open: () => void }) {

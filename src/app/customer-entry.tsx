@@ -1,5 +1,6 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { CustomerPortal } from "@/features/tickets/customer-portal";
+import { TicketReplyDraftProvider } from "@/features/tickets/reply-drafts";
 import { loginPathForRole } from "@/lib/app-routes";
 import { useLeave, useSessionExpiry } from "./auth-store";
 import { SessionBoundary } from "./session-boundary";
@@ -15,7 +16,9 @@ export function CustomerEntry() {
   const onLogout = () => leave(loginPathForRole("customer"));
   return (
     <SessionBoundary key={viewer.customerId} onExpired={onExpired}>
-      <CustomerPortal viewer={viewer} onLogout={onLogout} />
+      <TicketReplyDraftProvider>
+        <CustomerPortal viewer={viewer} onLogout={onLogout} />
+      </TicketReplyDraftProvider>
     </SessionBoundary>
   );
 }

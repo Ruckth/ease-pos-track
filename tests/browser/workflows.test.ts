@@ -1309,9 +1309,11 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await files(customer.page, "reply-photo.png", picker);
     const removePhoto = customer.page.getByRole("button", { name: copy(language, "removeFile", { name: "reply-photo.png" }), exact: true });
     await removePhoto.waitFor();
-    await removePhoto.click();
-
     await replyBox.fill("It also happens on our second register.");
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.click();
+    assert.equal(await replyBox.inputValue(), "It also happens on our second register.");
+    await removePhoto.click();
     await customerSend.click();
     await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
 
@@ -1355,15 +1357,32 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await staff.page.getByText(copy(language, "questionSent"), { exact: true }).waitFor();
     assert.equal((await convex.query(api.tickets.getTicket, { token: staff.token, id }))?.status, "waiting");
 
-    await customer.page.getByText(question, { exact: true }).waitFor();
+    await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor();
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
     await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).waitFor();
     assert.ok((await customerRow.locator("[data-ticket-excerpt]").innerText()).includes(question));
+    if (language === "en") {
+      for (let index = 0; index < 12; index++) {
+        await convex.mutation(api.conversations.send, {
+          token: staff.token, id, body: `Staff update ${index + 1}`, requestId: crypto.randomUUID(), expectedVersion: 0, requestReply: false,
+        });
+      }
+    }
     await customerRow.click();
+    if (language === "en") {
+      await customer.page.locator("[data-message-id]").getByText("Staff update 12", { exact: true }).waitFor();
+      await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor({ state: "hidden" });
+      await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).click();
+      await customer.page.getByText(copy(language, "threadQuoting", { quote: "details.html" }), { exact: true }).waitFor();
+      await customer.page.getByRole("button", { name: copy(language, "loadOlderMessages"), exact: true }).click();
+      await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor();
+    }
     const descriptionBox = await customer.page.getByRole("article").getByText(description, { exact: true }).boundingBox();
-    const questionBox = await customer.page.getByText(question, { exact: true }).boundingBox();
+    const questionBox = await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).boundingBox();
     const composerBox = await replyBox.boundingBox();
     assert.ok(questionBox && composerBox && descriptionBox && descriptionBox.y < questionBox.y && questionBox.y < composerBox.y);
+    await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).click();
+    assert.equal(await replyBox.evaluate(input => input === document.activeElement), true);
     const sharedPage = customer.page.getByRole("link", { name: copy(language, "openPageNamed", { name: "details.html" }), exact: true });
     assert.equal(await sharedPage.getAttribute("href"), hostedUrl);
     if (language === "en") await expectAccessible(customer.page, "Customer Ticket thread");
@@ -1385,8 +1404,18 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await customer.page.getByRole("alert").filter({ hasText: copy(language, "threadInvalidLink") }).waitFor();
     await address.fill("https://example.com/device");
     await customer.page.getByRole("button", { name: copy(language, "threadAddLink"), exact: true }).click();
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.click();
+    assert.equal(await replyBox.inputValue(), reply);
+    await customer.page.getByText(copy(language, "threadQuoting", { quote: "details.html" }), { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "threadRemoveLink"), exact: true }).waitFor();
     await customerSend.click();
     await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).waitFor({ state: "hidden" });
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.getByText(copy(language, "customerQueueYouReplied"), { exact: true }).waitFor();
+    assert.equal(await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).count(), 0);
+    await customerRow.click();
     await staff.page.getByText(reply, { exact: true }).waitFor();
     await staff.page.getByText(copy(language, "threadCustomerReplied"), { exact: true }).first().waitFor();
     const external = staff.page.getByRole("link", { name: copy(language, "threadOpenLinkNamed", { name: "example.com" }), exact: true });
@@ -1398,6 +1427,9 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await staffReply.fill("Thanks. I can reproduce this now.");
     await staff.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).click();
     await customer.page.getByText("Thanks. I can reproduce this now.", { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.getByText(copy(language, "customerQueueYouReplied"), { exact: true }).waitFor();
+    await customerRow.click();
     await replyBox.fill("I can test another version.");
     await customerSend.click();
     await staff.page.getByText("I can test another version.", { exact: true }).waitFor();
@@ -1424,6 +1456,10 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
       await staff.page.getByRole("button", { name: copy(language, "threadOpenAttachment", { name: receipt.name }), exact: true }).waitFor();
     }
 
+    if (language === "en") {
+      await customer.page.getByRole("button", { name: copy(language, "loadOlderMessages"), exact: true }).click();
+      await sharedPage.waitFor();
+    }
     await convex.mutation(api.pages.revokeTicketPage, { token: staff.token, pageId: published._id });
     await customer.page.getByText(copy(language, "threadPageUnavailable"), { exact: true }).waitFor();
     assert.equal(await sharedPage.count(), 0);
@@ -1437,6 +1473,155 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     assert.deepEqual(customer.errors, []);
     assert.deepEqual(staff.errors, []);
   } finally { await staff?.context.close(); await customer.context.close(); }
+});
+
+test("customer thread quotes exact files, notes and saved video moments via keyboard and viewer, and hides internal urgency", async () => {
+  const { readFileSync } = await import("node:fs");
+  const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2dIAAAAASUVORK5CYII=", "base64");
+  const webmBytes = readFileSync(path.resolve(import.meta.dirname, "pin-video.webm"));
+  const customer = await open("customer", "en", async context => {
+    await context.route("https://fixture.invalid/**", route => {
+      const url = route.request().url();
+      if (url.endsWith(".webm")) return route.fulfill({ status: 200, contentType: "video/webm", body: webmBytes });
+      return route.fulfill({ status: 200, contentType: "image/png", body: pngBytes });
+    });
+  });
+  const staffToken = seed.sessions[0];
+  const projectId = seed.projects.find(p => p.key === "POS")!.id;
+  const title = `Evidence quotes ${crypto.randomUUID()}`;
+  const photo = {
+    key: `fixture-ev-img-${crypto.randomUUID()}`,
+    name: "checkout-receipt.png",
+    size: pngBytes.length,
+    type: "image/png",
+    url: "https://fixture.invalid/checkout-receipt.png",
+  };
+  const video = {
+    key: `fixture-ev-vid-${crypto.randomUUID()}`,
+    name: "till-print.webm",
+    size: webmBytes.length,
+    type: "video/webm",
+    url: "https://fixture.invalid/till-print.webm",
+  };
+  try {
+    const intent = await convex.mutation(api.uploads.createUploadIntent, {
+      token: customer.token,
+      idempotencyKey: crypto.randomUUID(),
+      files: [photo, video].map(({ name, size, type }) => ({ name, size, type })),
+    });
+    for (const file of [photo, video]) {
+      await convex.mutation(api.uploads.recordUploadedFile, {
+        callbackToken: "local-only-callback-fixture",
+        intentId: intent.intentId,
+        secret: intent.secret,
+        file,
+      });
+    }
+    const id = await convex.mutation(api.tickets.createTicket, {
+      token: customer.token,
+      projectId,
+      title,
+      description: "Receipt total is short by 100.",
+      requestId: crypto.randomUUID(),
+      media: [photo, video],
+      annotations: [
+        { mediaIndex: 0, kind: "point", x: 0.7, y: 0.4, text: "MEMBER -100 printed twice" },
+        { mediaIndex: 1, kind: "time", x: 0.5, y: 0.5, time: 4, text: "Printer pauses before second line" },
+      ],
+      uploadIntentId: intent.intentId,
+      uploadIntentSecret: intent.secret,
+    });
+    const detail = await convex.query(api.tickets.getTicket, { token: customer.token, id });
+    assert.ok(detail);
+    const pointNote = detail.annotations.find(note => note.kind === "point")!;
+    const momentNote = detail.annotations.find(note => note.kind === "time")!;
+    // Staff updates internal urgency; customer history must not expose it.
+    await convex.mutation(api.tickets.updateUrgencyScore, {
+      token: staffToken, id, urgencyScore: 85, expectedVersion: detail.version,
+    });
+
+    await customer.page.goto(`${baseURL}/customer?project=POS&ticket=${id}`);
+    await customer.page.getByRole("heading", { name: title, exact: true }).waitFor();
+    const replyBox = customer.page.getByLabel(copy("en", "replyLabel"), { exact: true });
+    const sendButton = customer.page.getByRole("button", { name: copy("en", "sendReply"), exact: true });
+
+    // 1. Keyboard picker flow: Escape closes picker cleanly, selecting a note populates composer and returns focus.
+    const citeButton = customer.page.getByRole("button", { name: copy("en", "threadCiteEvidence"), exact: true });
+    await citeButton.click();
+    const selector = customer.page.getByRole("combobox", { name: copy("en", "threadCiteEvidence"), exact: true });
+    await selector.waitFor();
+    await selector.press("Escape");
+    await selector.waitFor({ state: "hidden" });
+    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+
+    await citeButton.click();
+    await selector.selectOption(`annotation:${pointNote.id}`);
+    await customer.page.getByText(copy("en", "threadAboutNote", { file: photo.name, label: pointNote.label }), { exact: true }).waitFor();
+    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.fill("Look at the duplicate discount line here.");
+    await customer.page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+    await customer.page.locator(`button[data-ticket-id="${id}"]`).click();
+    await customer.page.getByText(copy("en", "threadAboutNote", { file: photo.name, label: pointNote.label }), { exact: true }).waitFor();
+    assert.equal(await replyBox.inputValue(), "Look at the duplicate discount line here.");
+    await sendButton.click();
+    await customer.page.getByText("Look at the duplicate discount line here.", { exact: true }).waitFor();
+
+    // Clicking the sent note quote opens MediaViewer and focuses the exact pin.
+    const noteQuoteButton = customer.page.locator("[data-message-id]")
+      .filter({ hasText: "Look at the duplicate discount line here." })
+      .getByRole("button", { name: new RegExp(photo.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) });
+    await noteQuoteButton.click();
+    await customer.page.getByRole("button", { name: copy("en", "detailMedia", { count: 2 }), exact: true, expanded: true }).waitFor();
+    await customer.page.getByRole("heading", { name: copy("en", "noteLabel", { number: pointNote.label }), exact: true }).waitFor();
+    await customer.page.waitForFunction(pinId => document.activeElement?.getAttribute("data-pin-id") === pinId, pointNote.id);
+
+    // 2. Quote a saved video moment directly from the annotation list, send, and jump back to it.
+    await customer.page.getByRole("button", { name: copy("en", "threadQuoteMoment", { time: "0:04" }), exact: true }).first().click();
+    await customer.page.getByText(copy("en", "threadAboutMoment", { file: video.name, time: "0:04" }), { exact: true }).waitFor();
+    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.fill("The pause happens right at four seconds.");
+    await sendButton.click();
+    await customer.page.getByText("The pause happens right at four seconds.", { exact: true }).waitFor();
+
+    const momentQuoteButton = customer.page.locator("[data-message-id]")
+      .filter({ hasText: "The pause happens right at four seconds." })
+      .getByRole("button", { name: new RegExp(video.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) });
+    await momentQuoteButton.click();
+    await customer.page.locator(`video[aria-label="${video.name}"]`).waitFor();
+    await customer.page.getByRole("heading", {
+      name: `${copy("en", "noteLabel", { number: momentNote.label })} · ${copy("en", "pinAtTime", { time: "0:04" })}`,
+      exact: true,
+    }).waitFor();
+
+    // 3. Quote the exact file from MediaViewer toolbar and verify sent file quote focuses it.
+    await customer.page.getByRole("button", { name: copy("en", "threadQuoteFile"), exact: true }).click();
+    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.fill("Sharing this video file directly.");
+    await sendButton.click();
+    const fileQuoteButton = customer.page.locator("[data-message-id]")
+      .filter({ hasText: "Sharing this video file directly." })
+      .getByRole("button", { name: new RegExp(video.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) });
+    await fileQuoteButton.waitFor();
+    await fileQuoteButton.click();
+    await customer.page.locator(`video[aria-label="${video.name}"]`).waitFor();
+
+    // 4. Soft-deleting the photo note switches the sent quote safely to unavailable without leaking deleted text.
+    const latest = (await convex.query(api.tickets.getTicket, { token: customer.token, id }))!;
+    await convex.mutation(api.annotations.removeAnnotation, {
+      token: customer.token, id, expectedVersion: latest.version, annotationId: pointNote.id,
+    });
+    await customer.page.getByText(copy("en", "threadQuotedNoteUnavailable"), { exact: true }).waitFor();
+    assert.equal(await noteQuoteButton.count(), 0);
+
+    // 5. Customer Recent history excludes internal urgency changes.
+    await customer.page.getByRole("button", { name: copy("en", "detailHistory"), exact: true }).click();
+    await customer.page.getByText(copy("en", "actionCreated"), { exact: true }).waitFor();
+    assert.equal(await customer.page.getByText(copy("en", "actionUrgencyChanged"), { exact: true }).count(), 0);
+    assert.equal(customer.uploads(), 0);
+    assert.deepEqual(customer.errors, []);
+  } finally {
+    await customer.context.close();
+  }
 });
 
 for (const language of ["en", "th"] as const) {
@@ -2302,8 +2487,7 @@ test("Owner verifies staff invitation creation and reissue, then replaces and re
     const team = page.getByRole("dialog", { name: copy("en", "teamTitle"), exact: true });
     const codeField = team.getByRole("textbox", { name: copy("en", "verificationCode"), exact: true });
     async function confirm(purpose: string, testError = false) {
-      await codeField.waitFor();
-      assert.equal(await codeField.evaluate(element => element === document.activeElement), true);
+      await codeField.and(page.locator(":focus")).waitFor();
       const delivery = await admin(internal.identity.readLocalDelivery, { to: fixture.ownerEmail });
       if (!delivery) throw new Error("Local verification delivery missing");
       assert.equal(delivery.purpose, purpose);

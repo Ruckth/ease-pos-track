@@ -281,3 +281,47 @@ test("URL Ticket read endpoints normalize untrusted string ids safely without cr
     expect(await t.query(api.annotations.listAnnotationActivity, { token, id: String(ticketId) })).toEqual([]);
   }
 });
+
+test("customer reads omit internal urgency from summaries, details, search and activity while staff reads retain it", async () => {
+  const { t, seed, staff, alice } = await fixture();
+  const id = seed.tickets[1];
+  const projectId = seed.projects[0].id;
+
+  const urgency = await t.mutation(api.tickets.updateUrgencyScore, { token: staff, id, urgencyScore: 88, expectedVersion: 0 });
+  await t.mutation(api.tickets.undoUrgencyScore, { token: staff, eventId: urgency.eventId!, expectedVersion: urgency.version });
+  await t.mutation(api.tickets.updateUrgencyScore, { token: staff, id, urgencyScore: 64, expectedVersion: 2 });
+  await t.mutation(api.tickets.updateTicketStatus, { token: staff, id, status: "in_progress", expectedVersion: 3 });
+
+  const customerDetail = await t.query(api.tickets.getTicket, { token: alice, id });
+  const customerWorkspace = await t.query(api.tickets.getWorkspaceTicket, { token: alice, projectId, ticket: id });
+  const customerPage = await t.query(api.tickets.pageTickets, { token: alice, projectId, lifecycle: "active", paginationOpts: { numItems: 10, cursor: null } });
+  const customerSearch = await t.query(api.tickets.searchTickets, { token: alice, projectId, lifecycle: "active", search: "POS-0002" });
+  const customerActivity = await t.query(api.tickets.listTicketActivity, { token: alice, id });
+
+  for (const read of [customerDetail, customerWorkspace, customerPage.page[0], customerSearch.matches[0]]) {
+    expect(read).toBeTruthy();
+    expect(read).not.toHaveProperty("urgencyScore");
+  }
+  expect(customerActivity.map(event => event.action)).toEqual(["status_changed", "created"]);
+  for (const event of customerActivity) {
+    if (event.before) expect(event.before).not.toHaveProperty("urgencyScore");
+    if (event.after) expect(event.after).not.toHaveProperty("urgencyScore");
+  }
+  expect(JSON.stringify({ customerDetail, customerWorkspace, customerPage, customerSearch, customerActivity }))
+    .not.toMatch(/urgencyScore|urgency_changed|urgency_undone/);
+
+  const staffDetail = await t.query(api.tickets.getTicket, { token: staff, id });
+  const staffPage = await t.query(api.tickets.pageTickets, { token: staff, projectId, lifecycle: "active", paginationOpts: { numItems: 10, cursor: null } });
+  const staffActivity = await t.query(api.tickets.listTicketActivity, { token: staff, id });
+  expect(staffDetail).toMatchObject({ urgencyScore: 64 });
+  expect(staffPage.page.find(row => row._id === id)).toMatchObject({ urgencyScore: 64 });
+  expect(staffActivity.map(event => event.action)).toEqual(["status_changed", "urgency_changed", "urgency_undone", "urgency_changed", "created"]);
+  expect(staffActivity[0].after).toMatchObject({ urgencyScore: 64 });
+  let version = 4;
+  for (let index = 0; index < 35; index++) {
+    const changed = await t.mutation(api.tickets.updateUrgencyScore, { token: staff, id, urgencyScore: 65 + index % 2, expectedVersion: version });
+    version = changed.version;
+  }
+  const visibleAfterInternalChanges = await t.query(api.tickets.listTicketActivity, { token: alice, id });
+  expect(visibleAfterInternalChanges.map(event => event.action)).toEqual(["status_changed", "created"]);
+});

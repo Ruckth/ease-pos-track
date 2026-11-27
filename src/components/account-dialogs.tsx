@@ -284,7 +284,7 @@ export function TeamAdministration({ ownerStaffId }: { ownerStaffId: string }) {
         ownAccount={bindingMember.staffId === ownerStaffId} onRequest={input => requestBindingChange(bindingMember, input)}
         onCancel={() => { setBindingMember(null); returnFocus.current?.focus(); }} /> : null}
       {pending ? <form className="space-y-2 rounded-md border border-transparent bg-muted/40 p-3" aria-labelledby="team-confirm-heading" onSubmit={event => void onConfirm(event)}>
-        <h3 id="team-confirm-heading" className="break-words font-medium">{pending.action}</h3>
+        <h3 id="team-confirm-heading" className="break-words font-medium" tabIndex={-1} ref={focusMessage}>{pending.action}</h3>
         {pending.review ? <dl className="space-y-1 break-all text-sm">
           {pending.review.map(({ label, value }) => <div key={label}><dt className="font-medium">{label}</dt><dd>{value}</dd></div>)}
         </dl> : null}

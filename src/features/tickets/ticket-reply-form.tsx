@@ -1,5 +1,5 @@
-import { FileCode2, Link2, Paperclip, Send, X } from "lucide-react";
-import { lazy, Suspense, useId, useRef, useState, type FormEvent, type RefObject } from "react";
+import { FileCode2, Link2, MapPin, Paperclip, PlayCircle, Send, X } from "lucide-react";
+import { lazy, Suspense, useId, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from "react";
 import { toast } from "sonner";
 import { useAccessToken } from "@/app/adapter";
 import { Button } from "@/components/ui/button";
@@ -7,26 +7,26 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
-import type { Id } from "@convex/_generated/dataModel";
-import type { Ticket } from "@/lib/types";
+import { formatClock, isActiveAnnotation, type Ticket } from "@/lib/types";
 import { IMAGE_SOURCE_BYTES } from "../../../shared/image-optimization";
 import { validateFiles } from "../../../shared/media-policy";
 import { MEDIA_POLICY } from "../../../shared/ticket-contracts";
+import type { MessageEvidenceInput } from "../../../shared/ticket-evidence";
 import { MAX_TICKET_REPLY_LINK_LENGTH, normalizeTicketReplyUrl } from "../../../shared/ticket-reply-link";
 import { useDraftAdapter, useTicketCapabilities } from "./adapter";
 import type { useConversation, TicketMessage as Message } from "./adapters/conversation";
 import { useConversationPages } from "./adapters/pages";
-import type { DisposableTicketDraft, DraftSnapshot } from "./draft";
+import type { DraftSnapshot } from "./draft";
+import type { ReplyLink, TicketReplyDraft } from "./reply-drafts";
 
 const TicketPages = lazy(() => import("./ticket-pages").then(module => ({ default: module.TicketPages })));
 
 const replyNoReceiptErrors = new Set([
-  "INVALID_INPUT", "PAGE_UNAVAILABLE", "TICKET_RESOLVED", "VERSION_CONFLICT",
+  "COMMENT_NOT_FOUND", "INVALID_INPUT", "MEDIA_UNAVAILABLE", "PAGE_UNAVAILABLE", "TICKET_RESOLVED", "VERSION_CONFLICT",
 ]);
 
-type ReplyLink = { kind: "external"; url: string } | { kind: "page"; pageId: Id<"ticketPages"> };
-export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo, clearReply, textarea, send }: {
-  owner: DisposableTicketDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean; replyTo?: Message; clearReply: () => void;
+export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send }: {
+  draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
   textarea: RefObject<HTMLTextAreaElement | null>; send: ReturnType<typeof useConversation>["send"];
 }) {
   const { t, formatDate } = useI18n();
@@ -35,14 +35,18 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
   const mediaEnabled = useTicketCapabilities()?.mediaEnabled === true;
   const messageId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [link, setLink] = useState<ReplyLink>();
+  const { owner } = draft;
+  const { replyTo, evidence, link, requestReply } = useSyncExternalStore(draft.subscribe, draft.getSelection);
+  const setEvidence = (next?: MessageEvidenceInput) => draft.update({ evidence: next });
+  const setLink = (next?: ReplyLink) => draft.update({ link: next });
   const [linkField, setLinkField] = useState<string>();
   const [pickingPage, setPickingPage] = useState(false);
+  const [pickingEvidence, setPickingEvidence] = useState(false);
   const [publishingPage, setPublishingPage] = useState(false);
   const [pageUploadBusy, setPageUploadBusy] = useState(false);
-  const [requestReply, setRequestReply] = useState(false);
   const [sent, setSent] = useState<"replySent" | "questionSent">();
   const pages = useConversationPages(ticket._id, role === "staff" && mediaEnabled && (pickingPage || link?.kind === "page"));
+  const activeAnnotations = (ticket.annotations ?? []).filter(isActiveAnnotation);
   const progress = state.progress;
   const busy = progress !== null;
   const locked = busy || state.retryLocked;
@@ -79,15 +83,9 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     } catch { owner.setError(new Error("INVALID_LINK")); return false; }
   }
 
-  function clearComposer() {
-    clearReply();
-    setLink(undefined);
-    setRequestReply(false);
-  }
-
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage) return;
+    if (!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence) return;
     setSent(undefined);
     const ok = await owner.submit({
       token: accessToken ?? "",
@@ -98,31 +96,34 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
         send({
           id: ticket._id, expectedVersion: ticket.version, body: description, requestId,
           inReplyTo: replyTo?._id, requestReply: role === "staff" ? requestReply : undefined, link,
+          ...(evidence ? { evidence } : {}),
           ...(media.length ? { media, uploadIntentId, uploadIntentSecret } : {}),
         }),
       onCleanupError: error => toast.error(localizeError(error, t)),
     });
     if (ok) {
-      clearComposer();
+      draft.clear();
       setSent(requestReply ? "questionSent" : "replySent");
     }
   }
 
   if (!writable && !hasReply && !state.retryLocked) return <p className="text-sm text-muted-foreground">{t("threadResolved")}</p>;
   return <form onSubmit={submit} onKeyDown={event => {
-    if (event.key !== "Escape" || publishingPage || (linkField === undefined && !pickingPage)) return;
+    if (event.key !== "Escape" || publishingPage || (linkField === undefined && !pickingPage && !pickingEvidence)) return;
     event.preventDefault();
     event.stopPropagation();
     setLinkField(undefined);
     setPickingPage(false);
+    setPickingEvidence(false);
     owner.setError(null);
     textarea.current?.focus();
   }} className="aurora-inset min-w-0 space-y-2 rounded-xl border border-border/70 p-3">
     <label htmlFor={messageId} className="block text-sm font-medium">{t("replyLabel")}</label>
     {quoteLabel && <div className="flex min-w-0 items-center gap-2 rounded-md border-l-2 border-primary/50 bg-muted/60 px-2">
       <p className="line-clamp-2 flex-1 text-xs">{t("threadQuoting", { quote: quoteLabel })}</p>
-      <Button type="button" variant="ghost" size="icon" disabled={!canEdit} onClick={clearReply} aria-label={t("threadRemoveQuote")}><X aria-hidden /></Button>
+      <Button type="button" variant="ghost" size="icon" disabled={!canEdit} onClick={() => draft.update({ replyTo: undefined })} aria-label={t("threadRemoveQuote")}><X aria-hidden /></Button>
     </div>}
+    {evidence && <ComposerEvidenceQuote ticket={ticket} evidence={evidence} canEdit={canEdit} onRemove={() => setEvidence(undefined)} />}
     <Textarea id={messageId} ref={textarea} className="min-h-16 resize-y" maxLength={2000} placeholder={t("threadWriteReply")} readOnly={!canEdit}
       value={state.description} onChange={event => { owner.setDescription(event.target.value); setSent(undefined); }}
       onPaste={event => {
@@ -174,6 +175,41 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
       <Button type="button" variant="outline" onClick={() => setPublishingPage(true)}>{t("publishPage")}</Button>
       <Button type="button" variant="ghost" onClick={() => setPickingPage(false)}>{t("cancel")}</Button>
     </div>}
+    {pickingEvidence && <div className="flex flex-wrap items-center gap-2">
+      <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium">
+        {t("threadCiteEvidence")}
+        <select autoFocus className="min-h-11 min-w-0 rounded-md border bg-background px-2 text-sm" value=""
+          onChange={event => {
+            const value = event.target.value;
+            if (!value) return;
+            const sep = value.indexOf(":");
+            const kind = value.slice(0, sep);
+            const id = value.slice(sep + 1);
+            if (kind === "media") setEvidence({ kind: "media", mediaKey: id });
+            else if (kind === "annotation") setEvidence({ kind: "annotation", annotationId: id });
+            setPickingEvidence(false);
+            owner.setError(null);
+            setSent(undefined);
+            requestAnimationFrame(() => textarea.current?.focus());
+          }}>
+          <option value="">{t("threadSelectEvidence")}</option>
+          {activeAnnotations.length > 0 && <optgroup label={t("threadEvidenceNotesGroup")}>
+            {activeAnnotations.map(note => {
+              const file = ticket.media[note.mediaIndex];
+              if (!file) return null;
+              const prefix = note.kind === "time"
+                ? t("threadAboutMoment", { file: file.name, time: formatClock(note.time ?? 0) })
+                : t("threadAboutNote", { file: file.name, label: note.label });
+              return <option key={note.id} value={`annotation:${note.id}`}>{`${prefix} — ${note.text}`}</option>;
+            })}
+          </optgroup>}
+          {ticket.media.length > 0 && <optgroup label={t("threadEvidenceFilesGroup")}>
+            {ticket.media.map(file => <option key={file.key} value={`media:${file.key}`}>{file.name}</option>)}
+          </optgroup>}
+        </select>
+      </label>
+      <Button type="button" variant="ghost" onClick={() => { setPickingEvidence(false); textarea.current?.focus(); }}>{t("cancel")}</Button>
+    </div>}
     {role === "staff" && publishingPage && <Dialog open title={t("publishPage")} onOpenChange={open => {
       if (!open && !pageUploadBusy) setPublishingPage(false);
     }}>
@@ -188,7 +224,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     </Dialog>}
     {role === "staff" && <label className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
       <input type="checkbox" className="size-4 accent-primary" checked={requestReply} disabled={!canEdit}
-        onChange={event => setRequestReply(event.target.checked)} />{t("threadRequestReply")}
+        onChange={event => draft.update({ requestReply: event.target.checked })} />{t("threadRequestReply")}
     </label>}
     <div className="flex flex-wrap items-center gap-1">
       {mediaEnabled && <><input ref={fileInput} data-slot="ticket-reply-files" type="file" accept="image/*,video/*" hidden multiple
@@ -196,7 +232,10 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
         <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => fileInput.current?.click()}>
           <Paperclip aria-hidden />{t("threadAddMedia")}
         </Button></>}
-      {linkField === undefined && !pickingPage && <>
+      {linkField === undefined && !pickingPage && !pickingEvidence && <>
+        {mediaEnabled && ticket.media.length > 0 && <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => setPickingEvidence(true)}>
+          <MapPin aria-hidden />{t("threadCiteEvidence")}
+        </Button>}
         <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => setLinkField(link?.kind === "external" ? link.url : "")}>
           <Link2 aria-hidden />{t("threadLink")}
         </Button>
@@ -204,7 +243,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
           <FileCode2 aria-hidden />{t("threadAttachPage")}
         </Button>}
       </>}
-      <Button type="submit" size="sm" className="ml-auto" disabled={!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage}>
+      <Button type="submit" size="sm" className="ml-auto" disabled={!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence}>
         <Send aria-hidden />{t(requestReply ? "sendQuestion" : "sendReply")}
       </Button>
       {busy && state.items.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={owner.cancel}>{t("cancelUpload")}</Button>}
@@ -212,7 +251,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     {state.retryLocked && !busy && <Button type="button" variant="outline" size="sm" onClick={() => {
       if (!window.confirm(t("threadDiscardReplyConfirm"))) return;
       owner.discard();
-      clearComposer();
+      draft.clear();
     }}>{t("discardDraft")}</Button>}
     {state.error != null && <p role="alert" className="text-sm text-destructive">{localizeError(state.error, t)}</p>}
     {busy && state.items.length > 0 && <progress className="w-full" aria-label={t("submitting")} value={progress} max={100} />}
@@ -220,4 +259,46 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
       {state.retryLocked ? t("threadRetry") : !writable ? t("threadClosed") : sent ? t(sent) : null}
     </p>
   </form>;
+}
+
+function ComposerEvidenceQuote({ ticket, evidence, canEdit, onRemove }: {
+  ticket: Ticket; evidence: MessageEvidenceInput; canEdit: boolean; onRemove: () => void;
+}) {
+  const { t } = useI18n();
+  let content;
+  if (evidence.kind === "media") {
+    const file = ticket.media.find(item => item.key === evidence.mediaKey);
+    content = file ? (
+      <div className="min-w-0 flex-1 py-1">
+        <p className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
+          {file.type.startsWith("video/")
+            ? <PlayCircle className="size-3.5 shrink-0 text-primary" aria-hidden />
+            : <Paperclip className="size-3.5 shrink-0 text-primary" aria-hidden />}
+          <span className="min-w-0 font-mono [overflow-wrap:anywhere]">{file.name}</span>
+        </p>
+      </div>
+    ) : <p className="flex-1 py-1 text-xs text-destructive">{t("mediaUnavailable")}</p>;
+  } else {
+    const note = (ticket.annotations ?? []).find(item => item.id === evidence.annotationId && isActiveAnnotation(item));
+    const file = note ? ticket.media[note.mediaIndex] : undefined;
+    content = note && file ? (
+      <div className="min-w-0 flex-1 space-y-0.5 py-1">
+        <p className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
+          {note.kind === "time"
+            ? <span className="inline-flex shrink-0 items-center rounded bg-primary px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary-foreground">{formatClock(note.time ?? 0)}</span>
+            : <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">{note.label}</span>}
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            {note.kind === "time"
+              ? t("threadAboutMoment", { file: file.name, time: formatClock(note.time ?? 0) })
+              : t("threadAboutNote", { file: file.name, label: note.label })}
+          </span>
+        </p>
+        <p className="line-clamp-2 text-xs text-muted-foreground">{note.text}</p>
+      </div>
+    ) : <p className="flex-1 py-1 text-xs text-destructive">{t("commentMissing")}</p>;
+  }
+  return <div className="flex min-w-0 items-center gap-2 rounded-r-md border-l-2 border-primary bg-primary/10 px-2.5 py-1">
+    {content}
+    <Button type="button" variant="ghost" size="icon" disabled={!canEdit} onClick={onRemove} aria-label={t("threadRemoveEvidence")}><X aria-hidden /></Button>
+  </div>;
 }

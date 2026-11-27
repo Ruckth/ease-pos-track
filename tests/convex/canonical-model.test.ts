@@ -131,9 +131,12 @@ test("both roles create and edit text-only Tickets; workflow, urgency and restor
   await expect(t.mutation(api.tickets.restoreTicket, { token: alice, id, expectedVersion: 5 })).rejects.toThrow("STAFF_ONLY");
   await t.mutation(api.tickets.restoreTicket, { token: staff, id, expectedVersion: 5 });
   const restored = await t.query(api.tickets.getTicket, { token: alice, id });
-  expect(restored).toMatchObject({ lifecycle: "active", status: "acknowledged", urgencyScore: 50, version: 6 });
+  expect(restored).toMatchObject({ lifecycle: "active", status: "acknowledged", version: 6 });
+  expect(restored).not.toHaveProperty("urgencyScore");
   expect(restored).not.toHaveProperty("archivedAt");
-  expect(await t.query(api.tickets.listTicketActivity, { token: alice, id })).toHaveLength(7);
+  expect(await t.query(api.tickets.getTicket, { token: staff, id })).toMatchObject({ lifecycle: "active", status: "acknowledged", urgencyScore: 50, version: 6 });
+  expect(await t.query(api.tickets.listTicketActivity, { token: alice, id })).toHaveLength(6);
+  expect(await t.query(api.tickets.listTicketActivity, { token: staff, id })).toHaveLength(7);
   const totals = await t.run(ctx => ctx.db.query("ticketTotals").collect());
   expect(totals.reduce((count, total) => count + total.count, 0)).toBe(5);
   expect(totals.find(total => total.status === "acknowledged")?.count).toBe(1);
@@ -226,5 +229,8 @@ test("customer handlers deny status/urgency undo, media attachment and Ticket-nu
     .rejects.toMatchObject({ data: { code: "STAFF_ONLY" } });
   await expect(t.query(api.tickets.getTicketByTicketNumber, { token: alice, projectKey: "POS", ticketNumber: 2 }))
     .rejects.toMatchObject({ data: { code: "STAFF_ONLY" } });
-  expect(await t.query(api.tickets.getTicket, { token: alice, id })).toMatchObject({ version: 2, status: "acknowledged", urgencyScore: 50, media: [] });
+  const customerDetail = await t.query(api.tickets.getTicket, { token: alice, id });
+  expect(customerDetail).toMatchObject({ version: 2, status: "acknowledged", media: [] });
+  expect(customerDetail).not.toHaveProperty("urgencyScore");
+  expect(await t.query(api.tickets.getTicket, { token: staff, id })).toMatchObject({ version: 2, status: "acknowledged", urgencyScore: 50, media: [] });
 });

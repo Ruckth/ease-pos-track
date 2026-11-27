@@ -16,7 +16,7 @@ const shotDir = path.join(EVIDENCE_DIR, "public", "screenshots");
 const shot = async (page: Page, name: string) => { mkdirSync(shotDir, { recursive: true }); await page.screenshot({ path: path.join(shotDir, `components-${name}.png`), animations: "disabled" }); };
 
 async function harness(query: string, viewport = { width: 1280, height: 900 }, language: Language = "en", options: BrowserContextOptions = {}) {
-  const context = await newContext(await browsers.get(), { ...options, viewport, reducedMotion: "reduce" });
+  const context = await newContext(await browsers.get(), { reducedMotion: "reduce", ...options, viewport });
   await context.addInitScript(value => localStorage.setItem("ease-pos-tracking-language", value), language);
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -171,6 +171,10 @@ for (const theme of ["light", "dark"] as const) for (const width of [320, 390, 6
         const dots = await row.locator("[data-status-dot]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
         const label = await row.locator("[data-status-label]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
         const excerpt = await row.locator("[data-ticket-excerpt]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
+        const activity = await row.locator("[data-ticket-activity]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
+        assert.equal(activity, 1, `row ${index} shows when it last moved at ${width}`);
+        const request = await row.getByText(copy("en", "feedNeedsReply"), { exact: true }).count();
+        assert.equal(request, status === "waiting" ? 1 : 0, `only the open question asks for a reply (row ${index})`);
         if (width < 640) assert.deepEqual({ dots, label, excerpt }, { dots: 1, label: 0, excerpt: 1 }, `row ${index} at ${width}`);
         else assert.deepEqual({ dots, label, excerpt }, { dots: 0, label: 1, excerpt: 1 }, `row ${index} at ${width}`);
       }
@@ -210,13 +214,17 @@ test("Ticket rows: forced colors and grayscale keep every mark visible and focus
 });
 
 for (const theme of ["light", "dark"] as const) test(`notifications ${theme}: two status updates keep independently bound Undo actions`, async () => {
-  const { context, page, errors } = await harness(`case=notices&theme=${theme}`, { width: 390, height: 800 }, "en", { hasTouch: true, isMobile: true });
+  const { context, page, errors } = await harness(`case=notices&theme=${theme}`, { width: 390, height: 800 }, "en", {
+    hasTouch: true, isMobile: true, reducedMotion: "no-preference",
+  });
   try {
     await page.getByRole("button", { name: "Update two Tickets", exact: true }).click();
     const undo = page.getByRole("button", { name: copy("en", "undo"), exact: true });
     await page.waitForFunction(() => document.querySelectorAll("[data-sonner-toast]").length === 2);
     const undoBox = await undo.first().boundingBox();
     assert.ok(undoBox && undoBox.width >= 44 && undoBox.height >= 44, "Undo has a 44 px touch target");
+    const transition = await undo.first().evaluate(element => getComputedStyle(element.closest("[data-sonner-toast]")!).transitionProperty);
+    assert.doesNotMatch(transition, /opacity|\ball\b/, "Undo stays at full contrast while its notice moves");
     // The toast surface is neutral: no rich-colour background for success.
     const surface = await page.locator("[data-sonner-toast]").first().evaluate(element => getComputedStyle(element).backgroundColor);
     assert.doesNotMatch(surface, /rgb\(236, 253, 243\)/);

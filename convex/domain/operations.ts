@@ -83,9 +83,13 @@ function publicAnnotationEvent(event: Doc<"annotationEvents">) {
   };
 }
 
-function publicTicketEvent(event: Doc<"ticketEvents">, mediaEnabled: boolean) {
-  const state = (value: Doc<"ticketEvents">["before"]) => value && (mediaEnabled ? value
-    : { ...value, mediaCount: 0, annotationCount: 0 });
+function publicTicketEvent(event: Doc<"ticketEvents">, mediaEnabled: boolean, role: Actor<Id<"customers">>["role"]) {
+  const state = (value: Doc<"ticketEvents">["before"]) => {
+    if (!value) return value;
+    const { urgencyScore: _internalUrgency, ...customerSafe } = value;
+    const base = role === "staff" ? value : customerSafe;
+    return mediaEnabled ? base : { ...base, mediaCount: 0, annotationCount: 0 };
+  };
   return {
     _id: event._id,
     _creationTime: event._creationTime,
@@ -117,7 +121,7 @@ export const getTicket = queryOperation({
   handler: async (ctx, args) => {
     const { actor } = ctx;
     const row = await readableTicketInput(ctx, actor, args.id);
-    return row ? ticketDetail(row, await resolveTicketTags(ctx, row)) : null;
+    return row ? ticketDetail(row, await resolveTicketTags(ctx, row), actor.role) : null;
   },
 });
 
@@ -129,7 +133,7 @@ export const getWorkspaceTicket = queryOperation({
     if (!row || row.projectId !== args.projectId) return null;
     const project = await ctx.db.get(row.projectId);
     if (!project || project.archivedAt !== undefined) return null;
-    return ticketDetail(row, await resolveTicketTags(ctx, row));
+    return ticketDetail(row, await resolveTicketTags(ctx, row), ctx.actor.role);
   },
 });
 
@@ -148,7 +152,7 @@ export const getTicketByTicketNumber = queryOperation({
       .unique();
     if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")
       || !await projectInDeployment(ctx, doc.projectId)) return null;
-    return ticketDetail(doc, await resolveTicketTags(ctx, doc));
+    return ticketDetail(doc, await resolveTicketTags(ctx, doc), "staff");
   },
 });
 
@@ -176,14 +180,19 @@ export const listTicketActivity = queryOperation({
     const { actor } = ctx;
     const ticket = await readableTicketInput(ctx, actor, args.id);
     if (!ticket) return [];
+    const visibleLimit = 30;
+    // Read a bounded, wider window for customers so staff-only changes do not crowd out public history.
     const events = await ctx.db
       .query("ticketEvents")
       .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
       .order("desc")
-      .take(30);
+      .take(actor.role === "staff" ? visibleLimit : 120);
     const mediaEnabled = legacyMediaEnabled();
-    return events.filter(event => mediaEnabled || (event.action !== "media_attached" && event.action !== "annotation_changed"))
-      .map(event => publicTicketEvent(event, mediaEnabled));
+    return events
+      .filter(event => (mediaEnabled || (event.action !== "media_attached" && event.action !== "annotation_changed"))
+        && (actor.role === "staff" || (event.action !== "urgency_changed" && event.action !== "urgency_undone")))
+      .slice(0, visibleLimit)
+      .map(event => publicTicketEvent(event, mediaEnabled, actor.role));
   },
 });
 
@@ -271,7 +280,7 @@ export const createTextTicket = mutationOperation({
       ...await hashTicketRequest(ticketRequestFingerprintInput({ ...args, actor, projectId: selected._id })),
     };
     const replay = await replayTicketRequest(ctx, request);
-    if (replay) return { ticket: ticketDetail(replay.ticket, await resolveTicketTags(ctx, replay.ticket)), created: false, requestId };
+    if (replay) return { ticket: ticketDetail(replay.ticket, await resolveTicketTags(ctx, replay.ticket), actor.role), created: false, requestId };
 
     const created = await createTicketRecord(ctx, {
       project,
@@ -283,7 +292,7 @@ export const createTextTicket = mutationOperation({
       now: Date.now(),
     });
     await commitTicketRequest(ctx, request, { ticketId: created._id, version: created.version });
-    return { ticket: ticketDetail(created), created: true, requestId };
+    return { ticket: ticketDetail(created, [], actor.role), created: true, requestId };
   },
 });
 

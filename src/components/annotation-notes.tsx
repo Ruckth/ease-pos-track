@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { Clock3, Loader2, MapPin, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Clock3, Loader2, MapPin, MessageCircle, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -57,6 +57,7 @@ export function AnnotationList({
   deletedAnnotations,
   readOnly = false,
   onFocus,
+  onQuote,
   onUpdate,
   onDelete,
   onRestore,
@@ -65,6 +66,7 @@ export function AnnotationList({
   deletedAnnotations: Annotation[];
   readOnly?: boolean;
   onFocus: (annotation: Annotation) => void;
+  onQuote?: (annotation: Annotation) => void;
   onUpdate: (annotationId: string, text: string) => Promise<void>;
   onDelete: (annotationId: string) => Promise<void>;
   onRestore: (annotationId: string) => Promise<void>;
@@ -141,6 +143,16 @@ export function AnnotationList({
                   </>
                 )}
               </p>
+              {onQuote && editingId !== annotation.id && (
+                <div className="mt-1.5">
+                  <Button type="button" size="sm" variant="outline" onClick={() => onQuote(annotation)}>
+                    <MessageCircle aria-hidden="true" />
+                    {annotation.kind === "time"
+                      ? t("threadQuoteMoment", { time: formatClock(annotation.time ?? 0) })
+                      : t("threadQuoteNoteNamed", { label: annotation.label })}
+                  </Button>
+                </div>
+              )}
             </div>
             {!readOnly && <>
             <button

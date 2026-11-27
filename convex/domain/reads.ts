@@ -43,7 +43,9 @@ export function ticketExcerpt(description: string, limit = 200) {
   return description.slice(0, end);
 }
 
-export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
+type ReadRole = "staff" | "customer";
+
+export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[], role: ReadRole) {
   if (row.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
   const mediaEnabled = legacyMediaEnabled();
   return {
@@ -52,7 +54,8 @@ export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
     excerpt: ticketExcerpt(row.description), status: row.status,
     ...(row.latestReply ? { latestReply: row.latestReply } : {}),
     ...(row.origin === "staff" ? { openedByStaff: true } : {}),
-    urgencyScore: row.urgencyScore, lifecycle: row.lifecycle,
+    ...(role === "staff" ? { urgencyScore: row.urgencyScore } : {}),
+    lifecycle: row.lifecycle,
     tagIds: row.tagIds ?? [], tags,
     archivedAt: row.archivedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
     mediaCount: mediaEnabled ? row.media.length : 0,
@@ -60,7 +63,7 @@ export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
   };
 }
 
-export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[] = []) {
+export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[], role: ReadRole) {
   if (row.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
   const mediaEnabled = legacyMediaEnabled();
   return {
@@ -68,7 +71,7 @@ export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[] = []) {
     ticketNumber: row.ticketNumber, version: row.version, title: row.title, description: row.description,
     status: row.status, lifecycle: row.lifecycle, origin: row.origin, hasCustomerOwner: !!row.ownerCustomerId,
     ...(row.latestReply ? { latestReply: row.latestReply } : {}),
-    ...(row.urgencyScore === undefined ? {} : { urgencyScore: row.urgencyScore }),
+    ...(role === "staff" && row.urgencyScore !== undefined ? { urgencyScore: row.urgencyScore } : {}),
     tagIds: row.tagIds ?? [], tags,
     ...(row.createdVia === undefined ? {} : { createdVia: row.createdVia }),
     ...(row.archivedAt === undefined ? {} : { archivedAt: row.archivedAt }),
@@ -124,7 +127,7 @@ export const pageTickets = {
   handler: async (ctx: Parameters<typeof pageTicketRows.handler>[0], args: Parameters<typeof pageTicketRows.handler>[1]) => {
     const result = await pageTicketRows.handler(ctx, args);
     const resolveTags = ticketTagResolver(ctx);
-    return { ...result, page: await Promise.all(result.page.map(async row => ticketSummary(row, await resolveTags(row)))) };
+    return { ...result, page: await Promise.all(result.page.map(async row => ticketSummary(row, await resolveTags(row), ctx.actor.role))) };
   },
 };
 
@@ -134,7 +137,7 @@ export const pageTicketDetails = {
   handler: async (ctx: Parameters<typeof pageTicketRows.handler>[0], args: Parameters<typeof pageTicketRows.handler>[1]) => {
     const result = await pageTicketRows.handler(ctx, args);
     const resolveTags = ticketTagResolver(ctx);
-    return { ...result, page: await Promise.all(result.page.map(async row => ticketDetail(row, await resolveTags(row)))) };
+    return { ...result, page: await Promise.all(result.page.map(async row => ticketDetail(row, await resolveTags(row), ctx.actor.role))) };
   },
 };
 
@@ -199,7 +202,7 @@ export const searchTickets = queryOperation({
         && (args.status === undefined || row.status === args.status)
         && (!args.assignmentFilter || row.assigneeStaffId === assignee)
         && (ctx.actor.role === "staff" || row.ownerCustomerId === ctx.actor.customerId);
-      if (visible) return { matches: [ticketSummary(row, await resolveTicketTags(ctx, row))], hasMore: false };
+      if (visible) return { matches: [ticketSummary(row, await resolveTicketTags(ctx, row), ctx.actor.role)], hasMore: false };
     }
     const searchLane = (status?: Doc<"tickets">["status"]) => ctx.db.query("tickets").withSearchIndex("search_text", q => {
       const scoped = q.search("searchText", search).eq("projectId", project._id).eq("lifecycle", args.lifecycle);
@@ -211,7 +214,7 @@ export const searchTickets = queryOperation({
       ? await mergeRankedLanes(OPEN_STATUSES.map(searchLane))
       : await searchLane(args.status).take(SEARCH_LIMIT + 1);
     const resolveTags = ticketTagResolver(ctx);
-    const matches = await Promise.all(rows.slice(0, SEARCH_LIMIT).map(async row => ticketSummary(row, await resolveTags(row))));
+    const matches = await Promise.all(rows.slice(0, SEARCH_LIMIT).map(async row => ticketSummary(row, await resolveTags(row), ctx.actor.role)));
     return { matches, hasMore: rows.length > SEARCH_LIMIT };
   },
 });

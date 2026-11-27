@@ -249,6 +249,11 @@ test("removed legacy auth, pre-pilot sessions, media RPC and callbacks cannot cr
 
 test("named Ticket operations redact old media and deny attachment writes for both roles", async () => {
   const f = await fixture();
+  const historicalNoteId = await f.t.run(async ctx => (await ctx.db.get(f.id))!.annotations[0].id);
+  await f.t.mutation(api.conversations.send, {
+    token: f.customer, id: f.id, body: "Historical evidence reply", requestId: "historical-evidence-reply",
+    expectedVersion: 0, evidence: { kind: "annotation", annotationId: historicalNoteId },
+  });
   const raw = JSON.stringify(releaseEvidence(f.projectId));
   await configure(raw, firstEpoch);
   await f.t.mutation(internal.pilot_release.install, { manifest: raw });
@@ -267,6 +272,20 @@ test("named Ticket operations redact old media and deny attachment writes for bo
     expect(activities.find(row => row.action === "created")?.after).toMatchObject({ mediaCount: 0, annotationCount: 0 });
     expect(activities.every(row => row.action !== "annotation_changed" && row.action !== "media_attached")).toBe(true);
     expect(await f.t.query(api.annotations.listAnnotationActivity, { token, ...ticket })).toEqual([]);
+    const thread = await f.t.query(api.conversations.page, { token, id: f.id, paginationOpts: paging });
+    expect(thread.page).toHaveLength(1);
+    expect(thread.page[0]).not.toHaveProperty("evidence");
+    expect(JSON.stringify(thread)).not.toMatch(/synthetic-old-key|media\.invalid|canary\.png|hidden annotation/);
+    await expect(f.t.mutation(api.conversations.send, {
+      token, id: f.id, body: "Blocked file quote", requestId: `pilot-ev-file-${role}`, expectedVersion: 0,
+      ...(role === "staff" ? { requestReply: false } : {}),
+      evidence: { kind: "media", mediaKey: file.key },
+    })).rejects.toThrow("PILOT_MEDIA_DISABLED");
+    await expect(f.t.mutation(api.conversations.send, {
+      token, id: f.id, body: "Blocked note quote", requestId: `pilot-ev-note-${role}`, expectedVersion: 0,
+      ...(role === "staff" ? { requestReply: false } : {}),
+      evidence: { kind: "annotation", annotationId: historicalNoteId },
+    })).rejects.toThrow("PILOT_MEDIA_DISABLED");
     expect((await f.t.query(api.tickets.pageTickets, { token, ...page })).page.find(row => row._id === f.id))
       .toMatchObject({ mediaCount: 0, annotationCount: 0 });
     expect((await f.t.query(api.tickets.searchTickets, { token, projectId: f.projectId, lifecycle: "active", search: "historical" })).matches)

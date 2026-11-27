@@ -1,5 +1,6 @@
 import { getRouteApi, useMatch } from "@tanstack/react-router";
 import { StaffWorkspace } from "@/features/tickets/staff-workspace";
+import { TicketReplyDraftProvider } from "@/features/tickets/reply-drafts";
 import { APP_PATHS, loginPathForRole } from "@/lib/app-routes";
 import { useLeave, useSessionExpiry } from "./auth-store";
 import { SessionBoundary } from "./session-boundary";
@@ -18,13 +19,15 @@ export function StaffEntry() {
   const onLogout = () => leave(loginPathForRole("staff"));
   return (
     <SessionBoundary key={viewer.staffId} onExpired={onExpired}>
-      <StaffWorkspace viewer={viewer} onLogout={onLogout} t3Settings={t3Settings}
-        lineSettings={lineSettings?.search}
-        onLineSettings={(open, bot) => {
-          if (open) void navigate({ to: APP_PATHS.staffLineSettings, search: previous => ({ ...previous, bot }), resetScroll: false });
-          else void navigate({ to: APP_PATHS.staffHome, search: true, resetScroll: false });
-        }}
-        onT3Settings={open => void navigate({ to: open ? APP_PATHS.staffT3Settings : APP_PATHS.staffHome, search: true, state: true, resetScroll: false })} />
+      <TicketReplyDraftProvider>
+        <StaffWorkspace viewer={viewer} onLogout={onLogout} t3Settings={t3Settings}
+          lineSettings={lineSettings?.search}
+          onLineSettings={(open, bot) => {
+            if (open) void navigate({ to: APP_PATHS.staffLineSettings, search: previous => ({ ...previous, bot }), resetScroll: false });
+            else void navigate({ to: APP_PATHS.staffHome, search: true, resetScroll: false });
+          }}
+          onT3Settings={open => void navigate({ to: open ? APP_PATHS.staffT3Settings : APP_PATHS.staffHome, search: true, state: true, resetScroll: false })} />
+      </TicketReplyDraftProvider>
     </SessionBoundary>
   );
 }
