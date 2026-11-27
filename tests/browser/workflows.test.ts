@@ -1,3 +1,4 @@
+import { markupLabels } from "../../src/lib/markup-labels";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -30,6 +31,173 @@ async function openFilters(page: Page) {
 async function closeFilters(page: Page) {
   await page.keyboard.press("Escape");
   await filterPanel(page).waitFor({ state: "hidden" });
+}
+
+test("mobile screenshot markup pans a long receipt and reviews the mask at its source position", async () => {
+  const { context, page, errors, uploads } = await openWith(await browsers.get(), "customer", "en", undefined, {
+    viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
+  });
+  try {
+    const labels = markupLabels("en");
+    const data = await page.evaluate(() => {
+      const c = document.createElement("canvas");
+      c.width = 1080; c.height = 6000;
+      const ctx = c.getContext("2d")!;
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.fillStyle = "#111"; ctx.font = "32px sans-serif";
+      for (let y = 60; y < c.height; y += 100) ctx.fillText(`Receipt line ${y}`, 32, y);
+      return c.toDataURL("image/png").split(",")[1];
+    });
+    const name = "long-receipt.png";
+    await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(data, "base64") });
+    await page.getByRole("button", { name: copy("en", "editImageNamed", { name }), exact: true }).tap();
+    const editor = page.getByRole("dialog", { name: copy("en", "editDraftImage"), exact: true });
+    const button = (name: string) => editor.getByRole("button", { name, exact: true });
+    const surface = editor.getByRole("application");
+    const viewport = surface.locator("../..");
+    await button(labels.fitWidth).tap();
+    await button(labels.pan).tap();
+    await viewport.scrollIntoViewIfNeeded();
+    const available = (await viewport.boundingBox())!;
+    const before = await viewport.evaluate(el => el.scrollTop);
+    const finger = { x: available.x + 100, y: available.y + available.height * 0.7 };
+    const cdp = await context.newCDPSession(page);
+    try {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [finger] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: finger.x, y: finger.y - 110 }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    } finally { await cdp.detach(); }
+    assert.ok(await viewport.evaluate(el => el.scrollTop) > before + 70);
+    await button(labels.mask).tap();
+    await viewport.scrollIntoViewIfNeeded();
+    const visible = (await viewport.boundingBox())!, source = (await surface.boundingBox())!;
+    assert.ok(source.width > 300 && source.height > visible.height * 3);
+    assert.ok(await editor.locator("canvas").evaluate(el => (el as HTMLCanvasElement).height < 1200));
+    const x = visible.x + visible.width / 2, y = visible.y + visible.height / 2;
+    const sample = { x: (x - source.x) / source.width, y: (y - source.y) / source.height };
+    await page.touchscreen.tap(x - 24, y - 16);
+    await page.touchscreen.tap(x + 24, y + 16);
+    await button(labels.review).tap();
+    const preview = editor.locator("img");
+    await preview.waitFor();
+    await button(labels.fitWidth).tap();
+    const measured = (await preview.boundingBox())!;
+    assert.ok(measured.width > 300 && measured.height > 1200);
+    const pixel = await preview.evaluate(async (el, pos) => {
+      const img = el as HTMLImageElement; await img.decode();
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.drawImage(img, Math.floor(pos.x * img.naturalWidth), Math.floor(pos.y * img.naturalHeight), 1, 1, 0, 0, 1, 1);
+      return Array.from(ctx.getImageData(0, 0, 1, 1).data);
+    }, sample);
+    assert.deepEqual(pixel, [24, 35, 48, 255]);
+    assert.equal(uploads(), 0);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
+  test(`${role} ${language}: screenshot markup reviews and applies the exact edited attachment`, async () => {
+    const device = role === "customer" ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : {};
+    const { context, page, errors, uploads } = await openWith(await browsers.get(), role, language, undefined, device);
+    try {
+      const labels = markupLabels(language);
+      await files(page, "private-receipt.png");
+      const original = page.getByRole("button", { name: copy(language, "openMedia", { name: "private-receipt.png" }), exact: true });
+      await original.click();
+      const viewer = page.getByRole("dialog", { name: "private-receipt.png", exact: true });
+      await viewer.getByRole("button", { name: copy(language, "addPin"), exact: true }).click();
+      await viewer.locator("img").first().click();
+      await viewer.getByPlaceholder(copy(language, "describeIssue")).fill("Check this amount");
+      await viewer.getByRole("button", { name: copy(language, "savePin"), exact: true }).click();
+      if (role === "customer") {
+        await viewer.getByRole("button", { name: copy(language, "editDraftImage"), exact: true }).click();
+      } else {
+        await viewer.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+        await page.getByRole("button", { name: copy(language, "editImageNamed", { name: "private-receipt.png" }), exact: true }).click();
+      }
+      const dialog = page.getByRole("dialog", { name: copy(language, "editDraftImage"), exact: true });
+      const control = (name: string) => dialog.getByRole("button", { name, exact: true });
+      const surface = dialog.getByRole("application", { name: labels.canvasLabel });
+      async function place(x: number, y: number) {
+        const box = await surface.boundingBox();
+        assert.ok(box);
+        const position = { x: box.width * x, y: box.height * y };
+        if (role === "customer") await surface.tap({ position });
+        else await surface.click({ position });
+      }
+      await control(labels.circle).click();
+      await place(0.72, 0.66);
+      const width = dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true });
+      const height = dialog.getByRole("spinbutton", { name: `${labels.height} (px)`, exact: true });
+      const originalWidth = Number(await width.inputValue()), originalHeight = Number(await height.inputValue());
+      await control(labels.fineSteps).click();
+      await control(`${labels.width}: ${labels.wider}`).click();
+      assert.equal(Number(await width.inputValue()), originalWidth + 1);
+      assert.equal(Number(await height.inputValue()), originalHeight);
+      await height.fill(String(originalHeight + 7));
+      await height.press("Enter");
+      assert.equal(Number(await height.inputValue()), originalHeight + 7);
+      await control(`${labels.height}: ${labels.taller}`).click();
+      assert.equal(Number(await height.inputValue()), originalHeight + 8);
+      await control(labels.circle).click();
+      await place(0.25, 0.68);
+      await control(labels.mask).click();
+      await place(0.3, 0.25);
+      await place(0.52, 0.42);
+      await control(labels.eraser).click();
+      await place(0.25, 0.68);
+      await control(labels.undo).click();
+      await control(labels.redo).click();
+      await control(labels.crop).click();
+      await place(0.02, 0.02);
+      await place(0.20, 0.20);
+      assert.ok(await control(labels.review).isDisabled());
+      await control(labels.expandCrop).click();
+      assert.equal(await control(labels.review).isDisabled(), false);
+      await control(labels.crop).click();
+      await place(0.12, 0.12);
+      await place(0.94, 0.94);
+      await control(labels.review).click();
+      const reviewed = await dialog.locator("img").evaluate(async element => {
+        const img = element as HTMLImageElement;
+        await img.decode();
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+        const pixels = ctx.getImageData(0, 0, c.width, c.height).data;
+        let redLeft = 0, redRight = 0;
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i] > 140 && pixels[i + 1] < 100 && pixels[i + 2] < 100) {
+            if ((i / 4) % c.width < c.width / 2) redLeft++;
+            else redRight++;
+          }
+        }
+        const mask = Array.from(ctx.getImageData(Math.round(c.width * 0.36), Math.round(c.height * 0.25), 1, 1).data);
+        return { width: c.width, height: c.height, redLeft, redRight, mask,
+          bytes: Array.from(new Uint8Array(await (await fetch(img.src)).arrayBuffer())) };
+      });
+      assert.ok(reviewed.width < 320 && reviewed.height < 240);
+      assert.equal(reviewed.redLeft, 0);
+      assert.ok(reviewed.redRight > 10);
+      assert.deepEqual(reviewed.mask, [24, 35, 48, 255]);
+      await control(labels.apply).click();
+      await dialog.waitFor({ state: "hidden" });
+      if (role === "customer") {
+        const updatedViewer = page.getByRole("dialog").last();
+        await updatedViewer.getByRole("button", { name: copy(language, "editDraftImage"), exact: true }).waitFor();
+        await updatedViewer.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      }
+      const attachment = page.locator('[data-slot="sortable-item"] img').first();
+      const applied = await attachment.evaluate(async img => Array.from(
+        new Uint8Array(await (await fetch((img as HTMLImageElement).src)).arrayBuffer())));
+      assert.deepEqual(applied, reviewed.bytes);
+      assert.doesNotMatch(await attachment.getAttribute("alt") ?? "", /private-receipt/);
+      assert.equal(await page.getByText(copy(language, "pinSummary", { count: 1 }), { exact: true }).isVisible(), true);
+      assert.equal(uploads(), 0);
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
 }
 
 for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
@@ -239,6 +407,20 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await page.getByPlaceholder(copy(language, "describeIssue")).fill("Keep this pin");
       await page.getByRole("button", { name: copy(language, "savePin"), exact: true }).click();
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).last().click();
+      let attachmentName = "draft.png";
+      if (language === "en") {
+        const labels = markupLabels(language);
+        await page.getByRole("button", { name: copy(language, "editImageNamed", { name: attachmentName }), exact: true }).click();
+        const editor = page.getByRole("dialog", { name: copy(language, "editDraftImage"), exact: true });
+        const surface = editor.getByRole("application");
+        await surface.click();
+        await editor.getByRole("button", { name: labels.review, exact: true }).click();
+        await editor.getByRole("button", { name: labels.apply, exact: true }).click();
+        await editor.waitFor({ state: "hidden" });
+        attachmentName = (await page.locator('[data-slot="sortable-item"] img').first().getAttribute("alt"))!;
+        assert.notEqual(attachmentName, "draft.png");
+      }
+      const releasedBeforeSubmit = (await stats(page)).revoked.length;
       const submit = page.getByRole("button", { name: copy(language, "submitTicket"), exact: true });
       await submit.click();
       await Promise.race([held, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Create response was not intercepted")), 8000))]);
@@ -247,10 +429,10 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
         assert.equal(await title.isDisabled(), true);
         assert.equal(await description.isDisabled(), true);
         assert.equal(await page.locator('input[type="file"][multiple]').isDisabled(), true);
-        assert.equal(await page.getByRole("button", { name: copy(language, "openMedia", { name: "draft.png" }), exact: true }).isDisabled(), true);
+        assert.equal(await page.getByRole("button", { name: copy(language, "openMedia", { name: attachmentName }), exact: true }).isDisabled(), true);
       }
       await page.getByRole("button", { name: copy(language, "cancelUpload"), exact: true }).click();
-      assert.equal((await stats(page)).revoked.length, 0);
+      assert.equal((await stats(page)).revoked.length, releasedBeforeSubmit);
       release();
       await submit.waitFor({ state: "visible" });
       loseResponses = false;
@@ -265,6 +447,11 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       assert.deepEqual(requests[0], requests[2]);
       const matches = await convex.query(api.tickets.searchTickets, { token, projectId: seed.projects.find(p => p.key === "POS")!.id, search: name, lifecycle: "active" });
       assert.equal(matches.matches.filter(item => item.title === name).length, 1);
+      if (language === "en") {
+        const saved = await convex.query(api.tickets.getTicket, { token, id: matches.matches.find(item => item.title === name)!._id });
+        assert.equal(saved?.media[0]?.name, attachmentName);
+        assert.equal(saved?.annotations?.[0]?.text, "Keep this pin");
+      }
       assert.deepEqual((await stats(page)).revoked, (await stats(page)).created);
       // A separate Discard action is the only UI action here that drops content.
       await page.getByRole("button", { name: copy(language, "newTicket"), exact: true }).first().click();

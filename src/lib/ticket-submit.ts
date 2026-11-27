@@ -16,6 +16,7 @@ import { readUploadCancelResponse } from "@/lib/upload-cancel";
 import type { uploadFiles } from "@/uploadthing";
 import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
 import { fileSignature } from "../../shared/media-policy";
+import { errorCode } from "../../shared/errors";
 
 type UploadIntentHandle = {
   intentId: Id<"uploadIntents">;
@@ -46,7 +47,7 @@ export type SubmitTicketDeps = {
     requestId: string;
     title: string;
     description: string;
-  routingClassification?: TicketRoutingClassification;
+    routingClassification?: TicketRoutingClassification;
     media: MediaItem[];
     annotations: CreateAnnotationInput[];
     uploadIntentId?: Id<"uploadIntents">;
@@ -56,6 +57,8 @@ export type SubmitTicketDeps = {
   uploadMedia?: typeof uploadFiles;
   onProgress?: (percent: number) => void;
   signal?: AbortSignal;
+  /** A previous attempt may have written against this request key. */
+  reconciling?: boolean;
   /** Reports a cleanup failure without masking the original error. */
   onCleanupError?: (error: unknown) => void;
   onRequestConflict?: () => void;
@@ -75,14 +78,49 @@ async function requestUploadIntentCancel(
   return await readUploadCancelResponse(response);
 }
 
+/** Give every ambiguous slot its own upload signature before declaring an intent. */
+export function distinguishUploadFiles(items: PendingMedia[]): PendingMedia[] {
+  const counts = new Map<string, number>();
+  for (const { file } of items) {
+    const signature = fileSignature(file);
+    counts.set(signature, (counts.get(signature) ?? 0) + 1);
+  }
+  const used = new Set(counts.keys());
+  return items.map((item, index) => {
+    const { file } = item;
+    if (counts.get(fileSignature(file)) === 1) return item;
+    const extension = file.name.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? "";
+    let revision = 0;
+    let name: string;
+    let signature: string;
+    do {
+      name = `attachment-${index + 1}-${++revision}${extension}`;
+      signature = fileSignature({ name, size: file.size, type: file.type });
+    } while (used.has(signature));
+    used.add(signature);
+    return { ...item, file: new File([file], name, { type: file.type, lastModified: file.lastModified }) };
+  });
+}
+
+// createTicket emits these only on the new-Ticket path after receipt lookup.
+const createErrorsWithoutReceipt = new Set([
+  "REQUIRED_TICKET", "TITLE_TOO_LONG", "DESCRIPTION_TOO_LONG", "UNKNOWN_ROUTING_CODE",
+  "COMMENT_TEXT_REQUIRED", "COMMENT_TOO_LONG", "INVALID_MEDIA_INDEX", "INVALID_ANNOTATION_KIND",
+  "INVALID_ANNOTATION_POSITION", "INVALID_ANNOTATION_TIME", "INVALID_COMMENT_LABEL", "ANNOTATION_LIMIT_EXCEEDED",
+  "IMAGE_VIDEO_ONLY", "MEDIA_LIMIT_EXCEEDED", "IMAGE_TOO_LARGE", "VIDEO_TOO_LARGE", "INVALID_FILE_METADATA",
+  "INVALID_MEDIA_REFERENCE", "UPLOAD_INCOMPLETE",
+]);
+
 export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDraft) {
   let activeIntent: { intentId: Id<"uploadIntents">; secret: string } | null = null;
   let creating = false;
   try {
+    deps.signal?.throwIfAborted();
     if (deps.mediaEnabled === false) {
       if (draft.items.length || draft.annotations.length) throw new Error("PILOT_MEDIA_DISABLED");
       return await reconcileUploadWrite(() => {
         deps.signal?.throwIfAborted();
+        creating = true;
         return deps.createTicket({
           requestId: draft.idempotencyKey, title: draft.title,
           description: draft.description, media: [], annotations: [],
@@ -90,9 +128,10 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
         });
       });
     }
+    const items = distinguishUploadFiles(draft.items);
     const intent = await reconcileUploadWrite(() => deps.createUploadIntent({
       idempotencyKey: draft.idempotencyKey,
-      files: draft.items.map((item) => ({
+      files: items.map((item) => ({
         name: item.file.name,
         size: item.file.size,
         type: item.file.type,
@@ -103,11 +142,11 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     if (!intent.ticketId) activeIntent = { intentId: intent.intentId, secret: intent.secret };
     deps.signal?.throwIfAborted();
     const reusable = [...intent.uploadedFiles];
-    const media = draft.items.map(item => {
+    const media = items.map(item => {
       const index = reusable.findIndex(uploaded => fileSignature(uploaded) === fileSignature(item.file));
       return index < 0 ? undefined : reusable.splice(index, 1)[0];
     });
-    const missing = draft.items.flatMap((item, index) => media[index] ? [] : [{ file: item.file, index }]);
+    const missing = items.flatMap((item, index) => media[index] ? [] : [{ file: item.file, index }]);
     const uploads = intent.ticketId || missing.length === 0 ? []
       : await (deps.uploadMedia ?? (await import("@/uploadthing")).uploadFiles)("ticketMedia", {
           files: missing.map(item => item.file),
@@ -146,9 +185,13 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     return created;
   } catch (error) {
     const abortedBeforeCreate = deps.signal?.aborted && !creating;
-    const rejected = definitiveUploadRejection(error);
+    const code = errorCode(error);
+    // An earlier write stays uncertain until the server reaches its receipt check.
+    const resolvedRetry = creating && code !== undefined
+      && (createErrorsWithoutReceipt.has(code) || code === "REQUEST_ID_CONFLICT" || code === "TICKET_UNAVAILABLE");
+    const rejected = definitiveUploadRejection(error) && (!deps.reconciling || resolvedRetry);
     if (rejected) deps.onRequestConflict?.();
-    if (activeIntent && (abortedBeforeCreate || rejected)) {
+    if (activeIntent && ((abortedBeforeCreate && !deps.reconciling) || rejected)) {
       try {
         await requestUploadIntentCancel(deps.token, activeIntent.intentId, activeIntent.secret);
         if (abortedBeforeCreate && !rejected) deps.onRequestConflict?.();
