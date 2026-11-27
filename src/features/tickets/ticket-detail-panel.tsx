@@ -269,19 +269,17 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   </div>;
 }
 
-/** A status control stays focusable while its move saves, so keyboard focus
- * is not dropped to the page; `aria-disabled` blocks and announces it. */
+/** Keep the busy controls focusable. The handlers block writes while aria-disabled announces the state. */
 const busyControl = "aria-disabled:cursor-progress aria-disabled:opacity-60";
 
 /** Staff status popup: every workflow state, current one checked. Moves go
  * through the caller so busy, conflict and undo rules stay shared. */
 function StatusMenu({ status, busy, number, onSelect }: { status: TicketStatus; busy?: boolean; number: string; onSelect: (status: TicketStatus) => void }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const meta = statusMeta(status);
   const Icon = meta.icon;
   const label = t(meta.labelKey);
-  return <DropdownMenu open={open} onOpenChange={next => { if (!next || !busy) setOpen(next); }}>
+  return <DropdownMenu onOpenChange={(open, details) => { if (open && busy) details.cancel(); }}>
     <DropdownMenuTrigger aria-disabled={busy || undefined} aria-label={`${t("detailStatus")} · ${label} · ${number}`} title={t("detailStatus")}
       className={cn("aurora-control inline-flex min-h-11 items-center gap-1.5 rounded-full ps-3 pe-2.5 text-sm font-medium transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:border-primary/60", busyControl, meta.text)}>
       <Icon aria-hidden className="size-4 shrink-0" />{label}

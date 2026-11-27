@@ -1,6 +1,7 @@
 import { markupLabels } from "../../src/lib/markup-labels";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
+import { EventEmitter, once } from "node:events";
 import path from "node:path";
 import { after, test as nodeTest } from "node:test";
 import type { BrowserContext, Locator, Page, Request } from "playwright";
@@ -1710,7 +1711,8 @@ test("an open Ticket announces leaving filtered results in Queue, Board and Tabl
   } finally { await context.close(); }
 });
 
-for (const language of ["en", "th"] as const) test(`staff ${language}: status menu and move button keep keyboard focus while the move saves`, async () => {
+for (const [language, view] of [["en", "queue"], ["th", "table"]] as const) test(`staff ${language} ${view}: status menu and move button keep keyboard focus while the move saves`, async () => {
+  const intercepted = new EventEmitter();
   let release: (() => void) | undefined;
   let writes = 0;
   const { page, context, token, errors } = await open("staff", language, async context => {
@@ -1721,6 +1723,7 @@ for (const language of ["en", "th"] as const) test(`staff ${language}: status me
         if (message.type === "Mutation" && message.udfPath === "tickets:updateTicketStatus") {
           writes++;
           release = () => { release = undefined; server.send(raw); };
+          intercepted.emit("move");
         } else server.send(raw);
       });
     });
@@ -1729,8 +1732,11 @@ for (const language of ["en", "th"] as const) test(`staff ${language}: status me
     const title = `Status focus ${language} ${crypto.randomUUID()}`;
     const { ticket } = await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title, description: "", requestId: crypto.randomUUID() });
     const number = formatTicketNumber(ticket.ticketNumber, "POS");
-    await page.goto(`${baseURL}/staff?project=POS&view=queue&ticket=${ticket._id}`);
-    const detail = page.getByRole("region", { name: title, exact: true });
+    if (view === "table") await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${baseURL}/staff?project=POS&view=${view}&ticket=${ticket._id}`);
+    const detail = view === "queue"
+      ? page.getByRole("region", { name: title, exact: true })
+      : page.getByRole("dialog", { name: number, exact: true });
     const status = detail.locator('[data-slot="dropdown-menu-trigger"]');
     const label = (key: "new" | "inProgress" | "done") => `${copy(language, "detailStatus")} · ${copy(language, key)} · ${number}`;
     const focused = (control: Locator) => control.evaluate(element => element === document.activeElement);
@@ -1740,14 +1746,15 @@ for (const language of ["en", "th"] as const) test(`staff ${language}: status me
     await status.focus();
     await page.keyboard.press("Enter");
     await page.getByRole("menuitemradio", { name: copy(language, "inProgress"), exact: true }).focus();
-    await page.keyboard.press("Enter");
+    await Promise.all([once(intercepted, "move", { signal: AbortSignal.timeout(5000) }), page.keyboard.press("Enter")]);
     await page.getByRole("menu").waitFor({ state: "detached" });
     await saving.waitFor();
     assert.equal(await status.getAttribute("aria-disabled"), "true");
     assert.equal(await focused(status), true, "Focus stays on the status trigger during the save");
     await page.keyboard.press("Enter");
     assert.equal(await page.getByRole("menu").count(), 0, "A busy trigger does not open");
-    release!();
+    assert.ok(release);
+    release();
     await saving.waitFor({ state: "detached" });
     await detail.getByRole("button", { name: label("inProgress"), exact: true }).waitFor();
     assert.equal(await status.getAttribute("aria-disabled"), null);
@@ -1755,12 +1762,13 @@ for (const language of ["en", "th"] as const) test(`staff ${language}: status me
 
     const resolve = detail.getByRole("button", { name: `${copy(language, "queueResolve")} · ${number}`, exact: true });
     await resolve.focus();
-    await page.keyboard.press("Enter");
+    await Promise.all([once(intercepted, "move", { signal: AbortSignal.timeout(5000) }), page.keyboard.press("Enter")]);
     await saving.waitFor();
     assert.equal(await resolve.getAttribute("aria-disabled"), "true");
     assert.equal(await focused(resolve), true, "Focus stays on the move button during the save");
     await page.keyboard.press("Enter");
-    release!();
+    assert.ok(release);
+    release();
     await detail.getByRole("button", { name: label("done"), exact: true }).waitFor();
     await saving.waitFor({ state: "detached" });
     assert.equal(await focused(detail.getByRole("button", { name: `${copy(language, "queueReopen")} · ${number}`, exact: true })), true, "Focus stays on the move button after the save");
