@@ -254,6 +254,26 @@ test("signed mention + two screenshots in order (out-of-order imageSet) stage pr
   expect([staleResp.status, (await staleResp.json()).code]).toEqual([409, "MEDIA_REVISION_MISMATCH"]);
 });
 
+test("a screenshot survives another sender's withdrawal and becomes inaccessible after a second matching mention", async () => {
+  const f = await setupCaptureFixture();
+  const messageId = "fixture-png-shared-window";
+  const otherWithdrawal = () => {
+    const event = f.unsendEvent(messageId);
+    return { ...event, source: { ...event.source, userId: "Uother" } };
+  };
+  await f.postWebhook([otherWithdrawal(), f.mentionEvent("first", "@bot Printer stalled", f.now),
+    f.imageEvent(messageId, f.now + 100)]);
+  await f.settle();
+  const [intake] = await f.allIntakes();
+  const list = () => f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: intake._id });
+  const url = (await list())!.items[0].url!;
+  await f.postWebhook([otherWithdrawal()]);
+  expect((await f.fetchMedia(f.staff, url)).status).toBe(200);
+  await f.postWebhook([f.mentionEvent("second", "@bot Receipt missing", f.now + 600)]);
+  expect((await f.fetchMedia(f.staff, url)).status).toBe(404);
+  expect(await list()).toMatchObject({ items: [], warnings: ["MEDIA_MATCH_AMBIGUOUS"] });
+});
+
 test("image-before-text coordinates via bounded durable retry once mention arrives", async () => {
   const f = await setupCaptureFixture();
 

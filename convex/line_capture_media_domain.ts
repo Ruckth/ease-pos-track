@@ -112,6 +112,7 @@ async function matchIntakeWindow(
     const current = await currentCaptureIntake(ctx, row._id, now);
     if (current) eligible.push(current);
   }
+  if (candidates.length === 5) return { kind: "ambiguous", intakes: eligible };
   if (eligible.length === 0) return { kind: "none" };
   if (eligible.length === 1) return { kind: "matched", intake: eligible[0] };
   return { kind: "ambiguous", intakes: eligible };
@@ -290,7 +291,7 @@ export async function ingestCaptureMediaEvents(
       timestamp: event.timestamp,
     });
     if (!enrollment || enrollment.chat.kind !== event.kind) continue;
-    if (await captureMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId)) continue;
+    if (await captureMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId, event.senderDigest)) continue;
 
     const existingByMsg = await ctx.db.query("intakeMedia")
       .withIndex("by_bot_message", q => q.eq("botId", bot._id).eq("messageId", event.messageId))
@@ -393,7 +394,7 @@ export async function retryMatchCaptureMedia(
     return { state: row?.state ?? "expired", matched: false, warningCode: row?.warningCode };
   }
 
-  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) {
+  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) {
     await ctx.db.patch(row._id, { state: "withdrawn", withdrawnAt: now, matchUntil: undefined, updatedAt: now });
     return { state: "withdrawn", matched: false };
   }
@@ -453,11 +454,18 @@ export async function retryMatchCaptureMedia(
   return { state: "unmatched", matched: false };
 }
 
+/** A later webhook may introduce a second matching mention after staging. */
+async function stillMatches(ctx: DbCtx, row: MediaDoc, now: number) {
+  const match = await matchIntakeWindow(ctx, { botId: row.botId, chatId: row.chatId, joinedAt: row.joinedAt,
+    senderDigest: row.senderDigest, timestamp: row.messageTimestamp }, now);
+  return match.kind === "matched" && match.intake._id === row.intakeId;
+}
+
 /** Verifies current capture authority, intake, bot and unsend fence for a bound media row. */
 async function verifyMediaAuthority(ctx: DbCtx, row: MediaDoc, now: number) {
-  if (!row.intakeId || !lineCaptureEnabled()) return null;
+  if (!row.intakeId || !lineCaptureEnabled() || !await stillMatches(ctx, row, now)) return null;
   if (row.withdrawnAt !== undefined || row.expiresAt <= now) return null;
-  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) return null;
+  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) return null;
   const intake = await currentCaptureIntake(ctx, row.intakeId, now);
   if (!intake || intake.projectId !== row.projectId || intake.botId !== row.botId
     || intake.chatId !== row.chatId || intake.joinedAt !== row.joinedAt) return null;
@@ -476,7 +484,7 @@ export async function claimMediaForStaging(
   if (!row || (row.state !== "pending" && row.state !== "staging")) return null;
   if (row.availableAt > now || (row.leaseExpiresAt ?? 0) > now) return null;
 
-  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) {
+  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) {
     await ctx.db.patch(row._id, { state: "withdrawn", withdrawnAt: now, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
     return null;
   }
@@ -662,7 +670,7 @@ export async function recordStagedMedia(
   const remaining = open.filter(item => item.marker !== input.marker);
   const writeClaim = { writes: remaining, writeCheckAt: remaining.length ? row.writeCheckAt : undefined };
 
-  const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId);
+  const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest);
   const auth = !unsent ? await verifyMediaAuthority(ctx, row, now) : null;
   const otherBytes = auth ? await otherIntakeMediaBytes(ctx, auth.intake._id, row._id) : 0;
   const sizeExceeded = write.size > LINE_CAPTURE_MAX_TOTAL_BYTES || otherBytes + write.size > LINE_CAPTURE_MAX_TOTAL_BYTES;
@@ -738,7 +746,7 @@ export async function recordMediaWarning(
   if (!row || row.state !== "staging" || row.leaseId !== input.leaseId || (row.leaseExpiresAt ?? 0) <= now) {
     return false;
   }
-  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) {
+  if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) {
     await ctx.db.patch(row._id, { state: "withdrawn", withdrawnAt: now, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
     return false;
   }
@@ -964,7 +972,7 @@ export async function expireStagedMedia(
     .withIndex("by_state_expires", q => q.eq("state", "ready").gt("expiresAt", now))
     .take(limit);
   for (const row of activeReady) {
-    const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId);
+    const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest);
     const intake = row.intakeId ? await ctx.db.get(row.intakeId) : null;
     const intakeGone = !intake || intake.state === "withdrawn" || intake.state === "dismissed"
       || intake.unsentAt !== undefined || intake.redactedAt !== undefined;
@@ -1129,7 +1137,7 @@ export async function resolveCapturedMediaForStaff(
   if (row.state === "withdrawn" || row.withdrawnAt !== undefined
     || intake.state === "withdrawn" || intake.state === "dismissed"
     || intake.unsentAt !== undefined || intake.redactedAt !== undefined
-    || await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) {
+    || await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) {
     return { ok: false, status: 410, code: "MEDIA_WITHDRAWN" };
   }
 
@@ -1139,7 +1147,7 @@ export async function resolveCapturedMediaForStaff(
   }
 
   const liveIntake = await currentCaptureIntake(ctx, row.intakeId, now);
-  if (!liveIntake) return { ok: false, status: 404, code: "MEDIA_UNAVAILABLE" };
+  if (!liveIntake || !await stillMatches(ctx, row, now)) return { ok: false, status: 404, code: "MEDIA_UNAVAILABLE" };
 
   if (input.expectedRevision !== undefined && input.expectedRevision !== liveIntake.revision) {
     return { ok: false, status: 409, code: "MEDIA_REVISION_MISMATCH" };
@@ -1184,9 +1192,13 @@ export async function listIntakeMediaForStaff(
   const visible: MediaDoc[] = [];
   for (const row of rows) {
     if (row.state === "withdrawn" || row.withdrawnAt !== undefined) continue;
-    if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) continue;
+    if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) continue;
     if (row.state === "expired" || row.expiresAt <= now) {
       expiredCount++;
+      continue;
+    }
+    if (isActiveMediaState(row.state) && !await stillMatches(ctx, row, now)) {
+      warnings.add("MEDIA_MATCH_AMBIGUOUS");
       continue;
     }
     if (row.warningCode) warnings.add(row.warningCode);

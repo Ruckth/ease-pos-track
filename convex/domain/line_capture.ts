@@ -1,4 +1,5 @@
 import { v, type Infer } from "convex/values";
+import { hashTicketRequest } from "../ticket_requests";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { admittedLineProject } from "./line";
@@ -191,9 +192,12 @@ export async function currentCaptureIntake(ctx: DbContext, intakeId: Id<"lineCap
   return intake;
 }
 
-export async function captureMessageUnsent(ctx: DbContext, botId: Id<"lineBots">, lineChatId: string, messageId: string) {
-  return !!await ctx.db.query("lineCaptureUnsends")
-    .withIndex("by_bot_chat_message", q => q.eq("botId", botId).eq("lineChatId", lineChatId).eq("messageId", messageId)).unique();
+export async function captureMessageUnsent(ctx: DbContext, botId: Id<"lineBots">, lineChatId: string, messageId: string, senderDigest?: string) {
+  const fence = (sender: string | undefined) => ctx.db.query("lineCaptureUnsends")
+    .withIndex("by_bot_chat_message", q => q.eq("botId", botId).eq("lineChatId", lineChatId)
+      .eq("messageId", messageId).eq("senderDigest", sender)).unique();
+  // LINE may omit sender identity. A signed senderless withdrawal applies to the message itself.
+  return !!await fence(undefined) || (senderDigest !== undefined && !!await fence(senderDigest));
 }
 
 export async function flagCaptureWarning(ctx: MutationCtx, intakeId: Id<"lineCaptureIntakes">, code: string) {
@@ -231,14 +235,19 @@ async function dedup(ctx: MutationCtx, botId: Id<"lineBots">, event: LineCapture
 type Edit = { text: string; mentioned: boolean; timestamp: number };
 
 async function applyEdit(ctx: MutationCtx, intake: Intake, edit: Edit, now: number) {
-  if (withdrawn(intake) || edit.timestamp < intake.sourceTimestamp) return;
+  const latestTimestamp = Math.max(intake.sourceTimestamp, intake.correction?.timestamp ?? intake.sourceTimestamp);
+  if (withdrawn(intake) || edit.timestamp < latestTimestamp) return;
   const revision = intake.revision + 1;
   if (intake.state === "linked") {
-    // After linkage the Ticket is never rewritten; staff reviews the correction.
-    const previous = intake.correction;
-    if (previous && edit.timestamp < previous.timestamp) return;
-    const conflict = !!previous && edit.timestamp === previous.timestamp && previous.text !== edit.text;
-    await ctx.db.patch(intake._id, { correction: edit, revision, updatedAt: now, ...(conflict ? { conflict: true } : {}) });
+    const digest = (await hashTicketRequest(JSON.stringify([edit.text, edit.mentioned]))).inputDigest;
+    const sameTimestamp = edit.timestamp === latestTimestamp;
+    const latest = intake.correction ?? intake;
+    if (sameTimestamp && (intake.sourceEditDigest === digest || (!intake.sourceEditDigest
+      && edit.text === latest.text && edit.mentioned === latest.mentioned))) return;
+    await ctx.db.patch(intake._id, {
+      correction: edit, revision, updatedAt: now, sourceTimestamp: edit.timestamp, sourceEditDigest: digest,
+      conflict: sameTimestamp || undefined,
+    });
     return;
   }
   if (edit.timestamp === intake.sourceTimestamp) {
@@ -302,21 +311,27 @@ async function acceptUnsend(ctx: MutationCtx, bot: Doc<"lineBots">, event: Extra
   const chat = await ctx.db.query("lineChats").withIndex("by_bot_chat", q => q.eq("botId", bot._id).eq("lineChatId", event.lineChatId)).unique();
   if (!chat || chat.projectId !== bot.projectId || chat.kind !== event.kind || event.timestamp < chat.joinedAt) return;
   const intake = await ctx.db.query("lineCaptureIntakes").withIndex("by_bot_message", q => q.eq("botId", bot._id).eq("messageId", event.messageId)).unique();
-  // Chats that never opted in keep their legacy behavior: no capture fences or dedup rows.
-  if (!intake && !(await captureProject(ctx, bot.projectId) && await captureChatOptIn(ctx, chat))) return;
+  const media = await ctx.db.query("intakeMedia").withIndex("by_bot_message",
+    q => q.eq("botId", bot._id).eq("messageId", event.messageId)).unique();
+  const source = intake ?? media;
+  if (source && (source.chatId !== chat._id || (event.senderDigest && source.senderDigest !== event.senderDigest))) return;
+  // Withdraw known sources even if capture was paused after delivery.
+  if (!source && !(await captureProject(ctx, bot.projectId) && await captureChatOptIn(ctx, chat))) return;
   if (await dedup(ctx, bot._id, event, now)) return;
-  if (!await captureMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId)) {
+  if (!await captureMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId, event.senderDigest)) {
     await ctx.db.insert("lineCaptureUnsends", {
-      botId: bot._id, lineChatId: event.lineChatId, messageId: event.messageId, unsentAt: event.timestamp,
+      botId: bot._id, lineChatId: event.lineChatId, messageId: event.messageId, senderDigest: event.senderDigest, unsentAt: event.timestamp,
       expiresAt: now + LINE_CAPTURE_DEDUP_TTL_MS,
     });
   }
-  for (const edit of await heldEdits(ctx, bot._id, event.messageId)) await ctx.db.delete(edit._id);
+  for (const edit of await heldEdits(ctx, bot._id, event.messageId)) {
+    if (edit.lineChatId === event.lineChatId && (!event.senderDigest || edit.senderDigest === event.senderDigest)) await ctx.db.delete(edit._id);
+  }
   if (!intake || intake.chatId !== chat._id || intake.unsentAt !== undefined
     || (event.senderDigest && intake.senderDigest !== event.senderDigest)) return;
   // Linked Tickets keep their reference; LINE-sourced content is hidden.
   await ctx.db.patch(intake._id, {
-    text: "", correction: undefined, unsentAt: event.timestamp, revision: intake.revision + 1, updatedAt: now,
+    text: "", correction: undefined, sourceEditDigest: undefined, unsentAt: event.timestamp, revision: intake.revision + 1, updatedAt: now,
     ...(intake.state === "linked" ? {} : { state: "withdrawn" as const, bucket: "done" as const }),
   });
 }
@@ -333,7 +348,7 @@ export async function acceptLineCaptureEvents(ctx: MutationCtx, input: { bot: Do
     if (event.timestamp < now - LINE_CAPTURE_TTL_MS || event.timestamp > now + FUTURE_SKEW_MS) continue;
     const enrollment = await captureEnrollment(ctx, { botId: bot._id, lineChatId: event.lineChatId, timestamp: event.timestamp });
     if (!enrollment || enrollment.chat.kind !== event.kind) continue;
-    if (await captureMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId)) continue;
+    if (await captureMessageUnsent(ctx, bot._id, event.lineChatId, event.messageId, event.senderDigest)) continue;
     if (await dedup(ctx, bot._id, event, now)) continue;
     if (event.eventType === "mention") await acceptMention(ctx, bot, enrollment.chat, enrollment.captureChatId, event, now);
     else await acceptEdit(ctx, bot, enrollment.captureChatId, event, now);
@@ -354,7 +369,7 @@ export async function cleanupLineCapture(ctx: MutationCtx, options?: { now?: num
     const receipts = await ctx.db.query("lineCaptureReceipts").withIndex("by_intake_candidate", q => q.eq("intakeId", intake._id)).take(MAX_RECEIPTS);
     if (intake.redactedAt === undefined && receipts.length) {
       await ctx.db.patch(intake._id, {
-        text: "", correction: undefined, senderDigest: "", redactedAt: now, bucket: "done",
+        text: "", correction: undefined, sourceEditDigest: undefined, senderDigest: "", redactedAt: now, bucket: "done",
         revision: intake.revision + 1, updatedAt: now, expiresAt: now + LINE_CAPTURE_RECEIPT_TTL_MS,
       });
     } else {

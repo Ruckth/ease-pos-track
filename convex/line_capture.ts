@@ -215,6 +215,8 @@ export const acknowledgeCorrection = staffMutation({
     if (intake.revision !== expectedRevision) throw new Error("LINE_CAPTURE_REVISION_CHANGED");
     if (!intake.correction) return;
     await ctx.db.patch(intakeId, {
+      sourceTimestamp: intake.correction.timestamp,
+      sourceEditDigest: intake.sourceEditDigest ?? (await hashTicketRequest(JSON.stringify([intake.correction.text, intake.correction.mentioned]))).inputDigest,
       correction: undefined, conflict: undefined, revision: intake.revision + 1, updatedAt: Date.now(),
     });
   },

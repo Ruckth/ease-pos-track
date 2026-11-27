@@ -29,6 +29,7 @@ export const lineCaptureTables = {
     state: captureState, bucket: v.union(v.literal("open"), v.literal("done")),
     revision: v.number(), messageTimestamp: v.number(), sourceTimestamp: v.number(),
     conflict: v.optional(v.boolean()), warning: v.optional(v.string()),
+    sourceEditDigest: v.optional(v.string()),
     correction: v.optional(v.object({ text: v.string(), mentioned: v.boolean(), timestamp: v.number() })),
     unsentAt: v.optional(v.number()),
     // Content aged out; the content-free row and its receipts remain until expiresAt again.
@@ -44,8 +45,8 @@ export const lineCaptureTables = {
   }).index("by_bot_event", ["botId", "webhookEventId"]).index("by_expires_at", ["expiresAt"]),
   // Unsend fences: an unsend wins over late, early or redelivered events for the same message.
   lineCaptureUnsends: defineTable({
-    botId: v.id("lineBots"), lineChatId: v.string(), messageId: v.string(), unsentAt: v.number(), expiresAt: v.number(),
-  }).index("by_bot_chat_message", ["botId", "lineChatId", "messageId"]).index("by_expires_at", ["expiresAt"]),
+    botId: v.id("lineBots"), lineChatId: v.string(), messageId: v.string(), senderDigest: v.optional(v.string()), unsentAt: v.number(), expiresAt: v.number(),
+  }).index("by_bot_chat_message", ["botId", "lineChatId", "messageId", "senderDigest"]).index("by_expires_at", ["expiresAt"]),
   // Edits that arrived before their original message was admitted.
   lineCaptureEdits: defineTable({
     captureChatId: v.id("lineCaptureChats"), botId: v.id("lineBots"), lineChatId: v.string(), messageId: v.string(), senderDigest: v.string(),

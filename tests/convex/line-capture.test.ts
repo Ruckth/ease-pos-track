@@ -57,9 +57,9 @@ const edit = (id: string, text: string, at: number, options: { mentioned?: boole
     ...(options.mentioned === false ? {} : { mention: { mentionees: [{ index: 0, length: 4, type: "user", isSelf: true }] } }),
   },
 });
-const unsend = (id: string, at: number) => ({
-  type: "unsend", mode: "active", webhookEventId: `unsend-${id}`, timestamp: at,
-  source: { type: "group", groupId: group, userId: "Ualice" }, unsend: { messageId: id },
+const unsend = (id: string, at: number, user = "Ualice") => ({
+  type: "unsend", mode: "active", webhookEventId: `unsend-${id}-${user}-${at}`, timestamp: at,
+  source: { type: "group", groupId: group, userId: user }, unsend: { messageId: id },
 });
 const image = (id: string, at: number, set?: { id: string; index: number; total: number }) => ({
   type: "message", mode: "active", webhookEventId: `img-${id}`, timestamp: at,
@@ -199,6 +199,18 @@ test("an early edit is held and reconciled only when its original is admitted", 
   expect(await f.t.run(({ db }) => db.query("lineCaptureEdits").collect())).toEqual([]);
 });
 
+test("a different sender cannot withdraw a held edit or its original", async () => {
+  const f = await setup();
+  await f.enable();
+  await f.send([edit("m1", "updated", now + 200), unsend("m1", now + 250, "Uother")]);
+  await f.send([mention("m1", "original")]);
+  expect((await f.list()).page[0].text).toBe("updated");
+  await f.send([unsend("m1", now + 300, "Uother"), edit("m1", "latest", now + 350)]);
+  expect((await f.list()).page[0].text).toBe("latest");
+  await f.send([unsend("m1", now + 400)]);
+  expect((await f.list("done")).page[0]).toMatchObject({ state: "withdrawn", text: "" });
+});
+
 test("unsend always wins against late originals and late edits", async () => {
   const f = await setup();
   await f.enable();
@@ -247,6 +259,12 @@ test("staff create once, replay returns the same receipt and a different payload
   expect(done.page[0].receipts).toHaveLength(2);
   await f.t.mutation(capture.acknowledgeCorrection, { token: f.token, intakeId: row._id, expectedRevision: 2 });
   expect((await f.list("done")).page[0].correction).toBeNull();
+
+  await f.send([edit("m1", "late older correction", now + 180),
+    edit("m1", "printer and scanner down", now + 200, { event: "same-edit-redelivered" })]);
+  expect((await f.list("done")).page[0].correction).toBeNull();
+  await f.send([edit("m1", "different correction", now + 200)]);
+  expect((await f.list("done")).page[0]).toMatchObject({ conflict: true, correction: { text: "different correction" } });
 
   // Post-link unsend hides LINE content and keeps the Ticket reference.
   await f.send([unsend("m1", now + 300)]);
