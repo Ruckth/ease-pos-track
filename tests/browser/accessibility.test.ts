@@ -163,6 +163,8 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
       await editor.getByRole("img", { name: labels.reviewTitle }).waitFor();
       await expectAccessible(page, `${role} ${language} edited attachment review`);
       await page.keyboard.press("Escape");
+      await page.getByRole("alertdialog", { name: copy(language, "discardImageTitle") })
+        .getByRole("button", { name: copy(language, "discardChanges"), exact: true }).press("Enter");
       await editor.waitFor({ state: "hidden" });
       await page.waitForFunction(element => element === document.activeElement, await edit.elementHandle());
       await page.keyboard.press("Escape");

@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, Paperclip, Pencil, RotateCcw } from "lucide-react";
-import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
 import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
@@ -53,30 +53,35 @@ type PanelProps = DetailNavigation & RoleActions & {
 
 export function TicketDetailPanel(props: PanelProps) {
   const { t } = useI18n();
-  const { ticket, ticketId, onPrevious, onNext, inline, initialSection } = props;
+  const { ticket, ticketId, onPrevious, onNext, onToggleFocus, inline, initialSection } = props;
   const panel = useRef<HTMLElement>(null);
+  const viewer = useRef<MediaViewerHandle>(null);
   const heading = useId();
   useEffect(() => {
     if (ticketId && inline && initialSection !== "media") panel.current?.focus();
   }, [ticketId, inline, initialSection]);
 
-  const close = props.onClose;
+  function navigate(action: () => void) {
+    if (viewer.current) viewer.current.requestClose(action);
+    else action();
+  }
+  const close = () => navigate(props.onClose);
   if (!ticketId) return null;
   const title = ticket ? formatTicketNumber(ticket.ticketNumber, ticket.projectKey) : t("ticket");
   const navigation = <nav aria-label={t("ticket")} className="flex flex-wrap items-center justify-between gap-1 border-b border-border/50 pb-2">
     {inline && <Button type="button" variant="ghost" className="min-h-11 px-2" onClick={close}><ArrowLeft />{t("detailBack")}</Button>}
     <div className="ml-auto flex flex-wrap gap-1">
-      {props.onToggleFocus && <Button type="button" variant="ghost" className="hidden min-h-11 px-2 lg:inline-flex" aria-pressed={props.focusMode} onClick={props.onToggleFocus}>
+      {onToggleFocus && <Button type="button" variant="ghost" className="hidden min-h-11 px-2 lg:inline-flex" aria-pressed={props.focusMode} onClick={() => navigate(onToggleFocus)}>
         {props.focusMode ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}{t("queueFocus")}
       </Button>}
-      <Button type="button" variant="ghost" size="icon" className="size-11" disabled={!onPrevious} onClick={onPrevious} aria-label={t("detailPrevious")} title={t("detailPrevious")}><ChevronLeft /></Button>
-      <Button type="button" variant="ghost" size="icon" className="size-11" disabled={!onNext} onClick={onNext} aria-label={t("detailNext")} title={t("detailNext")}><ChevronRight /></Button>
+      <Button type="button" variant="ghost" size="icon" className="size-11" disabled={!onPrevious} onClick={onPrevious && (() => navigate(onPrevious))} aria-label={t("detailPrevious")} title={t("detailPrevious")}><ChevronLeft /></Button>
+      <Button type="button" variant="ghost" size="icon" className="size-11" disabled={!onNext} onClick={onNext && (() => navigate(onNext))} aria-label={t("detailNext")} title={t("detailNext")}><ChevronRight /></Button>
     </div>
   </nav>;
   const content = <>
     {navigation}
     {ticket && <TicketListNotice key={ticketId} inResults={props.inResults} />}
-    {ticket ? <DetailContent key={ticket._id} {...props} ticket={ticket} onClose={close} heading={heading} />
+    {ticket ? <DetailContent key={ticket._id} {...props} ticket={ticket} viewer={viewer} heading={heading} />
       : <p className="py-6 text-sm text-muted-foreground" role={ticket === undefined ? "status" : "alert"}>{t(ticket === undefined ? "syncing" : "ticketMissing")}</p>}
   </>;
   if (inline) return <section tabIndex={-1} ref={panel} onKeyDown={event => {
@@ -111,9 +116,9 @@ function Disclosure({ title, children, icon }: { title: string; children: ReactN
   </section>;
 }
 
-function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) {
+function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; viewer: RefObject<MediaViewerHandle | null> }) {
   const { t, formatDate } = useI18n();
-  const { ticket, initialSection, onClose } = props;
+  const { ticket, initialSection, onClose, viewer } = props;
   const operations = useTicketOperations();
   const staff = props.role === "staff";
   const archived = ticket.lifecycle === "archived";
@@ -127,7 +132,6 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
   const [mediaOpen, setMediaOpen] = useState(initialSection === "media");
   const mediaButton = useRef<HTMLButtonElement>(null);
   const mediaId = useId();
-  const viewer = useRef<MediaViewerHandle>(null);
   const pendingPin = useRef<Annotation | null>(null);
   const annotations = (ticket.annotations ?? []).filter(isActiveAnnotation);
   const deleted = (ticket.annotations ?? []).filter(note => !isActiveAnnotation(note));
@@ -205,7 +209,10 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
     <div>
       {ticket.media.length > 0 && <section className="border-t">
         <Button ref={mediaButton} type="button" variant="ghost" aria-expanded={mediaOpen} aria-controls={mediaId}
-          className="min-h-11 w-full justify-start px-0" onClick={() => setMediaOpen(!mediaOpen)}>
+          className="min-h-11 w-full justify-start px-0" onClick={() => {
+            if (mediaOpen && viewer.current) viewer.current.requestClose(() => setMediaOpen(false));
+            else setMediaOpen(!mediaOpen);
+          }}>
           <Paperclip />{t("detailMedia", { count: ticket.media.length })}<ChevronDown className={cn("ml-auto", mediaOpen && "rotate-180")} />
         </Button>
         <div id={mediaId}>{mediaOpen && <Suspense fallback={<p role="status">{t("syncing")}</p>}>
@@ -250,6 +257,9 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string }) 
     </footer>
     <AlertDialog open={confirming} onOpenChange={setConfirming} title={t(staff ? "archive" : "deleteTicket")}
       description={t(staff ? "archiveConfirm" : "deleteTicketConfirm")} confirmLabel={t(staff ? "archive" : "deleteTicket")}
-      onConfirm={() => { void changeLifecycle(); }} />
+      onConfirm={() => {
+        if (viewer.current) viewer.current.requestClose(() => { void changeLifecycle(); });
+        else void changeLifecycle();
+      }} />
   </div>;
 }

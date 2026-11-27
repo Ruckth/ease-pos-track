@@ -33,6 +33,37 @@ async function closeFilters(page: Page) {
   await filterPanel(page).waitFor({ state: "hidden" });
 }
 
+async function selectMarkupMenu(page: Page, trigger: string, item: string) {
+  await page.getByRole("button", { name: trigger, exact: true }).tap();
+  const menu = page.getByRole("menu");
+  await menu.getByRole("menuitemradio", { name: item, exact: true }).tap();
+  await menu.waitFor({ state: "hidden" });
+}
+
+async function placeOnSurface(surface: Locator, x: number, y: number, input: "tap" | "click" = "tap") {
+  await surface.scrollIntoViewIfNeeded();
+  // The target can move during a keyboard resize or after changing tools.
+  const settled = await surface.evaluate(async element => {
+    const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    let previous = element.getBoundingClientRect();
+    let stable = 0;
+    for (let frame = 0; frame < 20 && stable < 2; frame++) {
+      await nextFrame();
+      const current = element.getBoundingClientRect();
+      stable = current.width === previous.width && current.height === previous.height
+        && current.x === previous.x && current.y === previous.y ? stable + 1 : 0;
+      previous = current;
+    }
+    return stable === 2;
+  });
+  assert.ok(settled, "The editing surface should settle before placing a mark");
+  const box = await surface.boundingBox();
+  assert.ok(box);
+  const position = { x: box.width * x, y: box.height * y };
+  if (input === "tap") await surface.tap({ position });
+  else await surface.click({ position });
+}
+
 async function attachLongReceipt(page: Page, name: string) {
   const data = await page.evaluate(() => {
     const c = document.createElement("canvas");
@@ -59,8 +90,8 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
     const button = (name: string) => editor.getByRole("button", { name, exact: true });
     const surface = editor.getByRole("application");
     const viewport = surface.locator("../..");
-    await button(labels.fitWidth).tap();
-    await button(labels.pan).tap();
+    await selectMarkupMenu(page, labels.view, labels.fitWidth);
+    await selectMarkupMenu(page, labels.moreTools, labels.pan);
     await viewport.scrollIntoViewIfNeeded();
     const available = (await viewport.boundingBox())!;
     const before = await viewport.evaluate(el => el.scrollTop);
@@ -70,8 +101,16 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
       await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [finger] });
       await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: finger.x, y: finger.y - 110 }] });
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      assert.ok(await viewport.evaluate(el => el.scrollTop) > before + 70);
+      const x = available.x + available.width * .5, y = available.y + available.height * .5;
+      const pinch = (delta: number) => [{ x: x - delta, y, id: 0 }, { x: x + delta, y, id: 1 }];
+      const widthBeforePinch = (await surface.boundingBox())!.width;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: pinch(25) });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: pinch(45) });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await page.waitForFunction(({ el, width }) => el.getBoundingClientRect().width > width * 1.3,
+        { el: (await surface.elementHandle())!, width: widthBeforePinch });
     } finally { await cdp.detach(); }
-    assert.ok(await viewport.evaluate(el => el.scrollTop) > before + 70);
     await button(labels.mask).tap();
     await viewport.scrollIntoViewIfNeeded();
     const visible = (await viewport.boundingBox())!, source = (await surface.boundingBox())!;
@@ -84,7 +123,7 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
     await button(labels.review).tap();
     const preview = editor.locator("img");
     await preview.waitFor();
-    await button(labels.fitWidth).tap();
+    await selectMarkupMenu(page, labels.view, labels.fitWidth);
     const measured = (await preview.boundingBox())!;
     assert.ok(measured.width > 300 && measured.height > 1200);
     const pixel = await preview.evaluate(async (el, pos) => {
@@ -214,9 +253,15 @@ test("screenshot markup wheel resizes a newly placed circle in one undo step whi
     await page.mouse.move(outside.x, outside.y);
     await page.mouse.wheel(0, 120);
     await page.waitForFunction(({ el, prev }) => el.scrollTop > prev + 40, { el: (await viewport.elementHandle())!, prev: scrollBeforeOutside });
+    await page.waitForTimeout(300);
     const circleAfterOutsideScroll = await screenPoint(shrunk.cx, shrunk.cy);
-    await page.mouse.move(circleAfterOutsideScroll.x, circleAfterOutsideScroll.y);
-    await page.mouse.wheel(0, -100);
+    const uncanceled = await surface.evaluate((el, { outside, center }) => {
+      // Dispatch the two events in one burst even on a loaded CI machine.
+      const send = (point: { x: number; y: number }, deltaY: number) =>
+        el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y, deltaY }));
+      return [send(outside, 120), send(center, -100)];
+    }, { outside, center: circleAfterOutsideScroll });
+    assert.deepEqual(uncanceled, [true, true]);
     assert.equal((await readCircle()).width, shrunk.width, "momentum crossing circle from outside burst did not resize");
     await page.waitForTimeout(300);
 
@@ -365,9 +410,9 @@ test("screenshot markup wheel resizes a newly placed circle in one undo step whi
   } finally { await context.close(); }
 });
 
-test("narrow touch screenshot markup keeps one-tap modes, Circle size slider and Fine-tune within 320 px", async () => {
+test("narrow touch screenshot markup keeps primary tools, Circle size slider and Fine-tune within 320 px", async () => {
   const { context, page, errors, uploads } = await openWith(await browsers.get(), "customer", "en", undefined, {
-    viewport: { width: 320, height: 680 }, hasTouch: true, isMobile: true,
+    viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true,
   });
   try {
     const labels = markupLabels("en");
@@ -387,13 +432,12 @@ test("narrow touch screenshot markup keeps one-tap modes, Circle size slider and
 
     await surface.waitFor();
     await assertNoOverflow("initial 320px editor");
-    for (const label of [labels.select, labels.pan, labels.circle, labels.crop, labels.mask, labels.eraser]) {
+    for (const label of [labels.circle, labels.mask, labels.moreTools, labels.undo, labels.redo]) {
       const box = await control(label).boundingBox();
       assert.ok(box && box.height >= 44, `${label} has a 44 px touch target height`);
     }
     const circleBoxBefore = (await control(labels.circle).boundingBox())!;
-    await control(labels.pan).tap();
-    assert.equal(await control(labels.pan).getAttribute("aria-pressed"), "true");
+    await selectMarkupMenu(page, labels.moreTools, labels.pan);
     const circleBoxAfterPan = (await control(labels.circle).boundingBox())!;
     assert.ok(Math.abs(circleBoxAfterPan.x - circleBoxBefore.x) <= 1 && Math.abs(circleBoxAfterPan.y - circleBoxBefore.y) <= 1, "mode switch kept toolbar buttons stationary");
     await control(labels.circle).tap();
@@ -401,7 +445,6 @@ test("narrow touch screenshot markup keeps one-tap modes, Circle size slider and
 
     const surfaceBox = (await surface.boundingBox())!;
     await surface.tap({ position: { x: surfaceBox.width * 0.5, y: surfaceBox.height * 0.5 } });
-    assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
     const slider = dialog.getByRole("slider", { name: labels.circleSize, exact: true });
     await slider.waitFor();
     assert.equal(await control(labels.fineTune).getAttribute("aria-expanded"), "false");
@@ -425,13 +468,190 @@ test("narrow touch screenshot markup keeps one-tap modes, Circle size slider and
     await dialog.getByRole("group", { name: labels.outline, exact: true }).waitFor();
     await assertNoOverflow("expanded fine-tune");
 
-    await control(labels.eraser).tap();
+    // Model a software keyboard shrinking the visual viewport independently of CSS layout.
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Object.defineProperty(viewport, "height", { configurable: true, value: 320 });
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    const widthField = dialog.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true });
+    await widthField.scrollIntoViewIfNeeded();
+    const previousWidth = Number(await widthField.inputValue());
+    await widthField.fill(String(previousWidth + 5));
+    await widthField.press("Enter");
+    assert.equal(Number(await widthField.inputValue()), previousWidth + 5);
+    const reviewAction = (await control(labels.review).boundingBox())!;
+    assert.ok(reviewAction.y + reviewAction.height <= 320);
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Reflect.deleteProperty(viewport, "height");
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    await control(labels.fineTune).tap();
+    await selectMarkupMenu(page, labels.moreTools, labels.eraser);
     const boxNow = (await surface.boundingBox())!;
     await surface.tap({ position: { x: boxNow.width * 0.5, y: boxNow.height * 0.5 } });
     assert.equal(await surface.locator("ellipse").count(), 0);
     await control(labels.undo).tap();
     assert.equal(await surface.locator("ellipse").count(), 2);
     assert.equal(uploads(), 0);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+for (const [language, viewport] of [
+  ["en", { width: 320, height: 568 }],
+  ["th", { width: 390, height: 664 }],
+] as const) {
+  test(`mobile photo workspace keeps marking, review, and two notes reachable (${language})`, async () => {
+    const { context, page, errors, uploads } = await openWith(await browsers.get(), "customer", language, undefined, {
+      viewport, hasTouch: true, isMobile: true,
+    });
+    const t = (key: Parameters<typeof copy>[1], values?: Parameters<typeof copy>[2]) => copy(language, key, values);
+    const labels = markupLabels(language);
+    const control = (name: string) => page.getByRole("button", { name, exact: true }).last();
+    async function tapHere(name: string) {
+      const button = control(name);
+      await button.waitFor();
+      await page.waitForFunction(label => {
+        const button = [...document.querySelectorAll("button")].reverse().find(el =>
+          el.getClientRects().length && (el.getAttribute("aria-label") ?? el.textContent?.trim()) === label);
+        if (!button) return false;
+        const box = button.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight &&
+          button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }, name);
+      await button.tap();
+    }
+    const place = (selector: string, x: number, y: number) => placeOnSurface(page.locator(selector).last(), x, y);
+    try {
+      await files(page, "checkout.png");
+      await control(t("editImageNamed", { name: "checkout.png" })).tap();
+      await place('[role="application"]', .3, .35);
+      await tapHere(labels.mask);
+      await place('[role="application"]', .56, .5);
+      await place('[role="application"]', .86, .68);
+      await tapHere(t("closeDialog"));
+      const imageDiscard = page.getByRole("alertdialog", { name: t("discardImageTitle") });
+      await imageDiscard.getByRole("button", { name: t("cancel"), exact: true }).tap();
+      await imageDiscard.waitFor({ state: "hidden" });
+      await tapHere(labels.review);
+      await page.getByRole("heading", { name: labels.reviewTitle }).waitFor();
+      await tapHere(labels.apply);
+      const photo = page.getByRole("dialog", { name: t("attachmentPhoto", { number: 1 }), exact: true });
+      await photo.waitFor();
+      await tapHere(t("addPin"));
+      await place("img[data-pin-surface]", .4, .38);
+      const draftNote = photo.getByRole("textbox", { name: t("describeIssue") });
+      await draftNote.fill("Payment error");
+      await tapHere(t("repositionPin"));
+      await place("img[data-pin-surface]", .45, .4);
+      assert.equal(await draftNote.inputValue(), "Payment error");
+      await tapHere(t("closeDialog"));
+      const noteDiscard = page.getByRole("alertdialog", { name: t("discardNoteTitle") });
+      await noteDiscard.getByRole("button", { name: t("cancel"), exact: true }).tap();
+      await noteDiscard.waitFor({ state: "hidden" });
+      assert.equal(await draftNote.inputValue(), "Payment error");
+
+      // Exercise the layout with the space a software keyboard would leave.
+      await page.setViewportSize({ width: viewport.width, height: 320 });
+      await tapHere(t("savePin"));
+      await page.setViewportSize(viewport);
+      await place("img[data-pin-surface]", .45, .4);
+      await draftNote.fill("Same spot on the edited photo");
+      await tapHere(t("savePin"));
+      await tapHere(t("placementDone"));
+      await tapHere(t("noteListCount", { count: 2 }));
+      await tapHere(t("noteLabel", { number: 1 }));
+      await photo.getByText("Payment error", { exact: true }).waitFor();
+      await tapHere(t("noteLabel", { number: 2 }));
+      await photo.getByText("Same spot on the edited photo", { exact: true }).waitFor();
+
+      const notes = await photo.locator("button[data-pin-id]").count();
+      assert.equal(notes, 2);
+      assert.equal(await photo.evaluate(el => el.scrollTop), 0);
+      assert.equal(uploads(), 0);
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+}
+
+test("mobile video fits the placement surface and time controls in the photo workspace", async () => {
+  const { context, page, errors } = await openWith(await browsers.get(), "customer", "en", undefined, {
+    viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true,
+  });
+  const t = (key: Parameters<typeof copy>[1], values?: Parameters<typeof copy>[2]) => copy("en", key, values);
+  try {
+    const name = "pin-video.webm";
+    await page.locator('input[type="file"][multiple]').setInputFiles(`tests/browser/${name}`);
+    await page.getByRole("button", { name: t("openMedia", { name }), exact: true }).tap();
+    const viewer = page.getByRole("dialog", { name, exact: true });
+    await viewer.getByRole("button", { name: t("addPin"), exact: true }).tap();
+    const slider = viewer.getByRole("slider");
+    await slider.waitFor();
+    const surface = viewer.getByRole("button", { name: t("markPoint"), exact: true });
+    const viewport = viewer.locator('[aria-roledescription="carousel"]');
+    async function assertFits() {
+      const rangeBox = (await slider.boundingBox())!;
+      const hitBox = (await surface.boundingBox())!;
+      const bounds = (await viewport.boundingBox())!;
+      assert.ok(rangeBox.y >= bounds.y && hitBox.y + hitBox.height <= bounds.y + bounds.height);
+      await surface.tap({ position: { x: hitBox.width * .7, y: hitBox.height * .9 } });
+    }
+    await assertFits();
+    await viewer.getByRole("textbox", { name: t("describeIssue") }).fill("Check this frame");
+    await viewer.getByRole("button", { name: t("savePin"), exact: true }).tap();
+    await assertFits();
+    await viewer.getByRole("textbox", { name: t("describeIssue") }).fill("Second frame note");
+    await viewer.getByRole("button", { name: t("savePin"), exact: true }).tap();
+    await viewer.getByRole("button", { name: t("placementDone"), exact: true }).tap();
+    await viewer.getByRole("button", { name: t("noteListCount", { count: 2 }), exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("mobile receipt note stays readable and editable outside the image", async () => {
+  const { context, page, errors } = await openWith(await browsers.get(), "customer", "en", undefined, {
+    viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true,
+  });
+  try {
+    const text = "The receipt shows the error near the top. The amount was not charged and the order stayed open.";
+    await attachLongReceipt(page, "receipt.png");
+    await files(page, "other-attachment.png");
+    await page.getByRole("button", { name: copy("en", "openMedia", { name: "receipt.png" }), exact: true }).tap();
+    const photo = page.getByRole("dialog", { name: "receipt.png" });
+    await photo.getByRole("button", { name: copy("en", "addPin"), exact: true }).tap();
+    const image = photo.locator("img[data-pin-surface]");
+    const box = (await image.boundingBox())!;
+    await image.tap({ position: { x: box.width / 2, y: box.height * .57 } });
+    await photo.getByRole("textbox", { name: copy("en", "describeIssue") }).fill(text);
+    await photo.getByRole("button", { name: copy("en", "savePin"), exact: true }).tap();
+    await photo.getByRole("button", { name: copy("en", "placementDone"), exact: true }).tap();
+    await photo.getByRole("button", { name: copy("en", "noteListCount", { count: 1 }), exact: true }).tap();
+    await photo.getByRole("button", { name: copy("en", "noteLabel", { number: 1 }), exact: true }).tap();
+    const displayed = photo.getByText(text, { exact: true });
+    assert.ok((await displayed.boundingBox())!.width > box.width * 3);
+    const editLabel = copy("en", "editComment", { label: 1 });
+    await photo.getByRole("button", { name: editLabel, exact: true }).tap();
+    await photo.getByRole("textbox", { name: editLabel }).fill("Corrected receipt note");
+    await photo.locator("button[data-pin-id]").press("ArrowRight");
+    assert.equal(await photo.getByRole("textbox", { name: editLabel }).inputValue(), "Corrected receipt note");
+    assert.equal(await photo.locator('img[alt="receipt.png"]').count(), 1);
+    await photo.getByRole("button", { name: copy("en", "save"), exact: true }).tap();
+    await photo.getByText("Corrected receipt note", { exact: true }).waitFor();
+    const deleteLabel = copy("en", "deleteComment", { label: 1 });
+    const deleteNote = photo.getByRole("button", { name: deleteLabel, exact: true });
+    const confirmation = page.getByRole("alertdialog", { name: deleteLabel });
+    await deleteNote.tap();
+    await confirmation.waitFor();
+    await page.keyboard.press("Escape");
+    await confirmation.waitFor({ state: "hidden" });
+    assert.ok(await photo.getByText("Corrected receipt note", { exact: true }).isVisible());
+    await deleteNote.tap();
+    await confirmation.getByRole("button", { name: deleteLabel, exact: true }).tap();
+    await photo.getByText("Corrected receipt note", { exact: true }).waitFor({ state: "hidden" });
+    const add = photo.getByRole("button", { name: copy("en", "addPin"), exact: true });
+    await page.waitForFunction(button => document.activeElement === button, await add.elementHandle());
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });
@@ -451,6 +671,7 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       await viewer.getByPlaceholder(copy(language, "describeIssue")).fill("Check this amount");
       await viewer.getByRole("button", { name: copy(language, "savePin"), exact: true }).click();
       if (role === "customer") {
+        await viewer.getByRole("button", { name: copy(language, "placementDone"), exact: true }).tap();
         await viewer.getByRole("button", { name: copy(language, "editDraftImage"), exact: true }).click();
       } else {
         await viewer.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
@@ -459,16 +680,10 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       const dialog = page.getByRole("dialog", { name: copy(language, "editDraftImage"), exact: true });
       const control = (name: string) => dialog.getByRole("button", { name, exact: true });
       const surface = dialog.getByRole("application", { name: labels.canvasLabel });
-      async function place(x: number, y: number) {
-        const box = await surface.boundingBox();
-        assert.ok(box);
-        const position = { x: box.width * x, y: box.height * y };
-        if (role === "customer") await surface.tap({ position });
-        else await surface.click({ position });
-      }
+      const place = (x: number, y: number) => placeOnSurface(surface, x, y, role === "customer" ? "tap" : "click");
       await control(labels.circle).click();
       await place(0.72, 0.66);
-      assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
+      if (role === "staff") assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
       await dialog.getByRole("slider", { name: labels.circleSize, exact: true }).waitFor();
       const fineTune = control(labels.fineTune);
       assert.equal(await fineTune.getAttribute("aria-expanded"), "false");
@@ -494,17 +709,20 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       await control(labels.mask).click();
       await place(0.3, 0.25);
       await place(0.52, 0.42);
-      await control(labels.eraser).click();
+      if (role === "customer") await selectMarkupMenu(page, labels.moreTools, labels.eraser);
+      else await control(labels.eraser).click();
       await place(0.25, 0.68);
       await control(labels.undo).click();
       await control(labels.redo).click();
-      await control(labels.crop).click();
+      if (role === "customer") await selectMarkupMenu(page, labels.moreTools, labels.crop);
+      else await control(labels.crop).click();
       await place(0.02, 0.02);
       await place(0.20, 0.20);
       assert.ok(await control(labels.review).isDisabled());
       await control(labels.expandCrop).click();
       assert.equal(await control(labels.review).isDisabled(), false);
-      await control(labels.crop).click();
+      if (role === "customer") await selectMarkupMenu(page, labels.moreTools, labels.crop);
+      else await control(labels.crop).click();
       await place(0.12, 0.12);
       await place(0.94, 0.94);
       await control(labels.review).click();
@@ -534,7 +752,7 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       await control(labels.apply).click();
       await dialog.waitFor({ state: "hidden" });
       if (role === "customer") {
-        const updatedViewer = page.getByRole("dialog").last();
+        const updatedViewer = page.getByRole("dialog", { name: copy(language, "attachmentPhoto", { number: 1 }), exact: true });
         await updatedViewer.getByRole("button", { name: copy(language, "editDraftImage"), exact: true }).waitFor();
         await updatedViewer.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       }
@@ -1501,7 +1719,7 @@ for (const language of ["en", "th"] as const) test(`keyboard pin placement and a
     await dialog.getByRole("button", { name: copy(language, "savePin"), exact: true }).press("Enter");
     const marker = dialog.getByRole("button", { name: `${copy(language, "comment", { label: 1 })}: Keyboard placement`, exact: true });
     await marker.press("Enter");
-    await dialog.getByRole("button", { name: copy(language, "moveComment"), exact: true }).press("Enter");
+    await dialog.getByRole("button", { name: copy(language, "repositionPin"), exact: true }).press("Enter");
     await surface.press("ArrowLeft");
     await surface.press("Space");
     await page.waitForFunction(() => document.querySelector<HTMLElement>("[data-pin-id]")?.style.left === "59%");

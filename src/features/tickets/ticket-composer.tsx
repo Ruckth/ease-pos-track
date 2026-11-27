@@ -7,8 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/lib/i18n";
 import { canMarkupImage, type PendingMedia } from "@/lib/types";
 import { ChevronDown, Loader2, Pencil } from "lucide-react";
-import { lazy, Suspense, useState, type FormEvent } from "react";
+import { lazy, Suspense, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
+import type { MediaViewerHandle } from "@/components/media-viewer";
 import type { DisposableTicketDraft } from "./draft";
 import { useTicketDraft } from "./use-composer";
 import type { Id } from "@convex/_generated/dataModel";
@@ -32,6 +33,10 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
     createPendingAnnotation, updatePendingAnnotation, deletePendingAnnotation, submit: submitDraft } = useTicketDraft(draftOwner);
   const [editingItem, setEditingItem] = useState<PendingMedia | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
+  const [viewIndex, setViewIndex] = useState(0);
+  const [editingDirty, setEditingDirty] = useState(false);
+  const [discardingEdits, setDiscardingEdits] = useState(false);
+  const viewerRef = useRef<MediaViewerHandle>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingMedia | null>(null);
   const [preview, setPreview] = useState(false);
   const [titleInvalid, setTitleInvalid] = useState(false);
@@ -81,19 +86,53 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
     }
   }
 
-  const markupDialog = <Dialog open={active && editingItem !== null} onOpenChange={open => { if (!open) setEditingItem(null); }}
-      title={t("editDraftImage")} placement="fullscreen">
+  function openMedia(item: PendingMedia) {
+    const index = items.findIndex(candidate => candidate.id === item.id);
+    if (index < 0) return;
+    setViewIndex(index);
+    setSelectedMediaId(item.id);
+  }
+
+  function closeEditor() {
+    setEditingItem(null);
+    setEditingDirty(false);
+  }
+
+  function requestCloseEditor() {
+    if (editingDirty) setDiscardingEdits(true);
+    else closeEditor();
+  }
+
+  function requestCloseViewer() {
+    if (viewerRef.current) viewerRef.current.requestClose(() => setSelectedMediaId(null));
+    else setSelectedMediaId(null);
+  }
+
+  const markupDialog = <Dialog open={active && editingItem !== null} onOpenChange={open => { if (!open) requestCloseEditor(); }}
+      title={t("editDraftImage")} placement="fullscreen" mobileWorkspace>
       {active && editingItem && <Suspense fallback={<p role="status">{t("syncing")}</p>}>
         <ImageMarkupEditor key={editingItem.previewUrl} item={editingItem}
           pins={viewerAnnotations.filter(pin => items[pin.mediaIndex]?.id === editingItem.id)}
-          onCancel={() => setEditingItem(null)}
+          onCancel={requestCloseEditor}
+          onDirtyChange={setEditingDirty}
           onApply={(file, crop) => {
             const applied = owner.applyImageEdit(editingItem, file, crop);
-            if (applied) setEditingItem(null);
+            if (applied) {
+              if (selectedMediaId === null && window.matchMedia("(max-width: 639px)").matches) openMedia(editingItem);
+              closeEditor();
+            }
             return applied;
           }} />
       </Suspense>}
+      <AlertDialog open={discardingEdits} onOpenChange={setDiscardingEdits}
+        title={t("discardImageTitle")} description={t("discardImageDescription")} confirmLabel={t("discardChanges")} onConfirm={closeEditor} />
     </Dialog>;
+
+  const viewed = items[viewIndex];
+  const generatedName = /^image-[a-f\d-]{36}\.(?:png|jpg)$/i.test(viewed?.file.name ?? "");
+  const mediaTitle = generatedName
+    ? t(viewed?.isVideo ? "attachmentVideo" : "attachmentPhoto", { number: viewIndex + 1 })
+    : viewed?.file.name ?? t("annotateMedia");
 
   return <>
     <form className="space-y-4" onSubmit={submit} noValidate aria-busy={isUploading}>
@@ -115,7 +154,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       {mediaEnabled && <div className="space-y-2">
         <p className="text-sm font-medium">{t("media")}</p>
         <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>}><MediaUploadField items={items} onItemsChange={setItems} onFilesAdded={owner.addFiles}
-          onEditImage={setEditingItem} onPreviewItem={item => setSelectedMediaId(item.id)} onRequestRemove={requestPendingItemRemoval}
+          onEditImage={setEditingItem} onPreviewItem={openMedia} onRequestRemove={requestPendingItemRemoval}
           annotationCounts={annotationCounts} disabled={!active || editsDisabled} /></Suspense>
         {items.length ? <p className="text-sm leading-5 text-muted-foreground">{annotations.length ? t("pinSummary", { count: annotations.length }) : t("pinHint")}</p> : null}
       </div>}
@@ -144,10 +183,10 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
         {mediaEnabled && isUploading ? <Button type="button" variant="outline" className="min-h-11" onClick={() => owner.cancel()}>{t("cancelUpload")}</Button> : null}
       </div>
     </form>
-    {mediaEnabled && <><Dialog open={active && selectedMediaId !== null} onOpenChange={open => !open && setSelectedMediaId(null)}
-      title={items[selectedMediaIndex]?.file.name ?? t("annotateMedia")} description={t("annotateDescription")} mobileFullScreen>
-      <Suspense fallback={<p role="status">{t("syncing")}</p>}><MediaViewer key={selectedMediaId ?? "pending-media"} media={viewerMedia} annotations={viewerAnnotations}
-        initialIndex={selectedMediaIndex} disabled={editsDisabled}
+    {mediaEnabled && <><Dialog open={active && selectedMediaId !== null} onOpenChange={open => { if (!open) requestCloseViewer(); }}
+      title={mediaTitle} description={t("annotateDescription")} mobileFullScreen mobileWorkspace>
+      <Suspense fallback={<p role="status">{t("syncing")}</p>}><MediaViewer ref={viewerRef} key={selectedMediaId ?? "pending-media"} media={viewerMedia} annotations={viewerAnnotations}
+        initialIndex={selectedMediaIndex} disabled={editsDisabled} workspace onMediaChange={setViewIndex}
         renderImageAction={index => {
           const item = items[index];
           return item && canMarkupImage(item.file)

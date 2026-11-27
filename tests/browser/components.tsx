@@ -2,12 +2,13 @@
 // the Project switcher (three Projects to two), customer Ticket rows in all
 // five states and two independent Undo notifications. No backend is involved.
 import type { Id } from "../../convex/_generated/dataModel";
-import type { ProjectSummary, TicketStatus } from "../../src/lib/types";
+import type { Annotation, ProjectSummary, TicketStatus } from "../../src/lib/types";
 import type { TicketSummary } from "../../shared/ticket-contracts";
 import type { TicketAdapter } from "../../src/features/tickets/operations";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LanguageProvider, useI18n } from "../../src/lib/i18n";
+import { MediaViewer, type MediaViewerHandle } from "../../src/components/media-viewer";
 import { ProjectSwitcher } from "../../src/components/project-controls";
 import { CustomerTicketRow } from "../../src/features/tickets/customer-ticket-row";
 import { ticketOperations } from "../../src/features/tickets/operations";
@@ -71,6 +72,24 @@ function Notices() {
   </section>;
 }
 
+function NoteChanges() {
+  const viewer = useRef<MediaViewerHandle>(null);
+  const [archived, setArchived] = useState(false);
+  const [notes, setNotes] = useState<Annotation[]>([
+    { id: "unavailable-note", label: 1, mediaIndex: 0, kind: "point", x: .4, y: .6, text: "Original note", createdAt: 1 },
+  ]);
+  const photoUrl = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="white"/></svg>');
+  const media = [1, 2].map(index => ({ key: String(index), name: `Attachment ${index}.png`, size: 100, type: "image/png", url: photoUrl }));
+  return <section aria-label="Live note changes">
+    <button type="button" onClick={() => setNotes([])}>Remove note remotely</button>
+    <button type="button" onClick={() => setArchived(true)}>Archive remotely</button>
+    <button type="button" onClick={() => viewer.current?.requestClose(() => setArchived(true))}>Archive in place</button>
+    {archived && <p>Archived</p>}
+    <MediaViewer ref={viewer} media={media} annotations={notes} readOnly={archived}
+      onCreateAnnotation={async () => {}} onUpdateAnnotation={async () => {}} onDeleteAnnotation={async () => {}} />
+  </section>;
+}
+
 function Harness() {
   const { language, setLanguage } = useI18n();
   const only = params.get("case");
@@ -79,6 +98,7 @@ function Harness() {
     {(!only || only === "switcher") && <Switcher />}
     {(!only || only === "rows") && <Rows />}
     {(!only || only === "notices") && <Notices />}
+    {only === "removed-note" && <NoteChanges />}
     <AppToaster theme={document.documentElement.classList.contains("dark") ? "dark" : "light"} />
   </main>;
 }

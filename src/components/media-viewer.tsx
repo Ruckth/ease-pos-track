@@ -1,3 +1,4 @@
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Carousel,
@@ -12,7 +13,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { formatClock, isVideoMedia, type Annotation, type MediaItem, type AnnotationDraftInput, type AnnotationUpdateInput } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { EmblaCarouselType } from "embla-carousel";
-import { Loader2, MapPin, PlayCircle, X } from "lucide-react";
+import { Loader2, MapPin, MessageSquareText, PlayCircle } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -23,10 +24,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { PinDetails } from "./annotation-overlays";
 import { ImageSlide, VideoSlide } from "./media-slides";
 
 export type MediaViewerHandle = {
   focusAnnotation: (annotation: Annotation) => void;
+  requestClose: (onClose: () => void) => void;
 };
 
 export type DraftTarget = Omit<AnnotationDraftInput, "text">;
@@ -41,12 +44,14 @@ export const MediaViewer = forwardRef<
     initialIndex?: number;
     disabled?: boolean;
     readOnly?: boolean;
+    workspace?: boolean;
+    onMediaChange?: (index: number) => void;
     renderImageAction?: (index: number) => ReactNode;
     onCreateAnnotation: (input: AnnotationDraftInput) => Promise<void>;
     onUpdateAnnotation: (input: AnnotationUpdateInput) => Promise<void>;
     onDeleteAnnotation: (annotationId: string) => Promise<void>;
   }
->(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, renderImageAction, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
+>(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, workspace = false, onMediaChange, renderImageAction, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
   const { t } = useI18n();
   const [mainApi, setMainApi] = useState<CarouselApi>();
   const [thumbApi, setThumbApi] = useState<CarouselApi>();
@@ -58,26 +63,47 @@ export const MediaViewer = forwardRef<
   const [draft, setDraft] = useState<DraftTarget | null>(null);
   const [draftText, setDraftText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [repositioning, setRepositioning] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [editText, setEditText] = useState<string | null>(null);
+  const [panelBusy, setPanelBusy] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [discard, setDiscard] = useState<{ action: () => void } | null>(null);
+  const noteInput = useRef<HTMLTextAreaElement>(null);
+  const noteListButton = useRef<HTMLButtonElement>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const [focus, setFocus] = useState<FocusRequest>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const annotateModeRef = useRef(annotateMode);
+  const mediaLocked = annotateMode || Boolean(movingId) || editText !== null || panelBusy;
+  const mediaLockedRef = useRef(mediaLocked);
   const focusNonceRef = useRef(0);
   const focusTimerRef = useRef<number | null>(null);
 
-  annotateModeRef.current = annotateMode;
+  mediaLockedRef.current = mediaLocked;
+  const currentNotes = annotations.filter(note => note.mediaIndex === selectedIndex);
+  const selectedNote = currentNotes.find(note => note.id === openId);
+  const confirmingDeletion = Boolean(selectedNote && selectedNote.id === confirmDeleteId);
+  const placing = !disabled && !readOnly && !saving && (Boolean(movingId) || (annotateMode && (!draft || repositioning)));
+  const noteUnavailableWhileEditing = editText !== null && (!selectedNote || readOnly);
+  const dirty = Boolean(draftText.trim()) || (editText !== null && editText !== selectedNote?.text);
+
+  const requestNoteChange = useCallback((action: () => void) => {
+    if (saving || panelBusy) return;
+    if (dirty) setDiscard({ action });
+    else action();
+  }, [dirty, saving, panelBusy]);
 
   const onSelect = useCallback(() => {
     if (!mainApi) return;
     const index = mainApi.selectedScrollSnap();
     setSelectedIndex(index);
+    initialTarget.current = index;
     thumbApi?.scrollTo(index);
   }, [mainApi, thumbApi]);
 
   useEffect(() => {
     if (!mainApi) return;
-    onSelect();
     mainApi.on("select", onSelect);
     mainApi.on("reInit", onSelect);
     return () => {
@@ -95,26 +121,49 @@ export const MediaViewer = forwardRef<
   }, [initialIndex, mainApi, media.length, thumbApi]);
 
   useEffect(() => {
+    onMediaChange?.(selectedIndex);
+  }, [onMediaChange, selectedIndex]);
+
+  useEffect(() => {
     return () => {
       if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
     };
   }, []);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      focusAnnotation: (annotation) => {
-        initialTarget.current = annotation.mediaIndex;
-        mainApi?.scrollTo(annotation.mediaIndex, true);
-        setOpenId(annotation.id);
-        focusNonceRef.current += 1;
-        setFocus({ id: annotation.id, nonce: focusNonceRef.current });
-        if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
-        focusTimerRef.current = window.setTimeout(() => setFocus(null), 3000);
-      },
+  const highlightNote = useCallback((annotation: Annotation) => {
+    setOpenId(annotation.id);
+    focusNonceRef.current += 1;
+    setFocus({ id: annotation.id, nonce: focusNonceRef.current });
+    if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = window.setTimeout(() => setFocus(null), 3000);
+  }, []);
+
+  const clearNotes = useCallback(() => {
+    setAnnotateMode(false);
+    setMovingId(null);
+    setDraft(null);
+    setDraftText("");
+    setRepositioning(false);
+    setEditText(null);
+    setConfirmDeleteId(null);
+    setOpenId(null);
+    setListOpen(false);
+    setFocus(null);
+    setActionError("");
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    requestClose: onClose => requestNoteChange(() => {
+      clearNotes();
+      onClose();
     }),
-    [mainApi],
-  );
+    focusAnnotation: annotation => requestNoteChange(() => {
+      clearNotes();
+      initialTarget.current = annotation.mediaIndex;
+      mainApi?.scrollTo(annotation.mediaIndex, true);
+      highlightNote(annotation);
+    }),
+  }), [clearNotes, highlightNote, mainApi, requestNoteChange]);
 
   useEffect(() => {
     if (!focus) return;
@@ -124,7 +173,7 @@ export const MediaViewer = forwardRef<
   const watchDrag = useCallback(
     (_api: EmblaCarouselType, event: MouseEvent | TouchEvent) => {
       if (media.length <= 1) return false;
-      if (annotateModeRef.current) return false;
+      if (mediaLockedRef.current) return false;
       const target = event.target as Element | null;
       if (target?.closest("video")) return false;
       return true;
@@ -134,25 +183,53 @@ export const MediaViewer = forwardRef<
 
   const carouselOpts = useMemo(() => ({ watchDrag }), [watchDrag]);
 
-  function cancelPlacement() {
+  function finishPlacement() {
     setDraft(null);
+    setDraftText("");
     setMovingId(null);
+    setRepositioning(false);
     setAnnotateMode(false);
     setActionError("");
-    requestAnimationFrame(() => addButton.current?.focus());
+    requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
+  }
+
+  function closeNote() {
+    setConfirmDeleteId(null);
+    setOpenId(null);
+    setEditText(null);
+    requestAnimationFrame(() => {
+      const marker = openId && fieldset.current?.querySelector<HTMLElement>(`[data-pin-id="${CSS.escape(openId)}"]`);
+      (noteListButton.current || marker || addButton.current)?.focus({ preventScroll: true });
+    });
+  }
+
+  function endRepositioning() {
+    setRepositioning(false);
+    requestAnimationFrame(() => noteInput.current?.focus({ preventScroll: true }));
+  }
+
+  function selectNote(id: string | null, highlight = false) {
+    if (mediaLocked && editText === null) return;
+    requestNoteChange(() => {
+      setEditText(null);
+      if (!id) { closeNote(); return; }
+      const note = currentNotes.find(item => item.id === id);
+      if (highlight && note) highlightNote(note);
+      else setOpenId(id);
+    });
   }
 
   function beginDraft(target: DraftTarget) {
-    if (disabled || readOnly) return;
     setOpenId(null);
     setDraft(target);
-    setDraftText("");
+    if (repositioning) endRepositioning();
   }
 
   function startMoving(annotationId: string) {
     if (disabled || readOnly) return;
     const annotation = annotations.find((item) => item.id === annotationId);
-    if (annotation) mainApi?.scrollTo(annotation.mediaIndex);
+    if (!annotation) return;
+    mainApi?.scrollTo(annotation.mediaIndex);
     setMovingId(annotationId);
     setAnnotateMode(false);
     setDraft(null);
@@ -161,7 +238,7 @@ export const MediaViewer = forwardRef<
   }
 
   async function handleSurfaceClick(target: DraftTarget) {
-    if (disabled || readOnly) return;
+    if (!placing) return;
     if (!movingId) {
       beginDraft(target);
       return;
@@ -180,6 +257,7 @@ export const MediaViewer = forwardRef<
     }
 
     setActionError("");
+    setSaving(true);
     try {
       await onUpdateAnnotation({
         annotationId: movingId,
@@ -188,22 +266,27 @@ export const MediaViewer = forwardRef<
         ...(target.time === undefined ? {} : { time: target.time }),
       });
       setMovingId(null);
-      requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
+      highlightNote({ ...movingAnnotation, x: target.x, y: target.y, time: target.time ?? movingAnnotation.time });
     } catch (error) {
       setActionError(localizeError(error, t));
+    } finally {
+      setSaving(false);
     }
   }
 
   async function saveDraft() {
-    if (disabled || readOnly || !draft || !draftText.trim() || saving) return;
+    if (disabled || readOnly || !draft || repositioning || !draftText.trim() || saving) return;
     setSaving(true);
     setActionError("");
     try {
       await onCreateAnnotation({ ...draft, text: draftText.trim() });
       setDraft(null);
       setDraftText("");
-      setAnnotateMode(false);
-      requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
+      // Leaving the input mounted or refocusing it would reopen the software keyboard.
+      if (!workspace || !window.matchMedia("(max-width: 639px)").matches) {
+        setAnnotateMode(false);
+        requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
+      }
     } catch (error) {
       setActionError(localizeError(error, t));
     } finally {
@@ -220,63 +303,66 @@ export const MediaViewer = forwardRef<
   }
 
   return (
-    <fieldset ref={fieldset} disabled={disabled} className="min-w-0 space-y-3" onKeyDown={event => {
-      if (event.key === "Escape" && (annotateMode || movingId || draft || openId)) {
-        event.preventDefault();
-        event.stopPropagation();
-        setOpenId(null);
-        cancelPlacement();
-      }
+    <fieldset ref={fieldset} disabled={disabled} className={cn("min-w-0 space-y-2", workspace && "max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:space-y-0")} onKeyDown={event => {
+      if (event.key !== "Escape" || discard || confirmingDeletion || !(mediaLocked || selectedNote)) return;
+      // Confirmation dialogs render in portals. Their Escape belongs to that dialog.
+      if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (repositioning) endRepositioning();
+      else requestNoteChange(mediaLocked && editText === null ? finishPlacement : closeNote);
     }}>
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         <p className="mr-auto text-sm leading-5 text-muted-foreground">
-          {selectedIndex + 1} / {media.length}
+          {placing ? <span role="status">{movingId ? t("moveComment") : t("choosePinSpot")}</span>
+            : <span className={workspace ? "max-sm:sr-only" : undefined}>{selectedIndex + 1} / {media.length}</span>}
         </p>
-        {!readOnly && !movingId && !annotateMode && !draft && renderImageAction?.(selectedIndex)}
-        {!readOnly && (movingId ? (
-          <Button type="button" size="sm" variant="outline" onClick={cancelPlacement}>
-            <X />
-            {t("cancelMove")}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            ref={addButton}
-            aria-pressed={annotateMode}
-            variant={annotateMode ? "default" : "outline"}
+        {!mediaLocked && !readOnly && renderImageAction?.(selectedIndex)}
+        {repositioning && <Button type="button" size="touch" variant="ghost" className="shrink-0"
+          onClick={endRepositioning}>{t("cancelMove")}</Button>}
+        {!readOnly && (movingId || annotateMode) && !draft &&
+          <Button type="button" size="touch" variant="ghost" className="shrink-0"
+            onClick={() => requestNoteChange(finishPlacement)} disabled={saving}>
+            {t(movingId ? "cancelMove" : "placementDone")}
+          </Button>}
+        {!readOnly && !mediaLocked && (
+          <Button type="button" size="touch" ref={addButton} variant="outline"
             onClick={() => {
-              setAnnotateMode((mode) => !mode);
-              setDraft(null);
+              setAnnotateMode(true);
               setOpenId(null);
+              setListOpen(false);
               setActionError("");
-            }}
-          >
-            <MapPin />
-            {annotateMode ? t("placePin") : t("addPin")}
+            }}>
+            <MapPin aria-hidden="true" />{t("addPin")}
           </Button>
-        ))}
+        )}
+        {workspace && !annotateMode && !movingId && !noteUnavailableWhileEditing && currentNotes.length > 0 && (
+          <Button type="button" size="icon-touch" ref={noteListButton} variant="outline" aria-expanded={listOpen}
+            aria-label={t("noteListCount", { count: currentNotes.length })} title={t("noteListCount", { count: currentNotes.length })}
+            onClick={() => setListOpen(open => !open)}><MessageSquareText aria-hidden="true" /></Button>
+        )}
       </div>
 
-      {movingId ? <p className="text-sm text-primary">{t("moveComment")}</p> : null}
-      {actionError ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{actionError}</p> : null}
+      {actionError ? <p role="alert" className="shrink-0 text-sm text-destructive">{actionError}</p> : null}
 
-      <Carousel setApi={setMainApi} opts={carouselOpts} className="overflow-hidden rounded-lg border bg-black">
-        <CarouselContent className="-ml-0">
+      <Carousel setApi={setMainApi} opts={carouselOpts} keyboardNavigation={!mediaLocked}
+        className={cn("overflow-hidden rounded-lg border bg-black", workspace && "max-sm:min-h-14 max-sm:flex-1 max-sm:[&>div:first-child]:h-full")}>
+        <CarouselContent className={cn("-ml-0", workspace && "max-sm:h-full")}>
           {media.map((item, index) => {
             const Slide = isVideoMedia(item) ? VideoSlide : ImageSlide;
-            return <CarouselItem key={item.key} className="pl-0">
+            return <CarouselItem key={item.key} className={cn("pl-0", workspace && "max-sm:flex max-sm:h-full max-sm:min-h-0 max-sm:flex-col")}>
               {index === selectedIndex && <Slide item={item} index={index}
                 annotations={annotations.filter(note => note.mediaIndex === index)}
-                annotateMode={!disabled && !readOnly && !draft && (annotateMode || Boolean(movingId))}
-                movingPin={annotations.find(note => note.id === movingId)}
-                draft={draft?.mediaIndex === index ? draft : null}
-                readOnly={readOnly} focus={focus} openId={openId} onOpenChange={setOpenId}
-                onSurfaceClick={handleSurfaceClick} onUpdate={onUpdateAnnotation} onMove={startMoving} onDelete={onDeleteAnnotation} />}
+                annotateMode={placing}
+                movingPin={repositioning && draft ? { id: "draft", x: draft.x, y: draft.y, time: draft.time } : annotations.find(note => note.id === movingId)}
+                draft={draft?.mediaIndex === index && !repositioning ? draft : null}
+                workspace={workspace} pinsPassive={annotateMode || Boolean(movingId)}
+                focus={focus} openId={openId} onOpenChange={selectNote}
+                onSurfaceClick={handleSurfaceClick} />}
             </CarouselItem>;
           })}
         </CarouselContent>
-        {media.length > 1 ? (
+        {media.length > 1 && !mediaLocked ? (
           <>
             <CarouselPrevious className="left-2 border-none bg-black/50 text-white hover:bg-black/70" />
             <CarouselNext className="right-2 border-none bg-black/50 text-white hover:bg-black/70" />
@@ -285,16 +371,17 @@ export const MediaViewer = forwardRef<
       </Carousel>
 
       {media.length > 1 ? (
-        <Carousel setApi={setThumbApi} opts={{ containScroll: "keepSnaps", dragFree: true }}>
+        <Carousel className={cn("shrink-0", mediaLocked && "hidden")} setApi={setThumbApi} opts={{ containScroll: "keepSnaps", dragFree: true }}>
           <CarouselContent className="-ml-2">
             {media.map((item, index) => (
               <CarouselItem key={item.key} className="basis-1/5 pl-2 sm:basis-1/6">
                 <button
                   type="button"
                   onClick={() => mainApi?.scrollTo(index)}
+                  disabled={mediaLocked}
                   aria-label={t("mediaNumber", { number: index + 1 })}
                   className={cn(
-                    "relative block aspect-square w-full overflow-hidden rounded-md border-2 bg-black transition-all",
+                    "relative block aspect-square w-full overflow-hidden rounded-md border-2 bg-black transition-all", workspace && "max-sm:aspect-auto max-sm:h-11",
                     index === selectedIndex
                       ? "border-primary opacity-100"
                       : "border-transparent opacity-50 hover:opacity-80",
@@ -315,32 +402,67 @@ export const MediaViewer = forwardRef<
         </Carousel>
       ) : null}
 
-      {draft ? (
-        <div className="space-y-2 rounded-lg border border-transparent bg-muted/40 p-3">
-          <p className="text-sm font-medium leading-5 text-muted-foreground">
-            {t("addPin")} {draft.mediaIndex + 1}
-            {draft.time !== undefined ? ` · ${t("pinAtTime", { time: formatClock(draft.time) })}` : ""}
-          </p>
+      {noteUnavailableWhileEditing && (
+        <div className={cn("shrink-0 space-y-2 border-t pt-2", workspace && "max-sm:max-h-[calc(100%-4rem)] max-sm:overflow-y-auto")}>
+          <p role="status" className="text-sm">{t(readOnly ? "readOnlyNoteDraft" : "removedNoteDraft")}</p>
+          <Textarea rows={2} readOnly value={editText} aria-label={t("unsavedNoteText")} className="min-h-16" />
+          <Button type="button" size="touch" variant="outline" onClick={() => requestNoteChange(closeNote)}>{t("closeNote")}</Button>
+        </div>
+      )}
+      {!noteUnavailableWhileEditing && !annotateMode && !movingId && (selectedNote || (listOpen && currentNotes.length > 0)) && (
+        <div className={cn("shrink-0", workspace && "max-sm:max-h-[52%] max-sm:overflow-y-auto")}>
+          {workspace && listOpen && (
+            <ul className="flex max-h-24 flex-wrap gap-1 overflow-y-auto pb-1">
+              {currentNotes.map(note => (
+                <li key={note.id}>
+                  <Button type="button" size="touch" variant={openId === note.id ? "default" : "outline"}
+                    aria-pressed={openId === note.id} onClick={() => selectNote(note.id, true)}>
+                    {t("noteLabel", { number: note.label })}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {selectedNote && <PinDetails key={selectedNote.id} annotation={selectedNote} readOnly={readOnly}
+            editText={editText} setEditText={setEditText} onCancelEdit={() => requestNoteChange(() => setEditText(null))}
+            onClose={() => requestNoteChange(closeNote)} onUpdate={onUpdateAnnotation} onMove={startMoving}
+            onDelete={onDeleteAnnotation} onDeleted={closeNote} onBusyChange={setPanelBusy}
+            confirmDelete={confirmingDeletion} onConfirmDeleteChange={open => setConfirmDeleteId(open ? selectedNote.id : null)} />}
+        </div>
+      )}
+
+      {draft && !repositioning && (
+        <div className={cn("shrink-0 space-y-2 border-t pt-2", workspace && "max-sm:max-h-[calc(100%-4rem)] max-sm:overflow-y-auto")}>
+          {draft.time !== undefined && <p className="text-sm text-muted-foreground">{t("pinAtTime", { time: formatClock(draft.time) })}</p>}
           <Textarea
+            ref={noteInput}
             autoFocus
             aria-label={t("describeIssue")}
+            disabled={saving}
+            className="min-h-16"
             maxLength={2000}
             rows={2}
             value={draftText}
             onChange={(event) => setDraftText(event.target.value)}
             placeholder={t("describeIssue")}
           />
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={cancelPlacement}>
-              {t("cancel")}
-            </Button>
-            <Button type="button" size="sm" disabled={!draftText.trim() || saving} onClick={saveDraft}>
-              {saving ? <Loader2 className="animate-spin" /> : null}
-              {t("savePin")}
-            </Button>
+          <div className="flex flex-wrap justify-between gap-1">
+            <Button type="button" size="touch" variant="ghost" disabled={saving}
+              onClick={() => { noteInput.current?.blur(); setRepositioning(true); }}>{t("repositionPin")}</Button>
+            <div className="ml-auto flex gap-1">
+              <Button type="button" variant="ghost" size="touch" disabled={saving}
+                onClick={() => requestNoteChange(finishPlacement)}>{t("cancel")}</Button>
+              <Button type="button" size="touch" disabled={!draftText.trim() || saving} onClick={saveDraft}>
+                {saving && <Loader2 aria-hidden="true" className="animate-spin" />}{t("savePin")}
+              </Button>
+            </div>
           </div>
         </div>
-      ) : null}
+      )}
+
+      <AlertDialog open={discard !== null} onOpenChange={open => { if (!open) setDiscard(null); }}
+        title={t("discardNoteTitle")} description={t("discardNoteDescription")} confirmLabel={t("discardChanges")}
+        onConfirm={() => discard?.action()} />
     </fieldset>
   );
 });
