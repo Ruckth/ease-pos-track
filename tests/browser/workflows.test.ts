@@ -40,6 +40,30 @@ async function selectMarkupMenu(page: Page, trigger: string, item: string) {
   await menu.waitFor({ state: "hidden" });
 }
 
+async function placeOnSurface(surface: Locator, x: number, y: number, input: "tap" | "click" = "tap") {
+  await surface.scrollIntoViewIfNeeded();
+  // The target can move during a keyboard resize or after changing tools.
+  const settled = await surface.evaluate(async element => {
+    const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    let previous = element.getBoundingClientRect();
+    let stable = 0;
+    for (let frame = 0; frame < 20 && stable < 2; frame++) {
+      await nextFrame();
+      const current = element.getBoundingClientRect();
+      stable = current.width === previous.width && current.height === previous.height
+        && current.x === previous.x && current.y === previous.y ? stable + 1 : 0;
+      previous = current;
+    }
+    return stable === 2;
+  });
+  assert.ok(settled, "The editing surface should settle before placing a mark");
+  const box = await surface.boundingBox();
+  assert.ok(box);
+  const position = { x: box.width * x, y: box.height * y };
+  if (input === "tap") await surface.tap({ position });
+  else await surface.click({ position });
+}
+
 async function attachLongReceipt(page: Page, name: string) {
   const data = await page.evaluate(() => {
     const c = document.createElement("canvas");
@@ -499,12 +523,7 @@ for (const [language, viewport] of [
       }, name);
       await button.tap();
     }
-    async function place(selector: string, x: number, y: number) {
-      const surface = page.locator(selector).last();
-      await surface.waitFor();
-      const box = (await surface.boundingBox())!;
-      await page.touchscreen.tap(box.x + box.width * x, box.y + box.height * y);
-    }
+    const place = (selector: string, x: number, y: number) => placeOnSurface(page.locator(selector).last(), x, y);
     try {
       await files(page, "checkout.png");
       await control(t("editImageNamed", { name: "checkout.png" })).tap();
@@ -661,29 +680,7 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       const dialog = page.getByRole("dialog", { name: copy(language, "editDraftImage"), exact: true });
       const control = (name: string) => dialog.getByRole("button", { name, exact: true });
       const surface = dialog.getByRole("application", { name: labels.canvasLabel });
-      async function place(x: number, y: number) {
-        await surface.scrollIntoViewIfNeeded();
-        // Tool and inspector changes can resize the canvas on the next animation frame.
-        const settled = await surface.evaluate(async element => {
-          const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-          let previous = element.getBoundingClientRect();
-          let stable = 0;
-          for (let frame = 0; frame < 20 && stable < 2; frame++) {
-            await nextFrame();
-            const current = element.getBoundingClientRect();
-            stable = current.width === previous.width && current.height === previous.height
-              && current.x === previous.x && current.y === previous.y ? stable + 1 : 0;
-            previous = current;
-          }
-          return stable === 2;
-        });
-        assert.ok(settled, "The markup canvas should settle after switching tools");
-        const box = await surface.boundingBox();
-        assert.ok(box);
-        const position = { x: box.width * x, y: box.height * y };
-        if (role === "customer") await surface.tap({ position });
-        else await surface.click({ position });
-      }
+      const place = (x: number, y: number) => placeOnSurface(surface, x, y, role === "customer" ? "tap" : "click");
       await control(labels.circle).click();
       await place(0.72, 0.66);
       if (role === "staff") assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
