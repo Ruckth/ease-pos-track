@@ -170,7 +170,12 @@ export async function applyTicketChange(
   }
   const visibilityVersion = (input.doc.inboxVisibilityVersion ?? 0)
     + Number(plan.before.lifecycle !== plan.after.lifecycle);
-  await ctx.db.patch(input.doc._id, { ...plan.patch, inboxVisibilityVersion: visibilityVersion });
+  const latestReply = input.doc.latestReply;
+  const endedWaiting = plan.before.status === "waiting" && plan.after.status !== "waiting";
+  await ctx.db.patch(input.doc._id, {
+    ...plan.patch, inboxVisibilityVersion: visibilityVersion,
+    ...(endedWaiting && latestReply?.awaitingCustomer ? { latestReply: { ...latestReply, awaitingCustomer: false } } : {}),
+  });
   if (plan.before.status !== plan.after.status || plan.before.lifecycle !== plan.after.lifecycle) {
     if (plan.before.lifecycle === "active") await changeTotal(ctx, input.doc.projectId, plan.before.status, -1);
     if (plan.after.lifecycle === "active") await changeTotal(ctx, input.doc.projectId, plan.after.status, 1);

@@ -32,8 +32,7 @@ export function resolveTicketTags(ctx: QueryCtx | MutationCtx, row: Doc<"tickets
   return ticketTagResolver(ctx)(row);
 }
 
-function ticketExcerpt(description: string) {
-  const limit = 200;
+export function ticketExcerpt(description: string, limit = 200) {
   if (description.length <= limit) return description;
   let end = 0;
   let count = 0;
@@ -51,6 +50,8 @@ export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = []) {
     _id: row._id, projectId: row.projectId, projectKey: row.projectKey,
     ticketNumber: row.ticketNumber, version: row.version, title: row.title,
     excerpt: ticketExcerpt(row.description), status: row.status,
+    ...(row.latestReply ? { latestReply: row.latestReply } : {}),
+    ...(row.origin === "staff" ? { openedByStaff: true } : {}),
     urgencyScore: row.urgencyScore, lifecycle: row.lifecycle,
     tagIds: row.tagIds ?? [], tags,
     archivedAt: row.archivedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
@@ -66,11 +67,13 @@ export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[] = []) {
     _id: row._id, _creationTime: row._creationTime, projectId: row.projectId, projectKey: row.projectKey,
     ticketNumber: row.ticketNumber, version: row.version, title: row.title, description: row.description,
     status: row.status, lifecycle: row.lifecycle, origin: row.origin, hasCustomerOwner: !!row.ownerCustomerId,
+    ...(row.latestReply ? { latestReply: row.latestReply } : {}),
     ...(row.urgencyScore === undefined ? {} : { urgencyScore: row.urgencyScore }),
     tagIds: row.tagIds ?? [], tags,
     ...(row.createdVia === undefined ? {} : { createdVia: row.createdVia }),
     ...(row.archivedAt === undefined ? {} : { archivedAt: row.archivedAt }),
     createdAt: row.createdAt, updatedAt: row.updatedAt,
+    ...(mediaEnabled && row.replyMediaKeys?.length ? { replyMediaKeys: row.replyMediaKeys } : {}),
     media: mediaEnabled ? row.media : [],
     annotations: mediaEnabled ? row.annotations : [],
   };

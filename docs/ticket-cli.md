@@ -203,10 +203,10 @@ state should still be changed; do not blindly increment the version.
 
 ## Hosted pages
 
-A Ticket can carry hosted HTML pages: one HTML file, or a folder with an HTML
-entry page and its CSS, JavaScript, images and fonts. Publishing returns one link;
-staff and the Ticket's customer see the same link on the Ticket, where they can
-open, copy or revoke it. Anyone with an active link can open the page.
+Staff can publish an HTML file or a folder with an HTML entry page and its CSS,
+JavaScript, images and fonts. Staff and the Ticket's customer see the same link
+on the Ticket, where they can open, copy or revoke it. Anyone with an active
+link can open the page.
 
 ```bash
 pnpm ticket page publish POS-0007 ./report.html
@@ -228,8 +228,8 @@ pnpm ticket page revoke POS-0007 --page <pageId>
   link with `"created":false`; different files return `PAGE_REQUEST_CONFLICT`
   (exit 5). After an interrupted run, retry with the reported key: files already
   stored are not uploaded again and the link appears only once every file is in.
-- Publishing requires current write access to an active Ticket, checked before
-  the upload is read and again when the page is committed. Archive hides every
+- Publishing requires staff write access to an active Ticket. The server checks
+  access before reading the upload and again when committing the page. Archive hides every
   page of the Ticket; restore brings the same links back. Revocation is permanent.
 
 ### HTTP API

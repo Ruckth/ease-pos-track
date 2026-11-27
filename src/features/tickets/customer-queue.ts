@@ -15,7 +15,14 @@ export function customerQueueCounts(rows: TicketSummary[]) {
     waiting: rows.filter(row => row.status === "waiting").length, done: rows.filter(row => row.status === "done").length };
 }
 
+function needsReply(row: TicketSummary) {
+  return row.status === "waiting" && row.latestReply?.awaitingCustomer === true;
+}
+
 export function customerQueue(rows: TicketSummary[], filter: CustomerQueueFilter) {
   return rows.filter(row => filter === "all" || filter === "active" && row.status !== "done" || row.status === filter)
-    .sort((a, b) => Number(b.status === "waiting") - Number(a.status === "waiting") || b.createdAt - a.createdAt || String(a._id).localeCompare(String(b._id)));
+    .sort((a, b) => Number(needsReply(b)) - Number(needsReply(a))
+      || Number(b.status === "waiting") - Number(a.status === "waiting")
+      || (b.latestReply?.at ?? b.createdAt) - (a.latestReply?.at ?? a.createdAt)
+      || String(a._id).localeCompare(String(b._id)));
 }

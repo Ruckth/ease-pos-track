@@ -57,8 +57,8 @@ test("page size is bounded and the summary projection excludes heavy and private
   for (const numItems of [0, -1, 51, 1.5]) await expect(page({ paginationOpts: { numItems, cursor: null } })).rejects.toThrow("INVALID_INPUT");
   const result = await page({ paginationOpts: { numItems: 50, cursor: null } });
   const row = result.page.find(row => row._id === seed.tickets[0])!;
-  expect(row).toMatchObject({ excerpt: "x".repeat(200), mediaCount: 1, annotationCount: 25 });
-  expect(Object.keys(row).sort()).toEqual(["_id", "annotationCount", "createdAt", "excerpt", "lifecycle", "mediaCount", "projectId", "projectKey", "status", "tagIds", "tags", "ticketNumber", "title", "updatedAt", "version"].sort());
+  expect(row).toMatchObject({ excerpt: "x".repeat(200), mediaCount: 1, annotationCount: 25, openedByStaff: true });
+  expect(Object.keys(row).sort()).toEqual(["_id", "annotationCount", "createdAt", "excerpt", "lifecycle", "mediaCount", "openedByStaff", "projectId", "projectKey", "status", "tagIds", "tags", "ticketNumber", "title", "updatedAt", "version"].sort());
   expect(JSON.stringify(row).length).toBeLessThan(800);
   expect(JSON.stringify(result)).not.toMatch(/ownerCustomerId|actorCustomerId|sessionId|fake-private-key|fixture.invalid|annotations|searchText/);
 });

@@ -37,6 +37,11 @@ export const mediaItemValidator = v.object({
   url: v.string(),
 });
 
+export const messageLinkValidator = v.union(
+  v.object({ kind: v.literal("external"), url: v.string() }),
+  v.object({ kind: v.literal("page"), pageId: v.id("ticketPages") }),
+);
+
 export const pendingFileValidator = v.object({
   name: v.string(),
   size: v.number(),
@@ -218,6 +223,8 @@ export default defineSchema({
     archivedAt: v.optional(v.number()),
     purgeBlocked: v.optional(v.boolean()),
     inboxVisibilityVersion: v.optional(v.number()),
+    replyMediaKeys: v.optional(v.array(v.string())),
+    latestReply: v.optional(v.object({ role: actorRole, at: v.number(), excerpt: v.string(), awaitingCustomer: v.boolean(), hasLink: v.optional(v.boolean()) })),
     ownerCustomerId: v.optional(v.id("customers")),
     origin: actorRole,
     createdVia: v.optional(ticketCreatedVia),
@@ -418,6 +425,12 @@ export default defineSchema({
     body: v.string(),
     requestId: v.string(),
     inReplyTo: v.optional(v.id("ticketMessages")),
+    // Thread additions; absent on legacy rows. `requestReply` is set only on staff messages.
+    requestReply: v.optional(v.boolean()),
+    link: v.optional(messageLinkValidator),
+    // Keys into the Ticket's own `media` ledger, hydrated on read.
+    mediaKeys: v.optional(v.array(v.string())),
+    uploadIntentId: v.optional(v.id("uploadIntents")),
   }).index("by_ticket", ["ticketId"])
     .index("by_ticket_request", ["ticketId", "requestId"]),
   ticketEvents: defineTable({

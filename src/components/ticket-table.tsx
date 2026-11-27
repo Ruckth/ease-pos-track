@@ -3,6 +3,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TicketCustomerReply } from "./ticket-customer-reply";
 import { TicketCard, type OpenTicket } from "./ticket-card";
 import { TicketUrgency } from "./ticket-urgency";
 import { TicketRowAction } from "./ticket-row-action";
@@ -63,7 +64,7 @@ export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPag
           <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber, item.projectKey)}</TableCell>
           <TableCell><button type="button" data-ticket-id={item._id} className="min-h-9 min-w-28 max-w-xs break-words rounded text-left font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
           <TableCell className="hidden xl:table-cell"><div className="min-w-24"><TicketTagList tags={item.tags ?? []} /></div></TableCell>
-          <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge></TableCell>
+          <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge><TicketCustomerReply item={item} /></TableCell>
           <TableCell><TicketUrgency score={item.urgencyScore} /></TableCell>
           <TableCell className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">{formatDate(item.createdAt)}</TableCell>
           <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">{formatDate(item.updatedAt)}</TableCell>

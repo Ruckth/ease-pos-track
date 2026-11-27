@@ -90,6 +90,7 @@ export function CustomerPortal({ viewer, onLogout }: {
   if (selectedId && sequence.current.length === 0 && visibleIds.includes(selectedId)) sequence.current = visibleIds;
   const { previous: previousId, next: nextId } = queueNeighbors(selectedId, visibleIds, sequence.current);
   const foreignDraft = composer.hasDraft && composer.project?._id !== project?._id;
+  const authorName = viewer.displayName.trim() || viewer.username;
 
   return <main className="aurora-canvas min-h-screen px-3 pt-3 sm:px-5">
     <header className="aurora-toolbar relative z-30 mx-auto max-w-6xl">
@@ -122,19 +123,28 @@ export function CustomerPortal({ viewer, onLogout }: {
         <CustomerAccount clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
       </Suspense>
     </Dialog>
-    <div className="mx-auto max-w-6xl py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:py-5">
+    <div className={cn("mx-auto py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:py-5", ticket ? "max-w-6xl" : "max-w-3xl")}>
       {viewer.needsRecoveryCode && !ticket && <RecoveryReminder onOpen={() => setAccountOpen(true)} />}
-      <div className={cn("mb-5 flex flex-wrap items-center justify-between gap-3", ticket && "hidden lg:flex")}>
-        <div><p className="text-sm text-muted-foreground">{project?.name ?? t("customerPortal")}</p><h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("yourTickets")}</h1></div>
-        <div className="flex flex-wrap items-center gap-2">{composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
-        <Button className="min-h-11 rounded-lg" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
-          <Plus />{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
-        </Button></div>
+      <div className={cn("mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-5", ticket && "hidden lg:flex")}>
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
+            <span className="truncate">{project?.name ?? t("customerPortal")}</span>
+            {project ? <span className="font-mono text-xs">{project.key}</span> : null}
+          </p>
+          <h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className="mt-0.5 text-2xl font-semibold tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-3xl">{t("yourTickets")}</h1>
+          {!ticket && <p className="mt-1 text-sm text-muted-foreground">{t("customerPortalSubtitle")}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
+          <Button className="glass-action min-h-11 rounded-xl px-4 font-semibold shadow-sm" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
+            <Plus aria-hidden="true" />{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
+          </Button>
+        </div>
       </div>
       {foreignDraft ? <div className="aurora-panel mb-4 px-4 py-3 text-sm text-foreground" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
       <div className={cn("grid items-start gap-4", ticket && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
-          <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
+          <CustomerTickets project={project} authorName={authorName} onNewTicket={composer.show} onSelect={openTicket}
             ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
             onFilter={navigation.setFilter} onResetFilters={navigation.resetFilters} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
         </ProjectTicketsBoundary>
@@ -174,16 +184,14 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
 
 function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
   const { t } = useI18n();
-  return <div role="status" className={cn("mb-4", className)}>
-    <button type="button" onClick={onOpen} aria-label={t("recoveryCodeCreate")} aria-describedby="customer-recovery-hint"
-      className="aurora-inset flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-start hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+  return <div role="status" className={cn("aurora-inset mb-4 rounded-xl px-3 pb-2", className)}>
+    <button type="button" onClick={onOpen} aria-describedby="customer-recovery-hint"
+      className="flex min-h-11 w-full items-center gap-3 rounded-xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <KeyRound aria-hidden className="size-5 shrink-0 text-amber-800 dark:text-amber-200" />
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold">{t("recoveryCodeCreate")}</span>
-        <span id="customer-recovery-hint" className="block text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</span>
-      </span>
+      <span className="min-w-0 flex-1 text-sm font-semibold">{t("recoveryCodeCreate")}</span>
       <ChevronRight aria-hidden className="size-4 shrink-0" />
     </button>
+    <p id="customer-recovery-hint" className="pl-8 text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</p>
   </div>;
 }
 
@@ -192,8 +200,8 @@ function ProjectUnavailable() {
   return <p role="alert" className="aurora-panel p-4 text-sm text-foreground">{t("projectMissing")}</p>;
 }
 
-function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onResetFilters, onQuery, onVisibleIds }: {
-  project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
+function CustomerTickets({ project, authorName, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onResetFilters, onQuery, onVisibleIds }: {
+  project: ProjectSummary | null | undefined; authorName: string; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
   selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string | undefined) => void; onResetFilters: () => void; onQuery: (query: string) => void;
   onVisibleIds: (ids: Id<"tickets">[] | undefined) => void;
 }) {
@@ -227,6 +235,12 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
     { value: "done", label: t("resolvedTickets"), count: counts.done },
     { value: "all", label: t("allTickets"), count: counts.all },
   ];
+  const quickFilters: { value: CustomerQueueFilter; label: string; count: number; waiting?: boolean }[] = [
+    { value: "active", label: t("activeTickets"), count: counts.active },
+    { value: "waiting", label: t("customerQueueWaiting"), count: counts.waiting, waiting: true },
+    { value: "done", label: t("resolvedTickets"), count: counts.done },
+    { value: "all", label: t("allTickets"), count: counts.all },
+  ];
   const countLabel = searching
     ? t(search?.hasMore ? "searchLoaded" : "searchMatches", { count: visibleTickets.length })
     : t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length });
@@ -241,20 +255,72 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   if (!project || !loaded) return <div className="aurora-panel grid min-h-48 place-items-center" role="status"><Loader2 className="size-6 animate-spin text-primary" /><span className="sr-only">{t("syncingTickets")}</span></div>;
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{pending || invalidSearch ? "" : announcement}</span>
-    <div className="aurora-toolbar mb-3 flex items-end gap-2 p-3 sm:gap-3">
-      <TicketSearchInput className="min-w-0 flex-1 space-y-1 text-sm font-medium text-foreground"
-        value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
-      {(!ticketOpen || desktop) && <TicketFilterPopover activeCount={activeFilterCount} triggerRef={filterTrigger} onClear={onResetFilters}>
-        <FilterChoices label={t("ticketStatus")} value={statusScope} onChange={onFilter}
-          options={options.map(option => ({ ...option, count: searching ? undefined : option.count }))} />
-      </TicketFilterPopover>}
+    <div className="aurora-toolbar mb-3 space-y-2.5 p-3 sm:p-3.5">
+      <div className="flex items-end gap-2 sm:gap-3">
+        <TicketSearchInput className="min-w-0 flex-1 space-y-1 text-sm font-medium text-foreground"
+          value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
+        {(!ticketOpen || desktop) && <TicketFilterPopover activeCount={activeFilterCount} triggerRef={filterTrigger} onClear={onResetFilters}>
+          <FilterChoices label={t("ticketStatus")} value={statusScope} onChange={onFilter}
+            options={options.map(option => ({ ...option, count: searching ? undefined : option.count }))} />
+        </TicketFilterPopover>}
+      </div>
+      <div role="group" aria-label={t("filterTickets")} className="flex flex-wrap items-center gap-1.5">
+        {quickFilters.map(item => {
+          const active = statusScope === item.value;
+          const highlightWaiting = Boolean(item.waiting && !searching && item.count > 0 && !active);
+          return <button
+            key={item.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => {
+              if (active) return;
+              if (item.value === "active") onResetFilters();
+              else onFilter(item.value);
+            }}
+            className={cn(
+              "min-h-11 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:text-sm",
+              item.waiting ? "inline-flex" : "hidden sm:inline-flex",
+              active
+                ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                : highlightWaiting
+                  ? "border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100/80 dark:border-violet-700 dark:bg-violet-950/80 dark:text-violet-100 dark:hover:border-violet-500"
+                  : "border-border bg-card/85 text-foreground hover:border-primary/45",
+            )}
+          >
+            {item.waiting && !searching && item.count > 0 ? (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  active ? "bg-primary-foreground" : "bg-violet-600 dark:bg-violet-400",
+                )}
+              />
+            ) : null}
+            <span>{item.label}</span>
+            {!searching ? (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none tabular-nums",
+                  active
+                    ? "bg-primary-foreground text-primary"
+                    : highlightWaiting
+                      ? "bg-violet-200/80 text-violet-950 dark:bg-violet-800/80 dark:text-violet-50"
+                      : "bg-muted text-muted-foreground",
+                )}
+              >
+                {item.count}
+              </span>
+            ) : null}
+          </button>;
+        })}
+      </div>
     </div>
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
       : pending ? <div className="ticket-surface flex items-center gap-2 p-5 text-sm" role="status"><Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />{t("syncingTickets")}</div>
       : !searching && tickets.length === 0 && page.status === "Exhausted" && (statusScope === "all" || statusScope === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
       : <div>
         <p className="px-1 pb-2 text-xs text-muted-foreground">{countLabel}</p>
-        {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+        {visibleTickets.length ? <ul className="space-y-2.5">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} authorName={authorName} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
           : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t(searching ? "customerQueueSearchEmpty" : "customerQueueEmpty")}</p>{statusScope !== "all" && <Button variant="outline" className="min-h-11 rounded-lg" onClick={() => { filterTrigger.current?.focus(); onFilter("all"); }}>{t(searching ? "customerQueueSearchAllStatuses" : "showAllTickets")}</Button>}</div>}
       </div>}
     {!searching && page.status !== "Exhausted" ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}

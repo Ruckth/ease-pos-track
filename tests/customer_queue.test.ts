@@ -17,6 +17,18 @@ test("customer Active includes Waiting and keeps it first even after a newer Tic
   assert.equal(rows[0]._id, "newest", "ordering must not mutate subscription data");
 });
 
+test("customer feed prioritizes replies needed and then recent thread activity", () => {
+  const waiting = row("waiting", "waiting", 2);
+  const question = { ...row("question", "waiting", 1), latestReply: {
+    role: "staff" as const, at: 10, excerpt: "Which register?", awaitingCustomer: true,
+  } };
+  const latest = { ...row("latest", "in_progress", 3), latestReply: {
+    role: "customer" as const, at: 15, excerpt: "Register 2", awaitingCustomer: false,
+  } };
+  assert.deepEqual(customerQueue([waiting, question, latest, row("new", "new", 4)], "active").map(item => item._id),
+    ["question", "waiting", "latest", "new"]);
+});
+
 test("customer queue status filters and counts operate on loaded rows", () => {
   const rows = [row("waiting", "waiting", 7), row("done", "done", 8)];
   assert.deepEqual(customerQueue(rows, "waiting").map(item => item._id), ["waiting"]);

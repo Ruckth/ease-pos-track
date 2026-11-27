@@ -132,6 +132,11 @@ export class DisposableTicketDraft {
     this.release();
     this.disposed = true;
   };
+  discard = () => {
+    if (this.disposed || this.controller) return;
+    this.release();
+    this.change(this.empty());
+  };
   cancel = () => {
     if (this.controller && !this.controller.signal.aborted) this.controller.abort();
   };
