@@ -1,6 +1,7 @@
 import * as React from "react";
 import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type AlertDialogProps = {
@@ -20,12 +21,13 @@ export function AlertDialog({
   confirmLabel,
   onConfirm,
 }: AlertDialogProps) {
+  const { t } = useI18n();
   return (
     <BaseAlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseAlertDialog.Portal>
-        <BaseAlertDialog.Backdrop className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[1px] transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <BaseAlertDialog.Backdrop className="fixed inset-0 z-[60] aurora-scrim transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <BaseAlertDialog.Popup className={cn(
-          "fixed left-1/2 top-1/2 z-[60] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-xl outline-none",
+          "fixed left-1/2 top-1/2 z-[60] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 aurora-dialog rounded-2xl p-6 text-card-foreground outline-none",
           "transition-[transform,opacity] data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0",
         )}>
           <BaseAlertDialog.Title className="text-base font-semibold">{title}</BaseAlertDialog.Title>
@@ -34,7 +36,7 @@ export function AlertDialog({
           </BaseAlertDialog.Description>
           <div className="mt-6 flex justify-end gap-2">
             <BaseAlertDialog.Close className={buttonVariants({ variant: "outline" })}>
-              Cancel
+              {t("cancel")}
             </BaseAlertDialog.Close>
             <BaseAlertDialog.Close
               className={buttonVariants({ variant: "destructive" })}

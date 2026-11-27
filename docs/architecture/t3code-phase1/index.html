@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Track Ease × T3 Code — Five researched plans</title>
+  <style>
+    :root { color-scheme: light dark; --fg:var(--foreground,CanvasText); --mut:var(--muted-foreground,GrayText); --line:var(--border,color-mix(in srgb,CanvasText 16%,transparent)); --panel:var(--card,color-mix(in srgb,CanvasText 4%,Canvas)); --accent:var(--chart-2,#24bba6); --link:var(--primary,#447dee); --warm:var(--chart-4,#bf8928); --r:var(--radius,10px); --sans:var(--font-sans,system-ui,sans-serif); --mono:var(--font-mono,ui-monospace,monospace); }
+    * { box-sizing:border-box; }
+    html,body { margin:0; padding:0; background:transparent; }
+    body { color:var(--fg); font:15px/1.65 var(--sans); }
+    main { max-width:900px; margin:0 auto; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:clamp(30px,6vw,46px); line-height:1.12; letter-spacing:-1.4px; max-width:760px; margin:16px 0; }
+    h2 { font-size:22px; line-height:1.3; letter-spacing:-.4px; margin-bottom:12px; }
+    h3 { font-size:16px; line-height:1.4; }
+    p+p { margin-top:10px; }
+    a { color:var(--link); text-underline-offset:3px; overflow-wrap:anywhere; }
+    a:hover { text-decoration-thickness:2px; }
+    a:focus-visible,summary:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
+    code { font:12px/1.6 var(--mono); overflow-wrap:anywhere; }
+    .eyebrow { font:11px/1.6 var(--mono); letter-spacing:1.3px; text-transform:uppercase; color:var(--accent); }
+    .lead { font-size:18px; max-width:750px; }
+    .meta,.note { color:var(--mut); font-size:12px; }
+    .meta { margin-top:15px; }
+    .decision { margin:22px 0; padding:16px; border-left:3px solid var(--accent); border-radius:0 var(--r) var(--r) 0; background:var(--panel); }
+    nav { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:13px; margin:18px 0 24px; }
+    section { padding:27px 0; border-top:1px solid var(--line); }
+    .topic { display:grid; grid-template-columns:32px 1fr; gap:13px; padding:19px 0; border-top:1px solid var(--line); }
+    .topic:first-of-type { border-top:0; }
+    .number { color:var(--accent); font:12px/1.7 var(--mono); padding-top:2px; }
+    .topic p { margin-top:7px; }
+    .topic .links { font-size:13px; display:flex; flex-wrap:wrap; gap:10px 20px; }
+    .tag { display:inline-block; color:var(--mut); font:11px/1.5 var(--mono); border:1px solid var(--line); border-radius:4px; padding:2px 6px; margin-left:7px; vertical-align:middle; }
+    .flow { list-style:none; padding:0; margin:18px 0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .flow li { padding:12px; background:var(--panel); border-radius:var(--r); border-top:2px solid var(--accent); font-size:13px; }
+    .flow strong { display:block; margin-bottom:5px; }
+    .flow small { display:block; color:var(--mut); font-size:12px; margin-top:7px; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    caption { text-align:left; color:var(--mut); font-size:12px; margin-bottom:9px; }
+    th,td { text-align:left; vertical-align:top; padding:11px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--mut); font-weight:550; }
+    td:first-child { font-weight:600; }
+    details { border-top:1px solid var(--line); margin-top:16px; padding-top:16px; }
+    summary { cursor:pointer; font-weight:600; }
+    details p { margin-top:12px; }
+    ol.build { padding-left:23px; }
+    .build li { padding:7px 0 7px 4px; }
+    .choices { padding-left:20px; margin-bottom:0; }
+    .choices li { padding:5px 0; }
+    footer { border-top:1px solid var(--line); padding:20px 0 8px; }
+    @media(max-width:600px) { .flow { grid-template-columns:1fr 1fr; } .topic { grid-template-columns:24px 1fr; gap:8px; } .lead { font-size:16px; } th,td { padding:9px 5px; } .tag { display:table; margin:6px 0 0; } }
+    @media(max-width:360px) { .flow { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Track Ease × T3 Code / Phase 1 research</p>
+    <h1>Track Ease and T3 Code launch plan</h1>
+    <p class="lead">Launch with Google sign-in for invited staff, usernames for customers, manual Ticket assignment and an in-app inbox. That is enough to serve the first two customers.</p>
+    <p class="meta">Researched 15 November 2026 · Launch decision updated 19 November 2026 · Track Ease source <code>f745763</code> · Recommendations only · Research and plan review</p>
+    <div class="decision">
+      <p><strong>Recommended direction:</strong> Convex Auth v2 with invite-only Google sign-in for staff and username/password for customers, a scoped CLI and skill connection to T3 Code, optional scheduled initial assignment, and app-controlled notification preferences.</p>
+      <p>The signed T3 connection, optional email and LINE can each ship separately. Add scheduled AI assignments only if the selected model improves on the team’s routing rule.</p>
+    </div>
+    <nav aria-label="Sections"><a href="#capabilities">Capabilities by phase</a><a href="launch-contracts.html">Decisions and release gates</a><a href="audit.html">Independent audit scores</a><a href="#plans">Five topic plans</a><a href="#architecture">How they connect</a><a href="#sequence">Build order</a><a href="#decisions">Launch decisions</a></nav>
+  </header>
+
+  <section id="capabilities" aria-labelledby="capabilities-title">
+    <h2 id="capabilities-title">What people can do in each phase</h2>
+    <table>
+      <thead><tr><th scope="col">Phase</th><th scope="col">Capability</th><th scope="col">What opens it</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">1 · Manual pilot</th><td>Invited staff sign in with Google. Customers join a Project with a username, password and saved recovery code, submit text Tickets and see their own updates in the inbox. Staff take responsibility for Tickets and can reassign them.</td><td>The operator verifies the real sign-in and invitation-email flows, the approved privacy notices and the pilot release checklist.</td></tr>
+        <tr><th scope="row">2 · Connect T3 Code</th><td>A staff member downloads the signed Mac kit, installs the skill, imports a personal Project key and runs the read-only connection check. The check identifies the account and Project.</td><td>Verify secure key import and skill discovery on each supported T3 and agent combination. Ticket content is outside the key's scope.</td></tr>
+        <tr><th scope="row">3 · Route Tickets</th><td>Owners configure responsibility areas, rosters and local rules. Staff review suggestions, accept or dismiss them, and can place a Ticket on hold.</td><td>External routing is paused. Reconsider a selected T3 agent only after an approved comparison on at least 50 independently labeled cases the rules could not resolve. Automatic assignment has a separate promotion decision.</td></tr>
+      </tbody>
+    </table>
+    <p>The pilot inbox works in the app. Customer-facing email and LINE Ticket alerts have a later, independent release gate.</p>
+  </section>
+  <section id="plans" aria-labelledby="plans-title">
+    <h2 id="plans-title">The five topic plans</h2>
+    <article class="topic"><span class="number">01</span><div>
+      <h3>Staff accounts and Google sign-in <span class="tag">Identity foundation</span></h3>
+      <p>Invite named staff through Convex Auth v2 Google sign-in. Track Ease assigns durable staff IDs and enforces Owner and Staff permissions.</p>
+      <p class="note">Designate the first Owner explicitly. Prove revocation across browser sessions, personal keys and scheduled assignments.</p>
+      <p class="links"><a href="01-staff-accounts.html">Open HTML plan →</a><a href="../../research/t3code-phase1/01-staff-accounts.md">Evidence and sources</a></p>
+    </div></article>
+    <article class="topic"><span class="number">02</span><div>
+      <h3>Customer usernames and access <span class="tag">Email optional</span></h3>
+      <p>Use the same Convex Auth v2 core for chosen usernames, passwords, single-use Project invitations and a saved recovery code. Give each new customer a stable ID and access to their own Tickets.</p>
+      <p class="note">Track Ease implements invite redemption, recovery authorization and the rule that customers see only their own Tickets within their Projects.</p>
+      <p class="links"><a href="02-customer-accounts.html">Open HTML plan →</a><a href="../../research/t3code-phase1/02-customer-accounts.md">Evidence and sources</a></p>
+    </div></article>
+    <article class="topic"><span class="number">03</span><div>
+      <h3>Easy T3 Code connection <span class="tag">CLI + skill first</span></h3>
+      <p>Provide a signed setup kit and a prompt to copy. Import a personal Project-scoped key through secure entry into the execution host’s credential store, then run a read-only connection check.</p>
+      <p class="note">Start with macOS execution hosts and prove Claude/Codex support individually. Defer MCP. The distributed client starts text-only; it must never contain the server’s upload token.</p>
+      <p class="links"><a href="03-t3code-connection.html">Open HTML plan →</a><a href="../../research/t3code-phase1/03-t3code-connection.md">Evidence and sources</a></p>
+    </div></article>
+    <article class="topic"><span class="number">04</span><div>
+      <h3>Responsibilities and scheduled delegation <span class="tag">Manual → suggest → opt in</span></h3>
+      <p>Give each Project responsibility areas, eligible staff and a Ticket assignee. A T3 timer uses the selected provider and model to suggest—or deliberately autoassign—new, unassigned Tickets.</p>
+      <p class="note">Track Ease validates every assignment. Human overrides win; uncertainty stays unassigned. Responsibilities grant no access permissions. A sleeping host pauses useful automation.</p>
+      <p class="links"><a href="04-responsibilities-and-delegation.html">Open HTML plan →</a><a href="../../research/t3code-phase1/04-responsibilities-and-delegation.md">Evidence and sources</a></p>
+    </div></article>
+    <article class="topic"><span class="number">05</span><div>
+      <h3>Email, LINE and notification choices <span class="tag">Core + LINE checkpoint 1b</span></h3>
+      <p>Let each person choose channels and categories. Use an authenticated inbox and app-owned delivery outbox, optional verified email through Resend, and documented LINE account linking.</p>
+      <p class="note">LINE works without email. External alerts open the authenticated app; replying to change a Ticket is a later feature requiring a public-message and identity boundary.</p>
+      <p class="links"><a href="05-notifications.html">Open HTML plan →</a><a href="../../research/t3code-phase1/05-notifications.md">Evidence and sources</a></p>
+    </div></article>
+  </section>
+
+  <section id="architecture" aria-labelledby="architecture-title">
+    <h2 id="architecture-title">One consistent authority model</h2>
+    <ol class="flow" aria-label="Proposed architecture">
+      <li><strong>1 · Identify people</strong>Named staff or customer principal.<small>Provider login, password or key proves identity.</small></li>
+      <li><strong>2 · Check authority</strong>Current role, credential scope, Project and Ticket rules.<small>Responsibilities and notifications grant no access.</small></li>
+      <li><strong>3 · Commit the change</strong>Versioned Ticket operation with durable actor and event.<small>T3 assignment uses a narrow, explicit permission.</small></li>
+      <li><strong>4 · Notify by choice</strong>App selects authorized recipients and verified channels.<small>T3 receives no email or LINE provider secrets.</small></li>
+    </ol>
+    <div class="table-wrap"><table>
+      <caption>Contracts reconciled across all five plans</caption>
+      <thead><tr><th scope="col">Boundary</th><th scope="col">Recommended behavior</th></tr></thead>
+      <tbody>
+        <tr><td>Staff identity</td><td>Immutable staff ID survives login changes, key rotation and deactivation. A credential ID explains how someone acted.</td></tr>
+        <tr><td>Customer ownership</td><td>Keep customer IDs, Project membership and individual Ticket ownership. A staff assignee never replaces the customer owner.</td></tr>
+        <tr><td>Project visibility</td><td>Staff retain existing global visibility unless a separate isolation requirement is chosen. Personal keys narrow that visibility to selected Projects.</td></tr>
+        <tr><td>Timer authority</td><td>Read bounded candidates and eligible staff; suggest or initially assign under an enabled policy. Status changes, archive, communication and administration are excluded.</td></tr>
+        <tr><td>Notification authority</td><td>Deterministic application rules choose recipients. Recheck current access, preferences and contact binding before dispatch; private assignment details stay staff-only.</td></tr>
+        <tr><td>Uncertain outcomes</td><td>Preserve request identities and committed events. Reconcile unknown writes and sends; no blanket exactly-once delivery promise.</td></tr>
+      </tbody>
+    </table></div>
+    <details><summary>Important corrections to the earlier combined draft</summary>
+      <p>The Product Owner (accountable role) confirmed there are no existing users. One <a href="https://docs.convex.dev/auth/convex-auth">Convex Auth v2</a> core handles both browser sign-in methods. Account migration is outside the initial release.</p>
+      <p><strong>Connection:</strong> reuse the <a href="https://github.com/Ruckth/ease-pos-track/blob/f74576308213563648934d1058ed5f079a27936f/scripts/ticket/registry.ts#L47">existing CLI contract</a>. A downloadable package, key importer and connection doctor are proposed work. Secure one-use entry does not itself create a durable scheduled credential.</p>
+      <p><strong>Scheduling:</strong> the <a href="https://github.com/pingdotgg/t3code/blob/3ee4aa62ec0ed16375e3f28c8ad2138a44ebaa88/apps/server/src/scheduledTasks/ScheduledTaskService.ts#L1032">inspected scheduler</a> treats bound and new-thread runs differently. Record the actual provider selection and workspace; dispatch status is separate from a committed Ticket assignment.</p>
+      <p><strong>LINE:</strong> use Messaging API and <a href="https://developers.line.biz/en/docs/messaging-api/linking-accounts/">documented account linking</a>. The <a href="https://lineforbusiness.com/th/news/20261030">official Thailand notice</a> confirms a Reply API change from 1 February 2027; it is distinct from push-message pricing. Check the chosen account’s current terms before enabling LINE.</p>
+    </details>
+  </section>
+
+  <section id="sequence" aria-labelledby="sequence-title">
+    <h2 id="sequence-title">Build order and release gates</h2>
+    <ol class="build">
+<li><strong>Open the smallest usable pilot.</strong> First prove pinned Auth session issuance and admission locally and inventory all 36 existing protected registrations. Then configure the dedicated staff identity sender and verified domain. Verify the first Owner, customer enrollment and recovery, then close legacy access through the single cutover gate. Deliver text-only Tickets, manual assignment and the authenticated inbox. The signed T3 kit comes at the next checkpoint. A customer can open a Ticket, staff can take it, and the customer can see progress.</li>
+<li><strong>Open the T3 connection checkpoint independently.</strong> Publish the signed kit and prove its doctor-only gateway on each supported host. Shipping this connection does not require an AI routing experiment.</li>
+<li><strong>Test whether AI improves routing.</strong> Use an in-app product/symptom rule first. Measure the selected agent on at least 50 separate residual holdout cases before investing in a broker. If it qualifies, record host and actual dispatch evidence, validate the approved data projection and run the manual override, timing and revocation tests. The Owner can enable limited initial autoassignment afterward.</li>
+<li><strong>Add optional external channels.</strong> Release verified Ticket email after consent, privacy and delivery checks. Enable LINE at checkpoint 1b after proving external-browser linking, quotas and replay handling. Both channels open the same authenticated inbox.</li>
+</ol><p>The <a href="launch-contracts.html#operations">release checklist</a> names accountable roles and evidence. The <a href="launch-contracts.html#cutover">cutover and rollback procedure</a> covers retained operational data. A <a href="launch-contracts.html#data-restore">separate restore procedure</a> invalidates old access before reopening.</p>
+  </section>
+
+  <section id="pilot"><h2>First pilot and release evidence</h2>
+<p>The smallest pilot has an Owner, an independently recoverable backup Owner, a named Staff member, two customers in one Project, and a second Project used to test isolation. A customer joins by invitation and creates a Ticket, a staff member assigns it manually, and the customer sees its status. At the next checkpoint, doctor proves the named connection without accessing any Ticket. The Owner can retain the built-in rule indefinitely. A T3 runner requires a measured improvement and a verified host.</p>
+<p>The implementation lead records the code revision, pinned versions, fixture set, results and unresolved failures for each topic. Use pnpm agent:setup in an isolated checkout, pnpm convex:local for schema work, pnpm check and pnpm test:browser. For the new delivery tests, use fake providers and block outbound traffic as the existing upload tests do. Record real Google redirect and supported T3 provider/host results separately. The provider operator checks real email and LINE with designated consenting pilot recipients only when that channel is approved.</p>
+<p>Release each capability after its documented gates pass. The Owner checks new invitations, failed recoveries, the unassigned queue, stale runner health, suppressed deliveries and unresolved outcomes during the pilot. Pause enrollment for identity failures, revoke a compromised key, pause the assignment policy for routing failures and pause external delivery for channel failures. Keep manual Ticket work available where authorization is intact.</p></section>
+  <section id="decisions" aria-labelledby="decisions-title">
+    <h2 id="decisions-title">Operating decisions before rollout</h2>
+    <p>The <a href="launch-contracts.html#decisions">decision register</a> records each launch default, its owner, the release it blocks and the evidence still needed. Real provider accounts, host versions, privacy approvals and rollback builds are supplied by the accountable operator before enablement.</p>
+  </section>
+  <footer class="note">Five sequential research tasks; one topic per task. Each plan includes claim-local primary sources and code references. The application baseline passed <code>pnpm check</code>; future authentication, setup, automation and delivery behavior still require their documented acceptance checks. No live integration, schedule, notification or Ticket was created.</footer>
+</main>
+</body>
+</html>

@@ -17,6 +17,8 @@ type SlideProps = {
   index: number;
   annotations: Annotation[];
   annotateMode: boolean;
+  movingPin?: Annotation;
+  readOnly: boolean;
   draft: DraftTarget | null;
   focus: FocusRequest;
   openId: string | null;
@@ -36,11 +38,51 @@ function relativePoint(event: React.MouseEvent, element: Element) {
   };
 }
 
+type Point = { x: number; y: number };
+
+/** Keyboard and pointer placements both commit normalized media coordinates. */
+function usePinPosition<T extends HTMLElement>(placing: boolean, movingPin?: Annotation) {
+  const { t } = useI18n();
+  const surface = useRef<T>(null);
+  const [point, setPoint] = useState<Point>({ x: 0.5, y: 0.5 });
+  useEffect(() => {
+    if (!placing) return;
+    setPoint({ x: movingPin?.x ?? 0.5, y: movingPin?.y ?? 0.5 });
+    surface.current?.focus({ preventScroll: true });
+  }, [placing, movingPin?.id, movingPin?.x, movingPin?.y]);
+  function onKeyDown(event: React.KeyboardEvent, commit: (point: Point) => void) {
+    const offsets: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+    };
+    const offset = offsets[event.key];
+    if (offset) {
+      event.preventDefault();
+      const step = event.shiftKey ? 10 : 1;
+      const adjust = (value: number, direction: number) => Math.max(0, Math.min(100, Math.round(value * 100) + direction * step)) / 100;
+      setPoint(previous => ({ x: adjust(previous.x, offset[0]), y: adjust(previous.y, offset[1]) }));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      commit(point);
+    }
+  }
+  const position = t("pinPosition", { x: Math.round(point.x * 100), y: Math.round(point.y * 100) });
+  return { surface, point, position, onKeyDown };
+}
+
+function PlacementHint({ position }: { position: string }) {
+  const { t } = useI18n();
+  return <p className="w-full bg-muted px-3 py-2 text-sm text-foreground">
+    {t("pinKeyboardHint")} <span role="status">{position}</span>
+  </p>;
+}
+
 export function ImageSlide({
   item,
   index,
   annotations,
   annotateMode,
+  movingPin,
+  readOnly,
   draft,
   focus,
   openId,
@@ -51,13 +93,21 @@ export function ImageSlide({
   onDelete,
 }: SlideProps) {
   const { t } = useI18n();
-  return (
+  const placement = usePinPosition<HTMLImageElement>(annotateMode, movingPin);
+  return <>
+    {annotateMode && <PlacementHint position={placement.position} />}
     <div className="flex h-[42vh] items-center justify-center sm:h-[48vh]">
       <div className="relative inline-flex max-h-full max-w-full">
         <img
           src={item.url}
           alt={item.name}
           draggable={false}
+          ref={placement.surface}
+          data-pin-surface={annotateMode ? true : undefined}
+          role={annotateMode ? "button" : undefined}
+          aria-label={annotateMode ? t("markPoint") : undefined}
+          tabIndex={annotateMode ? 0 : undefined}
+          onKeyDown={event => { if (annotateMode) placement.onKeyDown(event, point => onSurfaceClick({ mediaIndex: index, kind: "point", ...point })); }}
           className={cn("max-h-[42vh] max-w-full object-contain sm:max-h-[48vh]", annotateMode && "cursor-crosshair")}
           onClick={(event) => {
             if (!annotateMode) {
@@ -68,6 +118,7 @@ export function ImageSlide({
             onSurfaceClick({ mediaIndex: index, kind: "point", x, y });
           }}
         />
+        {annotateMode && <DraftPin {...placement.point} />}
         {annotations.map((annotation) =>
           annotation.x === undefined || annotation.y === undefined ? null : (
             <PinMarker
@@ -82,6 +133,7 @@ export function ImageSlide({
         <PinPopover
           key={openId}
           annotation={annotations.find((annotation) => annotation.id === openId) ?? null}
+          readOnly={readOnly}
           onClose={() => onOpenChange(null)}
           onUpdate={onUpdate}
           onMove={onMove}
@@ -89,7 +141,7 @@ export function ImageSlide({
         />
       </div>
     </div>
-  );
+  </>;
 }
 
 export function VideoSlide({
@@ -97,6 +149,8 @@ export function VideoSlide({
   index,
   annotations,
   annotateMode,
+  movingPin,
+  readOnly,
   draft,
   focus,
   openId,
@@ -108,6 +162,7 @@ export function VideoSlide({
 }: SlideProps) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const placement = usePinPosition<HTMLButtonElement>(annotateMode, movingPin);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
 
@@ -139,6 +194,28 @@ export function VideoSlide({
     return () => video.removeEventListener("loadedmetadata", applySeek);
   }, [focus, annotations, duration]);
 
+  useEffect(() => {
+    if (!annotateMode || !videoRef.current) return;
+    const video = videoRef.current;
+    video.pause();
+    syncDuration(video);
+    if (movingPin?.time !== undefined && duration > 0) {
+      video.currentTime = Math.min(movingPin.time, duration);
+      setCurrentTime(video.currentTime);
+    }
+  }, [annotateMode, movingPin?.time, duration]);
+
+  function syncDuration(video: HTMLVideoElement) {
+    setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+  }
+
+  function place(point: Point) {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    onSurfaceClick({ mediaIndex: index, kind: "time", ...point, time: video.currentTime });
+  }
+
   function jumpTo(annotation: Annotation) {
     const video = videoRef.current;
     if (!video || annotation.time === undefined) return;
@@ -154,17 +231,27 @@ export function VideoSlide({
     focus?.id === annotation.id ||
     openId === annotation.id;
 
-  return (
+  return <>
+    {annotateMode && <>
+      <PlacementHint position={placement.position} />
+      {duration > 0 && <label className="flex items-center gap-2 bg-muted px-3 pb-2 text-sm text-foreground">
+        {t("pinAtTime", { time: formatClock(currentTime) })}
+        <input type="range" className="min-h-11 min-w-0 flex-1" min={0} max={duration} step={0.1} value={currentTime}
+          onChange={event => { if (videoRef.current) videoRef.current.currentTime = Number(event.target.value); }} />
+      </label>}
+    </>}
     <div className="flex h-[42vh] flex-col items-center justify-center gap-2 py-2 sm:h-[48vh]">
       <div className="relative inline-flex max-h-full min-h-0 max-w-full">
         <video
           ref={videoRef}
           src={item.url}
+          aria-label={item.name}
           controls={!annotateMode}
           playsInline
           preload="metadata"
           className="max-h-[34vh] max-w-full sm:max-h-[40vh]"
-          onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+          onLoadedMetadata={event => syncDuration(event.currentTarget)}
+          onDurationChange={event => syncDuration(event.currentTarget)}
           onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
           onClick={() => {
             if (!annotateMode) onOpenChange(null);
@@ -173,17 +260,17 @@ export function VideoSlide({
         {annotateMode ? (
           <button
             type="button"
+            data-pin-surface
+            ref={placement.surface}
+            onKeyDown={event => placement.onKeyDown(event, place)}
             aria-label={t("markPoint")}
             className="absolute inset-0 z-10 cursor-crosshair"
             onClick={(event) => {
-              const video = videoRef.current;
-              if (!video) return;
-              video.pause();
-              const { x, y } = relativePoint(event, event.currentTarget);
-              onSurfaceClick({ mediaIndex: index, kind: "time", x, y, time: video.currentTime });
+              place(event.detail === 0 ? placement.point : relativePoint(event, event.currentTarget));
             }}
           />
         ) : null}
+        {annotateMode && <DraftPin {...placement.point} />}
         {annotations.map((annotation) =>
           annotation.x === undefined || annotation.y === undefined || !isPinVisible(annotation) ? null : (
             <PinMarker
@@ -198,6 +285,7 @@ export function VideoSlide({
         <PinPopover
           key={openId}
           annotation={annotations.find((annotation) => annotation.id === openId) ?? null}
+          readOnly={readOnly}
           onClose={() => onOpenChange(null)}
           onUpdate={onUpdate}
           onMove={onMove}
@@ -208,7 +296,7 @@ export function VideoSlide({
         <MarkerBar marks={timeMarks} duration={duration} currentTime={currentTime} onJump={jumpTo} />
       ) : null}
     </div>
-  );
+  </>;
 }
 
 function MarkerBar({
@@ -235,6 +323,7 @@ function MarkerBar({
         />
         {marks.map((mark) => (
           <button
+            data-pin-id={mark.id}
             key={mark.id}
             type="button"
             title={`${formatClock(mark.time ?? 0)} — ${mark.text}`}

@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: 210 25% 97%;
+    --background: 216 53% 96%;
     --foreground: 220 24% 12%;
     --card: 0 0% 100%;
     --card-foreground: 220 24% 12%;
@@ -15,24 +15,332 @@
     --secondary: 174 48% 92%;
     --secondary-foreground: 190 82% 20%;
     --muted: 214 24% 91%;
-    --muted-foreground: 220 10% 42%;
+    --muted-foreground: 221 24% 31%;
     --accent: 36 80% 92%;
     --accent-foreground: 28 62% 26%;
     --destructive: 0 72% 46%;
     --destructive-foreground: 0 0% 100%;
     --border: 216 20% 84%;
-    --input: 216 20% 84%;
+    --input: 216 14% 48%;
     --ring: 213 83% 38%;
-    --radius: 8px;
+    --radius: 10px;
+    color-scheme: light;
+    --glass-fill: 248 252 255;
+    --glass-rim: rgb(255 255 255 / .83);
+    --glass-glint: rgb(255 255 255 / .95);
+    --glass-outline: rgb(38 62 112 / .22);
+    --glass-shadow: rgb(31 55 117 / .24);
+    --canvas-wash: 234 242 255;
+    --canvas-opacity: .66;
+    --sheet-light: .79;
+    --sheet-shade: .57;
+    --edge-tint: 158 190 241;
+    --field: 216 33% 93%;
+    --surface-shadow: 0 1px 2px rgb(36 49 73 / 6%), 0 4px 16px -8px rgb(36 49 73 / 22%);
+    --surface-shadow-raised: 0 0 0 1px rgb(36 49 73 / 7%), 0 14px 36px -10px rgb(36 49 73 / 32%);
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    --background: 222 42% 10%;
+    --foreground: 210 37% 96%;
+    --card: 218 32% 17%;
+    --card-foreground: 210 37% 96%;
+    --popover: 220 32% 15%;
+    --popover-foreground: 210 37% 96%;
+    --primary: 191 80% 69%;
+    --primary-foreground: 217 54% 11%;
+    --secondary: 215 29% 24%;
+    --secondary-foreground: 207 39% 94%;
+    --muted: 218 27% 22%;
+    --muted-foreground: 213 29% 83%;
+    --accent: 211 31% 27%;
+    --accent-foreground: 210 44% 97%;
+    --destructive: 353 88% 74%;
+    --destructive-foreground: 345 55% 12%;
+    --border: 215 24% 32%;
+    --input: 216 18% 60%;
+    --ring: 187 82% 71%;
+    --glass-fill: 18 32 57;
+    --glass-rim: rgb(184 224 255 / .33);
+    --glass-glint: rgb(219 246 255 / .43);
+    --glass-outline: rgb(5 13 35 / .44);
+    --glass-shadow: rgb(2 8 30 / .50);
+    --canvas-wash: 9 19 40;
+    --canvas-opacity: .65;
+    --sheet-light: .74;
+    --sheet-shade: .59;
+    --edge-tint: 49 75 120;
+    --field: 218 27% 23%;
+    --surface-shadow: 0 1px 2px rgb(2 7 19 / 30%), 0 6px 18px -8px rgb(2 7 19 / 55%);
+    --surface-shadow-raised: 0 0 0 1px rgb(169 200 232 / 10%), 0 16px 36px -10px rgb(2 7 19 / 75%);
   }
 
   * {
     @apply border-border;
   }
 
+  /* Menus and popovers appear without the fade/zoom under reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"] {
+      animation: none !important;
+    }
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+}
+
+@layer components {
+  /* One stationary backdrop serves the workspace and its portal overlays. */
+  .aurora-canvas {
+    isolation: isolate;
+    background-color: rgb(var(--canvas-wash));
+  }
+
+  .aurora-canvas::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(120deg, rgb(var(--canvas-wash) / var(--canvas-opacity)), rgb(var(--canvas-wash) / .82)),
+      url("./assets/optical-glass.webp") center / cover;
+  }
+
+  .aurora-panel, .aurora-toolbar, .aurora-ticket, .aurora-dialog, .aurora-popover,
+  .aurora-inset, .aurora-control, .glass-field, .ticket-lane, .ticket-surface {
+    background-color: rgb(var(--glass-fill));
+    border: 1px solid var(--glass-rim);
+    box-shadow: inset 0 1px var(--glass-glint), 0 0 0 1px var(--glass-outline),
+      0 7px 18px -11px var(--glass-shadow);
+  }
+
+  .aurora-panel, .aurora-toolbar, .ticket-lane { border-radius: 1rem; }
+  .aurora-ticket, .ticket-surface { border-radius: .875rem; }
+  .aurora-dialog-edge { background-color: rgb(var(--glass-fill)); }
+  .aurora-scrim { background: rgb(16 31 64 / .30); }
+  .glass-field { border-color: hsl(var(--input)); }
+  select option { color: hsl(var(--foreground)); background: hsl(var(--card)); }
+  input[type="checkbox"] { accent-color: hsl(var(--primary)); }
+
+  .ticket-surface-selected {
+    border-color: hsl(var(--primary));
+    box-shadow: inset 0 0 0 1px hsl(var(--primary));
+  }
+  .ticket-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    border-radius: .375rem;
+    padding: .125rem .5rem;
+    background-color: color-mix(in srgb, currentColor 8%, transparent);
+  }
+
+  /* Repeated rows and controls reuse their parent's material without another blur. */
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .aurora-panel, .aurora-toolbar, .aurora-ticket, .aurora-dialog, .aurora-popover {
+      background: linear-gradient(132deg, rgb(var(--glass-fill) / var(--sheet-light)), rgb(var(--glass-fill) / var(--sheet-shade)));
+      -webkit-backdrop-filter: blur(18px) saturate(1.45);
+      backdrop-filter: blur(18px) saturate(1.45);
+    }
+    .aurora-ticket, .aurora-popover {
+      background-color: rgb(var(--glass-fill) / .44);
+    }
+    /* Soften the page itself so portal composition cannot leave sharp text
+       visible through the sheet. Dialogs and notifications stay in focus. */
+    body:has(> [data-base-ui-portal] > .aurora-dialog[data-open]) .aurora-canvas {
+      filter: var(--modal-page-filter, blur(4px));
+    }
+    .aurora-scrim {
+      background: linear-gradient(140deg, rgb(var(--canvas-wash) / .19), rgb(20 41 85 / .34));
+    }
+    .aurora-dialog, .aurora-popover {
+      box-shadow: inset 0 1px 1px var(--glass-glint), inset 0 -1px 1px var(--glass-rim),
+        0 0 0 1px var(--glass-outline), 0 18px 52px -12px var(--glass-shadow);
+    }
+    .aurora-scrim::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: url("./assets/optical-glass.webp") center / cover;
+      opacity: .58;
+    }
+    .aurora-dialog {
+      background: linear-gradient(135deg, rgb(var(--glass-fill) / .86), rgb(var(--glass-fill) / .63) 34%, rgb(var(--glass-fill) / .53) 72%, rgb(var(--glass-fill) / .78));
+      -webkit-backdrop-filter: blur(19px) saturate(1.6);
+      backdrop-filter: blur(19px) saturate(1.6);
+    }
+    .aurora-dialog-edge {
+      background: rgb(var(--edge-tint) / .28);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+    }
+    .ticket-lane, .aurora-inset, .aurora-control {
+      background: linear-gradient(145deg, rgb(var(--glass-fill) / .65), rgb(var(--glass-fill) / .38));
+    }
+    .ticket-surface {
+      background: linear-gradient(125deg, rgb(var(--glass-fill) / .93), rgb(var(--glass-fill) / .71));
+    }
+    .ticket-surface-selected { background-color: hsl(var(--primary) / .25); }
+    .glass-field {
+      background: linear-gradient(118deg, rgb(var(--glass-fill) / .67), rgb(var(--glass-fill) / .34));
+      box-shadow: inset 0 1px 3px var(--glass-outline), inset 0 -1px var(--glass-rim);
+    }
+    .glass-action {
+      background-image: linear-gradient(173deg, rgb(255 255 255 / .12), transparent 55%, rgb(6 30 80 / .1));
+      box-shadow: inset 0 1px rgb(255 255 255 / .4), 0 3px 8px -4px var(--glass-shadow);
+    }
+  }
+
+  /* Apply the fallback only on an explicit preference. Some engines support blur
+     before they recognize the transparency media feature. */
+  @media (prefers-reduced-transparency: reduce) {
+    .aurora-canvas { --modal-page-filter: none; }
+    .aurora-canvas::before, .aurora-scrim::after { background: none; }
+    .aurora-panel, .aurora-toolbar, .aurora-ticket, .aurora-dialog, .aurora-popover,
+    .aurora-dialog-edge, .aurora-inset, .aurora-control, .glass-field, .ticket-lane, .ticket-surface {
+      background: rgb(var(--glass-fill));
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    .glass-action { background-image: none; }
+    .aurora-scrim {
+      background: rgb(16 31 64 / .30);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  @media (max-width: 639px) {
+    .aurora-dialog-body:has(> form > .aurora-composer-footer) { padding-bottom: 0; }
+    .aurora-composer-footer { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
+  }
+
+  @media (min-width: 640px) {
+    .aurora-dialog:has(.aurora-composer-footer) { max-width: 40rem; }
+    .aurora-composer-footer {
+      background: none;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .ticket-surface:has([data-ticket-id]), button.ticket-surface {
+      transition: border-color 140ms ease, background-color 140ms ease;
+    }
+  }
+
+  @media (hover: hover) {
+    .ticket-surface:has([data-ticket-id]):hover, button.ticket-surface:hover {
+      border-color: hsl(var(--primary) / 0.45);
+    }
+  }
+
+
+  @media (forced-colors: active) {
+    .ticket-surface-selected {
+      border-color: Highlight;
+      border-width: 2px;
+    }
+  }
+
+  /* Notifications: neutral surface, severity in the icon colour only. */
+  :root [data-sonner-toaster][data-sonner-theme] {
+    --normal-bg: hsl(var(--popover));
+    --normal-border: var(--glass-rim);
+    --normal-text: hsl(var(--popover-foreground));
+    --border-radius: 0.75rem;
+    font-family: inherit;
+  }
+
+  :root [data-sonner-toast].app-toast {
+    box-shadow: var(--surface-shadow-raised);
+    gap: 0.625rem;
+  }
+
+  :root [data-sonner-toast] .app-toast-description {
+    color: hsl(var(--muted-foreground));
+  }
+
+  :root [data-sonner-toast] [data-button].app-toast-action {
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    border-radius: 0.375rem;
+    background-color: hsl(var(--field));
+    color: hsl(var(--foreground));
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+
+  @media (pointer: coarse) {
+    :root [data-sonner-toast] [data-button].app-toast-action {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
+  }
+
+  :root [data-sonner-toast] [data-button].app-toast-action:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  .app-toast-success [data-icon] { color: rgb(4 120 87); }
+  .app-toast-error [data-icon] { color: hsl(var(--destructive)); }
+  .app-toast-warning [data-icon] { color: rgb(180 83 9); }
+  .app-toast-info [data-icon] { color: hsl(var(--primary)); }
+  .dark .app-toast-success [data-icon] { color: rgb(110 231 183); }
+  .dark .app-toast-warning [data-icon] { color: rgb(252 211 77); }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root [data-sonner-toaster][data-sonner-theme] { --normal-bg: rgb(var(--glass-fill) / .9); }
+    :root [data-sonner-toast].app-toast {
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    :root [data-sonner-toaster][data-sonner-theme] { --normal-bg: hsl(var(--popover)); }
+    :root [data-sonner-toast].app-toast {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  /* Opaque token colors keep annotations readable without backdrop-filter. */
+  .annotation-glass-marker {
+    background-color: hsl(var(--primary));
+  }
+
+  .annotation-glass-popover {
+    background-color: hsl(var(--popover));
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .annotation-glass-marker {
+      background-color: hsl(var(--primary) / 0.82);
+      -webkit-backdrop-filter: blur(8px) saturate(1.2);
+      backdrop-filter: blur(8px) saturate(1.2);
+    }
+
+    .annotation-glass-popover {
+      background-color: hsl(var(--popover) / 0.88);
+      -webkit-backdrop-filter: blur(16px) saturate(1.15);
+      backdrop-filter: blur(16px) saturate(1.15);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .annotation-glass-marker, .annotation-glass-popover {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    .annotation-glass-marker { background-color: hsl(var(--primary)); }
+    .annotation-glass-popover { background-color: hsl(var(--popover)); }
   }
 }

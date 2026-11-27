@@ -1,3 +1,4 @@
+import { validStoredImage } from "./validate-upload-image.js";
 import type { OurFileRouter, UploadIntentInput } from "../shared/upload-router.js";
 import { ConvexHttpClient } from "convex/browser";
 import { createUploadthing, UploadThingError } from "uploadthing/server";
@@ -39,7 +40,38 @@ function bearerToken(request: Request) {
 }
 
 
-export function createUploadRouter(convex: ConvexHttpClient, callbackToken: string | undefined): OurFileRouter {
+/** A fresh client per request: the shared client never carries a user's JWT. */
+export function authenticatedClient(convex: ConvexHttpClient, accessToken: string) {
+  const client = new ConvexHttpClient(convex.url, { logger: false });
+  client.setAuth(accessToken);
+  return client;
+}
+
+const STORED_IMAGE_READS = 3;
+
+/**
+ * Whether the stored bytes are an acceptable prepared image. Provider read
+ * failures are retried briefly; if the bytes still cannot be read, the receipt
+ * is treated as rejected so guarded cleanup owns the provider file instead of
+ * leaving it unrecorded. The submission then fails and can be retried.
+ */
+export async function storedImageAccepted(file: CompletedUpload, validate = validStoredImage, pauseMs = 500) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await validate(file);
+    } catch {
+      if (attempt === STORED_IMAGE_READS) return false;
+      await new Promise(resolve => setTimeout(resolve, pauseMs * attempt));
+    }
+  }
+}
+
+export function createUploadRouter(
+  convex: ConvexHttpClient,
+  callbackToken: string | undefined,
+  forUser: (accessToken: string) => Pick<ConvexHttpClient, "query"> = accessToken => authenticatedClient(convex, accessToken),
+  acceptImage: (file: CompletedUpload) => Promise<boolean> = file => storedImageAccepted(file),
+): OurFileRouter {
   const f = createUploadthing();
   const record = recordUploadHandler(input => convex.mutation(api.uploads.recordUploadedFile, input), callbackToken);
   return {
@@ -63,8 +95,9 @@ export function createUploadRouter(convex: ConvexHttpClient, callbackToken: stri
       if (!token) throw new UploadThingError({ code: "FORBIDDEN", message: "Sign in before uploading." });
       let valid = false;
       try {
-        valid = await convex.query(api.uploads.validateUploadIntent, {
-          token,
+        // The browser's Convex Auth access token authenticates a per-request
+        // client; the server callback credential stays separate.
+        valid = await forUser(token).query(api.uploads.validateUploadIntent, {
           callbackToken,
           intentId: input.intentId as Id<"uploadIntents">,
           secret: input.secret,
@@ -84,7 +117,9 @@ export function createUploadRouter(convex: ConvexHttpClient, callbackToken: stri
       // See the parser note above: Vercel's non-strict API check also erases the
       // properties of UploadThing's Effect Schema-derived UploadedFileData type.
       const uploaded = file as unknown as CompletedUpload;
+      const rejectedImage = uploaded.type.startsWith("image/") && !await acceptImage(uploaded);
       await record({
+        ...(rejectedImage ? { rejectedImage: true } : {}),
         intentId: metadata.intentId as Id<"uploadIntents">,
         secret: metadata.secret,
         file: {

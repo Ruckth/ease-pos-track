@@ -2,6 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { mediaJobKind, mediaJobState } from "../schema";
+import { mediaCleanupEnabled } from "../pilot_access";
 import type { JobFence } from "../../shared/ticket-contracts";
 
 // The lease leaves forty seconds beyond the provider budget for settlement.
@@ -16,7 +17,7 @@ export async function createMediaJob(ctx: MutationCtx, input: Pick<Doc<"mediaJob
   const existing = await ctx.db.query("mediaJobs").withIndex("by_scope", q => q.eq("resourceScope", input.resourceScope)).first();
   if (existing) return existing._id;
   const now = Date.now();
-  const enabled = process.env.MEDIA_CLEANUP_ENABLED === "true";
+  const enabled = await mediaCleanupEnabled(ctx);
   const id = await ctx.db.insert("mediaJobs", { ...input, completedKeys: [], phase: "delete_media", state: "pending",
     attempt: 0, maxAttempts: JOB_POLICY.maxAttempts, availableAt: now, createdAt: now, updatedAt: now });
   await updateJobCounters(ctx, null, (await ctx.db.get(id))!);

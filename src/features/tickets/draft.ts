@@ -4,24 +4,34 @@ import { withoutPendingAnnotationsForMedia } from "@/lib/pending-annotations";
 import { submitTicketDraft, type SubmitTicketDeps, type TicketDraft } from "@/lib/ticket-submit";
 
 export type DraftSnapshot = TicketDraft & { progress: number | null; error: unknown };
-type Resources = { createURL: (file: File) => string; revokeURL: (url: string) => void; requestKey: () => string; now: () => number };
+type Resources = { prepareImage?: (file: File) => Promise<File>; createURL: (file: File) => string; revokeURL: (url: string) => void; requestKey: () => string; now: () => number };
 
 /** A component-scoped, Project-bound owner. Disposal never deletes provider files. */
 export class DisposableTicketDraft {
   private state: DraftSnapshot;
   private listeners = new Set<() => void>();
   private controller: AbortController | null = null;
+  private submission: ReturnType<typeof submitTicketDraft> | null = null;
   private disposed = false;
+  /** Set only after the create receipt is reconciled and cancellation checked. */
+  private submittedId: Id<"tickets"> | undefined;
+  get lastSubmittedId() { return this.submittedId; }
   constructor(readonly projectId: Id<"projects">, private resources: Resources = {
+    prepareImage: async file => (await import("@/lib/optimize-image")).optimizeBrowserImage(file),
     createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
     requestKey: () => crypto.randomUUID(), now: () => Date.now(),
   }) {
     this.state = this.empty();
   }
   private empty(): DraftSnapshot {
-    return { title: "", description: "", items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null };
+    return { title: "", description: "", routingClassification: undefined, items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null };
   }
   getSnapshot = () => this.state;
+  hasContent = () => {
+    const { title, description, routingClassification, items, annotations } = this.state;
+    return Boolean(title || description || routingClassification || items.length || annotations.length);
+  };
+  isSubmitting = () => this.state.progress !== null;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private change(patch: Partial<DraftSnapshot>) {
     if (this.disposed) return;
@@ -30,6 +40,9 @@ export class DisposableTicketDraft {
   }
   setTitle = (title: string) => { if (!this.controller) this.change({ title }); };
   setDescription = (description: string) => { if (!this.controller) this.change({ description }); };
+  setRoutingClassification = (routingClassification: TicketDraft["routingClassification"]) => {
+    if (!this.controller) this.change({ routingClassification });
+  };
   setError = (error: unknown) => this.change({ error });
   addFiles = (files: File[]) => {
     if (this.disposed || this.controller) return;
@@ -72,6 +85,11 @@ export class DisposableTicketDraft {
   cancel = () => {
     if (this.controller && !this.controller.signal.aborted) this.controller.abort();
   };
+  cancelAndSettle = async () => {
+    this.cancel();
+    // submit records failures on the draft. Wait for its guarded cleanup, too.
+    await this.submission?.catch(() => {});
+  };
   async submit(deps: Omit<SubmitTicketDeps, "signal" | "onProgress" | "onRequestConflict" | "createTicket"> & {
     createTicket: (args: Parameters<SubmitTicketDeps["createTicket"]>[0] & { projectId: Id<"projects"> }) => Promise<unknown>;
   }) {
@@ -81,13 +99,22 @@ export class DisposableTicketDraft {
     const draft = this.state;
     this.change({ progress: 0, error: null });
     try {
-      await submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
+      const items = [];
+      for (const item of draft.items) {
+        const file = !item.isVideo && this.resources.prepareImage ? await this.resources.prepareImage(item.file) : item.file;
+        controller.signal.throwIfAborted();
+        if (!item.isVideo && file.size > 8 * 1024 * 1024) throw new Error("IMAGE_TOO_LARGE");
+        items.push({ ...item, file });
+      }
+      this.submission = submitTicketDraft({ ...deps, createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
         signal: controller.signal,
         onProgress: progress => { if (this.controller === controller) this.change({ progress }); },
         onRequestConflict: () => { if (this.controller === controller) this.change({ idempotencyKey: this.resources.requestKey() }); },
-      }, draft);
+      }, { ...draft, items });
+      const created = await this.submission;
       if (this.disposed || this.controller !== controller) return false;
       controller.signal.throwIfAborted();
+      this.submittedId = typeof created === "string" ? created as Id<"tickets"> : undefined;
       this.release();
       this.change(this.empty());
       return true;
@@ -95,6 +122,7 @@ export class DisposableTicketDraft {
       if (this.controller === controller) this.change({ error });
       return false;
     } finally {
+      this.submission = null;
       if (this.controller === controller) {
         if (!controller.signal.aborted) controller.abort();
         this.controller = null;

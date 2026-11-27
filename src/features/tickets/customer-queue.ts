@@ -1,0 +1,21 @@
+import type { TicketSummary } from "../../../shared/ticket-contracts";
+
+export type CustomerQueueFilter = "all" | "active" | "waiting" | "done";
+
+export function customerSearchScope(filter: CustomerQueueFilter) {
+  return {
+    status: filter === "waiting" || filter === "done" ? filter : undefined,
+    activeOnly: filter === "active" || undefined,
+  };
+}
+
+/** These counts describe the loaded page window, never the whole Project. */
+export function customerQueueCounts(rows: TicketSummary[]) {
+  return { all: rows.length, active: rows.filter(row => row.status !== "done").length,
+    waiting: rows.filter(row => row.status === "waiting").length, done: rows.filter(row => row.status === "done").length };
+}
+
+export function customerQueue(rows: TicketSummary[], filter: CustomerQueueFilter) {
+  return rows.filter(row => filter === "all" || filter === "active" && row.status !== "done" || row.status === filter)
+    .sort((a, b) => Number(b.status === "waiting") - Number(a.status === "waiting") || b.createdAt - a.createdAt || String(a._id).localeCompare(String(b._id)));
+}

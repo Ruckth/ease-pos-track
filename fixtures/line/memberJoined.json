@@ -1,0 +1,11 @@
+[
+  {
+    "type": "memberJoined",
+    "webhookEventId": "fixture-line-2",
+    "timestamp": 1795656002000,
+    "source": {
+      "type": "group",
+      "groupId": "Cfixture"
+    }
+  }
+]

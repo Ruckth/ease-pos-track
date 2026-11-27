@@ -121,4 +121,8 @@ test("Keychain not-found, invalid content, and non-macOS access have stable beha
 
   const unsupported = new MacOsKeychainCredentialStore(async () => ({ exitCode: 0, stdout: "", stderr: "" }), "linux");
   await assert.rejects(() => unsupported.get("dev"), (error: unknown) => error instanceof TicketCliError && error.code === "KEYCHAIN_UNAVAILABLE");
+  await assert.rejects(
+    () => unsupported.exclusive(async () => assert.fail("ran without the session lock")),
+    (error: unknown) => error instanceof TicketCliError && error.code === "KEYCHAIN_UNAVAILABLE",
+  );
 });

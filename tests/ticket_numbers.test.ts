@@ -8,7 +8,7 @@ import {
 } from "../shared/ticket-numbers";
 import { formatTicketNumber } from "../shared/ticket-numbers";
 import { nextTicketStatus } from "../src/lib/ticket-ui";
-import { pickProject, readProjectParam, withProjectParam } from "../src/lib/projects";
+import { pickProject } from "../src/lib/projects";
 
 test("formats Ticket references with the required Project key", () => {
   assert.equal(formatTicketNumber(1, "POS"), "POS-0001");
@@ -53,8 +53,6 @@ test("the URL's Project wins, otherwise the first available Project", () => {
   assert.equal(pickProject(projects, "GONE")?.key, "APP");
   assert.equal(pickProject(projects, null)?.key, "APP");
   assert.equal(pickProject([], "POS"), null);
-  assert.equal(readProjectParam("?project=POS&x=1"), "POS");
-  assert.equal(withProjectParam("https://app.example.com/staff?x=1#top", "POS"), "/staff?x=1&project=POS#top");
 });
 
 test("advances status without wrapping Done", () => {

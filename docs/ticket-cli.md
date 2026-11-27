@@ -5,9 +5,6 @@ terminal users. It calls the same Convex authentication and Ticket functions as
 the app; it does not add a chat interface, a second authorization scheme, or a
 second Ticket workflow.
 
-For a short, copy-and-paste introduction, see the
-[simple Ticket CLI manual](ticket-cli-manual.md).
-
 Start by installing dependencies and discovering the command contract:
 
 ```bash
@@ -34,18 +31,22 @@ Configure and sign in to the development deployment:
 pnpm ticket login --url https://your-development-deployment.convex.cloud
 ```
 
-The CLI asks for the existing staff password on the controlling terminal. Input
-is not echoed, there is no password flag, and the password is never placed in
-shell history. The app's existing staff login function performs the check and
-applies its existing per-client and global rate limits.
-
-The prompt restores terminal mode and releases its terminal streams when input
-finishes or is cancelled. Login prints its JSON result and exits promptly; Ctrl-C
-returns `LOGIN_CANCELLED` with exit code 4.
+Login is a named staff sign-in with Google. The CLI starts the same guarded
+Google flow as the browser, opens the provider page, and receives the result on
+a loopback listener at `http://127.0.0.1:4271/` (override with
+`TICKET_LOGIN_PORT`). The deployment must list that origin in
+`AUTH_REDIRECT_ORIGINS`. Only an active staff member (an invited, bound Google
+identity) is admitted; a pending or customer account is refused with
+`NOT_AUTHORIZED` and nothing is stored. The shared staff password no longer
+exists. Against a disposable loopback backend with local fixtures enabled,
+`TICKET_LOCAL_FIXTURE_EMAIL=owner@local.test` uses the local test provider
+instead of Google.
 
 Successful login stores:
 
-- the secret session token, expiry, and bound deployment URL in macOS Keychain;
+- the rotating Convex Auth refresh token, its expiry, and bound deployment URL in
+  macOS Keychain. Each authenticated run rotates it once and uses the resulting
+  one-minute access token; the access token is never stored;
 - only non-secret configuration—the stable machine client ID and deployment
   URLs—in `~/.config/track-ease-pos/ticket.json` (or under
   `$XDG_CONFIG_HOME`) with mode `0600`; its directory uses mode `0700`.
@@ -92,15 +93,16 @@ pnpm ticket get TKT-0007
 pnpm ticket get TKT-0007 --include-archived
 ```
 
-`list` reads active Projects and consumes bounded summary pages (up to 50 Tickets
-per server page), then fetches detail by ID to preserve its complete descriptions,
-media counts, annotation counts and existing JSON shape. `--include-archived`
-also consumes archived lifecycle pages. The printed count is the number of Tickets
-returned; concurrent writes between pages do not form a single database snapshot.
+`list` reads active Projects and consumes staff-only `tickets:pageTicketDetails`
+pages (up to 50 Tickets per server page), preserving full descriptions, media
+counts, annotation counts and the existing JSON shape without a separate detail
+query for every Ticket. `--include-archived` also consumes archived lifecycle
+pages. The printed count is the number of Tickets returned; concurrent writes
+between pages do not form a single database snapshot.
 
 Create starts in status `new` and records staff ownership plus
 `createdVia: "codex"` in the existing Ticket and audit path. Repeat `--image` to
-attach up to 10 original image files. Each source may be a local path or an HTTPS
+attach up to 10 image files. Each source may be a local path or an HTTPS
 URL:
 
 ```bash
@@ -144,15 +146,14 @@ pnpm ticket get TKT-0007
 pnpm ticket attach TKT-0007 --image ./screen.png --image https://example.com/detail.webp --expected-version 0 --request-id attach-images-0007
 ```
 
-Local files and downloaded HTTPS images are uploaded without resizing or
-re-encoding. Images must be non-empty, no larger than 8 MB each, and the Ticket
+Local files and downloaded HTTPS images are prepared before upload (up to 20 MiB and 40 megapixels per source). Still images fit inside 1920 × 1080 without upscaling. The CLI chooses a compact faithful encoding and preserves alpha. Animated GIF and WebP keep every frame and delay (larger ones become lossless animated WebP); APNG must already fit 1920 × 1080 and animated AVIF is refused (`IMAGE_ANIMATION_UNSUPPORTED`). Sharp's prebuilt binaries cannot decode HEIC/HEIF, so on macOS the CLI first converts such a photo with the system `sips` tool; elsewhere it fails with `IMAGE_FORMAT_UNSUPPORTED`. Before upload, every prepared file passes the same byte validation as the browser's provider callback (staff uploads are recorded with the staff session, not the callback). The uploaded image must be at most 8 MiB, and the Ticket
 may contain at most 10 images in total. The upload intent is bound to the durable
 actor and retry key; an interrupted retry, including after sign-in, reuses files
 already recorded by the intent instead of uploading or attaching them twice.
 Recording requires the validated staff session that acquired the intent; this
 direct provider adapter is a deliberate staff capability. Image upload requires
 `UPLOADTHING_TOKEN` in `.env.local`, `.env`, or the process environment.
-`create --dry-run` reads or downloads each image and reports its original name,
+`create --dry-run` reads or downloads each image and prints its prepared name,
 size, and type, but does not upload it or contact the deployment.
 Attachment receipts use their own operation scope and compare the target Ticket
 and ordered media keys. A replay returns the committed attachment's version and
@@ -200,11 +201,107 @@ If another actor changed the Ticket first, the mutation returns
 `VERSION_CONFLICT` with exit 5. Read the Ticket again and decide whether the new
 state should still be changed; do not blindly increment the version.
 
+## Hosted pages
+
+A Ticket can carry hosted HTML pages: one HTML file, or a folder with an HTML
+entry page and its CSS, JavaScript, images and fonts. Publishing returns one link;
+staff and the Ticket's customer see the same link on the Ticket, where they can
+open, copy or revoke it. Anyone with an active link can open the page.
+
+```bash
+pnpm ticket page publish POS-0007 ./report.html
+pnpm ticket page publish POS-0007 ./site --entry reports/index.html --request-id page-0007
+pnpm ticket page list POS-0007
+pnpm ticket page revoke POS-0007 --page <pageId>
+```
+
+```json
+{"ok":true,"deployment":"dev","ticket":"POS-0007","url":"https://<deployment>.convex.site/p/<key>/reports/index.html","pageId":"kh7…","entry":"reports/index.html","fileCount":7,"totalBytes":4521,"created":true,"requestId":"page-0007"}
+```
+
+- `--entry` is required when a folder has several HTML files and no root
+  `index.html` (`PAGE_ENTRY_REQUIRED`, exit 3). Hidden files are skipped;
+  symbolic links are refused.
+- Limits: 50 files, 10 MiB of file content, 20 published pages per Ticket.
+  Allowed types: `html htm css js mjs png jpg jpeg gif webp avif ico woff woff2 ttf otf`.
+- `--request-id` is the retry key. The same key and files return the original
+  link with `"created":false`; different files return `PAGE_REQUEST_CONFLICT`
+  (exit 5). After an interrupted run, retry with the reported key: files already
+  stored are not uploaded again and the link appears only once every file is in.
+- Publishing requires current write access to an active Ticket, checked before
+  the upload is read and again when the page is committed. Archive hides every
+  page of the Ticket; restore brings the same links back. Revocation is permanent.
+
+### HTTP API
+
+The CLI and the Ticket UI share one route on the deployment's HTTP host
+(`*.convex.site`; locally `http://127.0.0.1:<CONVEX_SITE_PORT>`):
+
+```http
+POST /v1/tickets/{ticket}/pages
+Authorization: Bearer <Convex Auth access token (JWT) of a staff or customer session>
+Idempotency-Key: <stable request id>
+Content-Type: multipart/form-data
+
+entry    = reports/index.html
+manifest = [{"part":"f0","path":"reports/index.html"},{"part":"f1","path":"assets/site.css"}]
+f0, f1   = file bytes (each field exactly once)
+```
+
+The route verifies the access token like any browser call and forwards that
+identity to every internal step, so the live session and admission are checked
+again at reserve and commit.
+
+Image policy. Without `X-Ticket-Image-Policy`, the server converts each raster
+file and each literal base64 `img src` once with Sharp (fit within 1920 × 1080,
+then the smallest of a cleaned original, WebP, JPEG for opaque images and AVIF
+that passes the pixel comparison). The browser panel sends originals this way
+whenever they fit the 10 MiB page limit. A larger selection is prepared in the
+browser first (native canvas encoders) and sent with `X-Ticket-Image-Policy: v1`;
+if the server's converted output would exceed the limit, the first attempt
+falls back the same way. The CLI prepares images with the same Sharp pipeline
+and always sends `v1`. Prepared raster bytes are validated, not re-encoded. The
+policy is part of the request identity: a retry under the same
+`Idempotency-Key` must resend the same bytes with the same policy, and the
+browser panel keeps both with the selection. Paths in the HTML stay stable; the response MIME reflects the stored encoding. Literal base64 raster `img src` values in UTF-8 HTML can also be optimized. Hosted images use a private ETag with mandatory revalidation after checking that the page is active.
+
+`201` publishes, `200` replays. Errors are `{"ok":false,"code":…}`: `401`
+session, `403 ORIGIN_NOT_ALLOWED`, `404 TICKET_UNAVAILABLE`, `400` invalid
+bundle, `409` conflict/revoked/limit, `413 PAGE_TOO_LARGE`. Unknown outcomes are
+`503 PAGE_PUBLISH_UNKNOWN` with `"retryable":true` and `Retry-After`; incomplete
+or expired uploads are `409` with `"retryable":true`. Retry those with the same key.
+
+Browser writes are accepted only from origins listed in the Convex environment
+variable `TICKET_APP_ORIGINS` (comma-separated, exact). Clients without an
+`Origin` header, such as the CLI, are unaffected. Locally, `pnpm dev` and
+`pnpm test:browser` set it on this checkout's local backend to exactly this
+checkout's Vite origins (`localhost` and `127.0.0.1` on its `VITE_PORT`); no
+manual step is needed. Shared deployments are configured separately.
+
+`GET /p/{key}/{path}` serves committed files only, rechecking publication,
+revocation and Ticket lifecycle on every request. HTML and unavailable responses carry `no-store`. Served files carry
+`nosniff`, `no-referrer`, `noindex` and a CSP sandbox (`sandbox allow-scripts`,
+opaque origin, no network access beyond inline code, `data:`/`blob:` media and
+files under the page's own `/p/{key}/` prefix). External fonts and scripts do not
+load; bundle them. `/p/{key}` redirects to the entry page.
+
+Staging and blobs: before any byte is stored, the reservation records one
+claim per file with a private random marker; the stored blob carries it in its
+storage content type (served responses always use the validated path's type).
+Recording clears the claim. If a run stops between storing and recording, a
+same-key retry, or the five-minute reconciliation sweep, scans storage by
+creation time in bounded passes within the claim's 11-minute write window and
+attributes only the blob with that exact marker, size and hash. It is adopted
+while staging, otherwise recorded as discarded. Expiry (15 minutes) only marks
+abandoned uploads; deleting page blobs is part of the gated reclaim sweep and
+runs only with `MEDIA_CLEANUP_ENABLED=true`. Unrelated storage is never deleted.
+`pnpm convex:local run local_smoke:pages '{}'` checks this on the local backend.
+
 ## Output and error contract
 
 Programmatic success is exactly one compact JSON object on stdout. Programmatic
 failure is exactly one compact JSON object on stderr with a nonzero exit code.
-The hidden password prompt is the only interactive behavior and writes directly
+The browser sign-in during `login` is the only interactive behavior and writes directly
 to the controlling terminal. The repository's pnpm workspace configuration uses
 the silent reporter so pnpm does not add lifecycle lines around those streams.
 
@@ -229,8 +326,9 @@ the original error and exit status are retained with
 
 Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 `KEYCHAIN_UNAVAILABLE`, `NOT_LOGGED_IN`, `SESSION_EXPIRED`, `SESSION_INVALID`,
-`SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`, and
-`NOT_AUTHORIZED`. Their hints use `pnpm ticket …` syntax.
+`SESSION_DEPLOYMENT_MISMATCH`, `INVALID_CREDENTIALS`, `AUTH_RATE_LIMITED`,
+`CREDENTIAL_LOCK_TIMEOUT`, `CREDENTIAL_LOCK_ERROR`, and `NOT_AUTHORIZED`. Their hints use `pnpm ticket …`
+syntax.
 
 ## Security and platform limits
 
@@ -246,6 +344,16 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
   sessions are distinguished with stable JSON codes.
 - Logout asks the app to revoke the session, then removes the local Keychain
   record. Expired server sessions are also safe to clean up this way.
+- Concurrent runs on the same macOS account take turns with the saved session.
+  Each run's read, rotation and write of the refresh token, logout, and the
+  config and Keychain steps of login hold an exclusive lock on
+  `~/.config/track-ease-pos/ticket.lock` in the OS account’s home directory,
+  shared across all `XDG_CONFIG_HOME` profiles. Browser sign-in takes place
+  outside the lock. Each Keychain subprocess inherits the lock. If the CLI
+  is killed, the kernel releases the lock after the last holder exits.
+  A run that waits more than 60 seconds fails with `CREDENTIAL_LOCK_TIMEOUT`
+  (exit 4) before touching the session. Retry the same command with the
+  same `--request-id` for writes.
 
 ## Implementation map
 
@@ -258,24 +366,28 @@ Stable authentication errors include `DEPLOYMENT_NOT_CONFIGURED`,
 | `scripts/ticket/deployment.ts` | Development/production selection, URL rules, and `pnpm ticket` hints. |
 | `scripts/ticket/config.ts` | Restrictive non-secret configuration file. |
 | `scripts/ticket/keychain.ts` | Injectable macOS Keychain credential adapter. |
-| `scripts/ticket/prompt.ts` | Controlling-terminal password input with echo disabled. |
+| `scripts/ticket/lock.ts` | Crash-safe cross-process session lock (macOS `O_EXLOCK`). |
+| `scripts/ticket/google-login.ts` | Loopback listener for the named Google sign-in. |
 | `scripts/ticket/output.ts` | Every stdout/stderr JSON shape the CLI prints. |
-| `scripts/ticket/images.ts` | Original-byte local/HTTPS image loading and UploadThing storage. |
+| `scripts/ticket/images.ts` | Local/HTTPS image loading, preparation with byte verification, HEIC conversion on macOS, and UploadThing storage. |
 | `scripts/ticket/remote.ts` | Direct `ConvexHttpClient` calls to the app's public functions. |
 | `scripts/ticket/session.ts` | Persistent staff-session lifecycle and access policy. |
 | `scripts/ticket/run.ts` | Ticket command orchestration and remote-failure classification. |
 | `convex/tickets.ts` | Canonical policy-declared Ticket handlers for the browser and CLI. |
-| `convex/ticket_state.ts` | Ticket text limits and the optimistic-version check. |
+| `shared/ticket-state.ts` | Ticket text limits and the optimistic-version check. |
 | `convex/domain/tickets.ts` | Shared Ticket planner, allocation, totals and audit writes. |
 | `convex/ticket_requests.ts` | Request-id normalization and idempotency rules. |
 | `convex/domain/requests.ts` | Immutable receipt scope, replay authorization and purge tombstones. |
+| `scripts/ticket/pages.ts` | Reads a page file or folder from disk for `page publish`. |
+| `shared/ticket-pages.ts` | Page limits, path rules, media types, form body and serving headers. |
+| `convex/page_http.ts` | Publish and serve HTTP routes. |
+| `convex/domain/pages.ts` | Page reservation, staging, commit, revoke, expiry and reclaim. |
+| `src/features/tickets/ticket-pages.tsx` | Ticket dialog panel for staff and customers. |
 
 Verify changes with:
 
 ```bash
-pnpm test
-pnpm run typecheck
-pnpm run build
+pnpm check
 ```
 
 The CLI process tests use `python3` and its standard-library `pty` module on
@@ -290,20 +402,28 @@ procedure, see [Development reset](dev-reset.md). `pnpm dev:reset` inspects the
 recorded development target by default; implementation rehearsals must explicitly
 use `--target local`. Reset execution also requires `--expect <reviewed inspect manifest>`;
 remove the target's `UPLOADTHING_TOKEN` and set cleanup to exactly `false` first,
-using the reset tool's env commands. This does not change the Ticket CLI's flags or JSON contract.
+using the reset tool's env commands. After clearing, the reset bootstraps the
+Owner again and verifies this CLI's login/whoami/list/get/logout with that fresh
+Owner session; a run that stops after clearing continues with `pnpm dev:reset resume`.
+This does not change the Ticket CLI's flags or JSON contract.
 
-The implementation target is `anonymous:anonymous-track-ease-pos`, at `http://127.0.0.1:3212`.
-The wrapper preserves `.env.local`, which still selects shared development for
-ordinary app commands. `pnpm dev` and `pnpm dev:convex` push only to the local backend. No shared deployment or provider resources are changed
-by these fixtures. Do not run bare Convex commands or edit either environment
+The implementation target is this checkout's disposable anonymous backend. Run
+`pnpm agent:setup` in a new worktree to install dependencies and initialize its
+local backend; use the URLs it prints. Ports are assigned per checkout in
+`.env.worktree`, so do not assume the main checkout's default ports or edit that
+file manually.
+The wrapper preserves `.env.local`; its saved deployment can differ from the
+local backend. `pnpm dev` sets local URLs for the web and API processes, and
+`pnpm dev:convex` pushes only to the local backend. No shared deployment or
+provider resources are changed by these fixtures. Do not run bare Convex commands or edit either environment
 file manually. The local wrapper accepts only `dev`, `run`, `env`, `import`,
 `export`, `data`, `codegen` and `--help`; no arguments defaults to a local push.
 
 ```bash
 pnpm convex:local
 pnpm convex:local env set LOCAL_FIXTURES_ENABLED true
-pnpm convex:local env set APP_PASSWORD 'LocalStaff123!'
-pnpm convex:local env set CUSTOMER_PASSWORD_PEPPER local-only-fixture-pepper
+pnpm convex:local env set IDENTITY_SENDER local
+pnpm convex:local env set IDENTITY_CODE_KEY local-only-identity-code-key-0123456789abcdef
 pnpm convex:local env set UPLOAD_CALLBACK_SECRET local-only-callback-fixture
 pnpm convex:local env remove MEDIA_CLEANUP_ENABLED
 pnpm convex:local env list
@@ -315,12 +435,19 @@ pnpm convex:local run local_smoke:media '{}'
 pnpm convex:local dev --once --typecheck disable --start 'pnpm exec tsx scripts/smoke-local.ts'
 ```
 
+The CLI smoke also publishes `tests/fixtures/ticket-page` (nested entry, CSS,
+script, images, font) and a single file, then checks replay, conflict, served
+headers, nested assets and revocation against this checkout's backend.
+
 The internal seed requires explicit fixture opt-in and a loopback deployment URL, and is repeatable. It creates Projects `POS` and `APP`,
-customers `alice@local.test` and `bob@local.test` (password `LocalCustomer123!`),
-POS memberships, explicit-role sessions and three text-only Tickets through the
-Ticket domain. Each seed run returns fresh random tokens in `sessions` (staff, Alice, Bob order)
-for tests and smoke clients; Ticket rows are reused. The staff
-password remains the configured global staff sign-in mechanism.
+the Owner `owner@local.test` and Staff `staff@local.test` (local test provider in
+place of Google), customers `alice` and `bob` (password `local customer passphrase`,
+real username and password components), POS memberships and three text-only
+Tickets through the Ticket domain. Each run mints fresh admitted Convex Auth
+sessions: `sessions` holds their session IDs and `accessTokens` their one-hour
+local access tokens (staff, Alice, Bob order) for tests and smoke clients; Ticket
+rows are reused. `pnpm agent:setup` gives the local backend inert Google
+placeholders; Google sign-in itself is never available locally.
 
 The opt-in `largeDataset` fixture adds 300 text-only Tickets across POS and APP
 in bounded batches through Ticket domain commands. It grants both fixture customers
@@ -335,9 +462,6 @@ active counts rather than assuming an empty backend.
 It also checks reference-shaped printer text and two Thai examples against the
 real tokenizer. Thai token boundaries do not always match words: `ชำระเงิน` does
 not match inside the fixture's `เมื่อกดปุ่มชำระเงิน`, while the longer phrase does.
-The CLI consumes staff-only `tickets:pageTicketDetails` pages (at most 50 Tickets
-per page), preserving full descriptions and the existing JSON shape without a
-separate detail query for every Ticket.
 The backend smoke also creates a fresh Project without customer membership for
 its access-denial check; APP membership may already exist after the large seed.
 All three smokes can be repeated in any order on the same local data.
@@ -386,9 +510,25 @@ credentials are rejected; sign in again to write the current encoded format.
 Local media cleanup scheduling now uses durable jobs: abandoned intents are
 claimed every five minutes, and Tickets archived for at least 30 days are
 claimed hourly. Purging blocks restore, retains media reservations through
-failure and removes the Ticket only after verified deletion. Audit history is
-then removed in batches of at most 100 entries per table. Shared development
-and production have not been changed.
+failure and removes the Ticket only after verified deletion. Legacy finalization
+then removes the Ticket's events, messages, routing suggestions and customer and
+staff inbox items, and strips routing request receipts in indexed batches of at
+most 100 entries per table. Account and Project inbox preferences are retained.
+The purge completes after all these batches drain. Named-pilot settings or an
+installed pilot release block legacy finalization, including queued batches.
+
+Routing requests that produced a suggestion and those that returned manual
+routing both leave permanent tombstones with the request source, caller, request
+ID, immutable input digest and `unavailable` outcome. They discard the Ticket,
+Project and suggestion references and the Ticket and policy revisions. A replay
+against the purged Ticket returns `TICKET_UNAVAILABLE`. The same caller reusing
+the routing request ID with different input on an accessible Ticket receives
+`REQUEST_ID_CONFLICT`. Ticket creation and attachment receipts keep their
+existing tombstone policy.
+
+Purges already completed before this change need separate, scoped reconciliation
+if inbox rows or routing requests remain. Recovery resumes in-progress jobs.
+
 The Convex environment flag `MEDIA_CLEANUP_ENABLED=true` gates job execution,
 recovery and new purge claims; P8 enables it last, after configuration and smoke
 checks. Cancellation, rejected callbacks and expiry always create pending jobs

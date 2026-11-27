@@ -6,8 +6,9 @@ import { createMediaJob } from "./media_jobs";
 
 type Media = Doc<"tickets">["media"][number];
 
-export function requireOwnedUploadIntent(intent: Doc<"uploadIntents"> | null, actor: Actor<Id<"customers">>, secret: string) {
-  if (!intent || intent.secret !== secret || intent.actorRole !== actor.role || intent.actorCustomerId !== actor.customerId) {
+export function requireOwnedUploadIntent(intent: Doc<"uploadIntents"> | null, actor: Actor<Id<"customers">, Id<"staff">>, secret: string) {
+  if (!intent || intent.secret !== secret || intent.actorRole !== actor.role || intent.actorCustomerId !== actor.customerId
+    || intent.actorStaffId !== actor.staffId) {
     throw new Error("UPLOAD_INTENT_NOT_FOUND");
   }
   return intent;
@@ -37,7 +38,7 @@ export async function reserveIntentAssets(ctx: MutationCtx, intent: Doc<"uploadI
 }
 
 /** Only trusted callers reach here. Indexed key reads serialize competing claims. */
-export async function recordUpload(ctx: MutationCtx, intent: Doc<"uploadIntents">, file: Media, trustedCallback = false) {
+export async function recordUpload(ctx: MutationCtx, intent: Doc<"uploadIntents">, file: Media, source: "staff" | "callback" | "history", rejectedImage = false) {
   if (!file.key.trim()) throw new Error("INVALID_MEDIA_REFERENCE");
   const existing = await ctx.db.query("mediaAssets").withIndex("by_key", q => q.eq("key", file.key)).unique();
   if (existing) {
@@ -53,11 +54,12 @@ export async function recordUpload(ctx: MutationCtx, intent: Doc<"uploadIntents"
   let valid = true;
   try { validateMediaItems([file]); }
   catch { valid = false; }
-  const accepted = valid && intent.status === "pending" && intent.expiresAt > Date.now() && recordedCount < expectedCount;
-  if (!accepted && !trustedCallback) throw new Error("UPLOAD_INTENT_INVALID");
+  if (source === "history" && (!valid || expectedCount === 0)) throw new Error("UPLOAD_VERIFICATION_FAILED");
+  const accepted = !rejectedImage && source !== "history" && valid && intent.status === "pending" && intent.expiresAt > Date.now() && recordedCount < expectedCount;
+  if (!accepted && source === "staff") throw new Error("UPLOAD_INTENT_INVALID");
   const now = Date.now();
   const id = await ctx.db.insert("mediaAssets", {
-    key: file.key, source: trustedCallback ? "callback" : "staff", intentId: intent._id, metadata: file, lifecycle: "pending", createdAt: now, updatedAt: now,
+    key: file.key, source: source === "staff" ? "staff" : "callback", intentId: intent._id, metadata: file, lifecycle: "pending", createdAt: now, updatedAt: now,
   });
   if (!accepted) {
     // Late or definitively rejected new uploads get the same guarded reservation.

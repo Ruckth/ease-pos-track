@@ -13,6 +13,15 @@ export const DEFAULT_PORTS = {
   VITE_PORT: 5173,
 };
 
+// WHATWG fetch refuses these ports ("bad port"), so Node clients such as the
+// Convex CLI can never reach a backend listening on them.
+export const FETCH_BLOCKED_PORTS = new Set([4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+
+/** True when every port of the slot is reachable through fetch. */
+export function slotUsable(slot) {
+  return Object.values(portsForSlot(slot)).every((port) => !FETCH_BLOCKED_PORTS.has(port));
+}
+
 /** Slot n >= 1 owns four consecutive ports starting at 4000 + 10n. */
 export function portsForSlot(slot) {
   const base = 4000 + slot * 10;
@@ -33,4 +42,9 @@ export function readPortsFile(dir = process.cwd()) {
 
 export function loadPorts(dir = process.cwd()) {
   return { ...DEFAULT_PORTS, ...readPortsFile(dir) };
+}
+
+/** The only browser origins allowed to publish Ticket pages to this checkout's local backend. */
+export function localAppOrigins(ports = loadPorts()) {
+  return `http://localhost:${ports.VITE_PORT},http://127.0.0.1:${ports.VITE_PORT}`;
 }

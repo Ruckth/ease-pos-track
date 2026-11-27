@@ -28,6 +28,7 @@ export function CameraCaptureDialog({ open, onOpenChange, onCapture, onUseFilePi
     if (!open) return;
 
     let cancelled = false;
+    let preview: HTMLVideoElement | null = null;
     setReady(false);
     setErrorKey(null);
 
@@ -39,15 +40,16 @@ export function CameraCaptureDialog({ open, onOpenChange, onCapture, onUseFilePi
           return;
         }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
+        preview = videoRef.current;
+        if (preview) {
+          preview.srcObject = stream;
+          await preview.play();
         }
       } catch (error) {
         if (!cancelled) {
           stopCameraStream(streamRef.current);
           streamRef.current = null;
-          if (videoRef.current) videoRef.current.srcObject = null;
+          if (preview) preview.srcObject = null;
           setErrorKey(cameraErrorKey(error));
         }
       }
@@ -59,7 +61,7 @@ export function CameraCaptureDialog({ open, onOpenChange, onCapture, onUseFilePi
       setReady(false);
       stopCameraStream(streamRef.current);
       streamRef.current = null;
-      if (videoRef.current) videoRef.current.srcObject = null;
+      if (preview) preview.srcObject = null;
     };
   }, [open]);
 

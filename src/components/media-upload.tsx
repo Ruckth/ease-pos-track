@@ -1,3 +1,4 @@
+import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
 import type { PendingMedia } from "@/lib/types";
 import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
@@ -5,12 +6,12 @@ import { Button } from "@/components/ui/button";
 import { supportsCamera } from "@/lib/camera";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { Camera, FileImage, GripVertical, ImagePlus, Info, MapPin, PlayCircle, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, FileImage, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
 const VIDEO_LIMIT = 3;
-const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
 const VIDEO_MAX_BYTES = 64 * 1024 * 1024;
 
 export function MediaUploadField({
@@ -36,6 +37,33 @@ export function MediaUploadField({
   const [cameraOpen, setCameraOpen] = useState(false);
   if (disabled && cameraOpen) setCameraOpen(false);
   const [isDragging, setDragging] = useState(false);
+  const [positioning, setPositioning] = useState<string | null>(null);
+  const orderHint = useId();
+  const positionId = useId();
+  const positionIndex = items.findIndex(item => item.id === positioning);
+  const field = useRef<HTMLDivElement>(null);
+  const returnToHandle = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (positioning !== null || returnToHandle.current === null) return;
+    field.current?.querySelector<HTMLButtonElement>(
+      `[data-order-handle="${CSS.escape(returnToHandle.current)}"]`,
+    )?.focus();
+    returnToHandle.current = null;
+  }, [positioning]);
+
+  function closePosition(id: string) {
+    returnToHandle.current = id;
+    setPositioning(null);
+  }
+
+  function placeFile(from: number, to: number) {
+    const reordered = [...items];
+    const [file] = reordered.splice(from, 1);
+    reordered.splice(to, 0, file);
+    onItemsChange(reordered);
+    closePosition(file.id);
+  }
   const [errors, setErrors] = useState<string[]>([]);
   const addFiles = useCallback(
     (list: FileList | File[]) => {
@@ -52,8 +80,8 @@ export function MediaUploadField({
           problems.push(`${file.name}: ${t("imageVideoOnly")}`);
           continue;
         }
-        if (isImage && file.size > IMAGE_MAX_BYTES) {
-          problems.push(`${file.name}: ${t("imageTooLarge")}`);
+        if (isImage && file.size > IMAGE_SOURCE_BYTES) {
+          problems.push(`${file.name}: ${t("sourceImageTooLarge")}`);
           continue;
         }
         if (isVideo && file.size > VIDEO_MAX_BYTES) {
@@ -117,7 +145,8 @@ export function MediaUploadField({
 
   return (
     <div
-      className="space-y-3"
+      className={cn("space-y-3 rounded-xl", isDragging && "ring-2 ring-primary/50")}
+      ref={field}
       onDragEnter={(event) => {
         event.preventDefault();
         if (!disabled) setDragging(true);
@@ -175,40 +204,37 @@ export function MediaUploadField({
           type="button"
           disabled={disabled}
           onClick={() => uploadInputRef.current?.click()}
-          className={cn(
-            "grid min-h-52 w-full place-items-center rounded-2xl border-2 border-dashed bg-muted/30 px-5 py-8 text-sm text-muted-foreground transition-all hover:border-primary/60 hover:bg-primary/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            isDragging && "scale-[1.01] border-primary bg-primary/5 text-primary",
-          )}
+          className="hidden min-h-16 w-full items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
         >
-          <span className="text-center">
-            <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-              <FileImage className="size-6" aria-hidden="true" />
-            </span>
-            <span className="block font-semibold text-foreground">{t("addPhotosTitle")}</span>
-            <span className="mt-1 block leading-5">{t("dropMedia")}</span>
-            <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs shadow-sm">
-              <Info className="size-3.5" aria-hidden="true" />
-              {t("uploadLimits")}
-            </span>
-          </span>
+          <FileImage className="size-5 shrink-0" aria-hidden="true" />
+          {t("dropMedia")}
         </button>
       ) : (
         <>
           <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/45 px-3 py-2.5">
             <div className="min-w-0">
               <p className="text-sm font-medium">{t("filesReady", { count: items.length })}</p>
-              <p className="text-xs leading-4 text-muted-foreground">{t("reorderHint")}</p>
+              <p id={orderHint} className="text-xs leading-4 text-muted-foreground">{t("reorderHint")}</p>
             </div>
             <Button type="button" size="sm" variant="ghost" className="shrink-0" disabled={disabled} onClick={() => uploadInputRef.current?.click()}>
               <ImagePlus /> {t("addMore")}
             </Button>
           </div>
+          {positionIndex >= 0 && <fieldset id={positionId} className="flex flex-wrap gap-1 rounded-md border border-transparent bg-muted/40 p-2"
+            onKeyDown={event => {
+              if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePosition(items[positionIndex].id); }
+            }}>
+            <legend className="px-1 text-sm">{t("filePosition", { name: items[positionIndex].file.name })}</legend>
+            {items.map((file, index) => <button type="button" key={file.id} autoFocus={index === positionIndex}
+              aria-pressed={index === positionIndex} className="min-h-11 min-w-11 rounded-md border border-transparent bg-muted/40 px-2 aria-pressed:bg-muted focus-visible:ring-2"
+              onClick={() => placeFile(positionIndex, index)}>{index + 1}</button>)}
+          </fieldset>}
           <Sortable
             value={items}
             onValueChange={onItemsChange}
             getItemValue={(item) => item.id}
             strategy="grid"
-            className={cn("grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4", isDragging && "rounded-xl ring-2 ring-primary/50")}
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4"
           >
             {items.map((item, index) => (
               <SortableItem key={item.id} value={item.id} disabled={disabled}>
@@ -240,17 +266,24 @@ export function MediaUploadField({
                       {annotationCounts[item.id]}
                     </span>
                   ) : null}
-                  <SortableItemHandle className="absolute left-1 top-1 z-10">
-                    <span className="flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm">
+                  {items.length > 1 && <SortableItemHandle render={<button type="button" disabled={disabled} />}
+                    data-order-handle={item.id} aria-label={t("reorderFile", { name: item.file.name })} aria-describedby={orderHint}
+                    aria-expanded={positioning === item.id} aria-controls={positionId}
+                    onClick={() => setPositioning(current => current === item.id ? null : item.id)}
+                    onKeyDownCapture={event => {
+                      // Enter and Space activate the position chooser; pointer dragging uses the same handle.
+                      if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+                    }} className="absolute left-1 top-1 z-10">
+                    <span className="flex size-11 items-center justify-center rounded-full border bg-background/90 shadow-sm">
                       <GripVertical className="size-4" />
                     </span>
-                  </SortableItemHandle>
+                  </SortableItemHandle>}
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={() => removeItem(item.id)}
                     aria-label={t("removeFile", { name: item.file.name })}
-                    className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="size-4" />
                   </button>
@@ -270,10 +303,10 @@ export function MediaUploadField({
               </span>
             </button>
           </Sortable>
-          <p className="text-xs leading-5 text-muted-foreground">{t("uploadLimits")}</p>
         </>
       )}
 
+      <p className="text-xs leading-5 text-muted-foreground">{t("uploadLimits")}</p>
       {errors.length > 0 ? (
         <div role="alert" className="space-y-1 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           {errors.map((message) => (

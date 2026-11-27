@@ -79,14 +79,16 @@ test("upload middleware verifies the server callback credential before accepting
   const input = { intentId: "intent", secret: "s".repeat(48) };
   const req = new Request("https://fixture.invalid", { headers: { authorization: "Bearer customer" } });
   const files = [{ name: "fixture.png", size: 1, type: "image/png", lastModified: 1 }];
+  // The browser's access token selects a per-request client; it is never an argument.
+  const forUser = (accessToken: string) => { assert.equal(accessToken, "customer"); return client; };
   try {
     for (const code of ["UPLOAD_CALLBACK_NOT_CONFIGURED", "TRUSTED_CALLBACK_REQUIRED"]) {
       client.query = async (_reference, ...args) => {
         checks++;
-        assert.deepEqual(args[0], { token: "customer", callbackToken: "server-secret", ...input, files: [{ name: "fixture.png", size: 1, type: "image/png" }] });
+        assert.deepEqual(args[0], { callbackToken: "server-secret", ...input, files: [{ name: "fixture.png", size: 1, type: "image/png" }] });
         throw new ConvexError({ code, private: "private-content" });
       };
-      const route = createUploadRouter(client, "server-secret").ticketMedia;
+      const route = createUploadRouter(client, "server-secret", forUser).ticketMedia;
       await assert.rejects(async () => route.middleware({ req, input, files }), new RegExp(code));
       assert.deepEqual(logs.pop(), [code]);
     }
@@ -95,10 +97,38 @@ test("upload middleware verifies the server callback credential before accepting
     assert.deepEqual(logs.pop(), ["UPLOAD_CALLBACK_NOT_CONFIGURED"]);
     assert.equal(checks, 2);
     client.query = async () => true as never;
-    assert.deepEqual(await createUploadRouter(client, "server-secret").ticketMedia.middleware({ req, input, files }), input);
+    assert.deepEqual(await createUploadRouter(client, "server-secret", forUser).ticketMedia.middleware({ req, input, files }), input);
     client.query = async () => false as never;
-    await assert.rejects(async () => createUploadRouter(client, "server-secret").ticketMedia.middleware({ req, input, files }),
+    await assert.rejects(async () => createUploadRouter(client, "server-secret", forUser).ticketMedia.middleware({ req, input, files }),
       (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "FORBIDDEN");
     assert.equal(logs.length, 0);
   } finally { console.error = original; }
+});
+
+test("the upload callback records rejected image bytes as rejected and retries only provider read failures", async () => {
+  const { storedImageAccepted } = await import("../server/uploadthing");
+  const client = new ConvexHttpClient("https://fixture.convex.cloud");
+  const receipts: Array<Record<string, unknown>> = [];
+  client.mutation = async (_reference, ...args) => { receipts.push(args[0] as Record<string, unknown>); return { state: "recorded" } as never; };
+  const metadata = { intentId: "intent", secret: "s".repeat(48) };
+  const uploaded = (type: string) => ({ key: "file-key", name: "shot.webp", size: 9, type, ufsUrl: "https://demo.ufs.sh/f/file-key" });
+  const complete = (accept: (file: { type: string }) => Promise<boolean>, type = "image/webp") =>
+    createUploadRouter(client, "server-secret", undefined, accept).ticketMedia.onUploadComplete({ metadata, file: uploaded(type) } as never);
+
+  await complete(async () => true);
+  await complete(async () => false);
+  let checked = false;
+  await complete(async () => { checked = true; return false; }, "video/mp4");
+  assert.equal(checked, false, "videos are not image-validated");
+  assert.deepEqual(receipts.map(receipt => receipt.rejectedImage ?? null), [null, true, null]);
+  assert.ok(receipts.every(receipt => receipt.callbackToken === "server-secret" && receipt.intentId === "intent"));
+
+  // A provider read that fails twice then succeeds is accepted; one that keeps failing is rejected.
+  let reads = 0;
+  const flaky = async () => { if (++reads < 3) throw new Error("UPLOAD_VERIFICATION_FAILED"); return true; };
+  assert.equal(await storedImageAccepted(uploaded("image/webp"), flaky, 0), true);
+  assert.equal(reads, 3);
+  reads = 0;
+  assert.equal(await storedImageAccepted(uploaded("image/webp"), async () => { reads++; throw new Error("offline"); }, 0), false);
+  assert.equal(reads, 3);
 });

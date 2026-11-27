@@ -35,19 +35,24 @@ import {
   listOutput,
   loginOutput,
   logoutOutput,
+  pageListOutput,
+  pagePublishOutput,
+  pageRevokeOutput,
   ticketOutput,
   whoamiOutput,
 } from "./output";
 import { commandDiscoveryOutput, humanHelp } from "./registry";
-import type { TicketRemote } from "./remote";
+import type { SessionTokens, TicketRemote } from "./remote";
 import type { TicketImages } from "./images";
 import { TicketSessions, credentialError, type StaffAccess } from "./session";
+import { readPageBundle } from "./pages";
 
 export type TicketCliDeps = {
   remote: TicketRemote;
   config: ConfigStore;
   credentials: CredentialStore;
-  readPassword: () => Promise<string>;
+  /** Named interactive sign-in; returns the new session tokens or null. */
+  signIn: (url: string) => Promise<SessionTokens | null>;
   newRequestId: () => string;
   now: () => number;
   env: NodeJS.ProcessEnv;
@@ -63,7 +68,7 @@ type SessionCommand = Extract<TicketCommand, { kind: "login" | "logout" }>;
  * separately because its idempotency key must exist before authentication, so a
  * failed run can still report which key was in play.
  */
-type StaffCommand = Exclude<TicketCommand, { kind: "help" | "commands" | "login" | "logout" | "create" | "attach" }>;
+type StaffCommand = Exclude<TicketCommand, { kind: "help" | "commands" | "login" | "logout" | "create" | "attach" | "pagePublish" }>;
 
 function uploadRequestId(requestId: string) {
   return createHash("sha256").update(`ticket-images\0${requestId}`).digest("hex");
@@ -126,6 +131,12 @@ async function attachTicketImages(
   return attached;
 }
 
+async function requireTicket(remote: TicketRemote, access: StaffAccess, ref: TicketRef) {
+  const ticket = await remote.get(access.url, access.token, ref, false);
+  if (!ticket) throw inputError("TICKET_NOT_FOUND", `Ticket ${formatTicketNumber(ref.ticketNumber, ref.projectKey)} was not found.`);
+  return ticket;
+}
+
 function unreachable(command: never): never {
   const { kind } = command as { kind: string };
   throw internalError(`Unsupported Ticket command "${kind}".`);
@@ -150,12 +161,28 @@ const REMOTE_ERROR_RULES: ReadonlyArray<{ codes: string[]; toError: (target: Dep
     toError: () => conflictError("UPLOAD_REQUEST_CONFLICT", "This request id was already used with different images.", "Use the same --request-id only when retrying the same images."),
   },
   {
-    codes: ["INCORRECT_PASSWORD"],
-    toError: (target) => credentialError("INVALID_CREDENTIALS", "The staff password is incorrect.", target),
+    codes: ["PAGE_REQUEST_CONFLICT"],
+    toError: () => conflictError("PAGE_REQUEST_CONFLICT", "This request id was already used for a different page.", "Use the same --request-id only when retrying the same files."),
   },
   {
-    codes: ["AUTH_RATE_LIMITED"],
-    toError: () => authError("AUTH_RATE_LIMITED", "Too many sign-in attempts. Try again after the lockout window."),
+    codes: ["PAGE_REVOKED"],
+    toError: () => conflictError("PAGE_REVOKED", "The page for this request id was revoked.", "Publish again with a new --request-id."),
+  },
+  {
+    codes: ["PAGE_UNAVAILABLE"],
+    toError: () => inputError("PAGE_NOT_FOUND", "The page does not exist on this Ticket or is no longer published."),
+  },
+  {
+    codes: ["PAGE_UPLOAD_EXPIRED", "PAGE_UPLOAD_INCOMPLETE", "PAGE_UPLOAD_BUSY", "PAGE_PUBLISH_UNKNOWN"],
+    toError: () => remoteError("The page upload did not finish. Retry with the same --request-id."),
+  },
+  {
+    codes: ["AUTH_REQUIRED"],
+    toError: (target) => credentialError("SESSION_INVALID", "The saved Ticket session is no longer valid.", target),
+  },
+  {
+    codes: ["ACCESS_UNAVAILABLE", "SIGN_IN_RESTART_REQUIRED", "IDENTITY_PENDING"],
+    toError: (target) => credentialError("NOT_AUTHORIZED", "This account is not an active staff member. Sign in again with the invited Clerk account.", target),
   },
   {
     codes: ["SESSION_EXPIRED"],
@@ -187,10 +214,8 @@ async function runSessionCommand(command: SessionCommand, sessions: TicketSessio
   switch (command.kind) {
     case "logout":
       return logoutOutput(target, await sessions.logout(target));
-    case "login": {
-      const password = await deps.readPassword();
-      return loginOutput(target, await sessions.login(target, command.url, password));
-    }
+    case "login":
+      return loginOutput(target, await sessions.login(target, command.url));
     default:
       return unreachable(command);
   }
@@ -220,6 +245,16 @@ async function runStaffCommand(command: StaffCommand, access: StaffAccess, deps:
       return ticketOutput(target, await remote.archive(url, token, command.ref, command.expectedVersion));
     case "restore":
       return ticketOutput(target, await remote.restore(url, token, command.ref, command.expectedVersion));
+    case "pageList": {
+      const ticket = await requireTicket(remote, access, command.ref);
+      return pageListOutput(target, formatTicketNumber(ticket.ticketNumber, ticket.projectKey), await remote.listPages(url, token, ticket._id));
+    }
+    case "pageRevoke": {
+      const ticket = await requireTicket(remote, access, command.ref);
+      const pages = await remote.listPages(url, token, ticket._id);
+      if (!pages.some(page => page.pageId === command.pageId)) throw inputError("PAGE_NOT_FOUND", "The page does not exist on this Ticket or is no longer published.");
+      return pageRevokeOutput(target, formatTicketNumber(ticket.ticketNumber, ticket.projectKey), command.pageId, await remote.revokePage(url, token, command.pageId));
+    }
     default:
       return unreachable(command);
   }
@@ -271,6 +306,15 @@ export async function runTicketCli(argv: string[], deps: TicketCliDeps): Promise
       const access = await sessions.requireStaff(target);
       const attached = await attachTicketImages({ ...command, requestId }, access, deps, onCleanupUnknown);
       return succeed(jsonLine(attachmentOutput(target, attached, requestId)));
+    }
+    if (command.kind === "pagePublish") {
+      requestId = command.requestId ?? deps.newRequestId();
+      // Read and validate locally before authenticating, so file errors need no session.
+      const bundle = await readPageBundle(command.source, command.entry);
+      const access = await sessions.requireStaff(target);
+      const ticket = formatTicketNumber(command.ref.ticketNumber, command.ref.projectKey);
+      const page = await deps.remote.publishPage(access.url, access.token, { ticket, requestId, bundle });
+      return succeed(jsonLine(pagePublishOutput(target, ticket, page)));
     }
     return succeed(jsonLine(await runStaffCommand(command, await sessions.requireStaff(target), deps)));
   } catch (error) {

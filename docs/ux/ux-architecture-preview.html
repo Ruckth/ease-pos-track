@@ -1,0 +1,1083 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tackle Issue · Ticket workspace preview</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --ink: var(--foreground, light-dark(#172d28, #edf6f0));
+  --quiet: var(--muted-foreground, light-dark(#4d6259, #b6cabe));
+  --surface: var(--card, light-dark(#fff, #16241e));
+  --wash: light-dark(#f4f7f3, #1b2b24);
+  --line: var(--border, light-dark(#c9d5cd, #4c6054));
+  --strong: light-dark(#145946, #a8ddbf);
+  --on-strong: light-dark(#fff, #123624);
+  --tint: light-dark(#e5f2e8, #263d30);
+  --attention: light-dark(#925114, #f7ca89);
+  --danger: light-dark(#9c3030, #ffb4ae);
+  --focus: var(--ring, light-dark(#145caa, #94c6ff));
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  font: 15px/1.5 var(--sans);
+  color: var(--ink);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+body, button, input, select, textarea, dialog { color: var(--ink); }
+main { max-width: 1240px; margin-inline: auto; }
+button, input, select, textarea, summary { font: inherit; }
+button, select, input, textarea, summary { min-height: 44px; }
+button, select, summary { min-inline-size: 44px; cursor: pointer; }
+button, select, input, textarea {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  font-size: .91rem; padding: 8px 12px;
+}
+button { font-weight: 600; }
+button:hover:enabled, summary:hover { background: var(--wash); }
+button:disabled { opacity: .55; cursor: default; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+button.primary { background: var(--strong); color: var(--on-strong); border-color: var(--strong); }
+button.primary:hover { filter: brightness(1.12); }
+.link { background: transparent; color: var(--strong); border-color: transparent; }
+.negative { color: var(--danger); }
+input, select, textarea { max-width: 100%; min-width: 0; }
+input, textarea { width: 100%; }
+input::placeholder, textarea::placeholder { color: var(--quiet); opacity: .9; }
+textarea { resize: vertical; min-height: 96px; }
+h1,h2,h3,p,ul,ol { margin: 0; }
+h1,h2,h3 { line-height: 1.24; text-wrap: pretty; }
+h1 { font-size: clamp(1.55rem, 3.5vw, 2.25rem); letter-spacing: -.045em; }
+h2 { font-size: 1.2rem; letter-spacing: -.025em; }
+h3 { font-size: 1rem; }
+p, button, h1, h2, h3, label, li, dd, dt { overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+.muted, small { color: var(--quiet); }
+small { font-size: .81rem; }
+.mono { font: .8rem/1.5 var(--mono); letter-spacing: .025em; }
+.wrap, .actions, .ticket-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip { position: absolute; top: 2px; left: 2px; z-index: 9; transform: translateY(-140%); background: var(--surface); color: var(--ink); padding: 12px; }
+.skip:focus { transform: none; }
+.topline { border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.wordmark { display: flex; align-items: center; gap: 8px; font-size: 1.05rem; letter-spacing: -.04em; font-weight: 720; white-space: nowrap; }
+.logo { display: grid; place-items: center; background: var(--strong); color: var(--on-strong); border-radius: 8px; width: 30px; height: 30px; font: 700 1.08rem var(--mono); }
+nav { display: flex; gap: 2px; }
+nav button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; font-size: .86rem; }
+nav button[aria-pressed="true"] { border-bottom-color: var(--strong); color: var(--strong); }
+.workspace { padding-block: 18px; }
+.heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+.context { display: flex; gap: 8px; align-items: center; color: var(--quiet); font-size: .84rem; margin-bottom: 3px; }
+.context .mark { color: var(--strong); font-weight: 700; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
+.toolbar label { flex: 0 1 auto; min-width: 0; }
+.toolbar .search { flex: 1 1 180px; }
+.toolbar label span { display: block; color: var(--quiet); font-size: .76rem; margin-bottom: 3px; }
+.toolbar input, .toolbar select { width: 100%; }
+#filter { max-width: 200px; }
+#view { max-width: 120px; }
+.menu { position: relative; }
+.menu summary { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; font-size: .85rem; font-weight: 600; list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu-panel { position: absolute; z-index: 4; inset-inline-end: 0; top: calc(100% + 4px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; width: max-content; max-width: min(260px, 90vw); padding: 4px; box-shadow: 0 4px 16px #1020191a; }
+.menu-panel button { display: block; width: 100%; text-align: start; border: 0; }
+.work-area, .work-area > * { min-width: 0; }
+.list, .detail, .form, .plan-panel { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.list-head, .detail-nav { min-height: 44px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.list-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--quiet); font-size: .78rem; }
+.list-head p { font-weight: 650; }
+.ticket { display: grid; align-items: center; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.ticket:last-child { border-bottom: 0; }
+.ticket.selected { background: var(--tint); box-shadow: inset 3px 0 var(--strong); }
+.ticket-open { display: grid; gap: 3px; padding: 4px 0; width: 100%; text-align: start; background: transparent; border: 0; font-weight: 500; }
+.ticket-open:hover:enabled { background: transparent; }
+.ticket-open:hover .ticket-title { text-decoration: underline; text-underline-offset: 3px; }
+.ticket-title { font-size: 1rem; line-height: 1.35; font-weight: 650; }
+.ticket-meta { gap: 5px 10px; color: var(--quiet); font-size: .79rem; }
+.urgency { color: var(--attention); }
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: .82rem; }
+.status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--strong); }
+.status.waiting::before { background: var(--attention); }
+.status.done::before { background: var(--quiet); }
+.ticket .quick, .detail-nav button { font-size: .83rem; }
+.empty { padding: 24px 16px; display: grid; gap: 10px; justify-items: start; }
+.empty p { color: var(--quiet); }
+.detail-nav { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; padding-block: 4px; }
+.detail-nav .actions { gap: 2px; }
+.detail-body, .form, .plan-panel { padding: clamp(14px, 3vw, 22px); }
+.detail-body > h1 { margin-block: 6px 12px; font-size: clamp(1.4rem, 3.1vw, 1.85rem); }
+.description { white-space: pre-wrap; line-height: 1.65; }
+.detail-actions { margin-block: 16px; }
+.disclosure { border-top: 1px solid var(--line); }
+.disclosure > summary { padding: 11px 0; font-size: .92rem; font-weight: 620; }
+.inside { padding-bottom: 16px; }
+.inside > * + *, .form > * + *, .plan-panel > * + * { margin-block-start: 12px; }
+.board { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit,minmax(min(100%,260px),1fr)); align-items: start; }
+.lane { background: var(--wash); border: 1px solid var(--line); padding: 10px; border-radius: 10px; }
+.lane h2 { font-size: .95rem; padding: 4px 4px 10px; }
+.lane .ticket { background: var(--surface); border-radius: 6px; padding: 9px; grid-template-columns: 1fr; }
+.lane .quick { justify-self: start; }
+.lane .ticket + .ticket { margin-top: 6px; }
+.form-page { max-width: 660px; margin: 18px auto; }
+.field { display: grid; gap: 5px; }
+.field > label, .field > span { font-weight: 600; font-size: .9rem; }
+.field small { font-weight: 400; }
+.form-actions { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line); }
+.history, .messages { list-style: none; padding: 0; }
+.history li, .messages li { padding: 6px 0; }
+.sample { position: relative; width: 100%; min-height: 138px; border-radius: 8px; border: 1px solid var(--line); background: var(--wash); display: grid; place-items: center; padding: 20px; }
+.paper { background: var(--surface); border: 1px solid var(--line); padding: 12px 16px; width: min(210px, 100%); font: .8rem/1.55 var(--mono); }
+.point { position: absolute; transform: translate(-50%,-50%); border-radius: 50%; display: grid; place-items: center; background: var(--strong); color: var(--on-strong); width: 26px; height: 26px; font-size: .75rem; }
+.pin-editor { padding: 12px; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; }
+.pin-editor input[type="range"] { width: 100%; }
+.notice { position: sticky; bottom: 8px; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; background: var(--ink); color: var(--surface); border-radius: 9px; padding: 6px 12px; font-size: .87rem; }
+.notice span { flex: 1 1 130px; }
+.notice button { background: transparent; color: inherit; border-color: currentColor; }
+.notice button:hover:enabled { background: transparent; text-decoration: underline; }
+dialog { max-width: min(430px,calc(100% - 30px)); padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+dialog::backdrop { background: #15281f80; }
+dialog p { margin-block: 10px 16px; }
+.plan-panel + .plan-panel { margin-top: 12px; }
+.plan-panel dt { font-weight: 650; }
+.plan-panel dd { margin: 0 0 12px; color: var(--quiet); }
+.foot { color: var(--quiet); font-size: .78rem; padding: 10px 0; }
+@media(min-width:850px) {
+  .work-area.queue.split { display: grid; grid-template-columns: minmax(300px,.85fr) minmax(360px,1.15fr); gap: 14px; align-items: start; }
+  .split .ticket { grid-template-columns: minmax(0,1fr); }
+  .split .quick { justify-self: start; }
+}
+@media(max-width:849px) {
+  .work-area.split .list, .workspace:has(.work-area.split) > .heading, .workspace:has(.work-area.split) > .toolbar { display: none; }
+}
+@media(max-width:500px) {
+  .wordmark { font-size: .9rem; gap: 5px; }
+  .logo { display: none; }
+  nav { gap: 0; }
+  nav button { padding-inline: 8px; }
+  .workspace { padding-top: 12px; }
+  .toolbar .search { flex-basis: 100%; }
+  .toolbar label:has(#filter) { flex: 1; }
+  .toolbar #filter { max-width: none; }
+  .ticket { padding: 9px 10px; gap: 5px 7px; }
+  .quick { padding-inline: 8px; }
+  .ticket:has([data-media]) { grid-template-columns: 1fr; }
+  .detail-nav { padding-inline: 6px; }
+  input, textarea, select { font-size: 16px; }
+}
+@media(max-width:350px) {
+  .wordmark { font-size: .86rem; }
+  nav button { font-size: .8rem; padding-inline: 6px; }
+  .ticket { grid-template-columns: 1fr; }
+  .ticket .quick { justify-self: start; }
+  .toolbar { gap: 4px; }
+  .toolbar select, .menu summary { padding-inline: 6px; }
+}
+@media(forced-colors:active) { :focus-visible { outline: 3px solid Highlight; } }
+.point.selected-point { outline: 4px double var(--focus); outline-offset: 3px; }
+.pin-list { list-style: none; padding-inline-start: 0; }
+.pin-list button { text-align: start; margin-block: 2px; }
+.pin-list button[aria-pressed="true"] { border-color: var(--strong); background: var(--tint); }
+.journey-compare { margin: 0; }
+.journey-compare figcaption { color: var(--quiet); font-size: .85rem; }
+.journey { margin-block: 16px; }
+.journey > strong { display: block; margin-bottom: 3px; }
+.click-count { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) 1.4rem; gap: 6px; align-items: center; font-size: .84rem; }
+.click-track { display: block; overflow: hidden; height: 8px; background: var(--wash); border-radius: 4px; }
+.click-track i { display: block; height: 100%; background: var(--quiet); }
+.click-count.proposed i { background: var(--strong); }
+</style>
+</head>
+<body>
+<main>
+  <a class="skip" href="#content">Skip to workspace</a>
+  <header class="topline">
+    <span class="wordmark"><span class="logo" aria-hidden="true">t</span>Tackle Issue</span>
+    <nav aria-label="Preview workspaces">
+      <button data-page="staff">Staff</button>
+      <button data-page="customer">Customer</button>
+      <button data-page="plan">UX plan</button>
+    </nav>
+  </header>
+  <div id="content" tabindex="-1"></div>
+  <div id="result-announcement" class="sr" role="status" aria-live="polite"></div>
+  <div id="notice" class="notice" hidden>
+    <span id="notice-text" role="status" aria-live="polite"></span>
+    <button id="undo" hidden>Undo</button>
+    <button id="dismiss" aria-label="Dismiss notification">Dismiss</button>
+  </div>
+  <p class="foot">Interactive preview · Fictional data resets on reload.</p>
+</main>
+<template id="audit-evidence">
+  <section class="plan-panel">
+    <h2>Task checks</h2>
+    <p>The independent reviewer scored all eight prototype categories 9/10. Thirteen browser scenarios cover navigation, clicks, layout, roles and recovery. Usability testing with staff and customers is the next validation step.</p>
+    <figure class="journey-compare">
+      <figcaption>App paths from source inspection. Preview activations counted in Chromium. Typing and field focus are excluded.</figcaption>
+      <div class="journey"><strong>Send a customer Ticket</strong>
+        <div class="click-count"><span>Guided</span><span class="click-track" aria-hidden="true"><i style="width:80%"></i></span><b>4</b></div>
+        <div class="click-count proposed"><span>Preview</span><span class="click-track" aria-hidden="true"><i style="width:40%"></i></span><b>2</b></div>
+        <small>The current Review shortcut takes three activations.</small>
+      </div>
+      <div class="journey"><strong>Read three Tickets in sequence</strong>
+        <div class="click-count"><span>App</span><span class="click-track" aria-hidden="true"><i style="width:100%"></i></span><b>5</b></div>
+        <div class="click-count proposed"><span>Preview</span><span class="click-track" aria-hidden="true"><i style="width:60%"></i></span><b>3</b></div>
+      </div>
+      <div class="journey"><strong>Acknowledge a new Ticket</strong>
+        <div class="click-count"><span>App</span><span class="click-track" aria-hidden="true"><i style="width:20%"></i></span><b>1</b></div>
+        <div class="click-count proposed"><span>Preview</span><span class="click-track" aria-hidden="true"><i style="width:20%"></i></span><b>1</b></div>
+      </div>
+    </figure>
+  </section>
+</template>
+<dialog id="confirmation" aria-labelledby="confirm-title">
+  <h2 id="confirm-title"></h2>
+  <p id="confirm-description"></p>
+  <div class="actions">
+    <button id="keep" autofocus>Cancel</button>
+    <button id="confirm" class="negative">Confirm</button>
+  </div>
+</dialog>
+<script>
+"use strict";
+
+const project = "POS";
+const statuses = {
+  new: "New", acknowledged: "Acknowledged", in_progress: "In progress",
+  waiting: "Waiting for information", done: "Resolved"
+};
+const nextActions = {
+  new: ["Acknowledge", "acknowledged"], acknowledged: ["Start work", "in_progress"],
+  in_progress: ["Resolve", "done"], waiting: ["Resume work", "in_progress"], done: ["Reopen", "in_progress"]
+};
+const sampleTickets = [
+  ["POS-0042", "Receipt total differs from the checkout total", "The checkout screen shows ฿1,250 after the discount. The printed receipt shows ฿1,150.", "new", 82, true],
+  ["POS-0041", "Scanner stops after the first item", "The first barcode scans. The scanner must be reconnected before it reads the next item.", "in_progress", 65, false],
+  ["POS-0039", "Printer disconnects during checkout", "The receipt printer disconnects twice a day. Restarting the app reconnects it.", "waiting", 44, true],
+  ["POS-0038", "Add the branch name to receipts", "Please show the branch under the shop name on printed receipts.", "acknowledged", null, false],
+  ["POS-0036", "Thai product names missing from search results", "The search now finds products by their Thai names.", "done", 30, true],
+  ["POS-0030", "Update the printed shop address", "The new address appears on receipts.", "done", null, true]
+];
+const samplePin = { x: 72, y: 65, text: "Printed total differs here." };
+const $ = selector => document.querySelector(selector);
+const escapeText = value => String(value ?? "").replace(/[&<>"']/g, char =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+function seedTickets() {
+  return sampleTickets.map(([id, title, description, status, urgency, customer]) => ({
+    id, title, description, status, urgency, customer, project, version: 0,
+    archived: id === "POS-0030", attachment: id === "POS-0042", pins: id === "POS-0042" ? [{ ...samplePin }] : [],
+    events: [{ text: "Ticket created", staffOnly: false }],
+    messages: id === "POS-0039" ? [{ author: "Staff", text: "Which printer model and connection are you using?" }] : []
+  }));
+}
+let tickets = seedTickets();
+let nextNumber = 43;
+let role = "staff";
+let page = "workspace";
+let pendingUndo = null;
+let confirming = null;
+let members = ["customer@example.com"];
+const projectRoles = new Map();
+function freshSession() {
+  return {
+    selected: null, view: "queue", filter: "active", query: "", sequence: [], returnTo: null,
+    order: [], draft: null, edits: new Map(), urgency: new Map(), messages: new Map(),
+    sections: new Map(), pinDrafts: new Map(), activePins: new Map(), editing: null
+  };
+}
+function session() {
+  const key = role + "/" + project;
+  if (!projectRoles.has(key)) projectRoles.set(key, freshSession());
+  return projectRoles.get(key);
+}
+function draft() {
+  return session().draft ??= { title: "", description: "", attachment: false, pins: [], preview: false };
+}
+function allowed(ticket) {
+  return ticket?.project === project && (role === "staff" || ticket.customer && !ticket.archived);
+}
+function findTicket(id) {
+  return tickets.find(ticket => ticket.id === id && allowed(ticket));
+}
+function matching(ticket) {
+  const { filter, query } = session();
+  if (!allowed(ticket) || ticket.archived !== (filter === "archive")) return false;
+  if (filter === "active" && ticket.status === "done") return false;
+  if (Object.hasOwn(statuses, filter) && filter !== ticket.status) return false;
+  return [ticket.id, ticket.title, ticket.description].join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+}
+function suggestedOrder() {
+  const all = tickets.filter(allowed);
+  return all.sort((a, b) => {
+    if (role === "customer") return Number(b.status === "waiting") - Number(a.status === "waiting") || b.id.localeCompare(a.id);
+    return (b.urgency ?? -1) - (a.urgency ?? -1) || b.id.localeCompare(a.id);
+  }).map(ticket => ticket.id);
+}
+function visibleTickets() {
+  const context = session();
+  if (!context.order.length) context.order = suggestedOrder();
+  const known = new Set(context.order);
+  context.order.push(...suggestedOrder().filter(id => !known.has(id)));
+  const visible = context.order.map(findTicket).filter(ticket => ticket && matching(ticket));
+  return role === "customer" ? visible.sort((a, b) => Number(b.status === "waiting") - Number(a.status === "waiting")) : visible;
+}
+function button(attrs, text, style = "") {
+  return '<button type="button" class="' + style + '" ' + attrs + '>' + text + '</button>';
+}
+function section(key, title, body, ticketId) {
+  const open = session().sections.get(ticketId)?.has(key) ? " open" : "";
+  return '<details class="disclosure" data-section="' + key + '" data-owner="' + ticketId + '"' + open + '><summary>' +
+    title + '</summary><div class="inside">' + body + '</div></details>';
+}
+function rememberSection(id, key, open) {
+  const sections = session().sections;
+  if (!sections.has(id)) sections.set(id, new Set());
+  if (open) sections.get(id).add(key);
+  else sections.get(id).delete(key);
+}
+function focusTarget(selector) {
+  const target = [...document.querySelectorAll(selector || "#heading")].find(el => el.getClientRects().length && !el.disabled);
+  (target || $("#heading") || $("#content")).focus();
+}
+function selectTicket(ticket, origin) {
+  if (!allowed(ticket)) return;
+  const context = session();
+  context.returnTo = origin || '[data-open="' + ticket.id + '"]';
+  context.selected = ticket.id;
+  context.sequence = visibleTickets().map(item => item.id);
+  context.editing = null;
+  render("#detail-heading");
+}
+function leaveDetail() {
+  const context = session();
+  context.selected = null;
+  context.editing = null;
+  if (context.view === "focus") context.view = "queue";
+  render(context.returnTo || "#search");
+}
+function hideNotice() {
+  pendingUndo = null;
+  $("#notice").hidden = true;
+  $("#notice-text").textContent = "";
+}
+function notice(message, undo = null) {
+  pendingUndo = undo;
+  $("#notice").hidden = false;
+  $("#undo").hidden = !undo;
+  $("#notice-text").textContent = message;
+}
+function mutate(ticket, change, eventText, options = {}) {
+  if (!allowed(ticket) || ticket.archived && !options.restore) return;
+  const before = structuredClone(ticket);
+  change(ticket);
+  ticket.version++;
+  ticket.events.unshift({ text: eventText, staffOnly: Boolean(options.staffOnly) });
+  const revision = ticket.version;
+  const actor = role;
+  const undo = () => {
+    const current = findTicket(ticket.id);
+    if (actor !== role || !current || current.version !== revision) return;
+    Object.assign(current, before, { version: revision + 1 });
+    notice("Change undone.");
+    render(options.focus || "#detail-heading");
+  };
+  notice(ticket.id + " · " + eventText, undo);
+  render(options.focus || "#detail-heading");
+}
+function setStatus(ticket, status, focus) {
+  if (role !== "staff" || !Object.hasOwn(statuses, status) || !ticket || status === ticket.status) return;
+  mutate(ticket, item => { item.status = status; }, "Status changed to " + statuses[status], { focus });
+}
+function closeMenu() {
+  const menu = $("#workspace-menu");
+  if (menu?.open) menu.open = false;
+}
+function switchPage(nextPage) {
+  hideNotice();
+  closeMenu();
+  page = nextPage;
+  render(page === "create" ? "#new-title" : "#heading");
+}
+function switchRole(nextRole) {
+  hideNotice();
+  role = nextRole;
+  page = "workspace";
+  render(session().selected ? "#detail-heading" : "#heading");
+}
+function statusText(ticket) {
+  return '<span class="status ' + ticket.status + '">' + statuses[ticket.status] + '</span>';
+}
+function plural(count, label) { return count + " " + label + (count === 1 ? "" : "s"); }
+function row(ticket, lane = false) {
+  const selected = session().selected === ticket.id;
+  const priority = role === "staff" && ticket.urgency >= 76 ? '<span class="urgency">Urgency ' + ticket.urgency + '</span>' : "";
+  const meta = [!lane && statusText(ticket), priority].filter(Boolean).join("");
+  const action = nextActions[ticket.status];
+  const quick = ticket.archived ? button('data-restore="' + ticket.id + '"', "Restore", "quick") :
+    role === "staff" ? button('data-move="' + ticket.id + '" aria-label="' + action[0] + " " + ticket.id + '"', action[0], "quick") : "";
+  const attachment = ticket.attachment ? button('data-media="' + ticket.id + '" aria-label="Open attachment for ' + ticket.id + '"', "Attachment", "quick link") : "";
+  return '<article class="ticket' + (selected ? " selected" : "") + '">' +
+    '<button type="button" class="ticket-open" data-open="' + ticket.id + '"' + (selected ? ' aria-current="true"' : "") + '>' +
+    '<span class="mono muted">' + ticket.id + '</span><span class="ticket-title">' + escapeText(ticket.title) + '</span>' +
+    '<span class="ticket-meta">' + meta + '</span></button><div class="actions">' + attachment + (selected && session().view === "queue" ? "" : quick) + '</div></article>';
+}
+function toolbar() {
+  const context = session();
+  const opts = { active: "Active", ...statuses, all: "All Tickets" };
+  if (role === "staff") opts.archive = "Archive";
+  const options = (items, current) => Object.entries(items).map(([key, label]) =>
+    '<option value="' + key + '"' + (current === key ? " selected" : "") + '>' + label + '</option>').join("");
+  return '<div class="toolbar"><label class="search"><span>Search Tickets</span><input id="search" type="search" placeholder="Ticket number or title" value="' +
+    escapeText(context.query) + '"></label><label><span>Status</span><select id="filter">' + options(opts, context.filter) +
+    '</select></label>' + (role === "staff" ? '<label><span>Layout</span><select id="view">' +
+    options({ queue: "Queue", board: "Board", focus: "Focus" }, context.view) + '</select></label>' : "") +
+    '<details class="menu" id="workspace-menu"><summary>More</summary><div class="menu-panel">' +
+    (role === "staff" ? button("data-settings", "Project settings") : "") + button("data-account", "Account") +
+    button("data-refresh", "Refresh order") + '</div></details></div>';
+}
+function empty() {
+  return '<div class="empty"><h2>No matching Tickets</h2><p>Change the status or clear your search.</p>' +
+    button("data-clear", "Show all Tickets") + '</div>';
+}
+function workspace() {
+  const context = session();
+  const list = visibleTickets();
+  const selected = findTicket(context.selected);
+  const isBoard = role === "staff" && context.view === "board";
+  const detailOnly = selected && (context.view === "focus" || isBoard);
+  const heading = '<div class="heading"><div><p class="context"><span class="mark">Ease POS</span> / ' +
+    (role === "staff" ? "Staff workspace" : "Customer workspace") + '</p><h1 id="heading" tabindex="-1">' +
+    (context.filter === "archive" ? "Archived Tickets" : role === "staff" ? "Ticket queue" : "Your Tickets") +
+    '</h1></div>' + button("data-new", context.draft && (context.draft.title || context.draft.description || context.draft.attachment) ? "Resume draft" : "+ New Ticket", "primary") + '</div>';
+  const listHeading = '<div class="list-head"><p>' + plural(list.length, "Ticket") +
+    '</p><span>' + (role === "staff" ? "Urgency order" : "Waiting first") + '</span></div>';
+  let listView = '<section class="list" aria-label="Ticket list">' + listHeading + (list.length ? list.map(item => row(item)).join("") : empty()) + '</section>';
+  if (isBoard && list.length) {
+    listView = '<section class="board" aria-label="Ticket board">' + Object.entries(statuses).map(([key, label]) => {
+      const group = list.filter(item => item.status === key);
+      if (!group.length) return "";
+      return '<section class="lane"><h2>' + label + ' <small>· ' + group.length + '</small></h2>' + group.map(item => row(item, true)).join("") + '</section>';
+    }).join("") + '</section>';
+  }
+  return '<section class="workspace">' + (detailOnly ? "" : heading + toolbar()) +
+    '<div class="work-area ' + context.view + (selected ? " split" : "") + '">' +
+    (detailOnly ? "" : listView) + (selected ? detail(selected, list) : "") + '</div></section>';
+}
+function pinSurface(pins, draftPin, active) {
+  const markers = pins.map((pin, i) => marker(pin, i + 1)).join("");
+  function marker(pin, label) {
+    return '<span aria-hidden="true" class="point' + (label === active + 1 ? ' selected-point' : '') + '" style="left:' + pin.x + '%;top:' + pin.y + '%">' + label + '</span>';
+  }
+  return '<div class="sample" data-pin-surface><div class="paper" aria-label="Sample printed receipt"><strong>EASE POS</strong><br>Checkout ฿1,250<br>Receipt ฿1,150</div>' +
+    markers + (draftPin ? marker(draftPin, "+") : "") + '</div>';
+}
+function pinControls(key, pins, canWrite) {
+  const editing = session().pinDrafts.get(key);
+  const active = session().activePins.get(key) ?? -1;
+  const list = pins.length ? '<ol class="pin-list">' + pins.map((pin, index) => {
+    const attributes = 'data-saved-pin="' + index + '" data-owner="' + key + '" aria-pressed="' + (index === active) + '"';
+    const location = index === active ? ' <small>(' + pin.x + '% across, ' + pin.y + '% down)</small>' : '';
+    return '<li>' + button(attributes, 'Pin ' + (index + 1) + ' · ' + escapeText(pin.text) + location) + '</li>';
+  }).join("") + '</ol>' : "";
+  const editor = editing ? '<div class="pin-editor"><label class="field"><span>Pin note</span><textarea id="pin-note" maxlength="600">' +
+    escapeText(editing.text) + '</textarea></label><p class="muted">Click the image to position the pin, or adjust the sliders with the arrow keys.</p>' +
+    ["x", "y"].map(axis => '<label class="field"><span>' + (axis === "x" ? "Horizontal" : "Vertical") + ' position · <output id="pin-' +
+      axis + '-value">' + editing[axis] + '%</output></span><input type="range" min="5" max="95" step="1" id="pin-' + axis +
+      '" value="' + editing[axis] + '"></label>').join("") +
+    '<div class="actions">' + button('data-save-pin="' + key + '"', "Save pin", "primary") +
+    button('data-cancel-pin="' + key + '"', "Cancel") + '</div></div>' : "";
+  return pinSurface(pins, editing, active) + list + (canWrite && !editing ? button('data-add-pin="' + key + '"', "Add pin") : "") + editor;
+}
+function properties(ticket) {
+  const score = session().urgency.get(ticket.id) ?? String(ticket.urgency ?? "");
+  const options = Object.entries(statuses).map(([key, label]) =>
+    '<option value="' + key + '"' + (ticket.status === key ? " selected" : "") + '>' + label + '</option>').join("");
+  return section("properties", "Properties · " + (ticket.urgency === null ? "Unscored" : "Urgency " + ticket.urgency),
+    '<form id="urgency-form" class="wrap"><label class="field"><span>Urgency · 1–100</span><input id="urgency" type="text" inputmode="numeric" maxlength="3" value="' +
+    escapeText(score) + '" placeholder="Unscored"></label><button>Save urgency</button>' +
+    button('data-cancel-urgency ' + (score === String(ticket.urgency ?? "") ? "hidden" : ""), "Cancel") + '</form>' +
+    '<form id="status-form" class="wrap"><label class="field"><span>Status</span><select id="status-select">' + options +
+    '</select></label><button>Apply status</button></form>', ticket.id);
+}
+function messages(ticket) {
+  if (!ticket.customer || ticket.archived) return "";
+  const canSend = role === "staff" || ticket.status === "waiting" && ticket.messages.some(item => item.author === "Staff");
+  const thread = ticket.messages.length ? '<ul class="messages">' + ticket.messages.map(message =>
+    '<li><strong>' + message.author + '</strong><p>' + escapeText(message.text) + '</p></li>').join("") + '</ul>' : "";
+  const form = canSend ? '<form id="message-form"><label class="field"><span>' + (role === "staff" ? "Question for customer" : "Your reply") +
+    '</span><textarea id="message-text" required maxlength="2000">' + escapeText(session().messages.get(ticket.id)) +
+    '</textarea></label><button>' + (role === "staff" ? "Send request" : "Send reply") + '</button></form>' : "";
+  return section("conversation", "Conversation · Phase 3 preview",
+    '<p class="muted">Messages stay in this preview. A request sets the Ticket to Waiting. Staff resumes work after a reply.</p>' + thread + form, ticket.id);
+}
+function editForm(ticket) {
+  const edit = session().edits.get(ticket.id);
+  const conflict = edit.reviewedVersion !== undefined;
+  const resolution = conflict ? '<div class="pin-editor" role="alert" id="edit-conflict" tabindex="-1"><strong>The saved Ticket has changed.</strong>' +
+    '<p>Review the latest details before applying your draft.</p><dl><dt>Saved title</dt><dd>' + escapeText(ticket.title) +
+    '</dd><dt>Saved description</dt><dd>' + escapeText(ticket.description || "No description added.") + '</dd></dl></div>' : "";
+  const saveLabel = conflict ? "Apply my draft" : "Save changes";
+  return '<form id="edit-form" class="inside">' + resolution + '<label class="field"><span>Title</span><input id="edit-title" required maxlength="100" value="' +
+    escapeText(edit.title) + '"></label><label class="field"><span>Description</span><textarea id="edit-description" maxlength="10000">' +
+    escapeText(edit.description) + '</textarea></label><div class="actions"><button class="primary">' + saveLabel + '</button>' +
+    button("data-cancel-edit", conflict ? "Use saved details" : "Cancel") + '</div></form>';
+}
+function neighbors(ticket, items) {
+  const order = session().sequence;
+  const index = order.indexOf(ticket.id);
+  const available = new Set(items.map(item => item.id));
+  return {
+    previous: order.slice(0, index).reverse().find(id => available.has(id)),
+    next: order.slice(index + 1).find(id => available.has(id))
+  };
+}
+function detail(ticket, items) {
+  const { next, previous } = neighbors(ticket, items);
+  function neighbor(id, text) {
+    return button('data-neighbor="' + (id || "") + '" ' + (id ? "" : "disabled"), text);
+  }
+  const editing = session().editing === ticket.id;
+  const quick = ticket.archived ? button('data-restore="' + ticket.id + '"', "Restore", "primary") :
+    role === "staff" ? button('data-move="' + ticket.id + '"', nextActions[ticket.status][0], "primary") : "";
+  const edit = !ticket.archived && !editing ? button("data-edit", session().edits.has(ticket.id) ? "Resume edit" : "Edit Ticket", role === "customer" ? "primary" : "") : "";
+  const events = ticket.events.filter(event => role === "staff" || !event.staffOnly);
+  const media = ticket.attachment ? section("media", "Attachment · receipt" + (ticket.pins.length ? " · " + plural(ticket.pins.length, "pin") : ""),
+    pinControls(ticket.id, ticket.pins, !ticket.archived), ticket.id) : "";
+  return '<article class="detail" aria-labelledby="detail-heading"><div class="detail-nav">' + button("data-back", "← Back", "link") +
+    '<div class="actions">' + neighbor(previous, "Previous") + neighbor(next, "Next →") + '</div></div><div class="detail-body">' +
+    '<div class="ticket-meta"><span class="mono">' + ticket.id + '</span>' + statusText(ticket) +
+    (ticket.archived ? '<strong>Archived</strong>' : "") + (!matching(ticket) ? '<small>Outside current filter</small>' : "") +
+    '</div><h1 id="detail-heading" tabindex="-1">' + escapeText(ticket.title) + '</h1>' +
+    (editing ? editForm(ticket) : '<p class="description">' + escapeText(ticket.description || "No description added.") + '</p>') +
+    '<div class="actions detail-actions">' + quick + edit + '</div>' + media +
+    (role === "staff" && !ticket.archived ? properties(ticket) : "") +
+    section("history", "History · " + plural(events.length, "event"), '<ol class="history">' +
+      events.map(event => '<li>' + escapeText(event.text) + '</li>').join("") + '</ol>', ticket.id) +
+    messages(ticket) + section("more", "More actions", '<div class="actions">' + button("data-copy", "Copy Ticket number") +
+      (!ticket.archived && role === "staff" ? button("data-archive", "Archive Ticket") : "") +
+      (role === "customer" ? button("data-delete", "Delete Ticket…", "negative") : "") + '</div>', ticket.id) + '</div></article>';
+}
+function heading(title, back = true) {
+  return '<div class="heading"><div><p class="context"><span class="mark">Ease POS</span> / ' +
+    (role === "staff" ? "Staff" : "Customer") + '</p><h1 id="heading" tabindex="-1">' + title + '</h1></div>' +
+    (back ? button("data-workspace", "← Back", "link") : "") + '</div>';
+}
+function composer() {
+  const item = draft();
+  const attachment = item.attachment ? '<div class="inside">' + pinControls("draft", item.pins, true) +
+    button("data-remove-sample", "Remove attachment") + '</div>' : button("data-sample", "Attach sample receipt");
+  const preview = item.preview ? '<div class="inside"><strong>' + escapeText(item.title || "Untitled Ticket") +
+    '</strong><p class="description">' + escapeText(item.description) + '</p><small>' +
+    plural(Number(item.attachment), "attachment") + ' · ' + plural(item.pins.length, "pin") + '</small></div>' : "";
+  return '<section class="form-page">' + heading("New Ticket", false) + '<form class="form" id="create-form">' +
+    '<label class="field"><span>Title <small>· required</small></span><input id="new-title" required maxlength="100" value="' +
+    escapeText(item.title) + '"></label><label class="field"><span>Description <small>· optional</small></span>' +
+    '<textarea id="new-description" maxlength="10000">' + escapeText(item.description) + '</textarea></label>' +
+    '<div class="inside">' + attachment + '</div>' + button('data-preview aria-expanded="' + item.preview + '"', item.preview ? "Hide preview" : "Preview Ticket", "link") +
+    preview + '<div class="actions form-actions between">' + button("data-close-composer", "Close and keep draft") +
+    '<button class="primary" type="submit">Submit Ticket</button></div></form></section>';
+}
+function settings() {
+  return '<section class="form-page">' + heading("Project settings") + '<div class="form"><h2>Ease POS <small>· POS</small></h2>' +
+    '<p>Sample Project membership</p><ul>' + members.map(email => '<li>' + escapeText(email) + '</li>').join("") + '</ul>' +
+    '<form id="member-form"><label class="field"><span>Member email</span><input required id="member-email" type="email" placeholder="name@example.com"></label>' +
+    '<button>Add sample member</button></form><small>Membership changes apply to the sample list in this preview.</small></div></section>';
+}
+let accountLanguage = "en";
+function translated(english, thai) {
+  return accountLanguage === "th" ? thai : english;
+}
+function languageSelector() {
+  return '<label class="field"><span>' + translated("Account and sign-in language", "ภาษาของบัญชีและหน้าเข้าสู่ระบบ") +
+    '</span><select id="account-language"><option value="en"' + (accountLanguage === "en" ? " selected" : "") +
+    '>English</option><option value="th"' + (accountLanguage === "th" ? " selected" : "") +
+    '>ไทย</option></select><small>' + translated("The sample Ticket workspace uses English.", "หน้าตัวอย่าง Ticket แสดงเป็นภาษาอังกฤษ") + '</small></label>';
+}
+function account() {
+  const label = role === "staff" ? translated("Staff account", "บัญชีเจ้าหน้าที่") : translated("Customer account", "บัญชีลูกค้า");
+  return '<section class="form-page" lang="' + accountLanguage + '">' + heading(translated("Account", "บัญชี")) +
+    '<div class="form"><h2>' + label + '</h2>' + languageSelector() +
+    button("data-signout", translated("Sign out of demo", "ออกจากบัญชีตัวอย่าง")) + '</div></section>';
+}
+function auth() {
+  const register = page === "register";
+  const createAccount = translated("Create sample account", "สร้างบัญชีตัวอย่าง");
+  const signIn = translated("Sign in to demo", "เข้าสู่ระบบตัวอย่าง");
+  return '<section class="form-page" lang="' + accountLanguage + '">' + heading(register ? createAccount : signIn, false) +
+    '<form class="form" id="auth-form">' + languageSelector() + '<p>' +
+    translated("Use the sample credentials provided.", "ใช้ข้อมูลตัวอย่างที่กรอกไว้ให้") + '</p>' +
+    (role === "customer" ? '<label class="field"><span>' + translated("Email", "อีเมล") + '</span><input id="auth-email" required type="email" value="customer@example.com" autocomplete="off"></label>' : "") +
+    '<label class="field"><span>' + translated("Password", "รหัสผ่าน") + '</span><input type="password" id="password" required value="Samplepass123" autocomplete="off"></label>' +
+    (register ? '<label class="field"><span>' + translated("Confirm password", "ยืนยันรหัสผ่าน") + '</span><input required type="password" id="password-confirm" value="Samplepass123" autocomplete="off"></label>' : "") +
+    button("data-reveal", translated("Show password", "แสดงรหัสผ่าน"), "link") + '<div class="actions"><button class="primary">' +
+    (register ? createAccount : signIn) + '</button>' + (role === "customer" ?
+      button("data-register", register ? translated("Go to sign-in", "กลับไปเข้าสู่ระบบ") : createAccount, "link") : "") +
+    button("data-entry-role", role === "staff" ? translated("Customer sign-in", "เข้าสู่ระบบลูกค้า") : translated("Staff sign-in", "เข้าสู่ระบบเจ้าหน้าที่"), "link") + '</div></form></section>';
+}
+function plan() {
+  return '<section class="form-page"><div class="heading"><h1 id="heading" tabindex="-1">UX plan</h1>' +
+    button("data-workspace", "Back to workspace", "link") + '</div>' +
+    '<section class="plan-panel"><h2>Everyday tasks</h2><dl><dt>Send a Ticket</dt><dd>Open New Ticket, enter a title and submit. Context, attachments and pins are optional.</dd>' +
+    '<dt>Work through the queue</dt><dd>Apply the next status from a row. Open a Ticket and use Next to keep your place. Queue order stays stable until you refresh it.</dd>' +
+    '<dt>Choose a layout</dt><dd>Queue supports scanning, Board groups work by status, and Focus shows one Ticket at a time.</dd>' +
+    '<dt>Follow up</dt><dd>The optional Phase 3 conversation lets staff request information and customers reply. It requires new message storage and permissions.</dd></dl></section>' +
+    $("#audit-evidence").innerHTML +
+    '<section class="plan-panel"><h2>Implementation</h2><p>Share the composer and detail between roles. Preserve Project access, retry handling, exact urgency scores, and version checks. Keep Operations health available to staff in the existing application.</p>' +
+    '<p>Test real tasks with staff and customers in Thai and English before selecting the default layout.</p>' +
+    '<details class="disclosure"><summary>Preview controls</summary><div class="inside">' +
+    button("data-test-retry", "Simulate next submit failure") + button("data-reset", "Reset sample data…") +
+    '<p>After enabling the failure example, submit a Ticket. Its draft stays available for another attempt.</p></div></details></section></section>';
+}
+let failNextSubmit = false;
+let resultsTimer;
+function announceResults() {
+  clearTimeout(resultsTimer);
+  resultsTimer = setTimeout(() => {
+    if (page === "workspace" && !session().selected) {
+      $("#result-announcement").textContent = plural(visibleTickets().length, "matching Ticket");
+    }
+  }, 250);
+}
+function render(focus) {
+  document.querySelectorAll("nav [data-page]").forEach(el => {
+    el.setAttribute("aria-pressed", String(el.dataset.page === (page === "plan" ? "plan" : role)));
+  });
+  const pages = { workspace, create: composer, settings, account, auth, register: auth, plan,
+    unavailable: () => '<section class="form-page">' + heading("Ticket unavailable") + '<p>This Ticket is unavailable in your workspace.</p></section>' };
+  $("#content").innerHTML = pages[page]();
+  if (page === "create" && session().draftError) {
+    const msg = document.createElement("p");
+    msg.id = "submit-error";
+    msg.setAttribute("role", "alert");
+    msg.textContent = session().draftError;
+    $("#create-form .form-actions").before(msg);
+  }
+  if (focus) focusTarget(focus);
+}
+function urlState() {
+  const url = new URL(location.href);
+  const context = session();
+  url.search = "";
+  url.searchParams.set("project", project);
+  url.searchParams.set("role", role);
+  if (page !== "workspace") url.searchParams.set("page", page);
+  if (context.view !== "queue" && role === "staff") url.searchParams.set("variant", context.view);
+  if (context.query) url.searchParams.set("q", context.query);
+  if (context.filter !== "active") url.searchParams.set("filter", context.filter);
+  if (context.selected && page === "workspace") url.searchParams.set("ticket", context.selected);
+  return url;
+}
+function syncUrl(mode = "pushState") {
+  try {
+    const url = urlState();
+    if (url.href !== location.href) history[mode](null, "", url);
+  } catch { /* Embedded viewers may restrict history access. */ }
+}
+function readUrl(event) {
+  const query = new URLSearchParams(location.search);
+  const oldRole = role;
+  role = query.get("role") === "customer" ? "customer" : "staff";
+  const context = session();
+  const oldSelected = context.selected;
+  const requestedPage = query.get("page") || "workspace";
+  const allowedPages = ["workspace", "create", "account", "auth", "plan", "unavailable"];
+  if (role === "staff") allowedPages.push("settings");
+  if (role === "customer") allowedPages.push("register");
+  page = allowedPages.includes(requestedPage) ? requestedPage : "workspace";
+  const requestedProject = query.get("project");
+  const requestedView = query.get("variant");
+  context.view = role === "staff" && ["board","focus"].includes(requestedView) ? requestedView : "queue";
+  const filter = query.get("filter");
+  const options = ["all","active",...Object.keys(statuses)];
+  if (role === "staff") options.push("archive");
+  context.filter = options.includes(filter) ? filter : "active";
+  context.query = query.get("q") || "";
+  const id = query.get("ticket");
+  context.selected = null;
+  if (requestedProject && requestedProject !== project || id && !findTicket(id)) page = "unavailable";
+  if (page === "workspace" && id) {
+    context.selected = id;
+    if (findTicket(id).archived) context.filter = "archive";
+  } else if (page === "workspace" && context.view === "focus") {
+    context.selected = visibleTickets()[0]?.id ?? null;
+  }
+  context.sequence = visibleTickets().map(item => item.id);
+  context.editing = null;
+  hideNotice();
+  const focus = context.selected ? "#detail-heading" : page === "workspace" && oldRole === role && oldSelected ? '[data-open="' + oldSelected + '"]' : "#heading";
+  render(event ? focus : undefined);
+}
+function askConfirm(title, description, label, operation, origin) {
+  $("#confirm-title").textContent = title;
+  $("#confirm-description").textContent = description;
+  $("#confirm").textContent = label;
+  confirming = { operation, origin };
+  $("#confirmation").showModal();
+  $("#keep").focus();
+}
+$("#keep").onclick = () => $("#confirmation").close();
+$("#confirm").onclick = () => {
+  const action = confirming.operation;
+  $("#confirmation").close();
+  confirming = null;
+  action();
+  syncUrl();
+};
+$("#confirmation").onclose = () => {
+  if (confirming) focusTarget(confirming.origin);
+  confirming = null;
+};
+function removeAttachment() {
+  const item = draft();
+  const remove = () => {
+    item.attachment = false;
+    item.pins = [];
+    session().pinDrafts.delete("draft");
+    session().activePins.delete("draft");
+    render("[data-sample]");
+  };
+  if (!item.pins.length && !session().pinDrafts.has("draft")) return remove();
+  askConfirm("Remove attachment and pins?", "The pin notes belong to this attachment.", "Remove attachment", remove, "[data-remove-sample]");
+}
+function addPin(key) {
+  const ticket = key === "draft" ? null : findTicket(key);
+  if (key !== "draft" && (!ticket || ticket.archived || !ticket.attachment)) return;
+  session().pinDrafts.set(key, { x: 50, y: 50, text: "" });
+  render("#pin-note");
+}
+function currentPinKey() { return page === "create" ? "draft" : session().selected; }
+function savePin(key) {
+  const pending = session().pinDrafts.get(key);
+  if (!pending || !pending.text.trim()) return invalid("#pin-note", "Enter a pin note.");
+  const pin = { ...pending, text: pending.text.trim() };
+  session().pinDrafts.delete(key);
+  const focus = '[data-add-pin="' + key + '"]';
+  if (key === "draft") {
+    draft().pins.push(pin);
+    render(focus);
+  } else {
+    mutate(findTicket(key), ticket => ticket.pins.push(pin), "Pin added", { focus });
+  }
+}
+function invalid(selector, message) {
+  const field = $(selector);
+  field.setCustomValidity(message);
+  field.reportValidity();
+  field.setCustomValidity("");
+  field.focus();
+}
+function reset() {
+  tickets = seedTickets();
+  projectRoles.clear();
+  members = ["customer@example.com"];
+  nextNumber = 43;
+  failNextSubmit = false;
+  role = "staff";
+  page = "workspace";
+  hideNotice();
+  render("#heading");
+  syncUrl("replaceState");
+}
+function signOut() {
+  projectRoles.delete(role + "/" + project);
+  switchPage("auth");
+}
+function deleteTicket(ticket) {
+  askConfirm("Delete " + ticket.id + "?", "The Ticket will leave your workspace. Staff can restore it from the archive.", "Delete Ticket", () => {
+    ticket.archived = true;
+    ticket.version++;
+    ticket.events.unshift({ text: "Deleted by customer", staffOnly: false });
+    session().selected = null;
+    session().editing = null;
+    hideNotice();
+    render("#heading");
+    notice(ticket.id + " deleted.");
+  }, "[data-delete]");
+}
+function refreshOrder() {
+  session().order = suggestedOrder();
+  session().sequence = visibleTickets().map(item => item.id);
+  render("#search");
+  notice("Ticket order refreshed.");
+}
+function enterView(view) {
+  const context = session();
+  context.view = view;
+  if (view === "focus" && !context.selected) {
+    const first = visibleTickets()[0];
+    if (first) return selectTicket(first, "#view");
+  }
+  render("#view");
+}
+function openWorkspace() {
+  page = "workspace";
+  if (!findTicket(session().selected)) session().selected = null;
+  render(session().selected ? "#detail-heading" : "#heading");
+}
+document.addEventListener("click", async event => {
+  const target = event.target.closest("button");
+  if (!target || target.disabled || target.closest("dialog")) return;
+  const data = target.dataset;
+  const context = session();
+  const ticket = findTicket(context.selected);
+  if ("page" in data) {
+    if (data.page === "plan") switchPage("plan");
+    else if (role !== data.page) switchRole(data.page);
+    else { hideNotice(); context.selected = null; context.editing = null; if (context.view === "focus") context.view = "queue"; openWorkspace(); }
+  } else if (target.id === "undo") {
+    const apply = pendingUndo;
+    pendingUndo = null;
+    apply?.();
+  } else if (target.id === "dismiss") {
+    hideNotice(); focusTarget(context.selected ? "#detail-heading" : "#heading");
+  } else if ("open" in data) {
+    selectTicket(findTicket(data.open));
+  } else if ("media" in data) {
+    const item = findTicket(data.media);
+    if (item?.attachment) {
+      rememberSection(item.id, "media", true);
+      selectTicket(item, '[data-media="' + item.id + '"]');
+      focusTarget('[data-section="media"] summary');
+    }
+  } else if ("neighbor" in data) {
+    const next = findTicket(data.neighbor);
+    if (next) { context.selected = next.id; context.editing = null; context.returnTo = '[data-open="' + next.id + '"]'; render("#detail-heading"); }
+  } else if ("back" in data) {
+    leaveDetail();
+  } else if ("new" in data) {
+    switchPage("create");
+  } else if ("move" in data) {
+    const item = findTicket(data.move);
+    if (item) {
+      const actionFocus = context.selected === item.id ? "#detail-heading" : '[data-move="' + item.id + '"]';
+      setStatus(item, nextActions[item.status][1], actionFocus);
+    }
+  } else if ("clear" in data) {
+    context.filter = "all"; context.query = ""; context.selected = null; render("#search");
+  } else if ("refresh" in data) {
+    refreshOrder();
+  } else if ("settings" in data && role === "staff") {
+    switchPage("settings");
+  } else if ("account" in data) {
+    switchPage("account");
+  } else if ("workspace" in data) {
+    hideNotice(); openWorkspace();
+  } else if ("closeComposer" in data) {
+    page = "workspace"; openWorkspace(); focusTarget(context.selected ? "#detail-heading" : "[data-new]");
+  } else if ("sample" in data) {
+    draft().attachment = true; render('[data-add-pin="draft"]');
+  } else if ("removeSample" in data) {
+    removeAttachment();
+  } else if ("preview" in data) {
+    draft().preview = !draft().preview; render("[data-preview]");
+  } else if ("savedPin" in data) {
+    const index = Number(data.savedPin);
+    session().activePins.set(data.owner, index);
+    render('[data-saved-pin="' + index + '"]');
+  } else if ("addPin" in data) {
+    addPin(data.addPin);
+  } else if ("cancelPin" in data) {
+    context.pinDrafts.delete(data.cancelPin); render('[data-add-pin="' + data.cancelPin + '"]');
+  } else if ("savePin" in data) {
+    savePin(data.savePin);
+  } else if ("edit" in data && ticket && !ticket.archived) {
+    if (!context.edits.has(ticket.id)) context.edits.set(ticket.id, { title: ticket.title, description: ticket.description, version: ticket.version });
+    context.editing = ticket.id; render("#edit-title");
+  } else if ("cancelEdit" in data && ticket) {
+    context.edits.delete(ticket.id); context.editing = null; render("[data-edit]");
+  } else if ("cancelUrgency" in data && ticket) {
+    context.urgency.delete(ticket.id); render("#urgency");
+  } else if ("copy" in data && ticket) {
+    try { await navigator.clipboard.writeText(ticket.id); notice(ticket.id + " copied."); }
+    catch { notice("Select the Ticket number to copy it: " + ticket.id); }
+  } else if ("archive" in data && ticket && role === "staff") {
+    mutate(ticket, item => { item.archived = true; }, "Archived");
+  } else if ("restore" in data && role === "staff") {
+    const item = findTicket(data.restore);
+    if (item?.archived) mutate(item, item => { item.archived = false; }, "Restored", { restore: true });
+  } else if ("delete" in data && role === "customer" && ticket) {
+    deleteTicket(ticket);
+  } else if ("signout" in data) {
+    signOut();
+  } else if ("entryRole" in data) {
+    role = role === "staff" ? "customer" : "staff"; switchPage("auth");
+  } else if ("register" in data && role === "customer") {
+    switchPage(page === "register" ? "auth" : "register");
+  } else if ("reveal" in data) {
+    const reveal = $("#password").type === "password";
+    $("#password").type = reveal ? "text" : "password";
+    if ($("#password-confirm")) $("#password-confirm").type = reveal ? "text" : "password";
+    target.textContent = reveal ? translated("Hide password", "ซ่อนรหัสผ่าน") : translated("Show password", "แสดงรหัสผ่าน");
+  } else if ("testRetry" in data) {
+    failNextSubmit = true; notice("The next submit will simulate a connection failure.");
+  } else if ("reset" in data) {
+    askConfirm("Reset the preview?", "This clears sample edits, drafts and new Tickets in both workspaces.", "Reset preview", reset, "[data-reset]");
+  } else return;
+  syncUrl();
+});
+document.addEventListener("click", event => {
+  const surface = event.target.closest("[data-pin-surface]");
+  if (surface) {
+    const pin = session().pinDrafts.get(currentPinKey());
+    if (pin) {
+      const box = surface.getBoundingClientRect();
+      pin.x = Math.min(95, Math.max(5, Math.round(100 * (event.clientX - box.left) / box.width)));
+      pin.y = Math.min(95, Math.max(5, Math.round(100 * (event.clientY - box.top) / box.height)));
+      render("#pin-note");
+    }
+  }
+  if (!event.target.closest("#workspace-menu")) closeMenu();
+});
+$("#content").addEventListener("toggle", event => {
+  const { section: key, owner } = event.target.dataset;
+  if (key && owner && event.target.isConnected) rememberSection(owner, key, event.target.open);
+}, true);
+$("#content").addEventListener("input", event => {
+  const el = event.target;
+  const context = session();
+  const id = context.selected;
+  switch (el.id) {
+    case "search": {
+      const position = el.selectionStart;
+      context.query = el.value; context.selected = null;
+      render("#search"); $("#search").setSelectionRange(position, position); announceResults(); syncUrl("replaceState"); break;
+    }
+    case "new-title": draft().title = el.value; break;
+    case "new-description": draft().description = el.value; break;
+    case "edit-title": context.edits.get(id).title = el.value; break;
+    case "edit-description": context.edits.get(id).description = el.value; break;
+    case "urgency":
+      context.urgency.set(id, el.value);
+      $("[data-cancel-urgency]").hidden = el.value === String(findTicket(id).urgency ?? "");
+      break;
+    case "message-text": context.messages.set(id, el.value); break;
+    case "pin-note": context.pinDrafts.get(currentPinKey()).text = el.value; break;
+    case "pin-x":
+    case "pin-y": {
+      const axis = el.id.slice(-1);
+      const pin = context.pinDrafts.get(currentPinKey());
+      pin[axis] = Number(el.value);
+      $("#" + el.id + "-value").textContent = el.value + "%";
+      const marker = $(".sample .point:last-child");
+      marker.style[axis === "x" ? "left" : "top"] = el.value + "%";
+      break;
+    }
+  }
+});
+$("#content").addEventListener("change", event => {
+  const el = event.target;
+  if (el.id === "account-language") {
+    const fields = [...document.querySelectorAll("#auth-form input")].map(input => [input.id, input.value]);
+    accountLanguage = el.value === "th" ? "th" : "en";
+    render("#account-language");
+    for (const [id, value] of fields) document.getElementById(id).value = value;
+    return;
+  }
+  if (el.id === "filter") {
+    session().filter = el.value;
+    session().selected = null;
+    if (session().view === "focus") enterView("focus");
+    else render("#filter");
+    announceResults();
+  } else if (el.id === "view") {
+    enterView(el.value);
+  } else return;
+  syncUrl();
+});
+function submitTicket() {
+  const context = session();
+  const item = draft();
+  if (!item.title.trim()) return invalid("#new-title", "Enter a title.");
+  if (context.pinDrafts.has("draft")) {
+    focusTarget("#pin-note");
+    notice("Save or cancel your pin before submitting.");
+    return;
+  }
+  if (failNextSubmit) {
+    failNextSubmit = false;
+    context.draftError = "Connection interrupted. Your draft and attachment are ready to submit again.";
+    render('#create-form button[type="submit"]');
+    return;
+  }
+  const ticket = {
+    id: project + "-" + String(nextNumber++).padStart(4, "0"), project, title: item.title.trim(), description: item.description.trim(),
+    urgency: null, status: "new", archived: false, customer: role === "customer", attachment: item.attachment,
+    pins: structuredClone(item.pins), version: 0, events: [{ text: "Ticket created", staffOnly: false }], messages: []
+  };
+  tickets.unshift(ticket);
+  context.order.unshift(ticket.id);
+  context.activePins.delete("draft");
+  context.draft = null; context.draftError = null; context.filter = "active"; context.query = "";
+  page = "workspace";
+  selectTicket(ticket);
+  notice(ticket.id + " created.");
+}
+function saveMessage(ticket) {
+  if (!ticket || ticket.archived || !ticket.customer) return;
+  const text = $("#message-text").value.trim();
+  if (!text) return invalid("#message-text", "Enter a message.");
+  if (role === "customer" && (ticket.status !== "waiting" || !ticket.messages.some(message => message.author === "Staff"))) return;
+  const author = role === "staff" ? "Staff" : "Customer";
+  session().messages.delete(ticket.id);
+  mutate(ticket, item => {
+    item.messages.push({ author, text });
+    if (role === "staff") item.status = "waiting";
+  }, author === "Staff" ? "Information requested" : "Customer replied", { focus: '[data-section="conversation"] summary' });
+}
+$("#content").addEventListener("submit", event => {
+  event.preventDefault();
+  const context = session();
+  const ticket = findTicket(context.selected);
+  switch (event.target.id) {
+    case "create-form": submitTicket(); break;
+    case "edit-form": {
+      const edit = context.edits.get(ticket.id);
+      if (!edit.title.trim()) return invalid("#edit-title", "Enter a title.");
+      if ((edit.reviewedVersion ?? edit.version) !== ticket.version) {
+        edit.reviewedVersion = ticket.version;
+        render("#edit-conflict");
+        return;
+      }
+      context.edits.delete(ticket.id); context.editing = null;
+      mutate(ticket, item => { item.title = edit.title.trim(); item.description = edit.description.trim(); }, "Details updated", { focus: "[data-edit]" });
+      break;
+    }
+    case "urgency-form": {
+      if (role !== "staff") return;
+      const value = $("#urgency").value.trim();
+      if (value && (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100)) return invalid("#urgency", "Use a whole number from 1 to 100, or leave blank.");
+      context.urgency.delete(ticket.id);
+      mutate(ticket, item => { item.urgency = value ? Number(value) : null; }, value ? "Urgency set to " + value : "Urgency cleared", { staffOnly: true, focus: "#urgency" });
+      break;
+    }
+    case "status-form": setStatus(ticket, $("#status-select").value, "#status-select"); break;
+    case "message-form": saveMessage(ticket); break;
+    case "member-form": {
+      if (role !== "staff") return;
+      const email = $("#member-email").value.trim().toLowerCase();
+      if (members.includes(email)) return invalid("#member-email", "This member already has access.");
+      members.push(email); render("#member-email"); notice("Sample member added."); break;
+    }
+    case "auth-form":
+      if (page === "register" && $("#password").value !== $("#password-confirm").value) return invalid("#password-confirm", translated("Use the same password in both fields.", "กรุณากรอกรหัสผ่านทั้งสองช่องให้ตรงกัน"));
+      session().selected = null; switchPage("workspace"); break;
+  }
+  syncUrl();
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || $("#confirmation").open) return;
+  if ($("#workspace-menu")?.open) { closeMenu(); focusTarget("#workspace-menu summary"); }
+  else if (page === "create") { openWorkspace(); focusTarget(session().selected ? "#detail-heading" : "[data-new]"); }
+  else if (page === "workspace" && session().editing) {
+    session().editing = null; render("[data-edit]");
+  } else if (page === "workspace" && session().selected) leaveDetail();
+  else if (["settings", "account", "plan"].includes(page)) openWorkspace();
+  else return;
+  syncUrl();
+});
+window.addEventListener("popstate", readUrl);
+readUrl();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+[
+  {
+    "type": "leave",
+    "webhookEventId": "fixture-line-3",
+    "timestamp": 1795656003000,
+    "source": {
+      "type": "group",
+      "groupId": "Cfixture"
+    }
+  }
+]

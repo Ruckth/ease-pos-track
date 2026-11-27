@@ -1,7 +1,13 @@
-import { readFile, stat } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { optimizeImage } from "../../shared/node/optimize-image";
+import { validatePreparedRaster } from "../../shared/node/validate-raster";
+import { IMAGE_ERRORS, IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, extname, join } from "node:path";
+import { promisify } from "node:util";
 import { UTApi } from "uploadthing/server";
-import { authError, inputError, remoteError } from "./errors";
+import { authError, inputError, mapInputError, remoteError } from "./errors";
 
 const MAX_TICKET_IMAGES = 10;
 const MAX_TICKET_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -34,9 +40,9 @@ const IMAGE_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-function assertImageSize(size: number) {
-  if (size <= 0 || size > MAX_TICKET_IMAGE_BYTES) {
-    throw inputError("IMAGE_SIZE_INVALID", "Each --image must be larger than zero and no more than 8 MB.");
+function assertImageSize(size: number, limit = IMAGE_SOURCE_BYTES) {
+  if (size <= 0 || size > limit) {
+    throw inputError("IMAGE_SIZE_INVALID", "Each --image must be larger than zero and within the configured file size limit.");
   }
 }
 
@@ -90,25 +96,79 @@ async function remoteImage(source: string, index: number, fetcher: typeof fetch)
   const type = imageType(finalUrl.pathname, response.headers.get("content-type"));
   const declaredSize = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredSize) && declaredSize > 0) assertImageSize(declaredSize);
-  const bytes = await response.arrayBuffer();
-  assertImageSize(bytes.byteLength);
+  if (!response.body) throw inputError("IMAGE_SIZE_INVALID", "Empty image response.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > IMAGE_SOURCE_BYTES) { await reader.cancel(); assertImageSize(size); }
+    chunks.push(new Uint8Array(value));
+  }
+  assertImageSize(size);
   const name = remoteName(finalUrl, type, index);
-  return new File([bytes], name, { type });
+  return new File(chunks, name, { type });
 }
 
-/** Resolve local paths and HTTPS links into original, untransformed image files. */
-export async function prepareTicketImages(sources: string[], fetcher: typeof fetch = fetch) {
+/**
+ * Sharp's prebuilt binaries cannot decode HEIC/HEIF. On macOS the system `sips`
+ * tool converts such a photo to a full-quality JPEG, which is then prepared like
+ * any other image (fitted, metadata removed). Elsewhere there is no converter.
+ */
+async function convertHeic(file: File): Promise<File | undefined> {
+  if (process.platform !== "darwin") return undefined;
+  const directory = await mkdtemp(join(tmpdir(), "ticket-heic-"));
+  try {
+    const input = join(directory, "source.heic");
+    const output = join(directory, "converted.jpg");
+    await writeFile(input, new Uint8Array(await file.arrayBuffer()));
+    await promisify(execFile)("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "best", input, "--out", output], { timeout: 60_000 });
+    return new File([await readFile(output)], file.name.replace(/\.[^.]*$/, "") + ".jpg", { type: "image/jpeg", lastModified: file.lastModified });
+  } catch {
+    return undefined;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Optimize one image, converting HEIC first where the system can. */
+async function optimizeStaffImage(original: File) {
+  try {
+    return await optimizeImage(original);
+  } catch (error) {
+    const converted = error instanceof Error && error.message === IMAGE_ERRORS.format ? await convertHeic(original) : undefined;
+    if (!converted) throw mapInputError(error);
+    return await optimizeImage(converted).catch(retry => { throw mapInputError(retry); });
+  }
+}
+
+/**
+ * Resolve local paths and HTTPS links into bounded, optimized image files.
+ * Staff uploads are recorded with the staff session rather than through the
+ * provider callback, so each prepared file is also verified here with the same
+ * byte validation the callback applies.
+ */
+export async function prepareTicketImages(sources: string[], fetcher: typeof fetch = fetch, optimize = optimizeStaffImage) {
   if (sources.length > MAX_TICKET_IMAGES) {
     throw inputError("IMAGE_LIMIT_EXCEEDED", `At most ${MAX_TICKET_IMAGES} --image values are allowed.`);
   }
-  return await Promise.all(sources.map((rawSource, index) => {
+  const images: File[] = [];
+  for (const [index, rawSource] of sources.entries()) {
     const source = rawSource.trim();
     if (!source) throw inputError("INVALID_IMAGE_SOURCE", "--image cannot be blank.");
-    return source.includes("://") ? remoteImage(source, index, fetcher) : localImage(source);
-  }));
+    const original = await (source.includes("://") ? remoteImage(source, index, fetcher) : localImage(source));
+    const image = await optimize(original);
+    const type = await validatePreparedRaster(new Uint8Array(await image.arrayBuffer())).catch(() => undefined);
+    if (type !== image.type) throw mapInputError(new Error(IMAGE_ERRORS.invalid));
+    assertImageSize(image.size, MAX_TICKET_IMAGE_BYTES);
+    images.push(image);
+  }
+  return images;
 }
 
-/** Upload prepared originals with the server SDK; links and paths share one store. */
+/** Upload prepared images with the server SDK; links and paths share one store. */
 export class UploadThingTicketImages implements TicketImages {
   private readonly provider?: UploadProvider;
   constructor(token: string | undefined, providerFactory: (token: string) => UploadProvider = token => new UTApi({ token })) {

@@ -73,6 +73,9 @@ test("environment list parsing refuses unparsed text, malformed quotes and dupli
 });
 
 test("supplied reset passwords require 24 characters, a letter and a digit", () => {
+  assert.throws(() => validatePasswords(["a1" + "😀".repeat(11)]), /RESET_CREDENTIALS_REQUIRE_24/);
+  assert.throws(() => validatePasswords(["a1".repeat(55)]), /RESET_PASSWORD_TOO_LONG/);
+  assert.throws(() => validatePasswords(["a1".repeat(15) + " "]), /RESET_PASSWORD_HAS_SURROUNDING_WHITESPACE/);
   for (const password of ["", "Aa1short", "a".repeat(24), "1".repeat(24), "!".repeat(24)]) {
     assert.throws(() => validatePasswords([password]), /RESET_CREDENTIALS_REQUIRE/);
   }

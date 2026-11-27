@@ -1,9 +1,10 @@
+import { isLoopbackOrigin, legacyMode } from "../shared/pilot-settings";
+
 /** Fail closed: fixture access and detailed errors are local opt-ins only. */
 export function localFixturesEnabled() {
-  let host: string | undefined;
-  try { host = new URL(process.env.CONVEX_CLOUD_URL ?? "").hostname; } catch { /* Fail closed. */ }
   return process.env.LOCAL_FIXTURES_ENABLED === "true"
-    && ["127.0.0.1", "localhost", "[::1]"].includes(host ?? "");
+    && isLoopbackOrigin(process.env.CONVEX_CLOUD_URL)
+    && legacyMode(process.env, true);
 }
 
 export function requireLocalFixtures() {

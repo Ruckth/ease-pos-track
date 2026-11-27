@@ -9,6 +9,9 @@
 
 import { MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from "../../shared/ticket-state";
 import { MAX_REQUEST_ID_LENGTH } from "../../convex/ticket_requests";
+import { PAGE_FILE_EXTENSIONS, PAGE_LIMITS } from "../../shared/ticket-pages";
+
+const MIB = 1024 * 1024;
 
 export const EXIT = {
   ok: 0,
@@ -73,6 +76,10 @@ const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
   REQUIRED_REQUEST_ID: { code: "REQUEST_ID_REQUIRED", message: "--request-id cannot be blank." },
   REQUEST_ID_TOO_LONG: { code: "REQUEST_ID_TOO_LONG", message: `--request-id must be ${MAX_REQUEST_ID_LENGTH} characters or fewer.` },
   INVALID_REQUEST_ID: { code: "INVALID_REQUEST_ID", message: "--request-id must not contain control characters." },
+  IMAGE_INVALID: { code: "IMAGE_INVALID", message: "This image could not be decoded or exceeds the supported limits." },
+  IMAGE_ANIMATION_UNSUPPORTED: { code: "IMAGE_ANIMATION_UNSUPPORTED", message: "This animation cannot be kept: animated AVIF is not supported and APNG must already fit 1920 × 1080. Use an animated GIF or WebP, or a still image." },
+  IMAGE_FORMAT_UNSUPPORTED: { code: "IMAGE_FORMAT_UNSUPPORTED", message: "This image format cannot be decoded here (HEIC needs macOS); export it as JPEG or PNG and retry." },
+  PAGE_IMAGE_INVALID: { code: "PAGE_IMAGE_INVALID", message: "A page image could not be decoded or exceeds the supported limits." },
   IMAGE_VIDEO_ONLY: { code: "IMAGE_TYPE_UNSUPPORTED", message: "--image accepts image files only." },
   MEDIA_LIMIT_EXCEEDED: { code: "IMAGE_LIMIT_EXCEEDED", message: "A Ticket can contain at most 10 images." },
   IMAGE_TOO_LARGE: { code: "IMAGE_SIZE_INVALID", message: "Each --image must be larger than zero and no more than 8 MB." },
@@ -81,6 +88,16 @@ const INPUT_ERRORS: Record<string, { code: string; message: string }> = {
   INVALID_PROJECT_KEY: { code: "INVALID_PROJECT", message: "--project must be 2-10 letters or digits, starting with a letter." },
   PROJECT_NOT_FOUND: { code: "PROJECT_NOT_FOUND", message: "No active Project has that key." },
   PROJECT_REQUIRED: { code: "PROJECT_REQUIRED", message: "More than one Project exists; pass --project with its key." },
+  PAGE_FILES_REQUIRED: { code: "PAGE_FILES_REQUIRED", message: "The page has no files to publish." },
+  PAGE_FILE_LIMIT: { code: "PAGE_FILE_LIMIT", message: `A page can contain at most ${PAGE_LIMITS.maxFiles} files.` },
+  PAGE_TOO_LARGE: { code: "PAGE_TOO_LARGE", message: `A page can contain at most ${PAGE_LIMITS.maxTotalBytes / MIB} MiB of files.` },
+  PAGE_PATH_INVALID: { code: "PAGE_PATH_INVALID", message: "A file path is not a safe relative path inside the page." },
+  PAGE_PATH_DUPLICATE: { code: "PAGE_PATH_DUPLICATE", message: "Two files resolve to the same path." },
+  PAGE_FILE_TYPE_UNSUPPORTED: { code: "PAGE_FILE_TYPE_UNSUPPORTED", message: `Pages accept only ${PAGE_FILE_EXTENSIONS.join(", ")} files.` },
+  PAGE_FILE_INVALID: { code: "PAGE_FILE_INVALID", message: "A page file has invalid metadata." },
+  PAGE_ENTRY_INVALID: { code: "PAGE_ENTRY_INVALID", message: "--entry must name an .html or .htm file inside the page." },
+  PAGE_FORM_INVALID: { code: "PAGE_FORM_INVALID", message: "The page upload request was malformed." },
+  PAGE_LIMIT_REACHED: { code: "PAGE_LIMIT_REACHED", message: `A Ticket can have at most ${PAGE_LIMITS.maxPagesPerTicket} pages; revoke one first.` },
 };
 
 /** The validation codes a remote call can also report, for error classification. */

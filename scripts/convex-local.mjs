@@ -6,10 +6,11 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { loadPorts } from "./worktree-ports.mjs";
 import { parse } from "dotenv";
+import { localDeploymentName } from "./dev-reset-target.mjs";
 
 const args = process.argv.slice(2);
 const ENV_FILE = ".env.convex-local";
-const LOCAL_DEPLOYMENT = "anonymous:anonymous-track-ease-pos";
+const LOCAL_DEPLOYMENT = `anonymous:${localDeploymentName() ?? "anonymous-agent"}`;
 const SAVED = ".env.local.shared-backup";
 
 if (args.length && !["dev", "run", "env", "import", "export", "data", "codegen", "--help"].includes(args[0])) {
@@ -25,7 +26,7 @@ if (args.some(arg => /^--(reset-development|prod|deployment|deployment-name|env-
 if (!existsSync(ENV_FILE)) writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
 const settings = existsSync(ENV_FILE) ? parse(readFileSync(ENV_FILE)) : {};
 const target = settings.CONVEX_DEPLOYMENT;
-if (target !== LOCAL_DEPLOYMENT || Object.keys(settings).some(key => key !== "CONVEX_DEPLOYMENT" && key.startsWith("CONVEX_"))) {
+if (![LOCAL_DEPLOYMENT, "anonymous:anonymous-track-ease-pos"].includes(target) || Object.keys(settings).some(key => key !== "CONVEX_DEPLOYMENT" && key.startsWith("CONVEX_"))) {
   console.error(`Refusing to run: ${ENV_FILE} must target ${LOCAL_DEPLOYMENT}, found ${target ?? "nothing"}.`);
   process.exit(4);
 }
@@ -33,6 +34,10 @@ if (existsSync(SAVED)) {
   console.error(`Refusing to run: ${SAVED} exists from an interrupted run. Restore it to .env.local first.`);
   process.exit(4);
 }
+
+// Migrate the previous wrapper's fixed identity only after validating the
+// entire local settings file and refusing another active wrapper.
+if (target !== LOCAL_DEPLOYMENT) writeFileSync(ENV_FILE, `CONVEX_DEPLOYMENT=${LOCAL_DEPLOYMENT}\n`);
 
 if (args.length === 0) args.push("dev", "--once", "--typecheck", "disable");
 // Pin the backend to this checkout's ports: if they are taken the CLI fails
@@ -71,11 +76,20 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 const env = { ...process.env };
 for (const key of Object.keys(env)) if (key.startsWith("CONVEX_")) delete env[key];
 env.CONVEX_AGENT_MODE = "anonymous";
+// Agent mode names a fresh worktree's backend `anonymous-agent`; `run` and `env`
+// must select that same project-local backend instead of failing to find one.
+let envFile = ENV_FILE;
+try {
+  if (JSON.parse(readFileSync(".convex/local/default/config.json", "utf8")).deploymentName === "anonymous-agent") {
+    envFile = ".convex/local/agent.env";
+    writeFileSync(envFile, "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\n");
+  }
+} catch { /* No local backend yet: the CLI creates one. */ }
 // The installed CLI auto-starts local backends for `run`, but not snapshot/env
 // commands. A read-only system query subscription holds the backend open. This
 // works with incompatible/empty schemas and never pushes application code.
 if (!["dev", "run"].includes(args[0]) && !args.includes("--help")) {
-  keeper = spawn("convex", ["run", "_system/cli/tables", '{"paginationOpts":{"numItems":1,"cursor":null}}', "--watch", "--env-file", ENV_FILE], { stdio: ["ignore", "pipe", "pipe"], env, shell: false });
+  keeper = spawn("convex", ["run", "_system/cli/tables", '{"paginationOpts":{"numItems":1,"cursor":null}}', "--watch", "--env-file", envFile], { stdio: ["ignore", "pipe", "pipe"], env, shell: false });
   try {
     await new Promise((ready, reject) => {
       const timeout = setTimeout(() => reject(new Error("Local backend startup timed out.")), 30_000);
@@ -85,7 +99,7 @@ if (!["dev", "run"].includes(args[0]) && !args.includes("--help")) {
     });
   } catch (error) { await stopKeeper(); console.error(error.message); restore(); process.exit(1); }
 }
-child = spawn("convex", [...args, "--env-file", ENV_FILE], { stdio: "inherit", env, shell: false });
+child = spawn("convex", [...args, "--env-file", envFile], { stdio: "inherit", env, shell: false });
 child.on("error", async (error) => {
   console.error(error.message);
   await stopKeeper();
