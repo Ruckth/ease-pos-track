@@ -1397,6 +1397,10 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await customerSend.click();
     await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
     await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).waitFor({ state: "hidden" });
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.getByText(copy(language, "customerQueueYouReplied"), { exact: true }).waitFor();
+    assert.equal(await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).count(), 0);
+    await customerRow.click();
     await staff.page.getByText(reply, { exact: true }).waitFor();
     await staff.page.getByText(copy(language, "threadCustomerReplied"), { exact: true }).first().waitFor();
     const external = staff.page.getByRole("link", { name: copy(language, "threadOpenLinkNamed", { name: "example.com" }), exact: true });

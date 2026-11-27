@@ -17,7 +17,8 @@ function format(language: Language, kind: "time" | "day" | "year", timestamp: nu
 }
 
 /** Today shows the time, yesterday a word, this year the day, older the full date. */
-export function activityLabel(language: Language, timestamp: number, yesterday: string, now = Date.now()) {
+function activityLabel(language: Language, timestamp: number, yesterday: string) {
+  const now = Date.now();
   const day = (value: number) => { const date = new Date(value); date.setHours(0, 0, 0, 0); return date.getTime(); };
   const days = Math.round((day(now) - day(timestamp)) / DAY);
   if (days <= 0) return format(language, "time", timestamp);
@@ -38,6 +39,8 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
 }) {
   const { t, language, formatDate } = useI18n();
   const excerptId = useId();
+  const replyStateId = `${excerptId}-reply-state`;
+  const activityId = `${excerptId}-activity`;
   const meta = statusMeta(item.status);
   const StatusIcon = meta.icon;
   const label = formatTicketNumber(item.ticketNumber, item.projectKey);
@@ -53,6 +56,7 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
   const activity = t(updatedLater ? "updatedOn" : "createdAt", { date: formatDate(updatedAt) });
   const needsReply = waiting && reply?.awaitingCustomer === true;
   const youReplied = waiting && !needsReply && reply?.role === "customer";
+  const description = [excerpt ? excerptId : "", needsReply || youReplied ? replyStateId : "", activityId].filter(Boolean).join(" ");
 
   return <button
     type="button"
@@ -63,7 +67,7 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
       selected && "ticket-surface-selected",
     )}
     aria-label={[t("viewTicket", { ticket: label }), item.title, status].join(", ")}
-    aria-describedby={excerpt ? excerptId : undefined}
+    aria-describedby={description}
     aria-current={selected ? "true" : undefined}
     onClick={() => onSelect(item._id)}
   >
@@ -77,9 +81,9 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
     </span>
     {excerpt && <span id={excerptId} data-ticket-excerpt className="line-clamp-1 pl-[1.375rem] text-sm leading-snug text-muted-foreground [overflow-wrap:anywhere] sm:pl-0">{excerpt}</span>}
     <span className="mt-0.5 flex w-full flex-wrap items-center gap-x-3 gap-y-1 pl-[1.375rem] text-xs text-muted-foreground sm:pl-0">
-      {needsReply ? <span className="inline-flex items-center gap-1 rounded-full bg-violet-700 px-2 py-0.5 font-semibold text-white dark:bg-violet-300 dark:text-violet-950">
+      {needsReply ? <span id={replyStateId} className="inline-flex items-center gap-1 rounded-full bg-violet-700 px-2 py-0.5 font-semibold text-white dark:bg-violet-300 dark:text-violet-950">
         <MessageCircleQuestion className="size-3.5 shrink-0" aria-hidden />{t("feedNeedsReply")}
-      </span> : youReplied ? <span className="inline-flex items-center gap-1 font-medium text-foreground">
+      </span> : youReplied ? <span id={replyStateId} className="inline-flex items-center gap-1 font-medium text-foreground">
         <Check className="size-3.5 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />{t("customerQueueYouReplied")}
       </span> : null}
       <span className="font-mono">{label}</span>
@@ -98,7 +102,7 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
       ) : null}
       <span className="ml-auto inline-flex items-center gap-1">
         <time data-ticket-activity className="whitespace-nowrap tabular-nums" dateTime={new Date(updatedAt).toISOString()} title={activity}>
-          <span className="sr-only">{activity}</span>
+          <span id={activityId} className="sr-only">{activity}</span>
           <span aria-hidden="true">{activityLabel(language, updatedAt, t("customerQueueYesterday"))}</span>
         </time>
         <ChevronRight className="hidden size-3.5 shrink-0 text-primary transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none sm:block" aria-hidden="true" />
