@@ -2,6 +2,7 @@ import { TicketInbox } from "./ticket-inbox";
 import { isTicketSearchWithinLimits, type TicketSummary } from "../../../shared/ticket-contracts";
 import { errorCode } from "../../../shared/errors";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
+import type { DisposableTicketDraft } from "./draft";
 import { ProductWordmark } from "@/components/product-wordmark";
 import { queueNeighbors } from "@/lib/staff-ticket-queue";
 import { LanguageMenuGroup } from "@/components/language-menu";
@@ -15,8 +16,8 @@ import { useI18n } from "@/lib/i18n";
 import { type ProjectSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Id } from "@convex/_generated/dataModel";
-import { ChevronDown, ChevronRight, KeyRound, Loader2, LogOut, Plus, UserRound } from "lucide-react";
-import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, KeyRound, Loader2, LogOut, PenLine, Plus, UserRound } from "lucide-react";
+import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useCustomerTickets, useCustomerTicketSearch, useWorkspaceTicket } from "./adapter";
 import { TicketSearchInput } from "./ticket-search-input";
@@ -90,7 +91,11 @@ export function CustomerPortal({ viewer, onLogout }: {
   if (selectedId && sequence.current.length === 0 && visibleIds.includes(selectedId)) sequence.current = visibleIds;
   const { previous: previousId, next: nextId } = queueNeighbors(selectedId, visibleIds, sequence.current);
   const foreignDraft = composer.hasDraft && composer.project?._id !== project?._id;
-  const authorName = viewer.displayName.trim() || viewer.username;
+  const draftStrip = composer.hasDraft && !composer.open && !ticket;
+  function discardDraft() {
+    composer.discard();
+    requestAnimationFrame(() => document.getElementById("customer-new-ticket")?.focus());
+  }
 
   return <main className="aurora-canvas min-h-screen px-3 pt-3 sm:px-5">
     <header className="aurora-toolbar relative z-30 mx-auto max-w-6xl">
@@ -135,16 +140,16 @@ export function CustomerPortal({ viewer, onLogout }: {
           {!ticket && <p className="mt-1 text-sm text-muted-foreground">{t("customerPortalSubtitle")}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {composer.hasDraft && composer.project && <span id="customer-draft-project" className="text-sm text-muted-foreground">{composer.project.name} ({composer.project.key})</span>}
-          <Button className="glass-action min-h-11 rounded-xl px-4 font-semibold shadow-sm" type="button" aria-describedby={composer.hasDraft ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
-            <Plus aria-hidden="true" />{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
+          <Button className="glass-action min-h-11 rounded-xl px-4 font-semibold shadow-sm" type="button" id="customer-new-ticket" aria-describedby={draftStrip ? "customer-draft-project" : undefined} aria-expanded={composer.open} disabled={!project && !composer.owner} onClick={composer.show}>
+            {composer.hasDraft ? <PenLine aria-hidden="true" /> : <Plus aria-hidden="true" />}{t(composer.hasDraft ? "resumeTicket" : "newTicket")}
           </Button>
         </div>
       </div>
-      {foreignDraft ? <div className="aurora-panel mb-4 px-4 py-3 text-sm text-foreground" role="status">{t("customerQueueDraftProject", { project: composer.project?.name ?? "" })}</div> : null}
+      {draftStrip && composer.owner && composer.project
+        ? <DraftStrip owner={composer.owner} project={composer.project} foreign={foreignDraft} busy={composer.busy} onDiscard={discardDraft} /> : null}
       <div className={cn("grid items-start gap-4", ticket && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
-          <CustomerTickets project={project} authorName={authorName} onNewTicket={composer.show} onSelect={openTicket}
+          <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
             ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
             onFilter={navigation.setFilter} onResetFilters={navigation.resetFilters} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
         </ProjectTicketsBoundary>
@@ -195,13 +200,32 @@ function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className
   </div>;
 }
 
+/** Names the unsent draft beside the list; the header button continues it. */
+function DraftStrip({ owner, project, foreign, busy, onDiscard }: {
+  owner: DisposableTicketDraft; project: ProjectSummary; foreign: boolean; busy: boolean; onDiscard: () => void;
+}) {
+  const { t } = useI18n();
+  const title = useSyncExternalStore(owner.subscribe, () => owner.getSnapshot().title).trim();
+  return <div role="status" className="aurora-inset mb-4 flex flex-wrap items-start gap-x-3 gap-y-1 rounded-xl px-3.5 py-2.5 text-sm sm:items-center">
+    <PenLine aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary sm:mt-0" />
+    <p id="customer-draft-project" className="min-w-0 flex-1 basis-56">
+      <span className="font-semibold text-foreground">{t("customerQueueDraftLabel")}: </span>
+      <span className="break-words text-foreground [overflow-wrap:anywhere]">{title || t("composerUntitled")}</span>
+      <span className="block text-xs text-muted-foreground">
+        {foreign ? t("customerQueueDraftProject", { project: project.name }) : `${project.name} (${project.key}) · ${t("customerQueueDraftHint")}`}
+      </span>
+    </p>
+    <div className="-my-1 ml-auto"><DiscardTicketDraft busy={busy} onDiscard={onDiscard} /></div>
+  </div>;
+}
+
 function ProjectUnavailable() {
   const { t } = useI18n();
   return <p role="alert" className="aurora-panel p-4 text-sm text-foreground">{t("projectMissing")}</p>;
 }
 
-function CustomerTickets({ project, authorName, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onResetFilters, onQuery, onVisibleIds }: {
-  project: ProjectSummary | null | undefined; authorName: string; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
+function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onResetFilters, onQuery, onVisibleIds }: {
+  project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
   selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string | undefined) => void; onResetFilters: () => void; onQuery: (query: string) => void;
   onVisibleIds: (ids: Id<"tickets">[] | undefined) => void;
 }) {
@@ -320,7 +344,7 @@ function CustomerTickets({ project, authorName, onNewTicket, onSelect, selectedI
       : !searching && tickets.length === 0 && page.status === "Exhausted" && (statusScope === "all" || statusScope === "active") ? <div className="aurora-panel space-y-3 p-6"><h2 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h2><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus />{t("newTicket")}</Button></div>
       : <div>
         <p className="px-1 pb-2 text-xs text-muted-foreground">{countLabel}</p>
-        {visibleTickets.length ? <ul className="space-y-2.5">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} authorName={authorName} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+        {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
           : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t(searching ? "customerQueueSearchEmpty" : "customerQueueEmpty")}</p>{statusScope !== "all" && <Button variant="outline" className="min-h-11 rounded-lg" onClick={() => { filterTrigger.current?.focus(); onFilter("all"); }}>{t(searching ? "customerQueueSearchAllStatuses" : "showAllTickets")}</Button>}</div>}
       </div>}
     {!searching && page.status !== "Exhausted" ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}

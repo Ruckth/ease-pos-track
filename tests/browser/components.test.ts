@@ -171,6 +171,10 @@ for (const theme of ["light", "dark"] as const) for (const width of [320, 390, 6
         const dots = await row.locator("[data-status-dot]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
         const label = await row.locator("[data-status-label]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
         const excerpt = await row.locator("[data-ticket-excerpt]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
+        const activity = await row.locator("[data-ticket-activity]").evaluateAll(marks => marks.filter(mark => mark.getClientRects().length > 0).length);
+        assert.equal(activity, 1, `row ${index} shows when it last moved at ${width}`);
+        const request = await row.getByText(copy("en", "feedNeedsReply"), { exact: true }).count();
+        assert.equal(request, status === "waiting" ? 1 : 0, `only the open question asks for a reply (row ${index})`);
         if (width < 640) assert.deepEqual({ dots, label, excerpt }, { dots: 1, label: 0, excerpt: 1 }, `row ${index} at ${width}`);
         else assert.deepEqual({ dots, label, excerpt }, { dots: 0, label: 1, excerpt: 1 }, `row ${index} at ${width}`);
       }

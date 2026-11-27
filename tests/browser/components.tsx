@@ -30,6 +30,8 @@ const rows = statuses.map((status, index) => ({
   ticketNumber: index + 1, title: index === 3 ? "Receipt printer stops after the second copy and the drawer stays locked during close" : `Sample Ticket ${index + 1}`,
   excerpt: "Sample description", status, createdAt: Date.UTC(2026, 10, 1 + index), updatedAt: Date.UTC(2026, 10, 1 + index),
   mediaCount: index % 2, annotationCount: index === 2 ? 1 : 0, version: 0, lifecycle: "active", origin: "customer", tags: [], tagIds: [],
+  // The waiting row carries the team's open question, the way a reply request arrives.
+  ...status === "waiting" ? { latestReply: { role: "staff", at: Date.UTC(2026, 10, 5), excerpt: "Which printer model is it?", awaitingCustomer: true } } : {},
 }) as unknown as TicketSummary);
 
 function Switcher() {
