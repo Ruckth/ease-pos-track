@@ -61,6 +61,29 @@ test("a remotely removed note leaves a copyable draft and a way back to the atta
   } finally { await context.close(); }
 });
 
+test("discarding an unsaved note resets the viewer when a Ticket stays open after archive", async () => {
+  const { context, page, errors } = await harness("case=removed-note");
+  try {
+    await page.getByRole("button", { name: "Comment 1: Original note", exact: true }).click();
+    const editLabel = copy("en", "editComment", { label: 1 });
+    await page.getByRole("button", { name: editLabel, exact: true }).click();
+    const field = page.getByRole("textbox", { name: editLabel });
+    await field.fill("Do not keep this change");
+    const archive = page.getByRole("button", { name: "Archive in place" });
+    const confirm = page.getByRole("alertdialog", { name: copy("en", "discardNoteTitle") });
+    await archive.click();
+    await confirm.getByRole("button", { name: copy("en", "cancel"), exact: true }).click();
+    assert.equal(await field.inputValue(), "Do not keep this change");
+    await archive.click();
+    await confirm.getByRole("button", { name: copy("en", "discardChanges"), exact: true }).click();
+    await page.getByText("Archived", { exact: true }).waitFor();
+    await field.waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: copy("en", "mediaNumber", { number: 2 }), exact: true }).click();
+    await page.getByRole("img", { name: "Attachment 2.png", exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
 test("Project menu supports touch selection and stays visible at 200% pinch zoom", async () => {
   const { context, page } = await harness("case=switcher&long&align=right", { width: 390, height: 700 }, "en", { isMobile: true, hasTouch: true });
   try {

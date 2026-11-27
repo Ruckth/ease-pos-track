@@ -136,21 +136,31 @@ export const MediaViewer = forwardRef<
     focusTimerRef.current = window.setTimeout(() => setFocus(null), 3000);
   }, []);
 
+  const clearNotes = useCallback(() => {
+    setAnnotateMode(false);
+    setMovingId(null);
+    setDraft(null);
+    setDraftText("");
+    setRepositioning(false);
+    setEditText(null);
+    setOpenId(null);
+    setListOpen(false);
+    setFocus(null);
+    setActionError("");
+  }, []);
+
   useImperativeHandle(ref, () => ({
-    requestClose: requestNoteChange,
+    requestClose: onClose => requestNoteChange(() => {
+      clearNotes();
+      onClose();
+    }),
     focusAnnotation: annotation => requestNoteChange(() => {
+      clearNotes();
       initialTarget.current = annotation.mediaIndex;
       mainApi?.scrollTo(annotation.mediaIndex, true);
-      setAnnotateMode(false);
-      setMovingId(null);
-      setDraft(null);
-      setDraftText("");
-      setRepositioning(false);
-      setEditText(null);
-      setActionError("");
       highlightNote(annotation);
     }),
-  }), [highlightNote, mainApi, requestNoteChange]);
+  }), [clearNotes, highlightNote, mainApi, requestNoteChange]);
 
   useEffect(() => {
     if (!focus) return;
