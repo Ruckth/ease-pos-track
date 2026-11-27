@@ -27,7 +27,7 @@ function selectionFrom(list: FileList, folder: boolean): Selection {
  * Hosted pages on one Ticket: publish an HTML file or folder, then open, copy or
  * revoke each link. Anyone with an active link can open the page.
  */
-export function TicketPages({ ticket }: { ticket: Ticket }) {
+export function TicketPages({ ticket, staff }: { ticket: Ticket; staff: boolean }) {
   const { t, formatDate } = useI18n();
   const { pages, target, revoke, accessToken } = useTicketPages(ticket._id);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -35,7 +35,7 @@ export function TicketPages({ ticket }: { ticket: Ticket }) {
   const [error, setError] = useState("");
   const [revoking, setRevoking] = useState<TicketPage | null>(null);
   const entryId = useId();
-  const active = ticket.lifecycle === "active";
+  const canPublish = staff && ticket.lifecycle === "active";
   const htmlPaths = selection?.files.map(file => file.path).filter(isPageHtml) ?? [];
 
   function choose(list: FileList | null, folder: boolean) {
@@ -44,7 +44,7 @@ export function TicketPages({ ticket }: { ticket: Ticket }) {
   }
 
   async function publish() {
-    if (!selection || !target) return;
+    if (!canPublish || !selection || !target) return;
     if (!accessToken) { setError(localizeError(new Error("SESSION_EXPIRED"), t)); return; }
     setError("");
     setPublishing(true);
@@ -87,7 +87,7 @@ export function TicketPages({ ticket }: { ticket: Ticket }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-5 text-muted-foreground">{t("pagesHint")}</p>
+      <p className="text-sm leading-5 text-muted-foreground">{t(staff ? "pagesHint" : "customerPagesHint")}</p>
 
       {pages?.length ? (
         <ul className="divide-y">
@@ -117,7 +117,7 @@ export function TicketPages({ ticket }: { ticket: Ticket }) {
         </ul>
       ) : pages ? <p className="text-sm text-muted-foreground">{t("pagesEmpty")}</p> : null}
 
-      {active ? (
+      {canPublish ? (
         <div className="space-y-3">
           {selection ? (
             <div className="space-y-3">

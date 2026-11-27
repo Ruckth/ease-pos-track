@@ -229,7 +229,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
         </Suspense>}</div>
       </section>}
       <Disclosure title={t("pagesTitle")}><Suspense fallback={<p role="status">{t("syncing")}</p>}>
-        <TicketPages ticket={ticket} />
+        <TicketPages ticket={ticket} staff={staff} />
       </Suspense></Disclosure>
       <Disclosure title={t("detailHistory")}><TicketHistory id={ticket._id} staff={staff} /></Disclosure>
       {!archived && <Disclosure title={t("detailActions")}>

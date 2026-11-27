@@ -2325,7 +2325,7 @@ async function openNewTicket(f: Awaited<ReturnType<typeof open>>, role: "staff" 
   await f.page.getByRole("heading", { name, exact: true }).waitFor();
   await f.page.getByRole("button", { name: copy(language, "pagesTitle"), exact: true }).click();
   const dialog = f.page.locator("body");
-  await dialog.getByText(copy(language, "pagesHint"), { exact: true }).waitFor();
+  await dialog.getByText(copy(language, role === "staff" ? "pagesHint" : "customerPagesHint"), { exact: true }).waitFor();
   return { dialog, ref: created.ticket.ticketNumber };
 }
 async function publishFrom(dialog: Locator, language: Language, input: "choosePageFolder" | "chooseHtmlFile", source: string, entry?: string, timeout?: number) {
@@ -2337,8 +2337,8 @@ async function publishFrom(dialog: Locator, language: Language, input: "choosePa
   return link;
 }
 
-for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
-  test(`${role} ${language}: publish a folder page with nested assets, open it isolated, copy, revoke; publish a single file`, async () => {
+for (const [role, language] of [["staff", "en"], ["staff", "th"]] as const) {
+  test(`staff ${language}: publish a folder page with nested assets, open it isolated, copy, revoke; publish a single file`, async () => {
     const f = await open(role, language);
     const responses = new Map<string, { status: number; type: string | null }>();
     f.context.on("response", response => { if (response.url().includes("/p/")) responses.set(new URL(response.url()).pathname, { status: response.status(), type: response.headers()["content-type"] ?? null }); });
@@ -2392,6 +2392,16 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
     } finally { await f.context.close(); }
   });
 }
+
+test("customer cannot choose an HTML file or folder on their Ticket", async () => {
+  const f = await open("customer", "th");
+  try {
+    const { dialog } = await openNewTicket(f, "customer", "th");
+    await dialog.getByText(copy("th", "pagesEmpty"), { exact: true }).waitFor();
+    assert.equal(await dialog.getByLabel(copy("th", "choosePageFolder"), { exact: true }).count(), 0);
+    assert.equal(await dialog.getByLabel(copy("th", "chooseHtmlFile"), { exact: true }).count(), 0);
+  } finally { await f.context.close(); }
+});
 
 test("publishing an HTML screenshot fits Full HD and preserves transparent pixels", async () => {
   const { default: sharp } = await import("sharp");

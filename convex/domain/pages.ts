@@ -94,10 +94,11 @@ async function ticketByReference(ctx: Ctx, reference: string) {
   return doc;
 }
 
-/** Current Ticket write access, active lifecycle and Project access. */
+/** Staff publishing requires current Ticket write access, active lifecycle and Project access. */
 async function requirePublishableTicket(ctx: MutationCtx, actor: AnyActor, id: Id<"tickets">) {
   // Hosted pages store blobs like media: pilot deployments keep them disabled.
   await requireLegacyAccess(ctx);
+  if (actor.role !== "staff") throw new Error("TICKET_UNAVAILABLE");
   const doc = await requireWritableTicket(ctx, actor, id);
   await requireUsableProject(ctx, actor, doc.projectId);
   return doc;

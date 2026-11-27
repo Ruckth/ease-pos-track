@@ -49,9 +49,7 @@ async function fixture() {
   const blobs = () => t.run(ctx => ctx.db.system.query("_storage").collect());
   const path = (url: string) => new URL(url).pathname;
   const as = (session: string) => t.raw.withIdentity({ subject: session });
-  const aliceId = async () => (await t.query(api.projects.listProjectMembers, { token: staff, projectId: seed.projects[0].id }))
-    .find(member => member.username === "alice")!.customerId;
-  return { t, seed, staff, alice, bob, aliceTicket, ref, publish, rows, blobs, path, as, aliceId };
+  return { t, seed, staff, alice, bob, aliceTicket, ref, publish, rows, blobs, path, as };
 }
 
 test("authority is checked before the body is read; nothing is reserved or stored on rejection", async () => {
@@ -61,22 +59,20 @@ test("authority is checked before the body is read; nothing is reserved or store
     [null, f.aliceTicket.ref, 401, "AUTH_REQUIRED"],
     ["missing-session", f.aliceTicket.ref, 401, "SESSION_EXPIRED"],
     [f.bob, f.aliceTicket.ref, 404, "TICKET_UNAVAILABLE"],
-    [f.alice, "POS-9999", 404, "TICKET_UNAVAILABLE"],
-    [f.alice, "not-a-ticket", 404, "TICKET_UNAVAILABLE"],
+    [f.alice, f.aliceTicket.ref, 404, "TICKET_UNAVAILABLE"],
+    [f.staff, "POS-9999", 404, "TICKET_UNAVAILABLE"],
+    [f.staff, "not-a-ticket", 404, "TICKET_UNAVAILABLE"],
   ];
   for (const [token, ticket, status, code] of cases) {
     const response = await f.publish(token, ticket, garbage, crypto.randomUUID(), { "Content-Type": "multipart/form-data; boundary=x" });
     expect([response.status, (await response.json()).code], `${token} ${ticket}`).toEqual([status, code]);
   }
-  const foreign = await f.publish(f.alice, f.aliceTicket.ref, form(), crypto.randomUUID(), { Origin: "https://elsewhere.example" });
+  const foreign = await f.publish(f.staff, f.aliceTicket.ref, form(), crypto.randomUUID(), { Origin: "https://elsewhere.example" });
   expect([foreign.status, (await foreign.json()).code]).toEqual([403, "ORIGIN_NOT_ALLOWED"]);
-  const noKey = await f.publish(f.alice, f.aliceTicket.ref, form(), null);
+  const noKey = await f.publish(f.staff, f.aliceTicket.ref, form(), null);
   expect(noKey.status).toBe(400);
-  // A customer who lost Project membership is denied the same way.
-  const aliceId = await f.aliceId();
-  await f.t.mutation(api.projects.removeProjectMember, { token: f.staff, projectId: f.seed.projects[0].id, customerId: aliceId });
-  const removed = await f.publish(f.alice, f.aliceTicket.ref, form());
-  expect([removed.status, (await removed.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
+  const customer = await f.publish(f.alice, f.aliceTicket.ref, form());
+  expect([customer.status, (await customer.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
   expect(await f.rows()).toEqual([]);
   expect(await f.blobs()).toEqual([]);
 });
@@ -87,33 +83,33 @@ test("repeated, unnamed and excess multipart fields are rejected before staging"
   const unnamed = form(); unnamed.append("f99", new Blob(["x"]), "x.css");
   const doubled = form(); doubled.append("entry", "reports/summary.html");
   for (const body of [repeated, unnamed, doubled]) {
-    const response = await f.publish(f.alice, f.aliceTicket.ref, body);
+    const response = await f.publish(f.staff, f.aliceTicket.ref, body);
     expect([response.status, (await response.json()).code]).toEqual([400, "PAGE_FORM_INVALID"]);
   }
-  const unsafe = await f.publish(f.alice, f.aliceTicket.ref, form({ "../escape.html": "<p>x</p>" }, "../escape.html"));
+  const unsafe = await f.publish(f.staff, f.aliceTicket.ref, form({ "../escape.html": "<p>x</p>" }, "../escape.html"));
   expect([unsafe.status, (await unsafe.json()).code]).toEqual([400, "PAGE_PATH_INVALID"]);
-  const typed = await f.publish(f.alice, f.aliceTicket.ref, form({ "index.html": "", "tool.exe": "MZ" }, "index.html"));
+  const typed = await f.publish(f.staff, f.aliceTicket.ref, form({ "index.html": "", "tool.exe": "MZ" }, "index.html"));
   expect([typed.status, (await typed.json()).code]).toEqual([400, "PAGE_FILE_TYPE_UNSUPPORTED"]);
   expect(await f.rows()).toEqual([]);
 });
 
-test("customer publishes a nested folder; replay returns the original link; changed content conflicts", async () => {
+test("staff publishes a nested folder; replay returns the original link; changed content conflicts", async () => {
   const f = await fixture();
   const key = crypto.randomUUID();
-  const created = await f.publish(f.alice, f.aliceTicket.ref, form(), key, { Origin: APP });
+  const created = await f.publish(f.staff, f.aliceTicket.ref, form(), key, { Origin: APP });
   expect(created.status).toBe(201);
   expect(created.headers.get("access-control-allow-origin")).toBe(APP);
   const page = await created.json();
   expect(page).toMatchObject({ ok: true, ticket: f.aliceTicket.ref, entry: "reports/summary.html", fileCount: 5, created: true, requestId: key });
   expect(page.url).toMatch(new RegExp(`^${SITE}/p/[A-Za-z0-9_-]{43}/reports/summary\\.html$`));
 
-  const replay = await f.publish(f.alice, f.aliceTicket.ref, form(), key);
+  const replay = await f.publish(f.staff, f.aliceTicket.ref, form(), key);
   expect(replay.status).toBe(200);
   expect(await replay.json()).toMatchObject({ url: page.url, pageId: page.pageId, created: false });
-  const changed = await f.publish(f.alice, f.aliceTicket.ref, form({ ...bundle, "assets/app.js": "changed" }), key);
+  const changed = await f.publish(f.staff, f.aliceTicket.ref, form({ ...bundle, "assets/app.js": "changed" }), key);
   expect([changed.status, (await changed.json()).code]).toEqual([409, "PAGE_REQUEST_CONFLICT"]);
   // Another actor learns nothing about a key it does not own.
-  const foreign = await f.publish(f.staff, f.aliceTicket.ref, form(), key);
+  const foreign = await f.publish(f.alice, f.aliceTicket.ref, form(), key);
   expect([foreign.status, (await foreign.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
   expect((await f.rows()).length).toBe(1);
   expect((await f.blobs()).length).toBe(5);
@@ -140,7 +136,7 @@ test("named staff publish; a replay belongs to that staff member only", async ()
 
 test("serving checks publication, lifecycle and revocation on every HTML and asset read", async () => {
   const f = await fixture();
-  const page = await (await f.publish(f.alice, f.aliceTicket.ref, form())).json();
+  const page = await (await f.publish(f.staff, f.aliceTicket.ref, form())).json();
   const entry = f.path(page.url);
   const asset = f.path(new URL("../assets/img/dot.png", page.url).href);
   const font = f.path(new URL("../assets/fonts/f.woff2", page.url).href);
@@ -170,7 +166,7 @@ test("serving checks publication, lifecycle and revocation on every HTML and ass
   const archived = await f.t.mutation(api.tickets.archiveTicket, { token: f.alice, id: f.aliceTicket.id, expectedVersion: ticket.version });
   expect((await f.t.fetch(entry)).status).toBe(404);
   expect((await f.t.fetch(asset)).status).toBe(404);
-  const blocked = await f.publish(f.alice, f.aliceTicket.ref, form());
+  const blocked = await f.publish(f.staff, f.aliceTicket.ref, form());
   expect([blocked.status, (await blocked.json()).code]).toEqual([404, "TICKET_UNAVAILABLE"]);
   expect((await f.t.fetch(asset, { headers: { "If-None-Match": tag } })).status).toBe(404);
   await f.t.mutation(api.tickets.restoreTicket, { token: f.staff, id: f.aliceTicket.id, expectedVersion: archived.version });
@@ -183,7 +179,7 @@ test("serving checks publication, lifecycle and revocation on every HTML and ass
   for (const path of [entry, asset, font]) expect((await f.t.fetch(path)).status, path).toBe(404);
   expect(await f.t.query(api.pages.listTicketPages, { token: f.alice, id: f.aliceTicket.id })).toEqual([]);
   expect((await f.t.fetch(asset,{headers:{"If-None-Match":tag}})).status).toBe(404);
-  const reused = await f.publish(f.alice, f.aliceTicket.ref, form(), page.requestId);
+  const reused = await f.publish(f.staff, f.aliceTicket.ref, form(), page.requestId);
   expect([reused.status, (await reused.json()).code]).toEqual([409, "PAGE_REVOKED"]);
 });
 
@@ -198,14 +194,14 @@ test("an unexpected storage failure is retryable; the same key stages only missi
     if ((data as ArrayBuffer).byteLength === 777 && ++seen === 2) throw new TypeError("storage unavailable");
     return digest(algorithm, data);
   });
-  const failed = await f.publish(f.alice, f.aliceTicket.ref, form(files, "index.html"), key);
+  const failed = await f.publish(f.staff, f.aliceTicket.ref, form(files, "index.html"), key);
   expect([failed.status, failed.headers.get("retry-after")]).toEqual([503, "2"]);
   expect(await failed.json()).toEqual({ ok: false, code: "PAGE_PUBLISH_UNKNOWN", retryable: true });
   const [staged] = await f.rows();
   expect([staged.state, staged.files.map(file => file.path), staged.shareKey]).toEqual(["staging", ["index.html"], undefined]);
   vi.restoreAllMocks();
 
-  const retried = await f.publish(f.alice, f.aliceTicket.ref, form(files, "index.html"), key);
+  const retried = await f.publish(f.staff, f.aliceTicket.ref, form(files, "index.html"), key);
   expect(retried.status).toBe(201);
   const [row] = await f.rows();
   expect([row.state, row.files.map(file => file.path).sort(), row.discarded]).toEqual(["published", ["index.html", "style.css"], []]);
@@ -224,7 +220,7 @@ test("an interrupted publish retains stored encoder output and rejects drift for
   // and serialized the img element differently from the current encoder.
   const prior = original[entry] + "\n";
   const manifest = await manifestOf({ [entry]: prior });
-  const reserve = (requestId: string) => f.as(f.alice).mutation(internal.pages.reserve, {
+  const reserve = (requestId: string) => f.as(f.staff).mutation(internal.pages.reserve, {
     ticket: f.aliceTicket.ref, requestId, entry, manifest, sourceDigest,
   });
 
@@ -234,14 +230,14 @@ test("an interrupted publish retains stored encoder output and rejects drift for
   const [write] = saved.writes;
   const storageId = await f.t.run(ctx => ctx.storage.store(new Blob([prior], { type: write.contentType })));
   await f.t.mutation(internal.pages.recordStaged, { pageId: saved.pageId, marker: write.marker, storageId, ...manifest[0] });
-  const success = await f.publish(f.alice, f.aliceTicket.ref, form(original, entry), savedKey);
+  const success = await f.publish(f.staff, f.aliceTicket.ref, form(original, entry), savedKey);
   expect(success.status).toBe(201);
   const page = await success.json();
   expect(await (await f.t.fetch(f.path(page.url))).text()).toBe(prior);
 
   const missingKey = crypto.randomUUID();
   await reserve(missingKey);
-  const conflict = await f.publish(f.alice, f.aliceTicket.ref, form(original, entry), missingKey);
+  const conflict = await f.publish(f.staff, f.aliceTicket.ref, form(original, entry), missingKey);
   expect(conflict.status).toBe(409);
   expect(await conflict.json()).toEqual({ ok: false, code: "PAGE_REQUEST_CONFLICT" });
   expect(await f.blobs()).toHaveLength(1);
@@ -251,16 +247,16 @@ test("commit rechecks access; expiry records abandonment and only gated reclaim 
   vi.useFakeTimers();
   const f = await fixture();
   const manifest = [{ path: "index.html", size: 3, sha256: await sha256Hex(new TextEncoder().encode("<p>")) }];
-  const reserve = (requestId: string) => f.as(f.alice).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest });
+  const reserve = (requestId: string) => f.as(f.staff).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest });
   const first = await reserve("commit-recheck");
   if (first.state !== "staging") throw new Error("expected staging");
   const [write] = first.writes;
   const storageId = await f.t.run(ctx => ctx.storage.store(new Blob(["<p>"], { type: write.contentType })));
   await f.t.mutation(internal.pages.recordStaged, { pageId: first.pageId, marker: write.marker, path: "index.html", sha256: manifest[0].sha256, size: 3, storageId });
-  const aliceId = await f.aliceId();
-  await f.t.mutation(api.projects.removeProjectMember, { token: f.staff, projectId: f.seed.projects[0].id, customerId: aliceId });
-  await expect(f.as(f.alice).mutation(internal.pages.commit, { pageId: first.pageId })).rejects.toThrow("TICKET_UNAVAILABLE");
-  await f.t.run(ctx => ctx.db.insert("projectMembers", { projectId: f.seed.projects[0].id, customerId: aliceId, createdAt: Date.now() }));
+  const ticket = (await f.t.query(api.tickets.getTicket, { token: f.staff, id: f.aliceTicket.id }))!;
+  const archived = await f.t.mutation(api.tickets.archiveTicket, { token: f.staff, id: f.aliceTicket.id, expectedVersion: ticket.version });
+  await expect(f.as(f.staff).mutation(internal.pages.commit, { pageId: first.pageId })).rejects.toThrow("TICKET_UNAVAILABLE");
+  await f.t.mutation(api.tickets.restoreTicket, { token: f.staff, id: f.aliceTicket.id, expectedVersion: archived.version });
 
   vi.advanceTimersByTime(16 * 60 * 1000);
   expect(await f.t.mutation(internal.pages.expireStaging, {})).toBe(1);
@@ -272,7 +268,7 @@ test("commit rechecks access; expiry records abandonment and only gated reclaim 
   const resumed = await reserve("commit-recheck");
   expect(resumed).toMatchObject({ state: "staging", staged: [{ path: "index.html" }] });
   if (resumed.state !== "staging") throw new Error("expected staging");
-  expect(await f.as(f.alice).mutation(internal.pages.commit, { pageId: resumed.pageId })).toMatchObject({ entryPath: "index.html" });
+  expect(await f.as(f.staff).mutation(internal.pages.commit, { pageId: resumed.pageId })).toMatchObject({ entryPath: "index.html" });
 
   // Purge retires pages; enabled reclaim deletes only blobs recorded on retired rows.
   const unrelated = await f.t.run(ctx => ctx.storage.store(new Blob(["unrelated"])));
@@ -293,7 +289,7 @@ async function manifestOf(files: Files) {
 
 /** Stores bytes exactly as the publishing action does, then "crashes" before recording. */
 async function interruptedWrite(f: Awaited<ReturnType<typeof fixture>>, files: Files, requestId: string) {
-  const reserved = await f.as(f.alice).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest: await manifestOf(files) });
+  const reserved = await f.as(f.staff).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId, entry: "index.html", manifest: await manifestOf(files) });
   if (reserved.state !== "staging") throw new Error("expected staging");
   const write = reserved.writes.find(item => item.path === "index.html")!;
   const orphan = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: write.contentType })));
@@ -316,7 +312,7 @@ test("a blob stored before an interrupted record is adopted on retry by its priv
   vi.advanceTimersByTime(1_000);
 
   // The interrupted reservation was made for prepared files (no server image policy).
-  const retried = await f.publish(f.alice, f.aliceTicket.ref, form(files, "index.html"), key, { "X-Ticket-Image-Policy": "v1" });
+  const retried = await f.publish(f.staff, f.aliceTicket.ref, form(files, "index.html"), key, { "X-Ticket-Image-Policy": "v1" });
   expect(retried.status).toBe(201);
   const page = await retried.json();
   expect(JSON.stringify(page)).not.toContain(write.marker);
@@ -387,7 +383,7 @@ test("reconciliation reads a bounded number of storage rows per pass and resumes
   vi.useFakeTimers();
   const f = await fixture();
   const files = { "index.html": "<p>busy</p>" };
-  const reserved = await f.as(f.alice).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId: crypto.randomUUID(), entry: "index.html", manifest: await manifestOf(files) });
+  const reserved = await f.as(f.staff).mutation(internal.pages.reserve, { ticket: f.aliceTicket.ref, requestId: crypto.randomUUID(), entry: "index.html", manifest: await manifestOf(files) });
   if (reserved.state !== "staging") throw new Error("expected staging");
   await f.t.run(async ctx => { for (let index = 0; index < PAGE_WRITE_SCAN + 20; index++) await ctx.storage.store(new Blob([`other ${index}`])); });
   const orphan = await f.t.run(ctx => ctx.storage.store(new Blob([files["index.html"]], { type: reserved.writes[0].contentType })));
@@ -409,9 +405,9 @@ test("raw API resizes image bytes, preserves the authored path, and rejects a fo
     {path:"index.html",blob:new Blob(['<img src="picture.png">'])},
     {path:"picture.png",blob:new Blob([new Uint8Array(source)])},
   ]);
-  const failed=await f.publish(f.alice,f.aliceTicket.ref,body(),crypto.randomUUID(),{"X-Ticket-Image-Policy":"v1"});
+  const failed=await f.publish(f.staff,f.aliceTicket.ref,body(),crypto.randomUUID(),{"X-Ticket-Image-Policy":"v1"});
   expect(failed.status).toBe(400);
-  const published=await f.publish(f.alice,f.aliceTicket.ref,body());
+  const published=await f.publish(f.staff,f.aliceTicket.ref,body());
   expect(published.status).toBe(201);
   const {url}=await published.json();
   const asset=await f.t.fetch(f.path(new URL("picture.png",url).href));
@@ -431,7 +427,7 @@ test("browser originals are converted once on the server; the image policy is pa
   const html = `<!doctype html><h1>สรุป</h1><img alt="shot" src="data:image/jpeg;base64,${jpeg.toString("base64")}">`;
   const body = () => pageFormData("report.html", [{ path: "report.html", blob: new Blob([html]) }]);
   const key = crypto.randomUUID();
-  const created = await f.publish(f.alice, f.aliceTicket.ref, body(), key, { Origin: APP });
+  const created = await f.publish(f.staff, f.aliceTicket.ref, body(), key, { Origin: APP });
   expect(created.status).toBe(201);
   const page = await created.json();
   const served = await (await f.t.fetch(f.path(page.url))).text();
@@ -446,9 +442,9 @@ test("browser originals are converted once on the server; the image policy is pa
   expect(stored.length).toBeLessThan(jpeg.length);
   expect(page.totalBytes).toBe(new TextEncoder().encode(served).length);
   // The same originals declared as prepared are a different request under this key.
-  const prepared = await f.publish(f.alice, f.aliceTicket.ref, body(), key, { "X-Ticket-Image-Policy": "v1" });
+  const prepared = await f.publish(f.staff, f.aliceTicket.ref, body(), key, { "X-Ticket-Image-Policy": "v1" });
   expect([prepared.status, (await prepared.json()).code]).toEqual([409, "PAGE_REQUEST_CONFLICT"]);
-  expect((await f.publish(f.alice, f.aliceTicket.ref, body(), key)).status).toBe(200);
+  expect((await f.publish(f.staff, f.aliceTicket.ref, body(), key)).status).toBe(200);
 });
 
 test("temporary image chunks are consumed once and abandoned chunks expire", async () => {
