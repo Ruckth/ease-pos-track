@@ -41,7 +41,7 @@ export function ImageMarkupToolbar({ tool, labels, onTool, canUndo, canRedo, onU
             render={<Button type="button" size="icon-touch" className="shrink-0 sm:hidden" variant={primary(tool) || tool === "select" ? "outline" : "default"} />}
             disabled={disabled} aria-label={labels.moreTools}
           ><Ellipsis aria-hidden="true" /></DropdownMenuTrigger>
-          <DropdownMenuContent>
+          <DropdownMenuContent className="min-w-40">
             <DropdownMenuRadioGroup value={tool} onValueChange={value => onTool(value as MarkupTool)}>
               {tools.filter(([value]) => !primary(value)).map(([value, label, icon]) => (
                 <DropdownMenuRadioItem key={value} value={value} closeOnClick>{icon}{label}</DropdownMenuRadioItem>
@@ -72,7 +72,7 @@ export function ZoomControls({ zoom, labels }: { zoom: MarkupZoom; labels: Marku
           render={<Button type="button" size="icon-touch" className="sm:hidden" variant="outline" />}
           aria-label={labels.view}
         ><Shrink aria-hidden="true" /></DropdownMenuTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuContent className="min-w-40">
           <DropdownMenuRadioGroup value={String(zoom.view)} onValueChange={value => value === "fit" ? zoom.fit() : zoom.fitWidth()}>
             <DropdownMenuRadioItem value="fit" closeOnClick>{labels.fitImage}</DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="width" closeOnClick>{labels.fitWidth}</DropdownMenuRadioItem>

@@ -48,7 +48,7 @@ export function Dialog({ open, onOpenChange, title, description, keepMounted = f
     if (!open || !mobileWorkspace || !element || !viewport) return;
     const fitViewport = () => {
       // Let browser magnification work normally. A keyboard changes height at the same scale.
-      if (viewport.scale !== 1) return;
+      if (Math.abs(viewport.scale - 1) > 0.01) return;
       element.style.setProperty("--dialog-height", `${viewport.height}px`);
       element.style.setProperty("--dialog-top", `${viewport.offsetTop}px`);
     };
@@ -86,7 +86,7 @@ export function Dialog({ open, onOpenChange, title, description, keepMounted = f
               <X className="size-4" />
             </BaseDialog.Close>
           </div>
-          <div className={cn("aurora-dialog-body p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5", placement === "fullscreen" && "mx-auto max-w-4xl", mobileWorkspace && "w-full max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:px-3 max-sm:pt-2 max-sm:pb-[max(.5rem,env(safe-area-inset-bottom))]")}>{children}</div>
+          <div className={cn("aurora-dialog-body p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5", placement === "fullscreen" && "mx-auto max-w-4xl", mobileWorkspace && "w-full max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:overflow-y-auto max-sm:px-3 max-sm:pt-2 max-sm:pb-[max(.5rem,env(safe-area-inset-bottom))]")}>{children}</div>
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

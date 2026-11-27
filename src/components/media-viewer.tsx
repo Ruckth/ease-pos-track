@@ -83,6 +83,7 @@ export const MediaViewer = forwardRef<
   const currentNotes = annotations.filter(note => note.mediaIndex === selectedIndex);
   const selectedNote = currentNotes.find(note => note.id === openId);
   const placing = !disabled && !readOnly && !saving && (Boolean(movingId) || (annotateMode && (!draft || repositioning)));
+  const noteRemovedWhileEditing = editText !== null && !selectedNote;
   const dirty = Boolean(draftText.trim()) || (editText !== null && editText !== selectedNote?.text);
 
   const requestNoteChange = useCallback((action: () => void) => {
@@ -252,7 +253,6 @@ export const MediaViewer = forwardRef<
       });
       setMovingId(null);
       highlightNote({ ...movingAnnotation, x: target.x, y: target.y, time: target.time ?? movingAnnotation.time });
-      requestAnimationFrame(() => noteListButton.current?.focus({ preventScroll: true }));
     } catch (error) {
       setActionError(localizeError(error, t));
     } finally {
@@ -331,7 +331,7 @@ export const MediaViewer = forwardRef<
         <CarouselContent className={cn("-ml-0", workspace && "max-sm:h-full")}>
           {media.map((item, index) => {
             const Slide = isVideoMedia(item) ? VideoSlide : ImageSlide;
-            return <CarouselItem key={item.key} className="pl-0">
+            return <CarouselItem key={item.key} className={cn("pl-0", workspace && "max-sm:flex max-sm:h-full max-sm:min-h-0 max-sm:flex-col")}>
               {index === selectedIndex && <Slide item={item} index={index}
                 annotations={annotations.filter(note => note.mediaIndex === index)}
                 annotateMode={placing}
@@ -383,7 +383,14 @@ export const MediaViewer = forwardRef<
         </Carousel>
       ) : null}
 
-      {!annotateMode && !movingId && currentNotes.length > 0 && (
+      {noteRemovedWhileEditing && (
+        <div className="shrink-0 space-y-2 border-t pt-2">
+          <p role="status" className="text-sm">{t("removedNoteDraft")}</p>
+          <Textarea rows={2} readOnly value={editText} aria-label={t("unsavedNoteText")} className="min-h-16" />
+          <Button type="button" size="touch" variant="outline" onClick={() => requestNoteChange(closeNote)}>{t("closeNote")}</Button>
+        </div>
+      )}
+      {!noteRemovedWhileEditing && !annotateMode && !movingId && currentNotes.length > 0 && (
         <div className={cn("shrink-0", workspace && "max-sm:max-h-[52%] max-sm:overflow-y-auto")}>
           {workspace && <Button type="button" size="touch" ref={noteListButton} variant="ghost" aria-expanded={listOpen}
             onClick={() => setListOpen(!listOpen)}>{t("noteListCount", { count: currentNotes.length })}</Button>}
@@ -402,7 +409,7 @@ export const MediaViewer = forwardRef<
           {selectedNote && <PinDetails key={selectedNote.id} annotation={selectedNote} readOnly={readOnly}
             editText={editText} setEditText={setEditText} onCancelEdit={() => requestNoteChange(() => setEditText(null))}
             onClose={() => requestNoteChange(closeNote)} onUpdate={onUpdateAnnotation} onMove={startMoving}
-            onDelete={onDeleteAnnotation} onBusyChange={setPanelBusy} />}
+            onDelete={onDeleteAnnotation} onDeleted={closeNote} onBusyChange={setPanelBusy} />}
         </div>
       )}
 

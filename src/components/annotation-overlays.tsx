@@ -56,7 +56,7 @@ export function DraftPin({ x, y }: { x: number; y: number }) {
 }
 
 export function PinDetails({
-  annotation, readOnly, editText, setEditText, onCancelEdit, onClose, onUpdate, onMove, onDelete, onBusyChange,
+  annotation, readOnly, editText, setEditText, onCancelEdit, onClose, onUpdate, onMove, onDelete, onDeleted, onBusyChange,
 }: {
   annotation: Annotation;
   readOnly: boolean;
@@ -67,6 +67,7 @@ export function PinDetails({
   onUpdate: (input: AnnotationUpdateInput) => Promise<void>;
   onMove: (annotationId: string) => void;
   onDelete: (annotationId: string) => Promise<void>;
+  onDeleted: () => void;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useI18n();
@@ -129,7 +130,7 @@ export function PinDetails({
         title={t("deleteComment", { label: annotation.label })}
         description={t("deleteCommentConfirm", { label: annotation.label })}
         confirmLabel={t("deleteComment", { label: annotation.label })}
-        onConfirm={() => void run(async () => { await onDelete(annotation.id); onClose(); })} />
+        onConfirm={() => void run(async () => { await onDelete(annotation.id); onDeleted(); })} />
     </div>
   );
 }

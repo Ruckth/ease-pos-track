@@ -557,6 +557,40 @@ for (const [language, viewport] of [
   });
 }
 
+test("mobile video fits the placement surface and time controls in the photo workspace", async () => {
+  const { context, page, errors } = await openWith(await browsers.get(), "customer", "en", undefined, {
+    viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true,
+  });
+  const t = (key: Parameters<typeof copy>[1], values?: Parameters<typeof copy>[2]) => copy("en", key, values);
+  try {
+    const name = "pin-video.webm";
+    await page.locator('input[type="file"][multiple]').setInputFiles(`tests/browser/${name}`);
+    await page.getByRole("button", { name: t("openMedia", { name }), exact: true }).tap();
+    const viewer = page.getByRole("dialog", { name, exact: true });
+    await viewer.getByRole("button", { name: t("addPin"), exact: true }).tap();
+    const slider = viewer.getByRole("slider");
+    await slider.waitFor();
+    const surface = viewer.getByRole("button", { name: t("markPoint"), exact: true });
+    const viewport = viewer.locator('[aria-roledescription="carousel"]');
+    async function assertFits() {
+      const rangeBox = (await slider.boundingBox())!;
+      const hitBox = (await surface.boundingBox())!;
+      const bounds = (await viewport.boundingBox())!;
+      assert.ok(rangeBox.y >= bounds.y && hitBox.y + hitBox.height <= bounds.y + bounds.height);
+      await surface.tap({ position: { x: hitBox.width * .7, y: hitBox.height * .9 } });
+    }
+    await assertFits();
+    await viewer.getByRole("textbox", { name: t("describeIssue") }).fill("Check this frame");
+    await viewer.getByRole("button", { name: t("savePin"), exact: true }).tap();
+    await assertFits();
+    await viewer.getByRole("textbox", { name: t("describeIssue") }).fill("Second frame note");
+    await viewer.getByRole("button", { name: t("savePin"), exact: true }).tap();
+    await viewer.getByRole("button", { name: t("placementDone"), exact: true }).tap();
+    await viewer.getByRole("button", { name: t("noteListCount", { count: 2 }), exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
 test("mobile receipt note stays readable and editable outside the image", async () => {
   const { context, page, errors } = await openWith(await browsers.get(), "customer", "en", undefined, {
     viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true,

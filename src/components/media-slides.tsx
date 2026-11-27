@@ -73,7 +73,7 @@ function usePinPosition<T extends HTMLElement>(placing: boolean, movingPin?: Pin
 
 function PlacementHint({ position }: { position: string }) {
   const { t } = useI18n();
-  return <p className="w-full bg-muted px-3 py-2 text-sm text-foreground [@media(pointer:coarse)]:sr-only">
+  return <p className="w-full shrink-0 bg-muted px-3 py-2 text-sm text-foreground [@media(pointer:coarse)]:sr-only">
     {t("pinKeyboardHint")} <span role="status">{position}</span>
   </p>;
 }
@@ -96,7 +96,7 @@ export function ImageSlide({
   const placement = usePinPosition<HTMLImageElement>(annotateMode, movingPin);
   return <>
     {annotateMode && <PlacementHint position={placement.position} />}
-    <div className={cn("flex h-[42vh] items-center justify-center sm:h-[48vh]", workspace && "max-sm:h-full max-sm:[container-type:size]")}>
+    <div className={cn("flex h-[42vh] items-center justify-center sm:h-[48vh]", workspace && "max-sm:min-h-0 max-sm:flex-1 max-sm:[container-type:size]")}>
       <div className="relative inline-flex max-h-full max-w-full">
         <img
           src={item.url}
@@ -224,13 +224,13 @@ export function VideoSlide({
   return <>
     {annotateMode && <>
       <PlacementHint position={placement.position} />
-      {duration > 0 && <label className="flex items-center gap-2 bg-muted px-3 pb-2 text-sm text-foreground">
+      {duration > 0 && <label className="flex shrink-0 items-center gap-2 bg-muted px-3 pb-2 text-sm text-foreground">
         {t("pinAtTime", { time: formatClock(currentTime) })}
         <input type="range" className="min-h-11 min-w-0 flex-1" min={0} max={duration} step={0.1} value={currentTime}
           onChange={event => { if (videoRef.current) videoRef.current.currentTime = Number(event.target.value); }} />
       </label>}
     </>}
-    <div className={cn("flex h-[42vh] flex-col items-center justify-center gap-2 py-2 sm:h-[48vh]", workspace && "max-sm:h-full max-sm:[container-type:size]")}>
+    <div className={cn("flex h-[42vh] flex-col items-center justify-center gap-2 py-2 sm:h-[48vh]", workspace && "max-sm:min-h-0 max-sm:flex-1 max-sm:[container-type:size]")}>
       <div className="relative inline-flex max-h-full min-h-0 max-w-full">
         <video
           ref={videoRef}
