@@ -11,7 +11,31 @@ const errors=[];
 const button = name => page.getByRole("button", { name, exact: true });
 const countRows = async n => { await page.waitForFunction(n => document.querySelectorAll('tbody tr').length === n,n); };
 const summary = async text => { await page.getByText(text,{exact:true}).waitFor(); };
+const filterTrigger = () => page.locator('[data-slot="ticket-filter-trigger"]');
+const filterPanel = () => page.locator('[data-slot="ticket-filter-panel"]');
+async function openFilters() {
+  if (await filterTrigger().getAttribute("aria-expanded") !== "true") await filterTrigger().click();
+  await filterPanel().waitFor();
+}
+async function dismissFilters() {
+  await page.keyboard.press("Escape");
+  await filterPanel().waitFor({ state: "hidden" });
+  assert.equal(await filterTrigger().evaluate(el => el === document.activeElement), true);
+}
+async function expectFilterCount(count) {
+  const indicator = filterTrigger().locator('[data-slot="ticket-filter-indicator"]');
+  assert.equal(await filterTrigger().getAttribute("aria-label"), count ? `Filters, ${count} applied` : "Filters");
+  if (count) {
+    assert.equal(await indicator.isVisible(), true);
+    assert.equal(await indicator.innerText(), count === 1 ? "" : String(count));
+  } else assert.equal(await indicator.count(), 0);
+}
+async function clearFilters() {
+  await openFilters();
+  await button("Clear filters").click();
+}
 async function add(field, operator) {
+  await openFilters();
   await button("Add filter").click();
   await page.getByRole("option", { name: field, exact: true }).click();
   await page.getByRole("option", { name: operator, exact: true }).click();
@@ -28,23 +52,28 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await button("Ticket number").click(); await countRows(25);
   assert.match(await page.locator("tbody tr").first().innerText(),/POS-0001/);
   await page.getByRole("button",{name:/Open Ticket POS-0001:/}).click(); assert.equal(await page.locator("output").innerText(),"0");
+  await expectFilterCount(0);
   await add("Tags","is any of"); await page.getByRole("option",{name:"Printer",exact:true}).click(); await page.keyboard.press("Escape"); await summary("Page 1 of 2 · 27 Tickets");
+  assert.equal(await filterPanel().isVisible(), true, "Escape closes the nested editor first");
+  await dismissFilters(); await expectFilterCount(1);
   await button("Board").click(); assert.equal(await button("Board").getAttribute("aria-pressed"),"true");
   await button("Table").click(); await summary("Page 1 of 2 · 27 Tickets");
   await add("Status","is any of"); await page.getByRole("option",{name:"Resolved",exact:true}).click(); await page.keyboard.press("Escape"); await countRows(9);
+  await dismissFilters(); await expectFilterCount(2); await openFilters();
   await button("Status filter options").click(); await page.getByRole("menuitem",{name:"Remove",exact:true}).click(); await summary("Page 1 of 2 · 27 Tickets");
-  await button("Clear all").click(); await countRows(25);
+  await clearFilters(); await countRows(25);
   await add("Created date","between");
   await page.getByLabel("Created date · From",{exact:true}).fill("2026-09-15");
   await page.getByLabel("Created date · Through",{exact:true}).fill("2026-09-16");
   await button("Apply").click(); await countRows(2);
-  await button("Clear all").click();
+  await clearFilters();
   await add("Urgency","Unset"); await countRows(14);
-  await button("Clear all").click();
+  await clearFilters();
   await add("Urgency","between");
   const slider=page.getByRole("slider").first(); await slider.focus(); await page.keyboard.press("End");
   await button("Apply").click(); await page.getByText("No Tickets match these filters.",{exact:true}).waitFor();
-  await button("Clear all").click();
+  await clearFilters();
+  await dismissFilters(); await expectFilterCount(0);
   await button("Archives").click(); await summary("Page 1 of 3 · 55 Tickets");
   await page.getByRole("textbox",{name:"Search",exact:true}).fill("POS-0055"); await countRows(1); assert.match(await page.locator("tbody").innerText(),/Archived/);
   await page.getByRole("button",{name:/Open Ticket POS-0055:/}).click();
@@ -52,14 +81,15 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   assert.equal(await archivedDialog.getByRole("button",{name:"Edit",exact:true}).count(),0);
   await archivedDialog.getByRole("button",{name:"Restore",exact:true}).click(); await archivedDialog.waitFor({state:"hidden"});
   assert.doesNotMatch(await page.locator("tbody").innerText(),/Archived/);
-  await button("Clear all").click(); await button("Last page").click(); await button("Shrink").click(); await summary("Page 1 of 1 · 5 Tickets");
+  await page.getByRole("textbox", { name: "Search", exact: true }).fill(""); await button("Last page").click(); await button("Shrink").click(); await summary("Page 1 of 1 · 5 Tickets");
   assert.equal(await button("Next page").isDisabled(),true);
   await page.screenshot({path:shot("desktop"),fullPage:true});
-  await button("Language").click(); await button("เพิ่มตัวกรอง").click();
+  await button("Language").click(); await openFilters(); await button("เพิ่มตัวกรอง").click();
   await page.getByRole("option",{name:"สถานะ",exact:true}).click(); await page.getByRole("option",{name:"ตรงกับรายการใดก็ได้",exact:true}).click(); await page.keyboard.press("Escape");
   await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:shot("mobile"),fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,"no horizontal page overflow");
+  await dismissFilters();
   // A populated phone Table keeps its sort and primary action within reach.
   await button("Language").click();
   await page.getByRole("combobox", { name: "Sort", exact: true }).selectOption("ticketNumber:asc");
@@ -131,7 +161,7 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   // Browse counts and capped indexed search have different denominators.
   await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html?partial`);
   await page.setViewportSize({ width: 390, height: 844 });
-  await button("High or critical").click();
+  await openFilters(); await button("High or critical").click(); await dismissFilters();
   await summary("2 matching among 20 loaded · 80 total");
   await lane("new").getByRole("button", { name: "Load older Tickets", exact: true }).click();
   await summary("4 matching among 40 loaded · 80 total");
@@ -142,7 +172,7 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await button("Table").click();
   await summary("5 shown from the first 50 matches · Refine search");
   assert.equal(await page.locator("[data-ticket-id]").count(), 5);
-  await button("High or critical").click();
+  await openFilters(); await button("High or critical").click(); await dismissFilters();
   await summary("50 shown from the first 50 matches · Refine search");
   await search.fill("POS-0002");
   await button("Board").click();

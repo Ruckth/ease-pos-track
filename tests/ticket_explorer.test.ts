@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Id } from "../convex/_generated/dataModel";
 import { createFilterQuery, createFilterRule } from "../src/components/reui/filters/filters-query";
-import { dateBoundary, filterTickets, paginateTickets, sortTickets, type ExplorerTicket } from "../src/lib/ticket-explorer";
+import { countCommittedRules, dateBoundary, filterTickets, paginateTickets, sortTickets, type ExplorerTicket } from "../src/lib/ticket-explorer";
 const ticket = (n: number, extra: Partial<ExplorerTicket> = {}): ExplorerTicket => ({ _id: String(n) as Id<"tickets">, projectId: "project" as Id<"projects">, projectKey: "POS", version: 0, urgencyScore: undefined, archivedAt: undefined, lifecycle: "active", tagIds: [], tags: [], mediaCount: 0, annotationCount: 0, ticketNumber: n, title: `Ticket ${n}`, excerpt: "Printer", status: "new", createdAt: new Date(2026,8,15,12).getTime(), updatedAt: new Date(2026,8,16,12).getTime(), ...extra });
 const rule = (field: string, value: unknown) => createFilterRule({ id: crypto.randomUUID(), path: [field], operator: field.endsWith("At") ? "between" : "in", value });
 
@@ -47,4 +47,43 @@ test("urgency ranges never treat unset as zero and unset sorts last in either di
   assert.deepEqual(filterTickets(rows,"",createFilterQuery([createFilterRule({id: crypto.randomUUID(), path:["urgencyScore"],operator:"unset"})])).map(r=>r.ticketNumber),[1]);
   assert.deepEqual(sortTickets(rows,{field:"urgencyScore",direction:"asc"},[],"en").map(r=>r.ticketNumber),[2,4,3,1]);
   assert.deepEqual(sortTickets(rows,{field:"urgencyScore",direction:"desc"},[],"en").map(r=>r.ticketNumber),[3,4,2,1]);
+});
+
+test("the filter count includes each committed rule once, nested ones too, and nothing unfinished", () => {
+  const range = (value: unknown) => createFilterRule({ id: crypto.randomUUID(), path: ["urgencyScore"], operator: "between", value });
+  const draft = createFilterRule({ id: crypto.randomUUID(), path: ["status"], operator: "", value: undefined });
+  const emptyGroup = createFilterQuery();
+  const nested = createFilterQuery([rule("tags", ["a"]), createFilterQuery([rule("createdAt", ["2026-09-15", "2026-09-16"]), emptyGroup])]);
+  assert.equal(countCommittedRules(createFilterQuery()), 0);
+  // Two selected statuses and a two-ended date range each count once.
+  assert.equal(countCommittedRules(createFilterQuery([rule("status", ["new", "done"])])), 1);
+  assert.equal(countCommittedRules(createFilterQuery([rule("createdAt", ["2026-09-15", "2026-09-16"])])), 1);
+  assert.equal(countCommittedRules(nested), 2);
+  assert.equal(countCommittedRules(createFilterQuery([draft, rule("status", []), emptyGroup])), 0);
+  // A partially edited range neither counts nor narrows the list.
+  const partial = createFilterQuery([rule("updatedAt", ["2026-09-15", ""])]);
+  assert.equal(countCommittedRules(partial), 0);
+  assert.equal(filterTickets([ticket(1)], "", partial).length, 1);
+  assert.equal(countCommittedRules(createFilterQuery([range([1, 50]), createFilterRule({ id: crypto.randomUUID(), path: ["urgencyScore"], operator: "unset" })])), 2);
+  assert.equal(countCommittedRules(createFilterQuery([{ ...rule("status", ["done"]), negated: true }])), 1);
+});
+
+test("unfinished ranges and empty groups do not change a committed OR rule", () => {
+  const incomplete = createFilterRule({ id: "urgency", path: ["urgencyScore"], operator: "between", value: [51] });
+  const query = createFilterQuery([rule("status", ["new"]), incomplete, createFilterQuery()], "or");
+  const rows = [ticket(1), ticket(2, { status: "done" })];
+  assert.equal(countCommittedRules(query), 1);
+  assert.deepEqual(filterTickets(rows, "", query), [rows[0]]);
+});
+
+test("invalid filter ranges keep the original Ticket set and contribute no badge", () => {
+  const rows = [ticket(1)];
+  for (const [field, value] of [
+    ["urgencyScore", [50]], ["urgencyScore", [50, ""]], ["urgencyScore", [NaN, 100]],
+    ["urgencyScore", [80, 20]], ["createdAt", ["2026-09-16", "2026-09-15"]],
+  ] as const) {
+    const query = createFilterQuery([createFilterRule({ id: field, path: [field], operator: "between", value })]);
+    assert.equal(countCommittedRules(query), 0);
+    assert.equal(filterTickets(rows, "", query), rows);
+  }
 });

@@ -48,6 +48,18 @@ export function projectWorkspaceSearch(search: WorkspaceSearch, project: string,
   };
 }
 
+/**
+ * Clear filters: the view's default status and every assignment, in one history entry.
+ * Search, view and lane stay; Archive is a page rather than a filter, so it stays too.
+ * A status change closes the open Ticket, as choosing a status does.
+ */
+export function resetWorkspaceFilters(search: WorkspaceSearch, defaultFilter: "active" | "all"): WorkspaceSearch {
+  const current = search.filter ?? (search.archived ? "archive" : defaultFilter);
+  if (current === "archive" || (!search.filter && !search.assignment)) return search;
+  const ticket = current === defaultFilter ? {} : { ticket: undefined, section: undefined };
+  return { ...search, ...ticket, filter: undefined, assignment: undefined };
+}
+
 // Search parameters are scalars. Keep text such as "null", "007" and quoted
 // phrases intact instead of interpreting them as JSON values.
 export function parseWorkspaceSearch(search: string): Record<string, string> {

@@ -94,8 +94,7 @@ async function main() {
       const page = await context.newPage();
       await page.clock.setFixedTime(FROZEN_TIME);
       await page.goto(url);
-      // Lazy filter controls render a "Syncing" fallback first; wait for the settled UI.
-      await button(page, "Add filter").waitFor();
+      await button(page, "Filters").waitFor();
       await page.waitForLoadState("networkidle");
       await state.act(page);
       if (flag("--probe")) await page.addStyleTag({ content: "main { padding-left: calc(1rem + 4px) !important; }" });

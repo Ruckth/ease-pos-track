@@ -4,7 +4,7 @@ import type { HistoryState } from "@tanstack/react-router";
 import type { Id } from "@convex/_generated/dataModel";
 import { APP_PATHS } from "@/lib/app-routes";
 import {
-  customerWorkspaceSearch, projectWorkspaceSearch, staffWorkspaceSearch,
+  customerWorkspaceSearch, projectWorkspaceSearch, resetWorkspaceFilters, staffWorkspaceSearch,
   type ListView, type WorkspaceSearch, type WorkspaceView,
 } from "@/app/workspace-search";
 
@@ -105,6 +105,8 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
       ...(clearQuery ? { q: undefined } : {}),
     })),
     setQuery,
+    defaultFilter,
+    resetFilters: () => update(search => resetWorkspaceFilters(search, defaultFilter)),
     // Assignment narrows the list while allowing staff to keep working on the open Ticket.
     setAssignment: (next: WorkspaceSearch["assignment"]) => update(search => ({ ...search, assignment: next })),
     setLane: (next: NonNullable<WorkspaceSearch["lane"]>) => update(search => ({ ...search, lane: next }), { replace: true }),

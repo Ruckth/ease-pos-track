@@ -1,6 +1,6 @@
 # Ticket explorer
 
-Staff can switch between Board and Table without losing search or filters. Both consume the same filtered set. Each filter is ANDed with search and other filters; within one tags/status filter, any selected value matches. Separate tag filters can express “has A AND has B”. Chip menus support removal, duplication and negation. Clear all clears search and filters.
+Staff can switch between Board and Table without losing search or filters. Both consume the same filtered set. Each filter is ANDed with search and other filters; within one tags/status filter, any selected value matches. Separate tag filters can express “has A AND has B”. Chip menus support removal, duplication and negation. Open the funnel beside search to change filters. One applied condition shows an orange dot, and two or more show the count. Each complete rule counts once, including a rule with several values. Changing the default status scope or assignment, or enabling High or critical, also counts. Clear filters restores the current view’s defaults and preserves the search text.
 
 Created/updated ranges include both entire dates in the browser's local timezone, using next-day calendar arithmetic (including daylight-saving changes). Incomplete editor drafts do not filter. Urgency is read-only: existing 1–100 scores can be filtered inclusively; Unset matches absent scores and sorts last in either direction. This change does not calculate or edit urgency.
 

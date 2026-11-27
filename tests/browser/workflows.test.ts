@@ -20,6 +20,18 @@ function test(name: string, optionsOrRun: { timeout?: number; skip?: string | bo
   else nodeTest(name, optionsOrRun, () => capture("workflows", name, maybeRun!));
 }
 
+const filterTrigger = (page: Page) => page.locator('[data-slot="ticket-filter-trigger"]');
+const filterPanel = (page: Page) => page.locator('[data-slot="ticket-filter-panel"]');
+async function openFilters(page: Page) {
+  await filterTrigger(page).click();
+  await filterPanel(page).waitFor();
+}
+
+async function closeFilters(page: Page) {
+  await page.keyboard.press("Escape");
+  await filterPanel(page).waitFor({ state: "hidden" });
+}
+
 for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
   test(`${role} ${language}: focus, pointer pin removal, camera teardown and unmount`, async () => {
     const { context, page, title, errors, refreshToken, uploads } = await open(role, language);
@@ -321,11 +333,24 @@ for (const language of ["en", "th"] as const) {
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       await dialog.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
       assert.equal(await dialog.getByRole("table", { name: copy(language, "healthCounts") }).count(), 1);
+      await f.page.setViewportSize({ width: 360, height: 740 });
+      const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
       for (const key of ["healthFailed", "healthPending", "healthExpired"] as const) {
-        await dialog.getByRole("button", { name: copy(language, key), exact: true }).click();
+        await trigger.click();
+        const choice = filterPanel(f.page).getByRole("radio", { name: copy(language, key), exact: true });
+        await choice.click();
+        assert.equal(await choice.isChecked(), true);
+        await closeFilters(f.page);
+        assert.equal(await trigger.evaluate(el => document.activeElement === el), true);
+        await dialog.getByRole("heading", { name: copy(language, key), exact: true }).waitFor();
+        assert.equal(await trigger.getAttribute("aria-label"), key === "healthFailed" ? copy(language, "ticketFilters") : copy(language, "ticketFiltersApplied", { count: 1 }));
         await dialog.getByText(copy(language, "healthPageHint"), { exact: true }).waitFor();
-        assert.equal(await dialog.getByRole("button", { name: copy(language, key), exact: true }).getAttribute("aria-pressed"), "true");
       }
+      await trigger.click();
+      await filterPanel(f.page).getByRole("button", { name: copy(language, "ticketFiltersClear") }).click();
+      await closeFilters(f.page);
+      await dialog.getByRole("heading", { name: copy(language, "healthFailed"), exact: true }).waitFor();
+      assert.equal(await trigger.getAttribute("aria-label"), copy(language, "ticketFilters"));
       assert.doesNotMatch(await dialog.innerText(), /local-only-callback-fixture|https?:|UPLOADTHING_TOKEN|UPLOAD_CALLBACK_SECRET/);
       assert.deepEqual(f.errors, []);
       assert.equal(f.uploads(), 0);
@@ -342,12 +367,44 @@ test("customer navigation does not expose staff health", async () => {
   } finally { await f.context.close(); }
 });
 
+for (const language of ["en", "th"] as const) test(`customer ${language}: phone filters preserve search and restore the linked status on Back`, async () => {
+  const { page, context } = await open("customer", language);
+  try {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto(`${baseURL}/customer?project=POS&filter=waiting&q=Printer`);
+    const trigger = filterTrigger(page);
+    await page.getByRole("button", { name: copy(language, "ticketFiltersApplied", { count: 1 }), exact: true }).waitFor();
+    const indicator = trigger.locator('[data-slot="ticket-filter-indicator"]');
+    assert.equal(await indicator.isVisible(), true);
+    assert.equal(await indicator.innerText(), "");
+    await trigger.press("Enter");
+    const waiting = filterPanel(page).getByRole("radio", { name: copy(language, "customerQueueWaiting"), exact: true });
+    assert.equal(await waiting.isChecked(), true);
+    await waiting.press("ArrowDown");
+    await page.waitForURL(url => url.searchParams.get("filter") === "done");
+    const bounds = await filterPanel(page).boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 360);
+    await filterPanel(page).getByRole("button", { name: copy(language, "ticketFiltersClear"), exact: true }).click();
+    await page.waitForURL(url => !url.searchParams.has("filter") && url.searchParams.get("q") === "Printer");
+    await closeFilters(page);
+    assert.equal(await trigger.evaluate(el => document.activeElement === el), true);
+    assert.equal(await trigger.getAttribute("aria-label"), copy(language, "ticketFilters"));
+    await page.goBack();
+    await page.waitForURL(url => url.searchParams.get("filter") === "done" && url.searchParams.get("q") === "Printer");
+    await page.getByRole("button", { name: copy(language, "ticketFiltersApplied", { count: 1 }), exact: true }).waitFor();
+  } finally { await context.close(); }
+});
+
 test("customer search finds older Tickets and can include resolved Tickets", async () => {
   const { page, context, token, errors } = await open("customer");
   try {
     await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
     const query = page.getByLabel(copy("en", "customerQueueSearch"), { exact: true });
-    const status = page.getByLabel(copy("en", "ticketStatus"), { exact: true });
+    const setStatus = async (key: "allTickets" | "customerQueueAllActive") => {
+      await openFilters(page);
+      await filterPanel(page).getByRole("radio", { name: new RegExp("^" + copy("en", key) + "(?:$|\\s)") }).click();
+      await closeFilters(page);
+    };
     const older = page.getByRole("button", { name: copy("en", "loadOlder"), exact: true });
     const rows = page.locator("button[data-ticket-id]");
     const projectId = seed.projects.find(project => project.key === "POS")!.id;
@@ -359,10 +416,10 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
     const targetRow = page.locator(`button[data-ticket-id="${target._id}"]`);
     const noMatches = page.getByText(copy("en", "customerQueueSearchEmpty"), { exact: true });
 
-    await status.selectOption("all");
+    await setStatus("allTickets");
     await older.waitFor();
     assert.equal(await targetRow.count(), 0, "the resolved Ticket lies beyond the first page");
-    await status.selectOption("active");
+    await setStatus("customerQueueAllActive");
     await query.fill("quartz");
     await rows.filter({ hasText: "Printer calibration" }).waitFor();
     assert.equal(await rows.filter({ hasText: "quartz calibration" }).count(), 0, "the other customer's Ticket stays hidden");
@@ -379,7 +436,9 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
     await noMatches.waitFor();
     await page.getByRole("button", { name: copy("en", "customerQueueSearchAllStatuses"), exact: true }).click();
     await targetRow.waitFor();
-    assert.equal(await status.inputValue(), "all");
+    assert.equal(await filterTrigger(page).getAttribute("aria-label"), "Filters, 1 applied");
+    assert.equal(await filterTrigger(page).evaluate(el => document.activeElement === el), true);
+    assert.equal(new URL(page.url()).searchParams.get("filter"), "all");
     assert.equal(await query.inputValue(), reference);
     await targetRow.click();
     await page.getByRole("heading", { name: target.title, exact: true }).waitFor();
@@ -393,7 +452,7 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
     await clear.press("Enter");
     await page.waitForURL(url => !url.searchParams.has("q"));
     assert.equal(await query.inputValue(), "");
-    assert.equal(await status.inputValue(), "all");
+    assert.equal(new URL(page.url()).searchParams.get("filter"), "all");
     assert.equal(await query.evaluate(input => input === document.activeElement), true);
     await clear.waitFor({ state: "hidden" });
     await older.waitFor();
@@ -619,6 +678,28 @@ test("staff sign-in offers Google, and the local test provider admits a seeded O
   } finally { await context.close(); }
 });
 
+test("staff filter badge counts URL scopes and clears them together while preserving search", async () => {
+  const { page, context } = await open("staff");
+  try {
+    await page.goto(`${baseURL}/staff?project=POS&view=queue&filter=new&assignment=mine&q=Printer`);
+    const trigger = filterTrigger(page);
+    await page.getByRole("button", { name: "Filters, 2 applied", exact: true }).waitFor();
+    assert.equal(await trigger.innerText(), "2");
+    await openFilters(page);
+    await filterPanel(page).getByRole("button", { name: "Clear filters", exact: true }).click();
+    await page.waitForURL(url => !url.searchParams.has("assignment") && !url.searchParams.has("filter") && url.searchParams.get("q") === "Printer");
+    await closeFilters(page);
+    assert.equal(await trigger.getAttribute("aria-label"), "Filters");
+    assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "Printer");
+    await page.goBack();
+    await page.getByRole("button", { name: "Filters, 2 applied", exact: true }).waitFor();
+    const restored = new URL(page.url()).searchParams;
+    assert.equal(restored.get("q"), "Printer");
+    assert.equal(restored.get("assignment"), "mine");
+    assert.equal(restored.get("filter"), "new");
+  } finally { await context.close(); }
+});
+
 test("staff restores each Project’s view and returns to the Ticket trigger", async () => {
   const { page, context } = await open("staff");
   const views = page.getByRole("group", { name: "Ticket view" });
@@ -626,24 +707,36 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
     const statusFilter = page.getByRole("combobox", { name: copy("en", "ticketStatus"), exact: true });
-    assert.equal(await statusFilter.inputValue(), "all");
+    const expectStatus = async (value: string) => {
+      await openFilters(page);
+      assert.equal(await statusFilter.inputValue(), value);
+      await closeFilters(page);
+    };
+    await expectStatus("all");
     await views.getByRole("button", { name: "Queue", exact: true }).click();
-    assert.equal(await statusFilter.inputValue(), "active");
+    await expectStatus("active");
     await views.getByRole("button", { name: "Board", exact: true }).click();
-    assert.equal(await statusFilter.inputValue(), "all");
+    await expectStatus("all");
     await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
     const destinations = page.getByRole("navigation", { name: copy("en", "project"), exact: true });
     await destinations.getByRole("button", { name: "Archive", exact: true }).click();
     await destinations.getByRole("button", { name: "Tickets", exact: true }).click();
-    assert.equal(await statusFilter.inputValue(), "all");
+    await expectStatus("all");
     await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
+    await openFilters(page);
     await statusFilter.selectOption("active");
+    await closeFilters(page);
     await views.getByRole("button", { name: "Table", exact: true }).click();
-    assert.equal(await statusFilter.inputValue(), "active");
+    await expectStatus("active");
+    await openFilters(page);
+    await filterPanel(page).getByRole("button", { name: "High or critical", exact: true }).click();
+    await closeFilters(page);
+    await page.getByRole("button", { name: "Filters, 1 applied", exact: true }).waitFor();
     await chooseProject(page, "APP");
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
     await views.getByRole("button", { name: "Board", exact: true }).click();
     await chooseProject(page, "POS");
+    await page.getByRole("button", { name: "Filters", exact: true }).waitFor();
     assert.equal(await views.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
     const row = page.locator("button[data-ticket-id]:visible").first();
     const id = await row.getAttribute("data-ticket-id");
@@ -655,6 +748,10 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
     await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
     await page.waitForFunction(id => document.activeElement?.getAttribute("data-ticket-id") === id, id);
     assert.equal(await views.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
+    await openFilters(page);
+    await filterPanel(page).getByRole("button", { name: "High or critical", exact: true }).click();
+    await closeFilters(page);
+    await page.getByRole("button", { name: "Filters, 1 applied", exact: true }).waitFor();
     await chooseProject(page, "APP");
     assert.equal(await views.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
   } finally { await context.close(); }
@@ -664,7 +761,9 @@ test("an open Ticket announces leaving filtered results in Queue, Board and Tabl
   const { page, context, token, errors } = await open("staff");
   try {
     await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+    await openFilters(page);
     await page.getByRole("combobox", { name: copy("en", "ticketStatus"), exact: true }).selectOption("new");
+    await closeFilters(page);
     for (const view of ["Queue", "Board", "Table"]) {
       const title = `Result change ${view} ${crypto.randomUUID()}`;
       const { ticket } = await convex.mutation(api.tickets.createTextTicket, {
@@ -758,12 +857,13 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     const assigned = await convex.query(api.tickets.getTicket, { token: f.token, id });
     assert.deepEqual(assigned?.tags.map(t => t.name), [tagName]);
     await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
-    await f.page.locator("summary").filter({ hasText: copy("en", "queueFilters") }).click();
+    await openFilters(f.page);
     await f.page.getByRole("button", { name: "Add filter", exact: true }).click();
     await f.page.getByRole("option", { name: "Tags", exact: true }).click();
     await f.page.getByRole("option", { name: "is any of", exact: true }).click();
     await f.page.getByRole("option", { name: tagName, exact: true }).click();
     await f.page.keyboard.press("Escape");
+    await closeFilters(f.page);
     await search.fill("unmatchedfixturetext");
     await f.page.waitForURL(url => url.searchParams.get("q") === "unmatchedfixturetext");
     await f.page.getByText("No Tickets match these filters.", { exact: true }).waitFor();

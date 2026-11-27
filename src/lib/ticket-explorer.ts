@@ -17,36 +17,57 @@ export function dateBoundary(value: unknown, after = false): number | null {
   return date.getTime();
 }
 
-function matchRule(item: ExplorerTicket, rule: FilterRule): boolean {
+type TicketPredicate = (ticket: ExplorerTicket) => boolean;
+
+function rulePredicate(rule: FilterRule): TicketPredicate | undefined {
   const field = rule.path[0];
-  let match = true;
-  const values = Array.isArray(rule.value) ? rule.value : [];
-  if (!rule.operator || (rule.operator !== "unset" && values.length === 0)) return true;
-  if (field === "tags" || field === "status") {
-    const actual = field === "tags" ? item.tagIds ?? [] : [item.status];
-    match = values.length === 0 || values.some((value) => actual.includes(value));
-  } else if (field === "urgencyScore") {
-    match = rule.operator === "unset" ? item.urgencyScore === undefined : typeof item.urgencyScore === "number" && values.length === 2 && item.urgencyScore >= Number(values[0]) && item.urgencyScore <= Number(values[1]);
-  } else if (field === "createdAt" || field === "updatedAt") {
-    const from = dateBoundary(values[0]);
-    const until = dateBoundary(values[1], true);
-    // An incomplete editor draft never narrows the list.
-    if (from === null || until === null) return true;
-    match = item[field] >= from && item[field] < until;
+  if (field === "urgencyScore" && rule.operator === "unset") return ticket => ticket.urgencyScore === undefined;
+  if (!Array.isArray(rule.value)) return;
+  const values = rule.value;
+  if ((field === "tags" || field === "status") && rule.operator === "in") {
+    const selected = values.filter(value => typeof value === "string" && value.length > 0);
+    if (selected.length === 0) return;
+    return field === "status" ? ticket => selected.includes(ticket.status)
+      : ticket => ticket.tagIds?.some(id => selected.includes(id)) ?? false;
   }
-  return rule.negated ? !match : match;
+  if (rule.operator !== "between" || values.length !== 2) return;
+  if (field === "urgencyScore") {
+    const [from, to] = values;
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to > 100 || from > to) return;
+    return ticket => ticket.urgencyScore !== undefined && ticket.urgencyScore >= from && ticket.urgencyScore <= to;
+  }
+  if (field === "createdAt" || field === "updatedAt") {
+    const start = dateBoundary(values[0]);
+    const end = dateBoundary(values[1], true);
+    if (start === null || end === null || end <= start) return;
+    return ticket => ticket[field] >= start && ticket[field] < end;
+  }
 }
 
-function matches(item: ExplorerTicket, node: FilterNode): boolean {
-  if (node.type === "rule") return matchRule(item, node);
-  if (!node.rules.length) return true;
-  return node.combinator === "and" ? node.rules.every((rule) => matches(item, rule)) : node.rules.some((rule) => matches(item, rule));
+/** Compile only committed conditions. A draft inside an OR group must not admit every Ticket. */
+function compileFilters(node: FilterNode): { count: number; matches: TicketPredicate } {
+  if (node.type === "rule") {
+    const predicate = rulePredicate(node);
+    if (!predicate) return { count: 0, matches: () => true };
+    return { count: 1, matches: node.negated ? ticket => !predicate(ticket) : predicate };
+  }
+  const children = node.rules.map(compileFilters).filter(child => child.count > 0);
+  const count = children.reduce((total, child) => total + child.count, 0);
+  const matches: TicketPredicate = count === 0 ? () => true : node.combinator === "and"
+    ? ticket => children.every(child => child.matches(ticket))
+    : ticket => children.some(child => child.matches(ticket));
+  return { count, matches };
+}
+
+export function countCommittedRules(node: FilterNode): number {
+  return compileFilters(node).count;
 }
 
 export function filterTickets<T extends ExplorerTicket>(items: T[], search: string, query: FilterQuery): T[] {
   const text = search.trim().toLocaleLowerCase();
-  if (!text && !query.rules.length) return items;
-  return items.filter((item) => (!text || `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description ?? item.excerpt ?? ""}`.toLocaleLowerCase().includes(text)) && matches(item, query));
+  const filters = compileFilters(query);
+  if (!text && !filters.count) return items;
+  return items.filter(item => (!text || `${formatTicketNumber(item.ticketNumber, item.projectKey)} ${item.title} ${item.description ?? item.excerpt ?? ""}`.toLocaleLowerCase().includes(text)) && filters.matches(item));
 }
 
 export function sortTickets<T extends ExplorerTicket>(items: T[], sort: ExplorerSort, tags: ExplorerTag[], language: string): T[] {
