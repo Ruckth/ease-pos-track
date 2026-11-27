@@ -2,14 +2,19 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import { exportMarkupImage, imageMarkupErrorCode, loadMarkupImage, type MarkupMark, type MarkupRect } from "@/lib/image-markup";
 import { markupLabels, type ImageMarkupErrorCode } from "@/lib/markup-labels";
+import { nextSizeStep, scaleLimits, scaleRect, SIZE_STEP, stepLimits } from "@/lib/markup-geometry";
 import type { PendingMedia } from "@/lib/types";
 import { AlertTriangle, ArrowLeft, Check, Loader2, Maximize2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { adjustRect, clamp, ImageMarkupCanvas, ImageMarkupPreview, type MarkupPin, type MarkupPoint, type MarkupTool } from "./image-markup-canvas";
-import { ImageMarkupInspector, ImageMarkupToolbar, type MarkupField, type StrokeChoice } from "./image-markup-controls";
+import { ImageMarkupInspector, ImageMarkupToolbar, type CircleSizing, type MarkupField, type StrokeChoice } from "./image-markup-controls";
 
 type Reviewed = { source: File; file: File; url: string; crop: MarkupRect; width: number; height: number; failed: boolean; marks: readonly MarkupMark[] };
 type Phase = "edit" | "exporting" | "review" | "applying";
+type MarkHistory = { stack: Array<readonly MarkupMark[]>; pos: number };
+type SizeGroup = "wheel" | "slider";
+/** An open resize gesture: later steps replace its undo entry and derive from `origin` to avoid drift. */
+type OpenGroup = { key: SizeGroup; origin: MarkupMark; exponent: number; before: MarkHistory };
 
 /** Same tolerance and inclusive bounds as the draft owner's pin reprojection. */
 const EPSILON = Number.EPSILON * 4;
@@ -34,7 +39,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   const labels = markupLabels(language);
   const [image, setImage] = useState<ImageBitmap | null>(null);
   const [loadError, setLoadError] = useState<ImageMarkupErrorCode | null>(null);
-  const [history, setHistory] = useState<{ stack: Array<readonly MarkupMark[]>; pos: number }>({ stack: [[]], pos: 0 });
+  const [history, setHistory] = useState<MarkHistory>({ stack: [[]], pos: 0 });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tool, setTool] = useState<MarkupTool>("circle");
   const [corner, setCorner] = useState<MarkupPoint | null>(null);
@@ -48,7 +53,10 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   const exportToken = useRef(0);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
+  const group = useRef<OpenGroup | null>(null);
   const marks = history.stack[history.pos];
+  const marksRef = useRef(marks);
+  marksRef.current = marks;
 
   useEffect(() => {
     mounted.current = true;
@@ -61,6 +69,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
     setImage(null);
     setLoadError(null);
     setHistory({ stack: [[]], pos: 0 });
+    group.current = null;
     setSelectedId(null);
     setCorner(null);
     setReviewed(null);
@@ -102,13 +111,46 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
     || p.y < crop01.y - EPSILON || p.y > crop01.y + crop01.height + EPSILON) : [];
 
   function save(next: readonly MarkupMark[], message: string) {
+    group.current = null;
     setHistory((h) => ({ stack: [...h.stack.slice(0, h.pos + 1), next], pos: h.pos + 1 }));
     setNotice(message);
     setError("");
   }
   const replace = (m: MarkupMark) => marks.map((old) => (old.id === m.id ? m : old));
 
+  /** Closes an open wheel or slider gesture so the next edit is its own undo unit. */
+  function endGroup(key?: SizeGroup) {
+    const g = group.current;
+    if (!g || (key && g.key !== key)) return;
+    group.current = null;
+    const m = marksRef.current.find((x) => x.id === g.origin.id);
+    if (m) setNotice(labels.resized(nameOf(m), m.width, m.height));
+  }
+
+  /** Proportional circle resize around its centre. Grouped steps form one undo unit. */
+  function resizeCircle(key: SizeGroup | null, exponentOf: (g: OpenGroup) => number) {
+    if (selected?.kind !== "circle" || phase !== "edit") return;
+    const open = key && group.current?.key === key && group.current.origin.id === selected.id ? group.current : null;
+    if (!open) endGroup();
+    const g: OpenGroup = open ?? { key: key ?? "slider", origin: selected, exponent: 0, before: history };
+    const limits = stepLimits(g.origin, W, H, minSize);
+    g.exponent = clamp(exponentOf(g), limits.min, limits.max);
+    const next = scaleRect(g.origin, SIZE_STEP ** g.exponent, W, H, minSize);
+    const { before, origin } = g;
+    group.current = key ? g : null;
+    if (next.x === origin.x && next.y === origin.y && next.width === origin.width && next.height === origin.height) {
+      // A gesture that returns to its start preserves both Undo and Redo.
+      setHistory(before);
+      return;
+    }
+    const top = before.stack[before.pos].map((mark) => mark.id === next.id ? next : mark);
+    setHistory({ stack: [...before.stack.slice(0, before.pos + 1), top], pos: before.pos + 1 });
+    setError("");
+    if (!key) setNotice(labels.resized(nameOf(next), next.width, next.height));
+  }
+
   function chooseTool(next: MarkupTool) {
+    endGroup();
     setTool(next);
     setCorner(null);
     if (next !== "select" && next !== "erase" && next !== "pan") setSelectedId(null);
@@ -116,6 +158,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   }
 
   function select(id: number | null) {
+    endGroup();
     setSelectedId(id);
     setCorner(null);
     if (tool !== "erase") setTool("select");
@@ -182,6 +225,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   function travel(delta: -1 | 1) {
     const pos = history.pos + delta;
     if (pos < 0 || pos >= history.stack.length) return;
+    group.current = null;
     const prev = marks, next = history.stack[pos];
     setHistory({ ...history, pos });
     const changed = next.find((m) => !prev.includes(m)) ?? null;
@@ -210,6 +254,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
     if (!image || phase !== "edit") return;
     if (corner) { setNotice(labels.finishSelection); return; }
     if (excluded.length) return;
+    endGroup();
     const token = ++exportToken.current;
     const snapshot = marks, source = item.file;
     const cropOut = crop01;
@@ -245,12 +290,13 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   }
 
   function cancel() {
+    group.current = null;
     exportToken.current++;
     onCancel();
   }
 
   function rootKey(event: KeyboardEvent<HTMLDivElement>) {
-    if (phase !== "edit" || (event.target as Element).closest("input, textarea, select")) return;
+    if (phase !== "edit" || (event.target as Element).closest("input:not([type=range]), textarea, select")) return;
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "z") { event.preventDefault(); travel(event.shiftKey ? 1 : -1); }
     else if (mod && event.key.toLowerCase() === "y") { event.preventDefault(); travel(1); }
@@ -294,8 +340,19 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
     );
   }
 
+  const circleSelected = tool === "select" && selected?.kind === "circle" ? selected : null;
+  const sizeRange = circleSelected && scaleLimits(circleSelected, W, H, minSize);
+  const circle: CircleSizing | null = circleSelected && sizeRange ? {
+    value: circleSelected.width, height: circleSelected.height,
+    min: Math.min(circleSelected.width, Math.ceil(sizeRange.min * circleSelected.width)),
+    max: Math.max(circleSelected.width, Math.floor(sizeRange.max * circleSelected.width)),
+    onSet: (width) => resizeCircle("slider", (g) => Math.log(width / g.origin.width) / Math.log(SIZE_STEP)),
+    onStep: (steps, key) => resizeCircle(key, (g) => nextSizeStep(g.origin, g.exponent, steps)),
+    onEnd: endGroup,
+  } : null;
   const hints: Record<MarkupTool, string> = { select: labels.hintSelect, pan: labels.hintPan, circle: labels.hintCircle, crop: labels.hintCrop, mask: labels.hintMask, erase: labels.hintErase };
   const busy = phase === "exporting";
+  const needsAction = notice === labels.areaTooSmall || notice === labels.finishSelection;
 
   return (
     <div className="grid gap-3" onKeyDown={rootKey}>
@@ -304,7 +361,12 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
         canUndo={history.pos > 0} canRedo={history.pos < history.stack.length - 1}
         onUndo={() => travel(-1)} onRedo={() => travel(1)}
       />
-      <p className="text-sm text-muted-foreground">{corner ? labels.hintSecondCorner : hints[tool]}</p>
+      <p className="text-sm text-muted-foreground">
+        {circleSelected ? <>
+          <span className="[@media(pointer:coarse)]:hidden">{labels.hintResizeCircle}</span>
+          <span className="hidden [@media(pointer:coarse)]:inline">{labels.hintTouchSize}</span>
+        </> : corner ? labels.hintSecondCorner : hints[tool]}
+      </p>
       <p id="image-markup-keyboard-hint" className="sr-only">{labels.keyboardHint}</p>
       <div inert={busy || undefined} className="grid gap-3">
         <ImageMarkupCanvas
@@ -312,8 +374,10 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
           onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
           onMoveSelected={(dx, dy) => adjustSelected("move", dx, dy)}
           onEscape={() => { setCorner(null); setNotice(""); }}
+          onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
+          onWheelEnd={() => endGroup("wheel")}
         />
-      <p className="min-h-5 text-sm" role="status" aria-live="polite">{notice}</p>
+      <p className={needsAction ? "text-sm" : "sr-only"} role="status">{notice}</p>
       {excluded.length > 0 && (
         <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
           <AlertTriangle aria-hidden="true" className="size-4 shrink-0 text-destructive" />
@@ -324,7 +388,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
       <ImageMarkupInspector
         marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
         strokeChoice={selected?.kind === "circle" ? choiceOf(selected.stroke) : strokeChoice}
-        showStroke={tool === "circle" || selected?.kind === "circle"}
+        showStroke={tool === "circle" || !!circleSelected}
+        circle={circle}
         onSelect={select}
         onResize={(dw, dh) => adjustSelected(dw ? "e" : "s", dw, dh)}
         onMove={(dx, dy) => adjustSelected("move", dx, dy)}
