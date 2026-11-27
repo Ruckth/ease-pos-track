@@ -2,7 +2,7 @@ import {
   MARKUP_CIRCLE_COLOR, MARKUP_CIRCLE_HALO_COLOR, MARKUP_CIRCLE_HALO_EXTRA, MARKUP_MASK_COLOR, type MarkupMark, type MarkupRect,
 } from "@/lib/image-markup";
 import type { MarkupLabels } from "@/lib/markup-labels";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { ZoomControls } from "./image-markup-controls";
 import { useWheelResize } from "./image-markup-wheel";
 
@@ -70,13 +70,16 @@ export function useMarkupZoom(W: number, H: number) {
   const viewport = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<ZoomView>("fit");
   const [box, setBox] = useState({ width: 0, maxHeight: 220 });
-  const anchor = useRef<{ x: number; y: number } | null>(null);
+  const anchor = useRef<{ point: MarkupPoint; offset: MarkupPoint } | null>(null);
 
   useLayoutEffect(() => {
     const el = viewport.current;
     if (!el) return;
     const measure = () => setBox((b) => {
-      const width = Math.max(120, el.clientWidth), maxHeight = Math.max(220, Math.round(window.innerHeight * 0.55));
+      const width = Math.max(120, el.clientWidth);
+      const maxHeight = window.matchMedia("(max-width: 639px)").matches
+        ? Math.max(48, el.clientHeight)
+        : Math.max(220, Math.round(window.innerHeight * 0.55));
       return b.width === width && b.maxHeight === maxHeight ? b : { width, maxHeight };
     });
     measure();
@@ -94,25 +97,45 @@ export function useMarkupZoom(W: number, H: number) {
   const scale = clamp(view === "fit" ? fitScale : view === "width" ? widthScale : view, fitScale, maxScale) || 1;
   const display = { width: Math.max(1, Math.round(W * scale)), height: Math.max(1, Math.round(H * scale)) };
 
+  const keepPoint = useCallback((el: HTMLDivElement, point: MarkupPoint, offset: MarkupPoint, atScale: number) => {
+    const leading = Math.max(0, (el.clientWidth - Math.round(W * atScale)) / 2);
+    el.scrollLeft = point.x * atScale + leading - offset.x;
+    el.scrollTop = point.y * atScale - offset.y;
+  }, [W]);
+
   useLayoutEffect(() => {
     const el = viewport.current, a = anchor.current;
     anchor.current = null;
-    if (!el || !a) return;
-    el.scrollLeft = a.x * scale - el.clientWidth / 2;
-    el.scrollTop = a.y * scale - el.clientHeight / 2;
-  }, [scale]);
+    if (el && a) keepPoint(el, a.point, a.offset, scale);
+  }, [keepPoint, scale]);
 
   function zoomTo(next: ZoomView) {
     const el = viewport.current;
     if (el) {
-      const ox = Math.max(0, (el.clientWidth - display.width) / 2), oy = Math.max(0, (el.clientHeight - display.height) / 2);
-      anchor.current = { x: (el.scrollLeft + el.clientWidth / 2 - ox) / scale, y: (el.scrollTop + el.clientHeight / 2 - oy) / scale };
+      const leading = Math.max(0, (el.clientWidth - display.width) / 2);
+      const offset = { x: el.clientWidth / 2, y: el.clientHeight / 2 };
+      anchor.current = { point: { x: (el.scrollLeft + offset.x - leading) / scale, y: (el.scrollTop + offset.y) / scale }, offset };
     }
     setView(next);
   }
+
+  function pinchTo(next: number, point: MarkupPoint, client: MarkupPoint) {
+    const el = viewport.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const offset = { x: client.x - rect.left - el.clientLeft, y: client.y - rect.top - el.clientTop };
+    const nextScale = clamp(next, fitScale, maxScale);
+    if (nextScale === scale) {
+      anchor.current = null;
+      keepPoint(el, point, offset, scale);
+    } else {
+      anchor.current = { point, offset };
+    }
+    setView(nextScale <= fitScale ? "fit" : nextScale);
+  }
   const eps = 1e-6;
   return {
-    viewport, view, scale, display, maxHeight: box.maxHeight,
+    viewport, view, scale, display, maxHeight: box.maxHeight, pinchTo,
     percent: Math.round(scale * 100),
     canZoomIn: scale < maxScale - eps,
     canZoomOut: scale > fitScale + eps,
@@ -135,15 +158,15 @@ export function ImageMarkupPreview({ url, alt, width, height, labels, onLoad, on
   const zoom = useMarkupZoom(width || 1, height || 1);
   const known = width > 0 && height > 0;
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-2 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col">
       {known && <ZoomControls zoom={zoom} labels={labels} />}
       <div
         ref={zoom.viewport}
         tabIndex={0}
         role="region"
         aria-label={labels.previewRegion}
-        className="w-full overflow-auto overscroll-contain rounded-md border bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        style={{ maxHeight: zoom.maxHeight + 2 }}
+        className="w-full overflow-auto overscroll-contain rounded-md border bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-12 max-sm:flex-1 sm:max-h-[var(--markup-max-height)]"
+        style={{ "--markup-max-height": `${zoom.maxHeight + 2}px` } as CSSProperties}
       >
         <img
           src={url}
@@ -161,7 +184,7 @@ export function ImageMarkupPreview({ url, alt, width, height, labels, onLoad, on
 type Gesture =
   | { kind: "adjust"; pointerId: number; start: MarkupPoint; target: MarkupMark; side: Side }
   | { kind: "press"; pointerId: number; start: MarkupPoint; client: MarkupPoint; dragging: boolean }
-  | { kind: "pan"; origin: MarkupPoint; scroll: MarkupPoint };
+  | { kind: "pan"; origin: MarkupPoint; scroll: MarkupPoint; pinch?: { distance: number; scale: number; point: MarkupPoint } };
 
 export function ImageMarkupCanvas({
   image, marks, selectedId, tool, pins, corner, minSize, labels,
@@ -310,19 +333,31 @@ export function ImageMarkupCanvas({
   const selected = shown.find((m) => m.id === selectedId) ?? null;
   const edgePad = 12 * unit;
 
+  function touchCenter() {
+    const [first, second] = touches.current.values();
+    if (!second) return { point: first, distance: 0 };
+    return {
+      point: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+      distance: Math.hypot(first.x - second.x, first.y - second.y),
+    };
+  }
+
   function startPan() {
     const el = viewport.current!;
-    let x = 0, y = 0;
-    for (const t of touches.current.values()) { x += t.x; y += t.y; }
-    const n = Math.max(1, touches.current.size);
-    gesture.current = { kind: "pan", origin: { x: x / n, y: y / n }, scroll: { x: el.scrollLeft, y: el.scrollTop } };
+    const { point, distance } = touchCenter();
+    gesture.current = {
+      kind: "pan",
+      origin: point,
+      scroll: { x: el.scrollLeft, y: el.scrollTop },
+      pinch: distance ? { distance, scale, point: pointAt({ clientX: point.x, clientY: point.y }) } : undefined,
+    };
   }
 
   function down(event: PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return;
     touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     event.currentTarget.setPointerCapture(event.pointerId);
-    // A second finger turns any gesture into a view pan; nothing from the first finger is applied.
+    // A second finger takes over the view without committing a mark.
     if (touches.current.size > 1) { setLive(null); setDragRect(null); startPan(); return; }
     if (!event.isPrimary || gesture.current) return;
     const p = pointAt(event);
@@ -339,16 +374,19 @@ export function ImageMarkupCanvas({
   }
 
   function move(event: PointerEvent<SVGSVGElement>) {
-    if (touches.current.has(event.pointerId)) touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!touches.current.has(event.pointerId)) return;
+    touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const g = gesture.current;
     if (!g) return;
     if (g.kind === "pan") {
       const el = viewport.current!;
-      let x = 0, y = 0;
-      for (const t of touches.current.values()) { x += t.x; y += t.y; }
-      const n = Math.max(1, touches.current.size);
-      el.scrollLeft = g.scroll.x - (x / n - g.origin.x);
-      el.scrollTop = g.scroll.y - (y / n - g.origin.y);
+      const { point, distance } = touchCenter();
+      if (g.pinch && distance) {
+        zoom.pinchTo(g.pinch.scale * distance / g.pinch.distance, g.pinch.point, point);
+      } else {
+        el.scrollLeft = g.scroll.x - (point.x - g.origin.x);
+        el.scrollTop = g.scroll.y - (point.y - g.origin.y);
+      }
       return;
     }
     if (g.pointerId !== event.pointerId) return;
@@ -423,15 +461,18 @@ export function ImageMarkupCanvas({
 
   const crop = shown.find((m) => m.kind === "crop");
   const s = (px: number) => px * unit; // CSS px → source px
-  const handleSize = s(10), handleHit = s(32);
+  const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  const smallMark = coarse && selected && Math.min(selected.width, selected.height) < s(88);
+  const sides = smallMark ? SIDES.filter(side => side.length === 2) : SIDES;
+  const handleSize = s(10), handleHit = s(coarse ? 44 : 32);
 
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-2 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col">
       <ZoomControls zoom={zoom} labels={labels} />
       <div
         ref={viewport}
-        className="w-full overflow-auto overscroll-contain rounded-md border bg-muted"
-        style={{ maxHeight: zoom.maxHeight + 2 }}
+        className="w-full overflow-auto overscroll-contain rounded-md border bg-muted max-sm:min-h-12 max-sm:flex-1 sm:max-h-[var(--markup-max-height)]"
+        style={{ "--markup-max-height": `${zoom.maxHeight + 2}px` } as CSSProperties}
         onScroll={syncWindow}
       >
         <div className="relative mx-auto" style={display}>
@@ -484,11 +525,14 @@ export function ImageMarkupCanvas({
             {selected && (tool === "select" || tool === "pan") && (
               <g>
                 <rect x={selected.x} y={selected.y} width={selected.width} height={selected.height} fill="none" stroke="#13714d" strokeWidth={s(1.5)} strokeDasharray={`${s(4)} ${s(3)}`} pointerEvents="none" />
-                {tool === "select" && SIDES.map((side) => {
+                {tool === "select" && sides.map((side) => {
                   const h = handlePoint(selected, side);
+                  const padding = smallMark ? handleHit / 4 : 0;
+                  const hitX = h.x + (side.includes("w") ? -padding : side.includes("e") ? padding : 0);
+                  const hitY = h.y + (side.includes("n") ? -padding : side.includes("s") ? padding : 0);
                   return (
                     <g key={side} data-handle={side} style={{ cursor: `${side}-resize` }}>
-                      <rect x={h.x - handleHit / 2} y={h.y - handleHit / 2} width={handleHit} height={handleHit} fill="transparent" />
+                      <rect x={hitX - handleHit / 2} y={hitY - handleHit / 2} width={handleHit} height={handleHit} fill="transparent" />
                       <rect x={h.x - handleSize / 2} y={h.y - handleSize / 2} width={handleSize} height={handleSize} fill="white" stroke="#13714d" strokeWidth={s(1.5)} />
                     </g>
                   );

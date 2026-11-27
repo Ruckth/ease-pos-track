@@ -1,27 +1,30 @@
 import type { AnnotationUpdateInput } from "@/lib/types";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { formatClock, type Annotation } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Move, Pencil, Trash2 } from "lucide-react";
-import { useState } from "react";
-
-
+import { Loader2, Move, Pencil, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 export function PinMarker({
   annotation,
   highlighted,
+  passive = false,
   onClick,
 }: {
   annotation: Annotation;
   highlighted: boolean;
+  passive?: boolean;
   onClick: () => void;
 }) {
   const { t } = useI18n();
   return (
     <button
       type="button"
+      disabled={passive}
+      aria-hidden={passive || undefined}
       data-pin-id={annotation.id}
       onClick={(event) => {
         event.stopPropagation();
@@ -30,7 +33,9 @@ export function PinMarker({
       aria-label={`${t("comment", { label: annotation.label })}: ${annotation.text}`}
       className={cn(
         "absolute z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full annotation-glass-marker border border-white/70 text-xs font-bold text-primary-foreground shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/80",
+        "[@media(pointer:coarse)]:after:absolute [@media(pointer:coarse)]:after:-inset-1",
         highlighted && "scale-125 ring-4 ring-amber-400/80",
+        passive && "pointer-events-none opacity-70",
       )}
       style={{ left: `${(annotation.x ?? 0) * 100}%`, top: `${(annotation.y ?? 0) * 100}%` }}
     >
@@ -50,124 +55,81 @@ export function DraftPin({ x, y }: { x: number; y: number }) {
   );
 }
 
-export function PinPopover({
-  annotation,
-  readOnly = false,
-  onClose,
-  onUpdate,
-  onMove,
-  onDelete,
+export function PinDetails({
+  annotation, readOnly, editText, setEditText, onCancelEdit, onClose, onUpdate, onMove, onDelete, onBusyChange,
 }: {
-  annotation: Annotation | null;
-  readOnly?: boolean;
+  annotation: Annotation;
+  readOnly: boolean;
+  editText: string | null;
+  setEditText: (text: string | null) => void;
+  onCancelEdit: () => void;
   onClose: () => void;
   onUpdate: (input: AnnotationUpdateInput) => Promise<void>;
   onMove: (annotationId: string) => void;
   onDelete: (annotationId: string) => Promise<void>;
+  onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useI18n();
-  const [deleting, setDeleting] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState("");
-  const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const editButton = useRef<HTMLButtonElement>(null);
+  const editing = editText !== null;
+  const wasEditing = useRef(editing);
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButton.current?.focus({ preventScroll: true });
+    wasEditing.current = editing;
+  }, [editing]);
 
-  if (!annotation || annotation.x === undefined || annotation.y === undefined) return null;
+  async function run(action: () => Promise<void>) {
+    setPending(true);
+    onBusyChange(true);
+    setError("");
+    try { await action(); }
+    catch (reason) { setError(localizeError(reason, t)); }
+    finally { setPending(false); onBusyChange(false); }
+  }
 
-  const below = annotation.y <= 0.6;
   return (
-    <div
-      className="annotation-glass-popover absolute z-20 w-52 max-w-[calc(100%_-_16px)] rounded-lg border border-white/60 p-2.5 text-sm shadow-lg"
-      style={{
-        left: `clamp(112px, ${annotation.x * 100}%, calc(100% - 112px))`,
-        top: `${annotation.y * 100}%`,
-        transform: below ? "translate(-50%, 18px)" : "translate(-50%, calc(-100% - 18px))",
-      }}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-          {annotation.label}
-        </span>
-        {!readOnly && <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label={t("editComment", { label: annotation.label })}
-            onClick={() => {
-              setEditText(annotation.text);
-              setEditing(true);
-              setError("");
-            }}
-            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Pencil className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label={t("moveComment")}
-            onClick={() => {
-              onMove(annotation.id);
-              onClose();
-            }}
-            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Move className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label={t("deleteComment", { label: annotation.label })}
-            disabled={deleting}
-            onClick={async (event) => {
-              event.stopPropagation();
-              if (!window.confirm(t("deleteCommentConfirm", { label: annotation.label }))) return;
-              setDeleting(true);
-              setError("");
-              try {
-                await onDelete(annotation.id);
-                onClose();
-              } catch (deleteError) {
-                setError(localizeError(deleteError, t));
-              } finally {
-                setDeleting(false);
-              }
-            }}
-            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-          >
-            {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-          </button>
-        </div>}
+    <div className="min-w-0 border-t pt-1">
+      <div className="flex items-center justify-between gap-1">
+        <h3 className="min-w-0 text-sm font-medium">
+          {t("noteLabel", { number: annotation.label })}
+          {annotation.time !== undefined && ` · ${t("pinAtTime", { time: formatClock(annotation.time) })}`}
+        </h3>
+        <div className="flex shrink-0">
+          {!readOnly && editText === null && <>
+            <Button type="button" size="icon-touch" variant="ghost" ref={editButton} aria-label={t("editComment", { label: annotation.label })} disabled={pending}
+              onClick={() => { setError(""); setEditText(annotation.text); }}><Pencil aria-hidden="true" /></Button>
+            <Button type="button" size="icon-touch" variant="ghost" aria-label={t("repositionPin")} disabled={pending}
+              onClick={() => onMove(annotation.id)}><Move aria-hidden="true" /></Button>
+            <Button type="button" size="icon-touch" variant="ghost" aria-label={t("deleteComment", { label: annotation.label })} disabled={pending}
+              onClick={() => setConfirmDelete(true)}><Trash2 aria-hidden="true" /></Button>
+          </>}
+          <Button type="button" size="icon-touch" variant="ghost" aria-label={t("closeNote")} disabled={pending} onClick={onClose}><X aria-hidden="true" /></Button>
+        </div>
       </div>
-      {editing ? (
-        <div className="mt-2 space-y-2">
-          <Textarea rows={3} value={editText} maxLength={2_000} onChange={(event) => setEditText(event.target.value)} />
-          <div className="flex justify-end gap-1">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>{t("cancel")}</Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!editText.trim() || savingEdit}
-              onClick={async () => {
-                setSavingEdit(true);
-                setError("");
-                try {
-                  await onUpdate({ annotationId: annotation.id, text: editText });
-                  setEditing(false);
-                } catch (updateError) {
-                  setError(localizeError(updateError, t));
-                } finally {
-                  setSavingEdit(false);
-                }
-              }}
-            >
-              {savingEdit ? <Loader2 className="animate-spin" /> : null}
-              {t("save")}
+      {editText !== null && !readOnly ? (
+        <div className="space-y-2">
+          <Textarea autoFocus aria-label={t("editComment", { label: annotation.label })} rows={2} className="min-h-16" maxLength={2_000}
+            value={editText} disabled={pending} onChange={(event) => setEditText(event.target.value)} />
+          <div className="flex justify-end gap-2">
+            <Button type="button" size="touch" variant="ghost" disabled={pending} onClick={onCancelEdit}>{t("cancel")}</Button>
+            <Button type="button" size="touch" disabled={!editText.trim() || pending} onClick={() => void run(async () => {
+              await onUpdate({ annotationId: annotation.id, text: editText.trim() });
+              setEditText(null);
+            })}>
+              {pending && <Loader2 aria-hidden="true" className="animate-spin" />}{t("save")}
             </Button>
           </div>
         </div>
-      ) : <p className="mt-1.5 whitespace-pre-wrap leading-5">{annotation.text}</p>}
-      {error ? <p role="alert" className="mt-2 text-destructive">{error}</p> : null}
-      {annotation.time !== undefined ? (
-        <p className="mt-1 text-muted-foreground">{t("videoAt", { time: formatClock(annotation.time) })}</p>
-      ) : null}
+      ) : <p className="whitespace-pre-wrap break-words pb-2 text-sm leading-5">{annotation.text}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}
+        title={t("deleteComment", { label: annotation.label })}
+        description={t("deleteCommentConfirm", { label: annotation.label })}
+        confirmLabel={t("deleteComment", { label: annotation.label })}
+        onConfirm={() => void run(async () => { await onDelete(annotation.id); onClose(); })} />
     </div>
   );
 }

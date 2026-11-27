@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { MarkupMark } from "@/lib/image-markup";
 import type { MarkupLabels } from "@/lib/markup-labels";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Crop, Eraser, Hand, Minus, MousePointer2, MoveHorizontal, Plus, Redo2, Shrink, SlidersHorizontal, Square, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Crop, Eraser, Ellipsis, Hand, Minus, MousePointer2, MoveHorizontal, Plus, Redo2, Shrink, SlidersHorizontal, Square, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { MarkupTool, MarkupZoom } from "./image-markup-canvas";
 import { useWheelResize } from "./image-markup-wheel";
@@ -21,21 +22,35 @@ export function ImageMarkupToolbar({ tool, labels, onTool, canUndo, canRedo, onU
     ["mask", labels.mask, <Square key="i" aria-hidden="true" className="fill-current" />],
     ["erase", labels.eraser, <Eraser key="i" aria-hidden="true" />],
   ];
+  const primary = (value: MarkupTool) => value === "circle" || value === "mask";
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <div role="toolbar" aria-label={labels.tools} className="grid w-full grid-cols-3 gap-1 sm:flex sm:w-auto sm:flex-wrap">
+    <div className="flex shrink-0 items-center gap-1 sm:flex-wrap sm:gap-1.5">
+      <div role="group" aria-label={labels.tools} className="flex min-w-0 flex-1 gap-1 sm:w-auto sm:flex-none sm:flex-wrap">
         {tools.map(([value, label, icon]) => (
           <Button
-            key={value} type="button" size="touch" disabled={disabled} className="max-sm:flex-col max-sm:gap-0.5 max-sm:px-1 max-sm:text-xs sm:px-3"
+            key={value} type="button" size="touch" disabled={disabled} className={cn("max-sm:min-w-0 max-sm:flex-1 max-sm:whitespace-normal max-sm:px-1 max-sm:text-xs max-sm:leading-tight sm:px-3", !primary(value) && "max-sm:hidden")}
             variant={tool === value ? "default" : "outline"}
             aria-pressed={tool === value}
             onClick={() => onTool(value)}
           >
-            {icon}{label}
+            <span className="hidden sm:inline-flex">{icon}</span>{label}
           </Button>
         ))}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button type="button" size="icon-touch" className="shrink-0 sm:hidden" variant="outline" />}
+            disabled={disabled} aria-label={labels.moreTools}
+          ><Ellipsis aria-hidden="true" /></DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuRadioGroup value={tool} onValueChange={value => onTool(value as MarkupTool)}>
+              {tools.filter(([value]) => !primary(value)).map(([value, label, icon]) => (
+                <DropdownMenuRadioItem key={value} value={value} closeOnClick>{icon}{label}</DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      <div className="ms-auto flex gap-1">
+      <div className="ms-auto flex shrink-0 gap-1">
         <Button type="button" size="icon-touch" variant="outline" aria-label={labels.undo} title={labels.undo} disabled={disabled || !canUndo} onClick={onUndo}><Undo2 aria-hidden="true" /></Button>
         <Button type="button" size="icon-touch" variant="outline" aria-label={labels.redo} title={labels.redo} disabled={disabled || !canRedo} onClick={onRedo}><Redo2 aria-hidden="true" /></Button>
       </div>
@@ -46,12 +61,24 @@ export function ImageMarkupToolbar({ tool, labels, onTool, canUndo, canRedo, onU
 /** Zoom out / level / zoom in, then fit-whole-image and fit-width (for long receipts). */
 export function ZoomControls({ zoom, labels }: { zoom: MarkupZoom; labels: MarkupLabels }) {
   return (
-    <div className="flex flex-wrap items-center gap-1" role="group" aria-label={labels.view}>
+    <div className="flex shrink-0 items-center gap-1 sm:flex-wrap" role="group" aria-label={labels.view}>
       <Button type="button" size="icon-touch" variant="outline" aria-label={labels.zoomOut} disabled={!zoom.canZoomOut} onClick={zoom.zoomOut}><ZoomOut aria-hidden="true" /></Button>
       <output className="w-12 text-center text-sm tabular-nums" aria-label={labels.zoomLevel}>{zoom.percent}%</output>
       <Button type="button" size="icon-touch" variant="outline" aria-label={labels.zoomIn} disabled={!zoom.canZoomIn} onClick={zoom.zoomIn}><ZoomIn aria-hidden="true" /></Button>
-      <Button type="button" size="touch" className="px-3" variant={zoom.view === "fit" ? "default" : "outline"} aria-pressed={zoom.view === "fit"} onClick={zoom.fit}><Shrink aria-hidden="true" />{labels.fitImage}</Button>
-      <Button type="button" size="touch" className="px-3" variant={zoom.view === "width" ? "default" : "outline"} aria-pressed={zoom.view === "width"} onClick={zoom.fitWidth}><MoveHorizontal aria-hidden="true" />{labels.fitWidth}</Button>
+      <Button type="button" size="touch" className="hidden px-3 sm:inline-flex" variant={zoom.view === "fit" ? "default" : "outline"} aria-pressed={zoom.view === "fit"} onClick={zoom.fit}><Shrink aria-hidden="true" />{labels.fitImage}</Button>
+      <Button type="button" size="touch" className="hidden px-3 sm:inline-flex" variant={zoom.view === "width" ? "default" : "outline"} aria-pressed={zoom.view === "width"} onClick={zoom.fitWidth}><MoveHorizontal aria-hidden="true" />{labels.fitWidth}</Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button type="button" size="icon-touch" className="sm:hidden" variant="outline" />}
+          aria-label={labels.view}
+        ><Shrink aria-hidden="true" /></DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuRadioGroup value={String(zoom.view)} onValueChange={value => value === "fit" ? zoom.fit() : zoom.fitWidth()}>
+            <DropdownMenuRadioItem value="fit" closeOnClick>{labels.fitImage}</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="width" closeOnClick>{labels.fitWidth}</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -194,7 +221,7 @@ export function ImageMarkupInspector({ marks, selected, labels, nameOf, step, im
               <label htmlFor="image-markup-marks" className="text-sm text-muted-foreground">{labels.marks}</label>
               <select
                 id="image-markup-marks"
-                className="aurora-control h-11 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-56"
+                className="aurora-control h-11 min-w-0 flex-1 rounded-lg border bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-56 md:text-sm"
                 value={selected?.id ?? ""}
                 onChange={(event) => onSelect(Number(event.target.value) || null)}
               >
@@ -212,7 +239,7 @@ export function ImageMarkupInspector({ marks, selected, labels, nameOf, step, im
         </div>
       )}
       {precise && (selected || showStroke) && (
-        <div id="image-markup-precise" className="grid min-w-0 gap-2 rounded-md border p-2" role="group" aria-label={labels.fineTune}>
+        <div id="image-markup-precise" className="grid min-w-0 gap-2 rounded-md border p-2 max-sm:max-h-[min(27dvh,12rem)] max-sm:overflow-auto" role="group" aria-label={labels.fineTune}>
           {showStroke && <StrokePicker value={strokeChoice} labels={labels} onChange={onStroke} />}
           {selected && <div key={selected.id} className="grid min-w-0 gap-2">
             <div>

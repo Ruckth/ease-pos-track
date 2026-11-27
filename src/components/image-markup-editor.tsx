@@ -29,11 +29,12 @@ function formatBytes(bytes: number) {
  * Local screenshot editor for a draft image. Geometry is in oriented source pixels;
  * the crop passed to onApply is normalized 0..1 against the same oriented source.
  */
-export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
+export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange }: {
   item: PendingMedia;
   pins: Array<{ x?: number; y?: number; label: number }>;
   onApply: (file: File, crop: { x: number; y: number; width: number; height: number }) => boolean;
   onCancel: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const { language } = useI18n();
   const labels = markupLabels(language);
@@ -57,6 +58,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   const marks = history.stack[history.pos];
   const marksRef = useRef(marks);
   marksRef.current = marks;
+  const dirty = marks.length > 0;
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   useEffect(() => {
     mounted.current = true;
@@ -289,12 +292,6 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
     if (!ok) { setError(labels.applyFailed); setPhase("review"); }
   }
 
-  function cancel() {
-    group.current = null;
-    exportToken.current++;
-    onCancel();
-  }
-
   function rootKey(event: KeyboardEvent<HTMLDivElement>) {
     if (phase !== "edit" || (event.target as Element).closest("input:not([type=range]), textarea, select")) return;
     const mod = event.metaKey || event.ctrlKey;
@@ -317,7 +314,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
 
   if (reviewed && (phase === "review" || phase === "applying")) {
     return (
-      <section className="grid gap-3" aria-labelledby="image-markup-review-title">
+      <section className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2" aria-labelledby="image-markup-review-title">
         <h3 id="image-markup-review-title" ref={reviewHeading} tabIndex={-1} className="text-base font-semibold outline-none">{labels.reviewTitle}</h3>
         <p className="text-sm text-muted-foreground">{labels.reviewHint}</p>
         <ImageMarkupPreview
@@ -326,10 +323,10 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
           onError={() => { setReviewed((r) => (r && r.url === reviewed.url ? { ...r, failed: true } : r)); setError(labels.exportFailed); }}
         />
         {reviewed.width > 0 && (
-          <p className="text-sm tabular-nums text-muted-foreground">{labels.outputMeta(reviewed.width, reviewed.height, formatBytes(reviewed.file.size), reviewed.file.type.replace("image/", "").toUpperCase())}</p>
+          <p className="hidden text-sm tabular-nums text-muted-foreground sm:block">{labels.outputMeta(reviewed.width, reviewed.height, formatBytes(reviewed.file.size), reviewed.file.type.replace("image/", "").toUpperCase())}</p>
         )}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 max-sm:border-t max-sm:pt-2">
           <Button type="button" size="touch" variant="outline" onClick={backToEdit} disabled={phase === "applying"}><ArrowLeft aria-hidden="true" />{labels.backToEdit}</Button>
           <Button type="button" size="touch" onClick={apply} disabled={phase === "applying" || reviewed.failed || !reviewed.width} aria-busy={phase === "applying"}>
             {phase === "applying" ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Check aria-hidden="true" />}
@@ -355,20 +352,20 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
   const needsAction = notice === labels.areaTooSmall || notice === labels.finishSelection;
 
   return (
-    <div className="grid gap-3" onKeyDown={rootKey}>
+    <div className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2" onKeyDown={rootKey}>
       <ImageMarkupToolbar
         tool={tool} labels={labels} onTool={chooseTool} disabled={busy}
         canUndo={history.pos > 0} canRedo={history.pos < history.stack.length - 1}
         onUndo={() => travel(-1)} onRedo={() => travel(1)}
       />
-      <p className="text-sm text-muted-foreground">
+      <p className="shrink-0 text-sm leading-5 text-muted-foreground">
         {circleSelected ? <>
           <span className="[@media(pointer:coarse)]:hidden">{labels.hintResizeCircle}</span>
           <span className="hidden [@media(pointer:coarse)]:inline">{labels.hintTouchSize}</span>
         </> : corner ? labels.hintSecondCorner : hints[tool]}
       </p>
       <p id="image-markup-keyboard-hint" className="sr-only">{labels.keyboardHint}</p>
-      <div inert={busy || undefined} className="grid gap-3">
+      <div inert={busy || undefined} className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2">
         <ImageMarkupCanvas
           image={image} marks={marks} selectedId={selectedId} tool={tool} pins={placedPins} corner={corner} minSize={minSize} labels={labels}
           onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
@@ -399,8 +396,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel }: {
       />
       </div>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" size="touch" variant="outline" onClick={cancel}><X aria-hidden="true" />{labels.cancel}</Button>
+      <div className="flex shrink-0 flex-wrap justify-end gap-2 max-sm:border-t max-sm:pt-2">
+        <Button type="button" size="touch" variant="outline" onClick={onCancel}><X aria-hidden="true" />{labels.cancel}</Button>
         <Button ref={reviewButton} type="button" size="touch" onClick={review} disabled={busy || excluded.length > 0} aria-busy={busy}>
           {busy ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Check aria-hidden="true" />}
           {busy ? labels.reviewing : labels.review}
