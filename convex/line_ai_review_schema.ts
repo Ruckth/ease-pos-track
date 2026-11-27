@@ -42,6 +42,7 @@ export const lineAiReviewTables = {
     createdAt: v.number(), updatedAt: v.number(), expiresAt: v.number(), eraseTextAt: v.optional(v.number()), deleteAt: v.number(),
   }).index("by_draft", ["draftId"])
     .index("by_project", ["projectId", "createdAt"])
+    .index("by_project_state", ["projectId", "state"])
     .index("by_ticket", ["ticketId"])
     .index("by_state_updated", ["state", "updatedAt"])
     .index("by_erase_text", ["eraseTextAt"])

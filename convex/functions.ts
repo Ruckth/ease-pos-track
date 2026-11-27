@@ -333,6 +333,24 @@ export function internalActorMutation<A extends PropertyValidators, R>(
   }), "internalActorMutation");
 }
 
+/**
+ * Internal staff-checked query for private HTTP routes: the route forwards the
+ * caller's Convex Auth JWT, so live staff admission is enforced here.
+ */
+export function internalStaffQuery<A extends PropertyValidators, R>(
+  definition: Definition<QueryCtx & Access, A, R>,
+) {
+  refuseRawToken(definition.name, definition.args);
+  return tagged(internalQuery({
+    args: v.object(definition.args),
+    handler: (ctx, args) => guarded(definition.name, async () => {
+      const access = await requireActor(ctx);
+      assertStaffActor(access.actor);
+      return await definition.handler(Object.assign(ctx, access), args);
+    }),
+  }), "internalStaffQuery");
+}
+
 /** Live named staff admission for T3 Settings, resolved through t3Identity.browser. */
 export function namedStaffQuery<A extends PropertyValidators, R>(
   definition: Definition<QueryCtx & { namedStaff: T3Admission }, A, R>,
@@ -386,8 +404,22 @@ export const lineWebhookRoute = {
   credentialClass: "line-signature", operation: "line_webhook:receive",
 } as const;
 
+/** Private staged LINE capture screenshots: live staff Convex Auth JWT, streamed bytes only. */
+export const lineCaptureMediaRoutes = {
+  serve: { pathPrefix: "/v1/line-capture/media/", method: "GET" satisfies RoutableMethod, credentialClass: "convex-auth", operation: "line_capture_media:serve" },
+  preflight: { pathPrefix: "/v1/line-capture/media/", method: "OPTIONS" satisfies RoutableMethod, credentialClass: "cors", operation: "line_capture_media:preflight" },
+} as const;
+
 export function lineWebhookHttp(handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
   const { pathPrefix, method, credentialClass, operation } = lineWebhookRoute;
+  return { pathPrefix, method, handler: tagged(httpAction(handler), `http:${credentialClass}:${operation}`) };
+}
+
+export function lineCaptureMediaHttp(
+  route: keyof typeof lineCaptureMediaRoutes,
+  handler: (ctx: ActionCtx, request: Request) => Promise<Response>,
+) {
+  const { pathPrefix, method, credentialClass, operation } = lineCaptureMediaRoutes[route];
   return { pathPrefix, method, handler: tagged(httpAction(handler), `http:${credentialClass}:${operation}`) };
 }
 
@@ -399,7 +431,12 @@ export function lineStaffAction<A extends PropertyValidators, R>(definition: Def
   }), "lineStaffAction");
 }
 
-export const httpRouteManifest = [t3DoctorRoute, lineWebhookRoute, ...Object.values(pageRoutes)] as const;
+export const httpRouteManifest = [
+  t3DoctorRoute,
+  lineWebhookRoute,
+  ...Object.values(lineCaptureMediaRoutes),
+  ...Object.values(pageRoutes),
+] as const;
 
 export function pageHttp(route: keyof typeof pageRoutes, handler: (ctx: ActionCtx, request: Request) => Promise<Response>) {
   const { pathPrefix, method, credentialClass, operation } = pageRoutes[route];

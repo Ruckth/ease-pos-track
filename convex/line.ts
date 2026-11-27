@@ -108,6 +108,9 @@ export const setAssistantEnabled = staffMutation({
       }
       const connection = await readLineAiConnection(ctx, current.projectId);
       if (!await lineAiReleaseEnabled(ctx) || !connection?.enabled) throw new Error("LINE_AI_CONNECTION_REQUIRED");
+      if (await ctx.db.query("lineCaptureProjects").withIndex("by_project", q => q.eq("projectId", current.projectId)).unique()) {
+        throw new Error("LINE_CAPTURE_ACTIVE");
+      }
       const botRevision = bot.assistantRevision ?? 0;
       const projectVisibilityVersion = project.inboxVisibilityVersion ?? 0;
       if (currentAssistantOptIn(current, botRevision, projectVisibilityVersion)) return;

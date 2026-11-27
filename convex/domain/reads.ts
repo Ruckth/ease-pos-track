@@ -65,7 +65,7 @@ export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[] = []) {
   return {
     _id: row._id, _creationTime: row._creationTime, projectId: row.projectId, projectKey: row.projectKey,
     ticketNumber: row.ticketNumber, version: row.version, title: row.title, description: row.description,
-    status: row.status, lifecycle: row.lifecycle, origin: row.origin,
+    status: row.status, lifecycle: row.lifecycle, origin: row.origin, hasCustomerOwner: !!row.ownerCustomerId,
     ...(row.urgencyScore === undefined ? {} : { urgencyScore: row.urgencyScore }),
     tagIds: row.tagIds ?? [], tags,
     ...(row.createdVia === undefined ? {} : { createdVia: row.createdVia }),

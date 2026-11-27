@@ -39,6 +39,8 @@ export async function assistantEnrollment(ctx: DbContext, scope: Enrollment) {
     || !chat || chat.state !== "active" || chat.botId !== bot._id
     || chat.projectId !== project._id || chat.joinedAt !== scope.joinedAt || !connection?.enabled || !connection.keyCipher) return null;
   if (!currentAssistantOptIn(chat, bot.assistantRevision ?? 0, project.inboxVisibilityVersion ?? 0)) return null;
+  // A Project switched to LINE capture has one writer: leased or drafted AI work can no longer settle.
+  if (await ctx.db.query("lineCaptureProjects").withIndex("by_project", q => q.eq("projectId", project._id)).unique()) return null;
   if ((scope.chatRevision !== undefined && (chat.assistantRevision ?? 0) !== scope.chatRevision)
     || (scope.botRevision !== undefined && (bot.assistantRevision ?? 0) !== scope.botRevision)
     || (scope.projectVisibilityVersion !== undefined && (project.inboxVisibilityVersion ?? 0) !== scope.projectVisibilityVersion)

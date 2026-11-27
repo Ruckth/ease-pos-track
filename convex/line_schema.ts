@@ -94,6 +94,7 @@ export const lineTables = {
     updatedAt: v.number(),
   })
     .index("by_bot_message", ["botId", "messageId"])
+    .index("by_project_state", ["projectId", "state"])
     .index("by_chat_sender_window", ["chatId", "joinedAt", "senderDigest", "messageTimestamp"])
     .index("by_state_available", ["state", "availableAt"])
     .index("by_state_lease", ["state", "leaseExpiresAt"])
