@@ -33,17 +33,22 @@ const mimeTypes: Record<string, string> = {
   heif: "image/heif",
 };
 
+/** Read raw dimensions before choosing decode limits. */
+export function readRasterHeader(bytes: Uint8Array) {
+  // Valid JPEGs may start directly with a frame header when metadata was
+  // removed. image-size expects at least one segment before that header.
+  const firstFrame = bytes.length >= 11 && bytes[0] === 0xff && bytes[1] === 0xd8
+    && bytes[2] === 0xff && [0xc0, 0xc1, 0xc2].includes(bytes[3]);
+  return firstFrame
+    ? { type: "jpg", height: bytes[7] * 256 + bytes[8], width: bytes[9] * 256 + bytes[10], images: [] }
+    : imageSize(bytes);
+}
+
 /** Detect the format and declared size from the header, before decoding anything. */
 export function inspectRaster(bytes: Uint8Array, fullHD = false) {
   try {
     if (!bytes.length || bytes.length > IMAGE_SOURCE_BYTES) throw Error();
-    // Valid JPEGs may start directly with a frame header when metadata was
-    // removed. image-size expects at least one segment before that header.
-    const firstFrame = bytes.length >= 11 && bytes[0] === 0xff && bytes[1] === 0xd8
-      && bytes[2] === 0xff && [0xc0, 0xc1, 0xc2].includes(bytes[3]);
-    const image = firstFrame
-      ? { type: "jpg", height: bytes[7] * 256 + bytes[8], width: bytes[9] * 256 + bytes[10], images: [] }
-      : imageSize(bytes);
+    const image = readRasterHeader(bytes);
     const type = mimeTypes[image.type ?? ""];
     if (!type) throw Error();
     for (const frame of [image, ...(image.images ?? [])]) {

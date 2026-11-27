@@ -255,3 +255,181 @@ test("a failed or oversized preparation leaves the draft intact with its error, 
   assert.equal(await draft.submit(deps), true);
   assert.equal(declared[0][0].name, "photo.webp");
 });
+
+test("an applied crop updates only its image and reprojects that image's pin after reorder", async () => {
+  const { draft, revoked } = fixture();
+  const original = draft.getSnapshot().items[0];
+  draft.addFiles([new File(["other"], "other.png", { type: "image/png" })]);
+  const other = draft.getSnapshot().items[1];
+  await draft.addAnnotation({ mediaIndex: 0, kind: "point", x: 0.25, y: 0.75, text: "Expected change" });
+  await draft.addAnnotation({ mediaIndex: 1, kind: "point", x: 0.25, y: 0.75, text: "Other image" });
+  draft.setDescription("See [2]");
+  draft.reorder([other, original]);
+
+  const before = draft.getSnapshot();
+  const edited = new File(["reviewed bytes"], "customer-name.png", { type: "image/png" });
+  assert.equal(draft.applyImageEdit(original, edited, { x: 0.3, y: 0, width: 0.5, height: 1 }), false);
+  assert.equal(draft.applyImageEdit(original, edited, { x: NaN, y: 0, width: 0.5, height: 1 }), false);
+  assert.equal(draft.getSnapshot(), before);
+  assert.deepEqual(revoked, []);
+
+  const crop = { x: 0, y: 0.5, width: 0.5, height: 0.5 };
+  assert.equal(draft.applyImageEdit(original, edited, crop), true);
+  const applied = draft.getSnapshot();
+  const replacement = applied.items[1];
+  assert.equal(applied.items[0], other);
+  assert.equal(replacement.id, original.id);
+  assert.match(replacement.file.name, /^image-key-\d+\.png$/);
+  assert.equal(await replacement.file.text(), "reviewed bytes");
+  assert.deepEqual(applied.annotations, [{ ...before.annotations[0], x: 0.5, y: 0.5 }, before.annotations[1]]);
+  assert.equal(applied.description, "See [2]");
+  assert.deepEqual(revoked, [original.previewUrl]);
+  assert.equal(draft.applyImageEdit(original, edited, crop), false);
+  draft.remove(replacement);
+  assert.equal(draft.applyImageEdit(replacement, edited, crop), false);
+  assert.deepEqual(revoked, [original.previewUrl, replacement.previewUrl]);
+  draft.dispose();
+});
+
+test("an uncertain partial upload retries frozen files, annotations and cover order", async () => {
+  let preparations = 0;
+  const draft = new DisposableTicketDraft("original-project" as Id<"projects">, {
+    prepareImage: async file => { preparations++; return file; },
+    createURL: file => `blob:${file.name}`, revokeURL: () => {},
+    requestKey: (() => { let next = 0; return () => `key-${next++}`; })(),
+    now: () => 42,
+  });
+  const image = (text: string) => new File([text], "same.png", { type: "image/png" });
+  draft.addFiles([image("old"), image("A"), image("B")]);
+  const original = draft.getSnapshot().items[0];
+  const crop = { x: 0, y: 0, width: 1, height: 1 };
+  assert.equal(draft.applyImageEdit(original, image("reviewed"), crop), true);
+  await draft.addAnnotation({ mediaIndex: 0, kind: "point", x: 0.25, y: 0.75, text: "Original pin" });
+  draft.setTitle("Original title");
+  draft.setDescription("Original description [1]");
+  const before = draft.getSnapshot();
+  const stored = new Map<string, string>();
+  const receipts: Awaited<ReturnType<NonNullable<Parameters<typeof draft.submit>[0]["uploadMedia"]>>> = [];
+  const declarations: unknown[] = [];
+  const deps: Parameters<typeof draft.submit>[0] = {
+    token: "token",
+    createUploadIntent: async args => {
+      declarations.push(args);
+      return {
+        intentId: "intent" as Id<"uploadIntents">, secret: "secret",
+        uploadedFiles: receipts.map(file => ({ ...file, url: file.ufsUrl })),
+      };
+    },
+    uploadMedia: async (_route, { files }) => {
+      const firstUpload = receipts.length === 0;
+      if (firstUpload) {
+        assert.deepEqual(await Promise.all(files.map(file => file.text())), ["reviewed", "A", "B"]);
+        assert.equal(files[0], before.items[0].file);
+        assert.notEqual(files[1].name, files[2].name);
+      } else {
+        assert.deepEqual(await Promise.all(files.map(file => file.text())), ["reviewed", "A"]);
+      }
+      const uploaded = await Promise.all((firstUpload ? [files[2]] : files).map(async file => {
+        const key = file.name;
+        stored.set(key, await file.text());
+        return { key, name: file.name, size: file.size, type: file.type, ufsUrl: `https://fixture.invalid/${key}`, url: `https://fixture.invalid/${key}`, appUrl: `https://fixture.invalid/${key}`, customId: null, fileHash: key, serverData: null };
+      }));
+      receipts.push(...uploaded);
+      if (firstUpload) throw new Error("Upload response lost");
+      return uploaded;
+    },
+    createTicket: async args => {
+      assert.equal(args.requestId, before.idempotencyKey);
+      assert.equal(args.title, before.title);
+      assert.equal(args.description, before.description);
+      assert.deepEqual(args.media.map(file => stored.get(file.key)), ["reviewed", "A", "B"]);
+      assert.deepEqual(args.annotations.map(({ mediaIndex, text }) => [mediaIndex, text]), [[0, "Original pin"]]);
+      return "recorded-ticket";
+    },
+  };
+
+  assert.equal(await draft.submit(deps), false);
+  assert.equal(draft.getSnapshot().retryLocked, true);
+  draft.setTitle("Changed title");
+  draft.setDescription("Changed description");
+  draft.remove(before.items[1]);
+  draft.reorder([...before.items].reverse());
+  draft.addFiles([image("C")]);
+  await draft.updateAnnotation({ annotationId: before.annotations[0].id, text: "Changed pin" });
+  await draft.deleteAnnotation(before.annotations[0].id);
+  assert.equal(draft.applyImageEdit(before.items[0], image("stale edit"), crop), false);
+  assert.equal(await draft.submit(deps), true);
+  assert.equal(draft.getSnapshot().retryLocked, false);
+  assert.equal(preparations, 2);
+  assert.equal(declarations.length, 2);
+  assert.deepEqual(declarations[0], declarations[1]);
+  assert.equal(draft.lastSubmittedId, "recorded-ticket");
+});
+
+for (const mediaEnabled of [true, false]) {
+  test(`retired classification unlocks an uncertain ${mediaEnabled ? "media" : "text-only"} draft after receipt lookup`, async () => {
+    const { draft, deps } = fixture();
+    if (!mediaEnabled) draft.remove(draft.getSnapshot().items[0]);
+    draft.setRoutingClassification({ product: "retired", restricted: false });
+    const requestKey = draft.getSnapshot().idempotencyKey;
+    let cancellations = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      cancellations++;
+      return Response.json({ ok: true, state: "queued", jobIds: [] });
+    };
+    let failure: unknown = new Error("Response lost");
+    const submit = {
+      ...deps,
+      mediaEnabled,
+      createTicket: async () => { if (failure) throw failure; return "created-ticket"; },
+    };
+    try {
+      assert.equal(await draft.submit(submit), false);
+      assert.equal(draft.getSnapshot().retryLocked, true);
+      failure = new ConvexError({ code: "PROJECT_NOT_FOUND" });
+      assert.equal(await draft.submit(submit), false);
+      assert.equal(draft.getSnapshot().retryLocked, true);
+      assert.equal(draft.getSnapshot().idempotencyKey, requestKey);
+      assert.equal(cancellations, 0);
+
+      failure = new ConvexError({ code: "UNKNOWN_ROUTING_CODE" });
+      assert.equal(await draft.submit(submit), false);
+      assert.equal(draft.getSnapshot().retryLocked, false);
+      assert.notEqual(draft.getSnapshot().idempotencyKey, requestKey);
+      assert.equal(cancellations, mediaEnabled ? 1 : 0);
+
+      draft.setRoutingClassification(undefined);
+      assert.equal(draft.getSnapshot().routingClassification, undefined);
+      failure = undefined;
+      assert.equal(await draft.submit(submit), true);
+      assert.equal(draft.lastSubmittedId, "created-ticket");
+    } finally {
+      globalThis.fetch = originalFetch;
+      draft.dispose();
+    }
+  });
+}
+
+test("invalid prepared upload metadata leaves the draft editable before any intent write", async () => {
+  const { draft, deps } = fixture();
+  const invalid = new File(["fake image"], `${"a".repeat(256)}.png`, { type: "image/png" });
+  draft.addFiles([invalid]);
+  const before = draft.getSnapshot();
+  let intentCalls = 0;
+  const submit = {
+    ...deps,
+    createUploadIntent: async () => {
+      intentCalls++;
+      throw new Error("Intent response lost");
+    },
+  };
+
+  assert.equal(await draft.submit(submit), false);
+  assert.match(String(draft.getSnapshot().error), /INVALID_FILE_METADATA/);
+  assert.equal(intentCalls, 0);
+  assert.equal(draft.getSnapshot().idempotencyKey, before.idempotencyKey);
+  assert.equal(draft.getSnapshot().retryLocked, false);
+  draft.remove(before.items[1]);
+  assert.equal(await draft.submit(deps), true);
+});

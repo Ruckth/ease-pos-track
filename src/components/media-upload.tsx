@@ -1,12 +1,12 @@
 import { IMAGE_SOURCE_BYTES } from "../../shared/image-optimization";
-import type { PendingMedia } from "@/lib/types";
+import { canMarkupImage, type PendingMedia } from "@/lib/types";
 import { CameraCaptureDialog } from "@/components/camera-capture-dialog";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
 import { Button } from "@/components/ui/button";
 import { supportsCamera } from "@/lib/camera";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { Camera, FileImage, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
+import { Camera, Pencil, FileImage, GripVertical, ImagePlus, MapPin, PlayCircle, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 const IMAGE_LIMIT = 10;
@@ -19,6 +19,7 @@ export function MediaUploadField({
   onItemsChange,
   onFilesAdded,
   onPreviewItem,
+  onEditImage,
   onRequestRemove,
   annotationCounts = {},
   disabled = false,
@@ -26,6 +27,7 @@ export function MediaUploadField({
   items: PendingMedia[];
   onItemsChange: (items: PendingMedia[]) => void;
   onFilesAdded: (files: File[]) => void;
+  onEditImage?: (item: PendingMedia) => void;
   onPreviewItem?: (item: PendingMedia) => void;
   onRequestRemove: (item: PendingMedia) => void;
   annotationCounts?: Record<string, number>;
@@ -113,6 +115,8 @@ export function MediaUploadField({
     if (disabled) return;
 
     const onPaste = (event: ClipboardEvent) => {
+      const dialog = event.target instanceof Element && event.target.closest('[role="dialog"]');
+      if (dialog && !dialog.contains(field.current)) return;
       const files = Array.from(event.clipboardData?.files ?? []).filter(
         (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
       );
@@ -288,6 +292,12 @@ export function MediaUploadField({
                     <X className="size-4" />
                   </button>
                 </div>
+                {onEditImage && canMarkupImage(item.file) && (
+                  <Button type="button" size="sm" variant="ghost" className="min-h-11 w-full" disabled={disabled}
+                    aria-label={t("editImageNamed", { name: item.file.name })} onClick={() => onEditImage(item)}>
+                    <Pencil aria-hidden="true" /> {t("editDraftImage")}
+                  </Button>
+                )}
               </SortableItem>
             ))}
             <button

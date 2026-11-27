@@ -5,8 +5,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/lib/i18n";
-import type { PendingMedia } from "@/lib/types";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { canMarkupImage, type PendingMedia } from "@/lib/types";
+import { ChevronDown, Loader2, Pencil } from "lucide-react";
 import { lazy, Suspense, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import type { DisposableTicketDraft } from "./draft";
@@ -14,6 +14,7 @@ import { useTicketDraft } from "./use-composer";
 import type { Id } from "@convex/_generated/dataModel";
 import { DESCRIPTION_MAX_LENGTH, ticketDraftIssue, TITLE_MAX_LENGTH } from "./composer-validation";
 
+const ImageMarkupEditor = lazy(() => import("@/components/image-markup-editor").then(module => ({ default: module.ImageMarkupEditor })));
 const MediaViewer = lazy(() => import("@/components/media-viewer").then(module => ({ default: module.MediaViewer })));
 const MediaUploadField = lazy(() => import("@/components/media-upload").then(module => ({ default: module.MediaUploadField })));
 
@@ -26,14 +27,16 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
   onSubmitted: (id?: Id<"tickets">) => void;
 }) {
   const { t } = useI18n();
-  const { owner, mediaEnabled, title, description, items, annotations, error, progress, setTitle, setDescription,
+  const { owner, mediaEnabled, title, description, items, annotations, error, progress, retryLocked, setTitle, setDescription,
     setItems, setError, routingClassification, viewerMedia, viewerAnnotations, annotationCounts,
     createPendingAnnotation, updatePendingAnnotation, deletePendingAnnotation, submit: submitDraft } = useTicketDraft(draftOwner);
+  const [editingItem, setEditingItem] = useState<PendingMedia | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingMedia | null>(null);
   const [preview, setPreview] = useState(false);
   const [titleInvalid, setTitleInvalid] = useState(false);
   const isUploading = progress !== null;
+  const editsDisabled = isUploading || Boolean(retryLocked);
   const titleId = role === "customer" ? "customer-ticket-title" : "title";
   const descriptionId = role === "customer" ? "customer-ticket-description" : "description";
   const selectedMediaIndex = Math.max(0, items.findIndex(item => item.id === selectedMediaId));
@@ -78,11 +81,25 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
     }
   }
 
+  const markupDialog = <Dialog open={active && editingItem !== null} onOpenChange={open => { if (!open) setEditingItem(null); }}
+      title={t("editDraftImage")} mobileFullScreen>
+      {active && editingItem && <Suspense fallback={<p role="status">{t("syncing")}</p>}>
+        <ImageMarkupEditor key={editingItem.previewUrl} item={editingItem}
+          pins={viewerAnnotations.filter(pin => items[pin.mediaIndex]?.id === editingItem.id)}
+          onCancel={() => setEditingItem(null)}
+          onApply={(file, crop) => {
+            const applied = owner.applyImageEdit(editingItem, file, crop);
+            if (applied) setEditingItem(null);
+            return applied;
+          }} />
+      </Suspense>}
+    </Dialog>;
+
   return <>
     <form className="space-y-4" onSubmit={submit} noValidate aria-busy={isUploading}>
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span className="text-muted-foreground">{t("composerRequired")}</span></label>
-        <Input disabled={isUploading} id={titleId} value={title} required aria-invalid={titleInvalid || undefined}
+        <Input disabled={editsDisabled} id={titleId} value={title} required aria-invalid={titleInvalid || undefined}
           aria-describedby={titleInvalid ? `${titleId}-error` : undefined} maxLength={TITLE_MAX_LENGTH}
           placeholder={t("topicPlaceholder")} onChange={event => {
             setTitle(event.target.value);
@@ -92,18 +109,18 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       </div>
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor={descriptionId}>{t("description")}</label>
-        <Textarea disabled={isUploading} id={descriptionId} rows={4} maxLength={DESCRIPTION_MAX_LENGTH} value={description}
+        <Textarea disabled={editsDisabled} id={descriptionId} rows={4} maxLength={DESCRIPTION_MAX_LENGTH} value={description}
           placeholder={t("descriptionPlaceholder")} onChange={event => setDescription(event.target.value)} />
       </div>
       {mediaEnabled && <div className="space-y-2">
         <p className="text-sm font-medium">{t("media")}</p>
         <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>}><MediaUploadField items={items} onItemsChange={setItems} onFilesAdded={owner.addFiles}
-          onPreviewItem={item => setSelectedMediaId(item.id)} onRequestRemove={requestPendingItemRemoval}
-          annotationCounts={annotationCounts} disabled={!active || isUploading} /></Suspense>
+          onEditImage={setEditingItem} onPreviewItem={item => setSelectedMediaId(item.id)} onRequestRemove={requestPendingItemRemoval}
+          annotationCounts={annotationCounts} disabled={!active || editsDisabled} /></Suspense>
         {items.length ? <p className="text-sm leading-5 text-muted-foreground">{annotations.length ? t("pinSummary", { count: annotations.length }) : t("pinHint")}</p> : null}
       </div>}
       <TicketRoutingFields projectId={owner.projectId} value={routingClassification}
-        onChange={owner.setRoutingClassification} disabled={isUploading} />
+        onChange={owner.setRoutingClassification} disabled={editsDisabled} />
       <div className="rounded-md border border-border/60">
         <Button type="button" className="group h-auto min-h-11 w-full justify-between gap-2 whitespace-normal px-3 py-2 text-left" variant="ghost"
           disabled={isUploading} aria-expanded={preview} aria-controls={`${titleId}-preview`} onClick={() => setPreview(value => !value)}>
@@ -120,6 +137,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
         <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
       </div> : null}
       {(title || description || items.length > 0) && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
+      {retryLocked && !isUploading && <p role="status" className="text-sm">{t("retryFrozenTicket")}</p>}
       {error && !titleInvalid ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       <div className="aurora-composer-footer aurora-dialog-edge sticky bottom-0 z-10 -mx-4 flex flex-wrap gap-2 border-t border-border/60 px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
         <Button className="min-h-11 flex-1" disabled={isUploading || mediaEnabled === undefined}>{isUploading ? <Loader2 className="animate-spin" /> : null}{isUploading ? t("submitting") : t("submitTicket")}</Button>
@@ -129,9 +147,20 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
     {mediaEnabled && <><Dialog open={active && selectedMediaId !== null} onOpenChange={open => !open && setSelectedMediaId(null)}
       title={items[selectedMediaIndex]?.file.name ?? t("annotateMedia")} description={t("annotateDescription")} mobileFullScreen>
       <Suspense fallback={<p role="status">{t("syncing")}</p>}><MediaViewer key={selectedMediaId ?? "pending-media"} media={viewerMedia} annotations={viewerAnnotations}
-        initialIndex={selectedMediaIndex} disabled={isUploading} onCreateAnnotation={createPendingAnnotation}
+        initialIndex={selectedMediaIndex} disabled={editsDisabled}
+        renderImageAction={index => {
+          const item = items[index];
+          return item && canMarkupImage(item.file)
+            ? <Button type="button" size="touch" variant="outline" onClick={() => setEditingItem(item)}>
+                <Pencil aria-hidden="true" />{t("editDraftImage")}
+              </Button>
+            : null;
+        }}
+        onCreateAnnotation={createPendingAnnotation}
         onUpdateAnnotation={updatePendingAnnotation} onDeleteAnnotation={deletePendingAnnotation} /></Suspense>
+      {selectedMediaId !== null && markupDialog}
     </Dialog>
+    {selectedMediaId === null && markupDialog}
     <AlertDialog open={active && pendingRemoval !== null} onOpenChange={open => !open && setPendingRemoval(null)} title={t("removeMediaPins")}
       description={t("removeMediaDescription", { name: pendingRemoval?.file.name ?? t("media"), count: pendingRemoval ? annotationCounts[pendingRemoval.id] ?? 0 : 0 })}
       confirmLabel={t("removeMedia")} onConfirm={() => { if (pendingRemoval) removePendingItem(pendingRemoval); }} /></>}

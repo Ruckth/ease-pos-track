@@ -31,6 +31,12 @@ export function isActiveAnnotation(annotation: Annotation) {
   return annotation.deletedAt === undefined;
 }
 
+/** Eligibility for a draft action. Decoding checks the actual file and rejects animation. */
+export function canMarkupImage(file: File): boolean {
+  const type = file.type.split(";")[0].trim().toLowerCase();
+  return type ? type === "image/png" || type === "image/jpeg" : /\.(png|jpe?g)$/i.test(file.name);
+}
+
 export function isVideoMedia(item: MediaItem) {
   return item.type.startsWith("video/");
 }

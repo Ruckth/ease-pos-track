@@ -208,3 +208,38 @@ test("abort with an unknown guarded cancellation retains the draft key", async (
     assert.equal(renewed, 0);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("aborting a reconciliation before create preserves the earlier uncertain receipt", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let cancellations = 0;
+  let renewals = 0;
+  globalThis.fetch = async () => { cancellations++; throw new Error("Must keep the original intent"); };
+  try {
+    await assert.rejects(submitTicketDraft({
+      token: "session",
+      reconciling: true,
+      signal: controller.signal,
+      onRequestConflict: () => { renewals++; },
+      createUploadIntent: async () => {
+        controller.abort();
+        return { intentId: "intent" as Id<"uploadIntents">, secret: "secret", uploadedFiles: [] };
+      },
+      createTicket: async () => { assert.fail("Cancelled before create"); },
+    }, { title: "Ticket", description: "", items: [], annotations: [], idempotencyKey: "original-request-id" }), { name: "AbortError" });
+    assert.equal(cancellations, 0);
+    assert.equal(renewals, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("an authorization failure during receipt reconciliation preserves the request key", async () => {
+  let renewals = 0;
+  await assert.rejects(submitTicketDraft({
+    token: "expired-session",
+    reconciling: true,
+    onRequestConflict: () => { renewals++; },
+    createUploadIntent: async () => { throw new ConvexError({ code: "SESSION_EXPIRED" }); },
+    createTicket: async () => { assert.fail("Authorization failed before create"); },
+  }, { title: "Ticket", description: "", items: [], annotations: [], idempotencyKey: "original-request-id" }), /SESSION_EXPIRED/);
+  assert.equal(renewals, 0);
+});

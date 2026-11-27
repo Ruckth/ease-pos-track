@@ -21,6 +21,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { ImageSlide, VideoSlide } from "./media-slides";
 
@@ -40,11 +41,12 @@ export const MediaViewer = forwardRef<
     initialIndex?: number;
     disabled?: boolean;
     readOnly?: boolean;
+    renderImageAction?: (index: number) => ReactNode;
     onCreateAnnotation: (input: AnnotationDraftInput) => Promise<void>;
     onUpdateAnnotation: (input: AnnotationUpdateInput) => Promise<void>;
     onDeleteAnnotation: (annotationId: string) => Promise<void>;
   }
->(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
+>(function MediaViewer({ media, annotations, initialIndex = 0, disabled = false, readOnly = false, renderImageAction, onCreateAnnotation, onUpdateAnnotation, onDeleteAnnotation }, ref) {
   const { t } = useI18n();
   const [mainApi, setMainApi] = useState<CarouselApi>();
   const [thumbApi, setThumbApi] = useState<CarouselApi>();
@@ -226,10 +228,11 @@ export const MediaViewer = forwardRef<
         cancelPlacement();
       }
     }}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm leading-5 text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <p className="mr-auto text-sm leading-5 text-muted-foreground">
           {selectedIndex + 1} / {media.length}
         </p>
+        {!readOnly && !movingId && !annotateMode && !draft && renderImageAction?.(selectedIndex)}
         {!readOnly && (movingId ? (
           <Button type="button" size="sm" variant="outline" onClick={cancelPlacement}>
             <X />

@@ -1,3 +1,4 @@
+import { markupLabels } from "../../src/lib/markup-labels";
 // Keyboard and axe checks for the Ticket states people use most. Each scan
 // runs after the state opens; persisted-state assertions stay with behavior.
 import assert from "node:assert/strict";
@@ -123,6 +124,25 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
       await media.getByRole("button", { name: copy(language, "addPin"), exact: true }).waitFor();
       await expectAccessible(page, `${role} ${language} media dialog`);
       await focusStaysInside(page, media, "Tab", 15);
+      const edit = media.getByRole("button", { name: copy(language, "editDraftImage"), exact: true });
+      await edit.focus();
+      await page.keyboard.press("Enter");
+      const editor = page.getByRole("dialog", { name: copy(language, "editDraftImage"), exact: true });
+      const labels = markupLabels(language);
+      const area = editor.getByRole("application", { name: labels.canvasLabel });
+      await area.focus();
+      await area.press("Enter");
+      const width = editor.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true });
+      const pixels = Number(await width.inputValue());
+      await width.press("ArrowUp");
+      assert.equal(Number(await width.inputValue()), pixels + 1);
+      await expectAccessible(page, `${role} ${language} image editor`);
+      await editor.getByRole("button", { name: labels.review, exact: true }).press("Enter");
+      await editor.getByRole("img", { name: labels.reviewTitle }).waitFor();
+      await expectAccessible(page, `${role} ${language} edited attachment review`);
+      await page.keyboard.press("Escape");
+      await editor.waitFor({ state: "hidden" });
+      await page.waitForFunction(element => element === document.activeElement, await edit.elementHandle());
       await page.keyboard.press("Escape");
       await media.waitFor({ state: "hidden" });
       await page.waitForFunction(element => element === document.activeElement, await preview.elementHandle());
