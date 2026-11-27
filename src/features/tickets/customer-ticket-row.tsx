@@ -55,7 +55,7 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
   const updatedLater = updatedAt - item.createdAt >= 60_000;
   const activity = t(updatedLater ? "updatedOn" : "createdAt", { date: formatDate(updatedAt) });
   const needsReply = waiting && reply?.awaitingCustomer === true;
-  const youReplied = waiting && !needsReply && reply?.role === "customer";
+  const youReplied = waiting && !needsReply && (reply?.answeredCustomerRequest || reply?.role === "customer");
   const description = [excerpt ? excerptId : "", needsReply || youReplied ? replyStateId : "", activityId].filter(Boolean).join(" ");
 
   return <button

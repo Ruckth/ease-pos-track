@@ -5,9 +5,10 @@ import type { TicketMessage } from "./adapters/conversation";
 import { DisposableTicketDraft } from "./draft";
 
 export type ReplyLink = { kind: "external"; url: string } | { kind: "page"; pageId: Id<"ticketPages"> };
+export type QuotedTicketMessage = Pick<TicketMessage, "_id" | "body" | "link">;
 
 type ReplySelection = {
-  replyTo?: TicketMessage;
+  replyTo?: QuotedTicketMessage;
   evidence?: MessageEvidenceInput;
   link?: ReplyLink;
   requestReply: boolean;
@@ -23,6 +24,11 @@ export class TicketReplyDraft {
   }
 
   getSelection = () => this.selection;
+
+  canQuote = () => {
+    const { progress, retryLocked } = this.owner.getSnapshot();
+    return progress === null && !retryLocked;
+  };
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);

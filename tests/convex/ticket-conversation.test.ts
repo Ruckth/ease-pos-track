@@ -68,6 +68,27 @@ test("requestReply moves to Waiting atomically for staff only and resolved Ticke
   expect(await t.mutation(api.conversations.send, { ...question, requestReply: false, requestId: "plain" })).toBeTruthy();
 });
 
+test("the outstanding question and its answer survive later staff updates", async () => {
+  const { t, staff, alice, bob, id, question, page } = await fixture();
+  const request = await t.mutation(api.conversations.send, question);
+  await t.run(ctx => ctx.db.patch(request, { requestReply: undefined }));
+  for (let index = 0; index < 12; index++) {
+    await t.mutation(api.conversations.send, { ...question, body: "Staff update", requestId: `update-${index}`, requestReply: false });
+  }
+  expect((await page(alice)).page.every(row => row._id !== request)).toBe(true);
+  expect(await t.query(api.conversations.openRequest, { token: alice, id })).toEqual({ _id: request, body: question.body });
+  expect(await t.query(api.conversations.openRequest, { token: bob, id })).toBeNull();
+  await t.mutation(api.conversations.send, { ...question, token: alice, body: "At checkout", requestId: "answer", inReplyTo: request });
+  await t.mutation(api.conversations.send, { ...question, body: "Thanks", requestId: "thanks", requestReply: false });
+  expect(await t.query(api.conversations.openRequest, { token: alice, id })).toBeNull();
+  expect(await t.query(api.tickets.getTicket, { token: alice, id })).toMatchObject({
+    status: "waiting", latestReply: { role: "staff", awaitingCustomer: false, answeredCustomerRequest: true },
+  });
+  const next = await t.mutation(api.conversations.send, { ...question, expectedVersion: 1, requestId: "next-question" });
+  expect(await t.query(api.conversations.openRequest, { token: alice, id })).toMatchObject({ _id: next });
+  expect((await t.query(api.tickets.getTicket, { token: alice, id }))?.latestReply?.answeredCustomerRequest).toBeUndefined();
+});
+
 test("links are normalized HTTPS or same-Ticket published pages attached by staff", async () => {
   const { t, seed, staff, alice, id, question, page } = await fixture();
   const first = await t.mutation(api.conversations.send, { ...question, requestReply: false });

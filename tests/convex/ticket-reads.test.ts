@@ -317,4 +317,11 @@ test("customer reads omit internal urgency from summaries, details, search and a
   expect(staffPage.page.find(row => row._id === id)).toMatchObject({ urgencyScore: 64 });
   expect(staffActivity.map(event => event.action)).toEqual(["status_changed", "urgency_changed", "urgency_undone", "urgency_changed", "created"]);
   expect(staffActivity[0].after).toMatchObject({ urgencyScore: 64 });
+  let version = 4;
+  for (let index = 0; index < 35; index++) {
+    const changed = await t.mutation(api.tickets.updateUrgencyScore, { token: staff, id, urgencyScore: 65 + index % 2, expectedVersion: version });
+    version = changed.version;
+  }
+  const visibleAfterInternalChanges = await t.query(api.tickets.listTicketActivity, { token: alice, id });
+  expect(visibleAfterInternalChanges.map(event => event.action)).toEqual(["status_changed", "created"]);
 });

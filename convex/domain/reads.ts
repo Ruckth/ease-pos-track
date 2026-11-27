@@ -45,7 +45,7 @@ export function ticketExcerpt(description: string, limit = 200) {
 
 type ReadRole = "staff" | "customer";
 
-export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = [], role: ReadRole = "staff") {
+export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[], role: ReadRole) {
   if (row.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
   const mediaEnabled = legacyMediaEnabled();
   return {
@@ -63,7 +63,7 @@ export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[] = [], role:
   };
 }
 
-export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[] = [], role: ReadRole = "staff") {
+export function ticketDetail(row: Doc<"tickets">, tags: PublicTag[], role: ReadRole) {
   if (row.lifecycle === "purging") throw new Error("TICKET_UNAVAILABLE");
   const mediaEnabled = legacyMediaEnabled();
   return {

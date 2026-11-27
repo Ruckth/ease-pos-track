@@ -1361,7 +1361,22 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
     await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).waitFor();
     assert.ok((await customerRow.locator("[data-ticket-excerpt]").innerText()).includes(question));
+    if (language === "en") {
+      for (let index = 0; index < 12; index++) {
+        await convex.mutation(api.conversations.send, {
+          token: staff.token, id, body: `Staff update ${index + 1}`, requestId: crypto.randomUUID(), expectedVersion: 0, requestReply: false,
+        });
+      }
+    }
     await customerRow.click();
+    if (language === "en") {
+      await customer.page.locator("[data-message-id]").getByText("Staff update 12", { exact: true }).waitFor();
+      await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor({ state: "hidden" });
+      await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).click();
+      await customer.page.getByText(copy(language, "threadQuoting", { quote: "details.html" }), { exact: true }).waitFor();
+      await customer.page.getByRole("button", { name: copy(language, "loadOlderMessages"), exact: true }).click();
+      await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor();
+    }
     const descriptionBox = await customer.page.getByRole("article").getByText(description, { exact: true }).boundingBox();
     const questionBox = await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).boundingBox();
     const composerBox = await replyBox.boundingBox();
@@ -1412,6 +1427,9 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await staffReply.fill("Thanks. I can reproduce this now.");
     await staff.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).click();
     await customer.page.getByText("Thanks. I can reproduce this now.", { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.getByText(copy(language, "customerQueueYouReplied"), { exact: true }).waitFor();
+    await customerRow.click();
     await replyBox.fill("I can test another version.");
     await customerSend.click();
     await staff.page.getByText("I can test another version.", { exact: true }).waitFor();

@@ -7,8 +7,8 @@ import { formatClock, type MediaItem, type Ticket } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { MessageEvidenceInput } from "../../../shared/ticket-evidence";
 import { TicketReplyForm } from "./ticket-reply-form";
-import { useConversation, type TicketMessage as Message } from "./adapters/conversation";
-import { useTicketReplyDraft } from "./reply-drafts";
+import { useConversation, useOpenReplyRequest, type TicketMessage as Message } from "./adapters/conversation";
+import { useTicketReplyDraft, type QuotedTicketMessage } from "./reply-drafts";
 
 export type AvailableMessageEvidence = Extract<NonNullable<Message["evidence"]>, { available: true }>;
 
@@ -68,12 +68,15 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
   const openingMedia = role === "customer" ? ticket.media.filter(file => !mediaFromReplies.has(file.key)) : [];
   const visibleIds = new Set(messages.results.map(message => message._id));
   const needsReply = role === "customer" && ticket.status === "waiting" && ticket.latestReply?.awaitingCustomer === true;
-  const question = needsReply ? messages.results.find(message => message.role === "staff" && message.requestReply) : undefined;
+  const questionInPage = needsReply ? messages.results.find(message => message.role === "staff" && message.requestReply) : undefined;
+  const needsLookup = needsReply && !loading && !questionInPage;
+  const openRequest = useOpenReplyRequest(ticket._id, needsLookup);
+  const question = questionInPage ?? openRequest;
 
   useEffect(() => {
-    if (!evidenceRequest || evidenceRequest.nonce === handledEvidence.current) return;
-    if (!canQuote || loading) return;
+    if (loading || !evidenceRequest || evidenceRequest.nonce === handledEvidence.current) return;
     handledEvidence.current = evidenceRequest.nonce;
+    if (!canQuote) return;
     replyDraft.update({ evidence: evidenceRequest.item });
     requestAnimationFrame(() => {
       textarea.current?.scrollIntoView({ block: "nearest" });
@@ -81,7 +84,7 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
     });
   }, [evidenceRequest, canQuote, loading, replyDraft]);
 
-  function focusReply(message: Message) {
+  function focusReply(message: QuotedTicketMessage) {
     replyDraft.update({ replyTo: message });
     textarea.current?.focus();
   }
@@ -97,7 +100,7 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
         <p className="text-sm font-semibold">{t("feedNeedsReply")}</p>
         {question?.body && <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">{question.body}</p>}
       </div>
-      <Button type="button" className="min-h-11" disabled={loading || !canQuote} onClick={() => {
+      <Button type="button" className="min-h-11" disabled={loading || !canQuote || (needsLookup && openRequest === undefined)} onClick={() => {
         if (question) focusReply(question);
         else textarea.current?.focus();
       }}>{t("threadAnswerQuestion")}</Button>

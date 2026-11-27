@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, LoaderCircle, LockKeyhole, Paperclip, Pencil, RotateCcw } from "lucide-react";
-import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
 import { AnnotationList, DescriptionWithTags } from "@/components/annotation-notes";
@@ -21,6 +21,7 @@ import type { MessageEvidenceInput } from "../../../shared/ticket-evidence";
 import { TicketAssignment } from "@/features/routing/ticket-assignment";
 import { TicketConversation, type AvailableMessageEvidence } from "./ticket-conversation";
 import { DetailEdit } from "./ticket-detail-edit";
+import { useTicketReplyDraft } from "./reply-drafts";
 import { TicketHistory } from "./ticket-history";
 import { useTicketOperations } from "./use-ticket-operations";
 
@@ -141,7 +142,9 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   const deleted = (ticket.annotations ?? []).filter(note => !isActiveAnnotation(note));
   const editButton = useRef<HTMLButtonElement>(null);
   const urgencyButton = useRef<HTMLButtonElement>(null);
-  const canQuoteEvidence = ticket.hasCustomerOwner && !archived && ticket.status !== "done";
+  const replyDraft = useTicketReplyDraft(ticket._id, ticket.projectId);
+  const quoteUnlocked = useSyncExternalStore(replyDraft.owner.subscribe, replyDraft.canQuote);
+  const canQuoteEvidence = ticket.hasCustomerOwner && !archived && ticket.status !== "done" && quoteUnlocked;
 
   useEffect(() => {
     if (initialSection === "media") {
@@ -182,7 +185,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   }
 
   function quoteEvidence(item: MessageEvidenceInput) {
-    if (!canQuoteEvidence) return;
+    if (!canQuoteEvidence || !replyDraft.canQuote()) return;
     setEvidenceRequest(previous => ({ item, nonce: (previous?.nonce ?? 0) + 1 }));
   }
 

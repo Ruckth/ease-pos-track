@@ -174,7 +174,9 @@ export async function applyTicketChange(
   const endedWaiting = plan.before.status === "waiting" && plan.after.status !== "waiting";
   await ctx.db.patch(input.doc._id, {
     ...plan.patch, inboxVisibilityVersion: visibilityVersion,
-    ...(endedWaiting && latestReply?.awaitingCustomer ? { latestReply: { ...latestReply, awaitingCustomer: false } } : {}),
+    ...(endedWaiting && latestReply ? {
+      latestReply: { ...latestReply, awaitingCustomer: false, answeredCustomerRequest: undefined },
+    } : {}),
   });
   if (plan.before.status !== plan.after.status || plan.before.lifecycle !== plan.after.lifecycle) {
     if (plan.before.lifecycle === "active") await changeTotal(ctx, input.doc.projectId, plan.before.status, -1);

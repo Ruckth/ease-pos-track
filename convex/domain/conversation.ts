@@ -135,6 +135,24 @@ export const pageMessages = queryOperation({
   },
 });
 
+export const openReplyRequest = queryOperation({
+  args: { id: v.id("tickets") },
+  handler: async (ctx, { id }) => {
+    const ticket = await readableTicket(ctx, ctx.actor, id);
+    if (!ticket?.ownerCustomerId || ticket.lifecycle !== "active" || ticket.status !== "waiting" || !ticket.latestReply?.awaitingCustomer) return null;
+    const project = await ctx.db.get(ticket.projectId);
+    if (!project || project.archivedAt !== undefined) return null;
+    // Older staff asks may omit requestReply. Both index lookups read at most one message.
+    const [explicit, legacy] = await Promise.all([true, undefined].map(value =>
+      ctx.db.query("ticketMessages").withIndex("by_ticket_role_request_reply", q =>
+        q.eq("ticketId", id).eq("role", "staff").eq("requestReply", value)).order("desc").first()));
+    const row = legacy && (!explicit || legacy._creationTime > explicit._creationTime) ? legacy : explicit;
+    if (!row) return null;
+    const link = row.link && await hydrateLink(ctx, id, row.link, await hasLegacyAccess(ctx));
+    return { _id: row._id, body: row.body, ...(link ? { link } : {}) };
+  },
+});
+
 export const sendMessage = mutationOperation({
   args: {
     id: v.id("tickets"), body: v.string(), requestId: v.string(),
@@ -226,6 +244,9 @@ export const sendMessage = mutationOperation({
       });
       await attachIntentAssets(ctx, intent, doc._id, media);
     }
+    const answeredCustomerRequest = ticket.status === "waiting" && !requestReply
+      && (ticket.latestReply?.answeredCustomerRequest === true
+        || (actor.role === "customer" && ticket.latestReply?.awaitingCustomer === true));
     // Thread activity has its own timestamp and leaves the Ticket version alone.
     await ctx.db.patch(ticket._id, {
       ...(intent ? { replyMediaKeys: [...(ticket.replyMediaKeys ?? []), ...mediaKeys] } : {}),
@@ -234,6 +255,7 @@ export const sendMessage = mutationOperation({
         at: Date.now(),
         excerpt: ticketExcerpt(body),
         ...(link ? { hasLink: true } : {}),
+        ...(answeredCustomerRequest ? { answeredCustomerRequest: true } : {}),
         awaitingCustomer: actor.role === "staff" && (requestReply === true || (ticket.status === "waiting" && ticket.latestReply?.awaitingCustomer === true)),
       },
     });

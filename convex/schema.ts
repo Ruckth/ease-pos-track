@@ -229,7 +229,10 @@ export default defineSchema({
     purgeBlocked: v.optional(v.boolean()),
     inboxVisibilityVersion: v.optional(v.number()),
     replyMediaKeys: v.optional(v.array(v.string())),
-    latestReply: v.optional(v.object({ role: actorRole, at: v.number(), excerpt: v.string(), awaitingCustomer: v.boolean(), hasLink: v.optional(v.boolean()) })),
+    latestReply: v.optional(v.object({
+      role: actorRole, at: v.number(), excerpt: v.string(), awaitingCustomer: v.boolean(),
+      answeredCustomerRequest: v.optional(v.boolean()), hasLink: v.optional(v.boolean()),
+    })),
     ownerCustomerId: v.optional(v.id("customers")),
     origin: actorRole,
     createdVia: v.optional(ticketCreatedVia),
@@ -438,6 +441,7 @@ export default defineSchema({
     mediaKeys: v.optional(v.array(v.string())),
     uploadIntentId: v.optional(v.id("uploadIntents")),
   }).index("by_ticket", ["ticketId"])
+    .index("by_ticket_role_request_reply", ["ticketId", "role", "requestReply"])
     .index("by_ticket_request", ["ticketId", "requestId"]),
   ticketEvents: defineTable({
     ticketId: v.id("tickets"),

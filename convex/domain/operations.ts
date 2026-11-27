@@ -152,7 +152,7 @@ export const getTicketByTicketNumber = queryOperation({
       .unique();
     if (!doc || doc.lifecycle === "purging" || (!args.includeDeleted && doc.lifecycle !== "active")
       || !await projectInDeployment(ctx, doc.projectId)) return null;
-    return ticketDetail(doc, await resolveTicketTags(ctx, doc));
+    return ticketDetail(doc, await resolveTicketTags(ctx, doc), "staff");
   },
 });
 
@@ -180,15 +180,18 @@ export const listTicketActivity = queryOperation({
     const { actor } = ctx;
     const ticket = await readableTicketInput(ctx, actor, args.id);
     if (!ticket) return [];
+    const visibleLimit = 30;
+    // Read a bounded, wider window for customers so staff-only changes do not crowd out public history.
     const events = await ctx.db
       .query("ticketEvents")
       .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
       .order("desc")
-      .take(30);
+      .take(actor.role === "staff" ? visibleLimit : 120);
     const mediaEnabled = legacyMediaEnabled();
     return events
       .filter(event => (mediaEnabled || (event.action !== "media_attached" && event.action !== "annotation_changed"))
         && (actor.role === "staff" || (event.action !== "urgency_changed" && event.action !== "urgency_undone")))
+      .slice(0, visibleLimit)
       .map(event => publicTicketEvent(event, mediaEnabled, actor.role));
   },
 });
