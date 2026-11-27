@@ -59,7 +59,7 @@ This milestone uses a signed synthetic group webhook, a disposable backend and t
 The [local preview instructions](local-preview.md) describe the stable URL and separate backend slots. To seed and exercise the capture candidate, run this from the integration checkout, substituting the inactive slot and its own prepared worktree:
 
 ```sh
-pnpm preview:local launch b . line_capture_fixture:seed scripts/preview/capture-smoke.mjs
+pnpm preview:local launch b ../ticket-preview-b line_capture_fixture:seed scripts/preview/capture-smoke.mjs
 ```
 
 The fixture replays each signed delivery twice. The browser check opens both images with named staff credentials, creates a Ticket on desktop, links another intake on mobile and checks the saved receipts. The bilingual example remains available for a manual walkthrough.

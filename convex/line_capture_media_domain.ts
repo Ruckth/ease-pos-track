@@ -461,9 +461,16 @@ async function stillMatches(ctx: DbCtx, row: MediaDoc, now: number) {
   return match.kind === "matched" && match.intake._id === row.intakeId;
 }
 
-/** Verifies current capture authority, intake, bot and unsend fence for a bound media row. */
-async function verifyMediaAuthority(ctx: DbCtx, row: MediaDoc, now: number) {
-  if (!row.intakeId || !lineCaptureEnabled() || !await stillMatches(ctx, row, now)) return null;
+/**
+ * Checks capture authority, intake, bot and unsend fence for a bound media row.
+ * A later second mention from an otherwise authorized source returns `ambiguous`.
+ */
+async function checkMediaAuthority(ctx: DbCtx, row: MediaDoc, now: number): Promise<
+  | { kind: "authorized"; intake: Doc<"lineCaptureIntakes">; bot: Doc<"lineBots"> }
+  | { kind: "ambiguous"; intakes: Doc<"lineCaptureIntakes">[] }
+  | null
+> {
+  if (!row.intakeId || !lineCaptureEnabled()) return null;
   if (row.withdrawnAt !== undefined || row.expiresAt <= now) return null;
   if (await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest)) return null;
   const intake = await currentCaptureIntake(ctx, row.intakeId, now);
@@ -471,7 +478,28 @@ async function verifyMediaAuthority(ctx: DbCtx, row: MediaDoc, now: number) {
     || intake.chatId !== row.chatId || intake.joinedAt !== row.joinedAt) return null;
   const bot = await ctx.db.get(row.botId);
   if (!bot || !captureBot(bot) || bot.projectId !== row.projectId) return null;
-  return { intake, bot };
+  const match = await matchIntakeWindow(ctx, { botId: row.botId, chatId: row.chatId, joinedAt: row.joinedAt,
+    senderDigest: row.senderDigest, timestamp: row.messageTimestamp }, now);
+  if (match.kind === "ambiguous") return { kind: "ambiguous", intakes: match.intakes };
+  if (match.kind !== "matched" || match.intake._id !== row.intakeId) return null;
+  return { kind: "authorized", intake, bot };
+}
+
+async function verifyMediaAuthority(ctx: DbCtx, row: MediaDoc, now: number) {
+  const auth = await checkMediaAuthority(ctx, row, now);
+  return auth?.kind === "authorized" ? auth : null;
+}
+
+/** Keeps a leased row private as a staff warning on every candidate intake. */
+async function markMediaAmbiguous(ctx: MutationCtx, row: MediaDoc, intakes: Doc<"lineCaptureIntakes">[], now: number) {
+  await ctx.db.patch(row._id, {
+    state: "warning",
+    warningCode: "MEDIA_MATCH_AMBIGUOUS",
+    leaseId: undefined,
+    leaseExpiresAt: undefined,
+    updatedAt: now,
+  });
+  for (const intake of intakes) await flagCaptureWarning(ctx, intake._id, "MEDIA_MATCH_AMBIGUOUS");
 }
 
 /** Claims a fenced lease for bounded media download and staging. */
@@ -493,7 +521,11 @@ export async function claimMediaForStaging(
     return null;
   }
 
-  const auth = await verifyMediaAuthority(ctx, row, now);
+  const auth = await checkMediaAuthority(ctx, row, now);
+  if (auth?.kind === "ambiguous") {
+    await markMediaAmbiguous(ctx, row, auth.intakes, now);
+    return null;
+  }
   if (!auth) {
     await ctx.db.patch(row._id, { state: "withdrawn", withdrawnAt: now, leaseId: undefined, leaseExpiresAt: undefined, updatedAt: now });
     return null;
@@ -587,7 +619,11 @@ export async function reserveMediaWrite(
     return { ok: false, code: "MEDIA_MALFORMED" };
   }
 
-  const auth = await verifyMediaAuthority(ctx, row, now);
+  const auth = await checkMediaAuthority(ctx, row, now);
+  if (auth?.kind === "ambiguous") {
+    await markMediaAmbiguous(ctx, row, auth.intakes, now);
+    return { ok: false, code: "MEDIA_MATCH_AMBIGUOUS" };
+  }
   if (!auth) return { ok: false, code: "AUTHORITY_REVOKED" };
 
   const otherBytes = await otherIntakeMediaBytes(ctx, auth.intake._id, row._id);
@@ -671,13 +707,14 @@ export async function recordStagedMedia(
   const writeClaim = { writes: remaining, writeCheckAt: remaining.length ? row.writeCheckAt : undefined };
 
   const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId, row.senderDigest);
-  const auth = !unsent ? await verifyMediaAuthority(ctx, row, now) : null;
+  const checked = !unsent ? await checkMediaAuthority(ctx, row, now) : null;
+  const auth = checked?.kind === "authorized" ? checked : null;
   const otherBytes = auth ? await otherIntakeMediaBytes(ctx, auth.intake._id, row._id) : 0;
   const sizeExceeded = write.size > LINE_CAPTURE_MAX_TOTAL_BYTES || otherBytes + write.size > LINE_CAPTURE_MAX_TOTAL_BYTES;
+  const leaseHeld = row.state === "staging" && row.leaseId === input.leaseId && (row.leaseExpiresAt ?? 0) > now;
+  const ambiguous = leaseHeld && checked?.kind === "ambiguous" ? checked.intakes : null;
 
-  const settleable = row.state === "staging"
-    && row.leaseId === input.leaseId
-    && (row.leaseExpiresAt ?? 0) > now
+  const settleable = leaseHeld
     && !unsent
     && row.expiresAt > now
     && !!auth
@@ -685,6 +722,16 @@ export async function recordStagedMedia(
     && input.size === write.size
     && input.sha256 === write.sha256
     && input.contentType === write.contentType;
+
+  if (ambiguous) {
+    await ctx.db.patch(row._id, {
+      ...writeClaim,
+      discarded: discardedWith(row.discarded, input.storageId),
+      reclaimAfter: row.reclaimAfter ?? now,
+    });
+    await markMediaAmbiguous(ctx, row, ambiguous, now);
+    return { settled: false, state: "warning" };
+  }
 
   if (!settleable) {
     const discarded = discardedWith(row.discarded, input.storageId);

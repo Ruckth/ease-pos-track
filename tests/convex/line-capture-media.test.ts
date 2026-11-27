@@ -274,6 +274,76 @@ test("a screenshot survives another sender's withdrawal and becomes inaccessible
   expect(await list()).toMatchObject({ items: [], warnings: ["MEDIA_MATCH_AMBIGUOUS"] });
 });
 
+async function secondMentionDuringStaging() {
+  const f = await setupCaptureFixture();
+  await f.postWebhook([f.mentionEvent("first", "@bot Printer stalled", f.now)]);
+  const [first] = await f.allIntakes();
+  const ingest = (messageId: string) => f.t.run(async ctx => (await ingestCaptureMediaEvents(ctx, {
+    botId: f.botId,
+    now: f.now,
+    schedule: false,
+    events: [{ webhookEventId: `ev-${messageId}`, timestamp: f.now + 100, kind: "group", lineChatId: CHAT_LINE_ID,
+      messageId, senderDigest: first.senderDigest, fileType: "image", contentProvider: "line" }],
+  }))[0].mediaId);
+  const claim = (mediaId: Awaited<ReturnType<typeof ingest>>) =>
+    f.t.run(ctx => claimMediaForStaging(ctx, { mediaId, now: f.now, scheduleRecovery: false }));
+  const bytes = fixturePngBytes();
+  const sha256 = await sha256Hex(bytes);
+  const write = { sha256, size: bytes.byteLength, contentType: "image/png" as const, now: f.now };
+  const reserve = (mediaId: Awaited<ReturnType<typeof ingest>>, leaseId: string) =>
+    f.t.run(ctx => reserveMediaWrite(ctx, { mediaId, leaseId, ...write }));
+
+  return { f, ingest, claim, reserve, write, bytes };
+}
+
+async function expectAmbiguousWarnings(f: Awaited<ReturnType<typeof setupCaptureFixture>>, mediaIds: string[]) {
+  const rows = await f.allMedia();
+  for (const id of mediaIds) {
+    expect(rows.find(row => row._id === id)).toMatchObject({ state: "warning", warningCode: "MEDIA_MATCH_AMBIGUOUS" });
+  }
+  const intakes = await f.allIntakes();
+  expect(intakes).toHaveLength(2);
+  expect(intakes.map(intake => intake.warning)).toEqual(["MEDIA_MATCH_AMBIGUOUS", "MEDIA_MATCH_AMBIGUOUS"]);
+  const list = await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: intakes[0]._id });
+  expect(list).toMatchObject({ warnings: ["MEDIA_MATCH_AMBIGUOUS"] });
+  expect(list!.items.every(item => !item.url)).toBe(true);
+  return rows;
+}
+
+test("a second mention before claim leaves a staff warning instead of withdrawing the screenshot", async () => {
+  const { f, ingest, claim } = await secondMentionDuringStaging();
+  const mediaId = await ingest("fixture-png-claim");
+  await f.postWebhook([f.mentionEvent("second", "@bot Receipt missing", f.now + 600)]);
+  expect(await claim(mediaId)).toBeNull();
+  await expectAmbiguousWarnings(f, [mediaId]);
+});
+
+test("a second mention during reservation or settlement keeps bytes private and warns both intakes", async () => {
+  const { f, ingest, claim, reserve, write, bytes } = await secondMentionDuringStaging();
+  const atReserve = await ingest("fixture-png-reserve");
+  const atRecord = await ingest("fixture-png-record");
+  const reserveLease = (await claim(atReserve))!.leaseId;
+  const recordLease = (await claim(atRecord))!.leaseId;
+  const reservation = await reserve(atRecord, recordLease);
+  if (!reservation.ok) throw new Error("expected reservation");
+  const storageId = await f.t.run(ctx => ctx.storage.store(new Blob([bytes], { type: reservation.writeContentType })));
+  const record = (leaseId: string) => f.t.run(ctx => recordStagedMedia(ctx, {
+    mediaId: atRecord, leaseId, marker: reservation.marker, width: 16, height: 16, storageId, ...write,
+  }));
+
+  await f.postWebhook([f.mentionEvent("second", "@bot Receipt missing", f.now + 600)]);
+
+  expect(await reserve(atReserve, "stale-lease")).toEqual({ ok: false, code: "LEASE_EXPIRED" });
+  expect(await reserve(atReserve, reserveLease)).toEqual({ ok: false, code: "MEDIA_MATCH_AMBIGUOUS" });
+  expect(await record(recordLease)).toEqual({ settled: false, state: "warning" });
+
+  const rows = await expectAmbiguousWarnings(f, [atReserve, atRecord]);
+  const recorded = rows.find(row => row._id === atRecord)!;
+  expect(recorded.storageId).toBeUndefined();
+  expect(recorded.discarded).toEqual([storageId]);
+  expect(recorded.writes).toEqual([]);
+});
+
 test("image-before-text coordinates via bounded durable retry once mention arrives", async () => {
   const f = await setupCaptureFixture();
 
