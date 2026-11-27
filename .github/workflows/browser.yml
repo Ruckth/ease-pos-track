@@ -20,7 +20,12 @@ permissions:
   contents: read
 
 jobs:
-  browser-workflows:
+  browser-shard:
+    name: Browser tests (${{ matrix.suite }})
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [composer, workspace]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -40,13 +45,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Chromium for the locked Playwright version
         run: pnpm exec playwright install --with-deps chromium
-      # Runs every workflow and accessibility check, then the Explorer check.
-      # The exit status is the suite's; evidence is written either way.
+      # Each shard seeds its own disposable Convex backend.
       - name: Browser workflows
-        run: pnpm test:browser
+        run: pnpm test:browser --suite "$BROWSER_SUITE"
+        env:
+          BROWSER_SUITE: ${{ matrix.suite }}
       # Stability only (no baseline in CI yet): three captures must match.
       - name: Visual pilot stability (advisory)
-        if: always()
+        if: ${{ !cancelled() && matrix.suite == 'workspace' }}
         continue-on-error: true
         run: pnpm test:visual --repeat 3 --out test-results/visual
       - name: Summarize evidence
@@ -61,16 +67,27 @@ jobs:
         if: failure() && steps.verify.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: browser-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: browser-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}
           path: test-results/browser/public/
           retention-days: 7
           if-no-files-found: ignore
       # Synthetic Explorer harness renders, for manual review of Linux repeatability.
       - name: Upload visual pilot captures
-        if: always()
+        if: ${{ !cancelled() && matrix.suite == 'workspace' }}
         uses: actions/upload-artifact@v4
         with:
           name: visual-pilot-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/visual/
           retention-days: 7
           if-no-files-found: ignore
+
+  browser-workflows:
+    runs-on: ubuntu-24.04
+    needs: browser-shard
+    if: ${{ always() }}
+    timeout-minutes: 2
+    steps:
+      - name: Both browser shards passed
+        run: test "$BROWSER_RESULT" = success
+        env:
+          BROWSER_RESULT: ${{ needs.browser-shard.result }}

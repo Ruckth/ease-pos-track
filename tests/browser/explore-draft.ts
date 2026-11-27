@@ -4,7 +4,7 @@
 // draft is checked against a model. A failing run writes its seed, config,
 // resolved action sequence and first failure to explore/<name>.json, plus the
 // usual screenshot (and local trace), so it can be replayed exactly and turned
-// into a deterministic regression in workflows.test.ts.
+// into a deterministic browser workflow regression.
 //
 // Environment (all optional):
 //   EXPLORE_SEEDS=1,2,3      seeds to run          EXPLORE_ACTIONS=20  actions per seed

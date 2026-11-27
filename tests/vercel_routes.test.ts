@@ -11,7 +11,11 @@ test("Vercel serves the SPA entry point for every direct auth and portal URL", (
   };
   const rewrites = new Map(config.rewrites?.map(({ source, destination }) => [source, destination]));
 
-  assert.equal(config.buildCommand, "pnpm run build");
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  assert.equal(config.buildCommand, "pnpm run build:vercel");
+  assert.equal(manifest.scripts["build:vercel"], "vite build && tsc -b");
   assert.equal(config.git.deploymentEnabled.main, true);
   for (const path of [...Object.values(APP_PATHS), "/customer/register"]) {
     if (path === "/") continue;

@@ -2,6 +2,7 @@
 // and blocked provider traffic. Used by the workflow suite and exploration.
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "playwright";
 import { readFileSync } from "node:fs";
+import { test as nodeTest } from "node:test";
 import { ConvexHttpClient } from "convex/browser";
 import { getFunctionName, type FunctionArgs, type FunctionReference, type FunctionReturnType } from "convex/server";
 import { convexToJson, jsonToConvex, type JSONValue } from "convex/values";
@@ -9,7 +10,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { loadPorts } from "../../scripts/worktree-ports.mjs";
 import { translations, translate } from "../../src/lib/i18n";
-import { newContext, recordChromium, redact } from "../../scripts/browser-evidence";
+import { capture, newContext, recordChromium, redact } from "../../scripts/browser-evidence";
 
 export const baseURL = process.env.BROWSER_BASE_URL!;
 const fixture = JSON.parse(process.env.BROWSER_FIXTURE!) as { accessTokens: string[]; tickets: Id<"tickets">[]; projects: { id: Id<"projects">; key: string }[] };
@@ -173,4 +174,13 @@ export async function openHeaderMenu(page: Page, name: string, method: "click" |
   const trigger = page.locator("header").getByRole("button", { name, exact: true });
   if (method === "click") await trigger.click(); else await trigger.press("Enter");
   await page.getByRole("menu").waitFor();
+}
+
+// Every check runs in an evidence scope: failures keep a screenshot, the
+// assertion, and (locally) a Playwright trace taken before teardown.
+export function workflowTest(name: string, run: () => Promise<void>): void;
+export function workflowTest(name: string, options: { timeout?: number; skip?: string | boolean }, run: () => Promise<void>): void;
+export function workflowTest(name: string, optionsOrRun: { timeout?: number; skip?: string | boolean } | (() => Promise<void>), maybeRun?: () => Promise<void>) {
+  if (typeof optionsOrRun === "function") nodeTest(name, () => capture("workflows", name, optionsOrRun));
+  else nodeTest(name, optionsOrRun, () => capture("workflows", name, maybeRun!));
 }
