@@ -7,3 +7,5 @@ export function useConversation(id: Id<"tickets">, enabled: boolean) {
   const send = useMutation(api.conversations.send);
   return { messages, send };
 }
+
+export type TicketMessage = ReturnType<typeof useConversation>["messages"]["results"][number];

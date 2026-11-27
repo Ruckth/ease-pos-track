@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { TicketCreatedDate } from "./ticket-created-date";
 import { Images } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
+import { TicketCustomerReply } from "./ticket-customer-reply";
 import { TicketUrgency } from "./ticket-urgency";
 import { TicketTagList } from "@/components/ticket-tags";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,7 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
         {(showUnscored || item.urgencyScore !== undefined) && <TicketUrgency score={item.urgencyScore} plain />}
         {inLane && <TicketCreatedDate timestamp={item.createdAt} />}
+        <TicketCustomerReply item={item} />
       </div>
       <div className={inLane ? "mt-3 flex flex-wrap items-center gap-1 border-t border-border/50 pt-2" : "mt-1 flex flex-wrap items-center gap-1"}>
         {inLane && item.tags?.length > 0 && <span className="font-mono text-[0.7rem] text-muted-foreground">{reference}</span>}

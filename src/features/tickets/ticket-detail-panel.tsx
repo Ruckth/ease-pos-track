@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, Paperclip, Pencil, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, LockKeyhole, Paperclip, Pencil, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -130,6 +130,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(initialSection === "media");
+  const [mediaIndex, setMediaIndex] = useState(0);
   const mediaButton = useRef<HTMLButtonElement>(null);
   const mediaId = useId();
   const pendingPin = useRef<Annotation | null>(null);
@@ -145,6 +146,18 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       mediaButton.current?.scrollIntoView({ block: "start" });
     }
   }, [initialSection]);
+
+  function openThreadMedia(key: string) {
+    const index = ticket.media.findIndex(file => file.key === key);
+    if (index < 0) return;
+    setMediaIndex(index);
+    setMediaOpen(true);
+    if (viewer.current) viewer.current.focusMedia(index);
+    requestAnimationFrame(() => {
+      mediaButton.current?.focus({ preventScroll: true });
+      mediaButton.current?.scrollIntoView({ block: "start" });
+    });
+  }
 
   function focusPin(note: Annotation) {
     setMediaOpen(true);
@@ -189,11 +202,12 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
           catch { toast.error(t("ticketCopyFailed")); }
         }}>{number}<Copy className="size-3.5" /></button>
         <Badge variant="outline" className={meta.tone}>{t(!staff && ticket.status === "waiting" ? "customerQueueWaiting" : meta.labelKey)}</Badge>
+        {!staff && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><LockKeyhole className="size-3" aria-hidden />{t("threadPrivate")}</span>}
       </div>
       <h2 id={props.heading} className="text-xl font-semibold leading-tight">{ticket.title}</h2>
       {staff && description}
     </header>
-    {!staff && <TicketConversation ticket={ticket} role="customer">{description}</TicketConversation>}
+    {!staff && <TicketConversation ticket={ticket} role="customer" onOpenMedia={openThreadMedia}>{description}</TicketConversation>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
       <div className="flex flex-wrap items-center gap-2">
@@ -203,7 +217,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
-      {staff && <TicketConversation ticket={ticket} role="staff" />}
+      {staff && <TicketConversation ticket={ticket} role="staff" onOpenMedia={openThreadMedia} />}
     </>}
     {staff && <TicketAssignment ticket={ticket} />}
     <div>
@@ -219,7 +233,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
           <MediaViewer ref={handle => {
             viewer.current = handle;
             if (handle && pendingPin.current) { handle.focusAnnotation(pendingPin.current); pendingPin.current = null; }
-          }} media={ticket.media} annotations={annotations} readOnly={archived}
+          }} media={ticket.media} initialIndex={mediaIndex} annotations={annotations} readOnly={archived}
             onCreateAnnotation={async input => { await operations.addAnnotation(ticket, input); }}
             onUpdateAnnotation={async input => { await operations.updateAnnotation(ticket, input); }}
             onDeleteAnnotation={id => operations.removeAnnotation(ticket, id)} />

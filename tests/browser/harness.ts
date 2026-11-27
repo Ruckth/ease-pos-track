@@ -150,13 +150,13 @@ export function hostedPageErrors(page: Page) {
   return errors;
 }
 export async function stats(page: Page) { return page.evaluate(() => window.draftStats); }
-export async function files(page: Page, name = "draft.png") {
+export async function files(page: Page, name = "draft.png", input = page.locator('[data-slot="ticket-draft-files"]')) {
   const base64 = await page.evaluate(() => {
     const canvas = document.createElement("canvas"); canvas.width = 320; canvas.height = 240;
     const ctx = canvas.getContext("2d")!; ctx.fillStyle = "#8ab"; ctx.fillRect(0, 0, 320, 240);
     return canvas.toDataURL("image/png").split(",")[1];
   });
-  await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
+  await input.setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
 }
 /** The multi-Project switcher trigger: a menu button named for the open Project. */
 export function projectSwitcher(page: Page, language: Language = "en") {

@@ -1,3 +1,4 @@
+import { expectAccessible } from "./a11y";
 import { markupLabels } from "../../src/lib/markup-labels";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
@@ -74,7 +75,7 @@ async function attachLongReceipt(page: Page, name: string) {
     for (let y = 60; y < c.height; y += 100) ctx.fillText(`Receipt line ${y}`, 32, y);
     return c.toDataURL("image/png").split(",")[1];
   });
-  await page.locator('input[type="file"][multiple]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(data, "base64") });
+  await page.locator('[data-slot="ticket-draft-files"]').setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from(data, "base64") });
 }
 
 test("mobile screenshot markup pans a long receipt and reviews the mask at its source position", async () => {
@@ -583,7 +584,7 @@ test("mobile video fits the placement surface and time controls in the photo wor
   const t = (key: Parameters<typeof copy>[1], values?: Parameters<typeof copy>[2]) => copy("en", key, values);
   try {
     const name = "pin-video.webm";
-    await page.locator('input[type="file"][multiple]').setInputFiles(`tests/browser/${name}`);
+    await page.locator('[data-slot="ticket-draft-files"]').setInputFiles(`tests/browser/${name}`);
     await page.getByRole("button", { name: t("openMedia", { name }), exact: true }).tap();
     const viewer = page.getByRole("dialog", { name, exact: true });
     await viewer.getByRole("button", { name: t("addPin"), exact: true }).tap();
@@ -996,7 +997,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       if (role === "staff") {
         assert.equal(await title.isDisabled(), true);
         assert.equal(await description.isDisabled(), true);
-        assert.equal(await page.locator('input[type="file"][multiple]').isDisabled(), true);
+        assert.equal(await page.locator('[data-slot="ticket-draft-files"]').isDisabled(), true);
         assert.equal(await page.getByRole("button", { name: copy(language, "openMedia", { name: attachmentName }), exact: true }).isDisabled(), true);
       }
       await page.getByRole("button", { name: copy(language, "cancelUpload"), exact: true }).click();
@@ -1240,13 +1241,17 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
   } finally { await context.close(); }
 });
 
-for (const language of ["en", "th"] as const) test(`${language}: staff question and customer reply share one Ticket and preserve Waiting`, async () => {
-  const customer = await open("customer", language);
+for (const language of ["en", "th"] as const) test(`${language}: customer Ticket thread supports hosted pages and two-way replies`, async () => {
+  const customer = await openWith(await browsers.get(), "customer", language, undefined, {
+    viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
+  });
   let staff: Awaited<ReturnType<typeof open>> | undefined;
   const name = `Conversation ${language} ${crypto.randomUUID()}`;
-  const description = "The receipt printer disconnects after its first print. ".repeat(15).trim();
+  const description = "The receipt printer disconnects after its first print.";
   const question = `Which connection does your printer use? ${language}`;
   const reply = `It uses Bluetooth. ${language}`;
+  const replyBox = customer.page.getByLabel(copy(language, "replyLabel"), { exact: true });
+  const customerSend = customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true });
   try {
     await customer.title.fill(name);
     await customer.page.locator("#customer-ticket-description").fill(description);
@@ -1256,79 +1261,147 @@ for (const language of ["en", "th"] as const) test(`${language}: staff question 
     const id = new URL(customer.page.url()).searchParams.get("ticket") as Id<"tickets">;
     assert.ok(id);
 
-    // Exercise the browser's Back entry for a detail opened from the actual list.
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
     const customerRow = customer.page.locator(`button[data-ticket-id="${id}"]`);
     assert.ok((await customerRow.getAttribute("aria-label"))?.includes(name));
-    assert.ok((await customerRow.getAttribute("aria-label"))?.includes(copy(language, "new")));
     await customerRow.click();
     await customer.page.getByRole("heading", { name, exact: true }).waitFor();
     await customer.page.goBack();
     await customer.page.waitForFunction(ticket => !new URL(location.href).searchParams.has("ticket") && document.activeElement?.getAttribute("data-ticket-id") === ticket, id);
     await customerRow.click();
-    const history = customer.page.getByRole("button", { name: copy(language, "ticketConversation"), exact: true });
-    await history.waitFor();
-    assert.equal(await history.getAttribute("aria-expanded"), "false");
-    assert.equal(await customer.page.getByText(copy(language, "noTicketMessages"), { exact: true }).count(), 0);
+    await customer.page.getByText(copy(language, "noTicketMessages"), { exact: true }).waitFor();
+    assert.equal(await customer.page.getByRole("button", { name: copy(language, "threadAttachPage"), exact: true }).count(), 0);
+    const picker = customer.page.locator('[data-slot="ticket-reply-files"]');
+    assert.equal(await picker.getAttribute("accept"), "image/*,video/*");
+    await picker.setInputFiles({ name: "page.html", mimeType: "text/html", buffer: Buffer.from("<p>Page</p>") });
+    await customer.page.getByRole("alert").filter({ hasText: copy(language, "imageVideoOnly") }).waitFor();
+    await files(customer.page, "reply-photo.png", picker);
+    const removePhoto = customer.page.getByRole("button", { name: copy(language, "removeFile", { name: "reply-photo.png" }), exact: true });
+    await removePhoto.waitFor();
+    await removePhoto.click();
+
+    await replyBox.fill("It also happens on our second register.");
+    await customerSend.click();
+    await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
 
     staff = await open("staff", language);
     await staff.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
     await staff.page.getByPlaceholder(copy(language, "search"), { exact: true }).fill(name);
     await staff.page.locator(`button[data-ticket-id="${id}"]`).click();
-    const beforeWaiting = await convex.query(api.tickets.getTicket, { token: staff.token, id });
-    assert.ok(beforeWaiting);
-    await convex.mutation(api.tickets.updateTicketStatus, { token: staff.token, id, status: "waiting", expectedVersion: beforeWaiting.version });
-    await staff.page.getByRole("button", { name: `${copy(language, "queueResume")} · ${formatTicketNumber(beforeWaiting.ticketNumber, beforeWaiting.projectKey)}`, exact: true }).waitFor();
-    await customer.page.getByText(copy(language, "detailCustomerWaiting"), { exact: true }).waitFor();
-    assert.equal(await customer.page.getByLabel(copy(language, "replyLabel"), { exact: true }).count(), 0);
-    assert.equal(await customer.page.getByText(copy(language, "staffQuestion"), { exact: true }).count(), 0);
-    await staff.page.getByRole("button", { name: copy(language, "askCustomer"), exact: true }).click();
-    await staff.page.getByLabel(copy(language, "questionLabel"), { exact: true }).fill(question);
+    const staffPanel = staff.page.getByRole("heading", { name, exact: true });
+    await staffPanel.waitFor();
+    const file = path.join(pageFixture, "reports/details.html");
+    const publishName = copy(language, "publishPage");
+    if (language === "th") {
+      const pagesButton = staff.page.getByRole("button", { name: copy(language, "pagesTitle"), exact: true });
+      await pagesButton.click();
+      await publishFrom(staff.page.locator("body"), language, "chooseHtmlFile", file);
+      await pagesButton.click();
+    }
+    const conversation = staff.page.getByRole("button", { name: copy(language, "ticketConversation"), exact: true });
+    if (await conversation.getAttribute("aria-expanded") === "false") await conversation.click();
+    await staff.page.getByText("It also happens on our second register.", { exact: true }).waitFor();
+    const staffReply = staff.page.getByLabel(copy(language, "replyLabel"), { exact: true });
+    const attach = staff.page.getByRole("button", { name: copy(language, "threadAttachPage"), exact: true });
+    await staffReply.fill(question);
+    await attach.click();
+    if (language === "en") {
+      await staff.page.getByRole("button", { name: publishName, exact: true }).click();
+      const publisher = staff.page.getByRole("dialog", { name: publishName, exact: true });
+      await publisher.getByLabel(copy(language, "chooseHtmlFile"), { exact: true }).setInputFiles(file);
+      await publisher.getByRole("button", { name: publishName, exact: true }).click();
+      await publisher.waitFor({ state: "hidden" });
+      await staff.page.getByRole("button", { name: copy(language, "threadRemoveLink"), exact: true }).waitFor();
+    }
+    const [published] = await convex.query(api.pages.listTicketPages, { token: staff.token, id });
+    assert.ok(published?.url.includes("/p/"));
+    const hostedUrl = published.url;
+    if (language === "th") {
+      await staff.page.getByRole("combobox", { name: copy(language, "threadAttachPage"), exact: true }).selectOption(published._id);
+    }
+    await staff.page.getByLabel(copy(language, "threadRequestReply"), { exact: true }).check();
     await staff.page.getByRole("button", { name: copy(language, "sendQuestion"), exact: true }).click();
     await staff.page.getByText(copy(language, "questionSent"), { exact: true }).waitFor();
     assert.equal((await convex.query(api.tickets.getTicket, { token: staff.token, id }))?.status, "waiting");
 
+    await customer.page.getByText(question, { exact: true }).waitFor();
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
-    await customer.page.getByRole("button", { name: copy(language, "ticketInbox"), exact: true }).click();
-    const inbox = customer.page.getByRole("dialog", { name: copy(language, "ticketInbox") });
-    await inbox.getByRole("button").filter({ hasText: name }).click();
-    await customer.page.getByRole("heading", { name, exact: true }).waitFor();
-    const questionText = customer.page.getByText(question, { exact: true });
-    const replyInput = customer.page.getByLabel(copy(language, "replyLabel"), { exact: true });
-    await questionText.waitFor();
-    await replyInput.waitFor();
-    const questionBox = await questionText.boundingBox();
-    const replyBox = await replyInput.boundingBox();
-    const descriptionBox = await customer.page.getByText(description, { exact: true }).boundingBox();
-    assert.ok(questionBox && replyBox && descriptionBox && questionBox.y < replyBox.y && replyBox.y < descriptionBox.y);
-    await replyInput.fill(reply);
-    const beforeResume = await convex.query(api.tickets.getTicket, { token: staff.token, id });
-    assert.ok(beforeResume);
-    await convex.mutation(api.tickets.updateTicketStatus, { token: staff.token, id, status: "in_progress", expectedVersion: beforeResume.version });
-    await customer.page.getByText(copy(language, "threadClosed"), { exact: true }).waitFor();
-    assert.equal(await replyInput.inputValue(), reply);
-    await staff.page.getByRole("button", { name: `${copy(language, "queueResolve")} · ${formatTicketNumber(beforeResume.ticketNumber, beforeResume.projectKey)}`, exact: true }).waitFor();
-    const secondQuestion = question + " (2)";
-    await staff.page.getByLabel(copy(language, "questionLabel")).fill(secondQuestion);
-    await staff.page.getByRole("button", { name: copy(language, "sendQuestion"), exact: true }).click();
-    await customer.page.getByText(secondQuestion, { exact: true }).waitFor();
-    assert.equal(await questionText.isVisible(), false);
-    await customer.page.getByRole("button", { name: copy(language, "olderMessages"), exact: true }).click();
-    await questionText.waitFor();
-    assert.ok(await customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).isDisabled());
-    assert.equal(await customer.page.getByLabel(copy(language, "replyLabel")).inputValue(), reply);
-    await customer.page.getByRole("button", { name: copy(language, "answerLatestQuestion") }).click();
-    await customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).click();
-    await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
-    await replyInput.waitFor({ state: "hidden" });
-    assert.equal(await customer.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).count(), 0);
-    await customer.page.getByText(reply, { exact: true }).waitFor();
-    await staff.page.getByText(reply, { exact: true }).waitFor();
-    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).waitFor();
+    assert.ok((await customerRow.locator("[data-ticket-excerpt]").innerText()).includes(question));
     await customerRow.click();
-    await customer.page.getByText(copy(language, "replyWithTeam"), { exact: true }).waitFor();
-    assert.equal(await replyInput.count(), 0);
-    assert.equal((await convex.query(api.tickets.getTicket, { token: customer.token, id }))?.status, "waiting");
+    const descriptionBox = await customer.page.getByRole("article").getByText(description, { exact: true }).boundingBox();
+    const questionBox = await customer.page.getByText(question, { exact: true }).boundingBox();
+    const composerBox = await replyBox.boundingBox();
+    assert.ok(questionBox && composerBox && descriptionBox && descriptionBox.y < questionBox.y && questionBox.y < composerBox.y);
+    const sharedPage = customer.page.getByRole("link", { name: copy(language, "openPageNamed", { name: "details.html" }), exact: true });
+    assert.equal(await sharedPage.getAttribute("href"), hostedUrl);
+    if (language === "en") await expectAccessible(customer.page, "Customer Ticket thread");
+    const [popup] = await Promise.all([customer.context.waitForEvent("page"), sharedPage.click()]);
+    await popup.getByRole("heading", { name: "Fixture details", exact: true }).waitFor();
+    await popup.close();
+
+    await customer.page.getByRole("button", { name: copy(language, "threadQuoteLinkNamed", { name: "details.html" }), exact: true }).click();
+    await customer.page.getByText(copy(language, "threadQuoting", { quote: "details.html" }), { exact: true }).waitFor();
+    assert.equal(await replyBox.evaluate(input => input === document.activeElement), true);
+    await replyBox.fill(reply);
+    await customer.page.getByRole("button", { name: copy(language, "threadLink"), exact: true }).click();
+    const address = customer.page.getByLabel(copy(language, "threadLinkAddress"), { exact: true });
+    await address.press("Escape");
+    assert.equal(await replyBox.inputValue(), reply, "Escape closes link entry and keeps the current reply");
+    await customer.page.getByRole("button", { name: copy(language, "threadLink"), exact: true }).click();
+    await address.fill("http://example.com/device");
+    await customer.page.getByRole("button", { name: copy(language, "threadAddLink"), exact: true }).click();
+    await customer.page.getByRole("alert").filter({ hasText: copy(language, "threadInvalidLink") }).waitFor();
+    await address.fill("https://example.com/device");
+    await customer.page.getByRole("button", { name: copy(language, "threadAddLink"), exact: true }).click();
+    await customerSend.click();
+    await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
+    await staff.page.getByText(reply, { exact: true }).waitFor();
+    await staff.page.getByText(copy(language, "threadCustomerReplied"), { exact: true }).first().waitFor();
+    const external = staff.page.getByRole("link", { name: copy(language, "threadOpenLinkNamed", { name: "example.com" }), exact: true });
+    assert.equal(await external.getAttribute("href"), "https://example.com/device");
+    assert.equal(await external.getAttribute("rel"), "noopener noreferrer");
+
+    await staff.page.locator("[data-message-id]").filter({ hasText: reply }).getByRole("button").last().click();
+    await staff.page.getByText(copy(language, "threadQuoting", { quote: reply }), { exact: true }).waitFor();
+    await staffReply.fill("Thanks. I can reproduce this now.");
+    await staff.page.getByRole("button", { name: copy(language, "sendReply"), exact: true }).click();
+    await customer.page.getByText("Thanks. I can reproduce this now.", { exact: true }).waitFor();
+    await replyBox.fill("I can test another version.");
+    await customerSend.click();
+    await staff.page.getByText("I can test another version.", { exact: true }).waitFor();
+
+    if (language === "en") {
+      const receipt = { name: "reply-photo.png", size: 128, type: "image/png", key: `fixture-${crypto.randomUUID()}`, url: "https://fixture.invalid/reply-photo.png" };
+      const intent = await convex.mutation(api.uploads.createUploadIntent, {
+        token: customer.token, idempotencyKey: crypto.randomUUID(), files: [{ name: receipt.name, size: receipt.size, type: receipt.type }],
+      });
+      await convex.mutation(api.uploads.recordUploadedFile, {
+        callbackToken: "local-only-callback-fixture", intentId: intent.intentId, secret: intent.secret, file: receipt,
+      });
+      const writable = await convex.query(api.tickets.getTicket, { token: customer.token, id });
+      assert.ok(writable);
+      await convex.mutation(api.conversations.send, {
+        token: customer.token, id, body: "", media: [receipt], requestId: crypto.randomUUID(),
+        uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret, expectedVersion: writable.version,
+      });
+      const media = customer.page.getByRole("button", { name: copy(language, "threadOpenAttachment", { name: receipt.name }), exact: true });
+      await media.waitFor();
+      assert.equal(await customer.page.getByRole("article").getByRole("button").count(), 0, "Reply media is not attributed to the opening post");
+      await media.click();
+      await customer.page.getByRole("button", { name: copy(language, "detailMedia", { count: 1 }), exact: true, expanded: true }).waitFor();
+      await staff.page.getByRole("button", { name: copy(language, "threadOpenAttachment", { name: receipt.name }), exact: true }).waitFor();
+    }
+
+    await convex.mutation(api.pages.revokeTicketPage, { token: staff.token, pageId: published._id });
+    await customer.page.getByText(copy(language, "threadPageUnavailable"), { exact: true }).waitFor();
+    assert.equal(await sharedPage.count(), 0);
+    const current = await convex.query(api.tickets.getTicket, { token: staff.token, id });
+    assert.ok(current);
+    assert.equal(current.status, "waiting");
+    await convex.mutation(api.tickets.updateTicketStatus, { token: staff.token, id, status: "done", expectedVersion: current.version });
+    await customer.page.getByText(copy(language, "threadResolved"), { exact: true }).waitFor();
+    assert.equal(await customerSend.count(), 0);
     assert.equal(customer.uploads() + staff.uploads(), 0);
     assert.deepEqual(customer.errors, []);
     assert.deepEqual(staff.errors, []);
@@ -1692,7 +1765,7 @@ for (const language of ["en", "th"] as const) test(`keyboard pin placement and a
   const { page, context, uploads } = await open("customer", language);
   try {
     const video = language === "th";
-    if (video) await page.locator('input[type="file"][multiple]').setInputFiles("tests/browser/pin-video.webm");
+    if (video) await page.locator('[data-slot="ticket-draft-files"]').setInputFiles("tests/browser/pin-video.webm");
     else {
       await files(page);
       await files(page, "second.png");

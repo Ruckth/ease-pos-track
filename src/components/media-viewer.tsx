@@ -28,6 +28,7 @@ import { PinDetails } from "./annotation-overlays";
 import { ImageSlide, VideoSlide } from "./media-slides";
 
 export type MediaViewerHandle = {
+  focusMedia: (index: number) => void;
   focusAnnotation: (annotation: Annotation) => void;
   requestClose: (onClose: () => void) => void;
 };
@@ -156,6 +157,11 @@ export const MediaViewer = forwardRef<
     requestClose: onClose => requestNoteChange(() => {
       clearNotes();
       onClose();
+    }),
+    focusMedia: index => requestNoteChange(() => {
+      clearNotes();
+      initialTarget.current = index;
+      mainApi?.scrollTo(index, true);
     }),
     focusAnnotation: annotation => requestNoteChange(() => {
       clearNotes();

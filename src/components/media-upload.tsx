@@ -198,6 +198,7 @@ export function MediaUploadField({
       />
       <input
         ref={uploadInputRef}
+        data-slot="ticket-draft-files"
         className="hidden"
         disabled={disabled}
         type="file"

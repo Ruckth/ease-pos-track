@@ -61,6 +61,8 @@ export type SubmitTicketDeps = {
   signal?: AbortSignal;
   /** A previous attempt may have written against this request key. */
   reconciling?: boolean;
+  /** Other mutation-specific codes emitted only when an identical write has no committed receipt. */
+  noReceiptErrors?: ReadonlySet<string>;
   /** Reports a cleanup failure without masking the original error. */
   onCleanupError?: (error: unknown) => void;
   onRequestConflict?: () => void;
@@ -195,7 +197,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
     const code = errorCode(error);
     // An earlier write stays uncertain until the server reaches its receipt check.
     const resolvedRetry = creating && code !== undefined
-      && (createErrorsWithoutReceipt.has(code) || code === "REQUEST_ID_CONFLICT" || code === "TICKET_UNAVAILABLE");
+      && (createErrorsWithoutReceipt.has(code) || deps.noReceiptErrors?.has(code) || code === "REQUEST_ID_CONFLICT" || code === "TICKET_UNAVAILABLE");
     const rejected = definitiveUploadRejection(error) && (!deps.reconciling || resolvedRetry);
     if (rejected) deps.onRequestConflict?.();
     if (activeIntent && ((abortedBeforeCreate && !deps.reconciling) || rejected)) {
