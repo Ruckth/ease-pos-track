@@ -2,7 +2,7 @@
 
 **The first release includes resizable circles, an adjustable crop frame, resizable privacy masks and an Eraser.** Keep the existing numbered notes for explaining what happened. Start with a cashier who collected ฿200 on a ฿180 sale and saw ฿0 change. Support needs the three amounts and the cashier’s expected result. The customer’s phone number can stay private.
 
-[Watch the four-step example](./ticket-markup.html) · [Try it on the sample receipt](./ticket-markup.html#practice) · [Read the sources and export evidence](../research/ticket-image-export.md)
+[Watch the six-step example](./ticket-markup.html#walkthrough) · [Try it on the sample receipt](./ticket-markup.html#practice) · [Read the sources and export evidence](../research/ticket-image-export.md)
 
 ## What a user can do
 
@@ -57,11 +57,11 @@ The current draft owner releases its submit lock in a finally block, and the upl
 
 | Evidence | Status |
 | --- | --- |
-| Walkthrough and practice editor | Passed on Chromium 151, Firefox 153 and WebKit 26.5 at 360 and 820 CSS pixels. Covered reduced motion, pause, replay availability, click and keyboard selection, undo/redo, free-text notes, reviewed PNG dimensions, the circle and every pixel in the mask. No HTTP requests during practice. |
+| Walkthrough and practice editor | Passed on Chromium 151, Firefox 153 and WebKit 26.5 at 360 and 820 CSS pixels. Covered reduced motion, pause, replay availability, drag resizing, independent width and height controls, outline changes, individual erasure of overlapping marks, undo/redo, free-text notes and exact restoration of reviewed PNG pixels. No HTTP requests during practice. |
 | PNG metadata and crop math | Synthetic Chromium fixture passed all twelve pixel comparisons, stripped the injected text chunk and correctly classified the test pins. |
 | Existing Ticket submit tests | All ten existing tests passed. The separate partial-upload experiment reproduced the B/B substitution. End-to-end coverage for the corrected editor flow belongs to implementation. |
 | Physical devices and supported formats | Pending. Run on a supported iPhone and Android phone with a long screenshot, a large camera photo, EXIF rotations, JPEG GPS/embedded thumbnails, transparency and an export over 8 MiB. Select output limits based on memory and text legibility. |
-| Human comprehension | Pending. The current HTML sample uses fixed-size ovals, undo and a free-text Ticket description. The walkthrough illustrates the numbered note. Resize and Eraser need to pass the scenarios above in the next interactive build before the full editing flow can be signed off. Integration with existing pins and Thai usability testing are also pending. |
+| Human comprehension | Pending. The sample supports resize, outline thickness, individual mark removal, undo and a free-text Ticket description. The walkthrough illustrates the numbered note. The pilot can now exercise the correction task. Integration with existing pins and Thai usability testing are also pending. |
 
 From the worktree root, run the two standalone checks with the installed Playwright browsers.
 
@@ -76,6 +76,6 @@ Open the **Try it yourself** link on a phone before showing the walkthrough. Giv
 
 > A customer paid ฿200 for this ฿180 sale. Prepare an image for support that explains what went wrong and keeps the customer number private.
 
-Observe the first attempt without coaching. Record time to review, whether a preset or custom selection was used, any help requested, and whether the final receipt retains all three amounts and fully covers the number. Ask the cashier how much change they expected and what support can see under the mask. Have a support colleague read only the result and describe the discrepancy. In a separate round, ask participants to complete the task using taps alone and recover from a deliberately misplaced mask. Use the next interactive build for a correction task. Ask the cashier to widen an earlier oval around the full amount and remove an extra circle while keeping a later privacy mask. Record whether they can discover and complete both actions without help.
+Observe the first attempt without coaching. Record time to review, whether a preset or custom selection was used, any help requested, and whether the final receipt retains all three amounts and fully covers the number. Ask the cashier how much change they expected and what support can see under the mask. Have a support colleague read only the result and describe the discrepancy. In a separate round, ask participants to complete the task using taps alone and recover from a deliberately misplaced mask. Use the practice editor for a correction task. Ask the cashier to widen an earlier oval around the full amount and remove an extra circle while keeping a later privacy mask. Record whether they can discover and complete both actions without help.
 
 **Proposed pilot gate.** At least four of five cashiers independently prepare a clear attachment within one minute, every shared sample hides the entire customer number, and support identifies ฿0 actual versus ฿20 expected on each successful attempt. For the correction task, at least four of five cashiers should resize and erase without coaching, and every final image must retain the intended privacy mask. Record the first point of confusion and repeat the affected task after revising the tool. This threshold is a product decision. The sample is for finding usability problems, and the recruited participants supply the evidence. [GOV.UK moderated usability testing](https://www.gov.uk/service-manual/user-research/using-moderated-usability-testing)
