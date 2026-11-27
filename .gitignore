@@ -19,3 +19,6 @@ bun.lock
 
 # Browser evidence and visual pilot output (never committed).
 test-results/
+
+# Local preview slot state, immutable builds, and logs.
+.preview/

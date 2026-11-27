@@ -400,6 +400,7 @@ export const sendChallengeCode = identityAction("send-challenge")({
   },
   handler: async (ctx, args): Promise<{ sent: true; challengeId: Id<"identityChallenges"> }> => {
     const sender = process.env.IDENTITY_SENDER;
+    if (process.env.TICKET_LOCAL_PREVIEW === "true" && sender !== "local") throw new Error("IDENTITY_SENDER_UNAVAILABLE");
     if (sender !== "resend" && !(sender === "local" && localFixturesEnabled())) throw new Error("IDENTITY_SENDER_UNAVAILABLE");
     const delivery: Delivery | null = await ctx.runMutation(internal.identity.issueChallenge, { ...args, code: newChallengeCode() });
     if (!delivery) throw new Error("RATE_LIMITED");
