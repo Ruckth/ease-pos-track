@@ -63,7 +63,7 @@ export function ProjectSwitcher({
   const { t } = useI18n();
   const menu = useMenuAction();
   const visibleLabel = compact ? <>
-    <span className="min-[480px]:hidden">{current.key}</span>
+    <span className="truncate min-[480px]:hidden">{current.key}</span>
     <span className="hidden truncate min-[480px]:block">{projectLabel(current)}</span>
   </> : <span className="truncate">{projectLabel(current)}</span>;
   if (projects.length === 1) {

@@ -1,6 +1,7 @@
 import { markupLabels } from "../../src/lib/markup-labels";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import assert from "node:assert/strict";
+import { EventEmitter, once } from "node:events";
 import path from "node:path";
 import { after, test as nodeTest } from "node:test";
 import type { BrowserContext, Locator, Page, Request } from "playwright";
@@ -1122,6 +1123,34 @@ test("customer navigation does not expose staff health", async () => {
   } finally { await f.context.close(); }
 });
 
+for (const language of ["en", "th"] as const) test(`customer ${language}: Ticket header fits in one phone row`, async () => {
+  const { page, context } = await open("customer", language);
+  try {
+    await page.goto(`${baseURL}/customer?project=POS&ticket=${seed.tickets[1]}`);
+    await page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).waitFor();
+    const header = page.locator("main > header");
+    const wordmark = header.getByText(copy(language, "appName"), { exact: true });
+    const project = projectSwitcher(page, language);
+    const inbox = header.getByRole("button", { name: copy(language, "ticketInbox"), exact: true });
+    const account = header.getByRole("button", { name: copy(language, "customerQueueMore"), exact: true });
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await wordmark.isVisible(), false);
+      assert.equal(await project.innerText(), "POS");
+      const toolbar = await header.boundingBox();
+      assert.ok(toolbar && toolbar.height <= 64, `Header height at ${width}px: ${toolbar?.height}`);
+      for (const control of [project, inbox, account]) {
+        const box = await control.boundingBox();
+        assert.ok(box && box.height >= 44 && box.x >= 0 && box.x + box.width <= width);
+        assert.ok(Math.abs(box.y + box.height / 2 - (toolbar.y + toolbar.height / 2)) <= 1);
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await wordmark.waitFor();
+    assert.match(await project.innerText(), /\(POS\)/);
+  } finally { await context.close(); }
+});
+
 for (const language of ["en", "th"] as const) test(`customer ${language}: phone filters preserve search and restore the linked status on Back`, async () => {
   const { page, context } = await open("customer", language);
   try {
@@ -1372,6 +1401,135 @@ for (const language of ["en", "th"] as const) {
   });
 }
 
+for (const language of ["en", "th"] as const) {
+  test(`staff ${language}: operations health stays compact and unclipped across phone, sm and desktop viewports`, async () => {
+    // Exercise populated counts, diagnostic states and paging with a transport fixture; never schedule deletion.
+    const f = await open("staff", language, async context => {
+      await context.route("**/src/features/operations/adapters/health.ts", route => route.fulfill({
+        contentType: "application/javascript",
+        body: `window.healthLoadMore = [];
+          const counts = {
+            "cancellation:pending": 4, "cancellation:running": 2, "cancellation:completed": 12, "cancellation:failed": 1, "cancellation:superseded": 0,
+            "intent_expiry:pending": 3, "intent_expiry:running": 1, "intent_expiry:completed": 8, "intent_expiry:failed": 0, "intent_expiry:superseded": 0,
+            "rejected_upload:pending": 2, "rejected_upload:running": 0, "rejected_upload:completed": 5, "rejected_upload:failed": 1, "rejected_upload:superseded": 0,
+            "ticket_purge:pending": 1, "ticket_purge:running": 1, "ticket_purge:completed": 3, "ticket_purge:failed": 1, "ticket_purge:superseded": 2,
+          };
+          const byView = {
+            failed: [
+              { jobId: "f-cancel", kind: "cancellation", state: "failed", attempt: 3, maxAttempts: 8, availableAt: 1795700400000, lastOutcome: "failed_permanent", exhausted: false, purgeBlocked: false },
+              { jobId: "f-purge", kind: "ticket_purge", state: "failed", attempt: 8, maxAttempts: 8, availableAt: 1795700400000, lastOutcome: "ownership_conflict", exhausted: true, purgeBlocked: true },
+            ],
+            pending: [
+              { jobId: "p-expiry", kind: "intent_expiry", state: "pending", attempt: 1, maxAttempts: 8, availableAt: 1795700460000, lastOutcome: "failed_retryable", exhausted: false, purgeBlocked: false },
+            ],
+            expired: [
+              { jobId: "e-cancel", kind: "cancellation", state: "running", attempt: 2, maxAttempts: 8, availableAt: 1795700400000, leaseExpiresAt: 1795701180000, exhausted: false, purgeBlocked: false },
+            ],
+          };
+          export const useHealth = () => ({ counts, oldestPendingAt: 1795698180000,
+            configuration: { uploadThingToken: false, callbackSecret: true, mediaCleanupEnabled: false } });
+          export const useJobDiagnostics = view => ({ status: "CanLoadMore",
+            loadMore(count) { window.healthLoadMore.push({ view, count }); },
+            results: byView[view] ?? [],
+            requeue: async () => true });`,
+      }));
+    });
+    try {
+      await f.page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
+      await openHeaderMenu(f.page, copy(language, "queueMore"));
+      await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
+      const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
+      const table = dialog.getByRole("table", { name: copy(language, "healthCounts") });
+      await table.waitFor();
+
+      for (const viewport of [
+        { width: 320, height: 568 },
+        { width: 360, height: 740 },
+        { width: 390, height: 844 },
+        { width: 640, height: 800 },
+        { width: 768, height: 800 },
+        { width: 1280, height: 900 },
+      ]) {
+        await f.page.setViewportSize(viewport);
+        const layout = await dialog.evaluate(el => {
+          const tableEl = el.querySelector("table")!;
+          const wrap = tableEl.parentElement!;
+          const dialogRect = el.getBoundingClientRect();
+          const cells = [...tableEl.querySelectorAll("td")];
+          const maxCellRight = Math.max(...cells.map(cell => cell.getBoundingClientRect().right));
+          return {
+            tableDisplay: getComputedStyle(tableEl).display,
+            docOverflow: document.documentElement.scrollWidth - window.innerWidth,
+            dialogOverflow: el.scrollWidth - el.clientWidth,
+            tableOverflow: wrap.scrollWidth - wrap.clientWidth,
+            cellsBeyondDialog: maxCellRight - dialogRect.right,
+            columnHeaders: tableEl.querySelectorAll('[role="columnheader"]').length,
+            rowHeaders: tableEl.querySelectorAll('[role="rowheader"]').length,
+            cells: cells.length,
+          };
+        });
+        assert.equal(layout.tableDisplay, viewport.width >= 768 ? "table" : "block");
+        assert.ok(layout.docOverflow <= 0, `${language} ${viewport.width}px: document overflow ${layout.docOverflow}`);
+        assert.ok(layout.dialogOverflow <= 0, `${language} ${viewport.width}px: dialog overflow ${layout.dialogOverflow}`);
+        assert.ok(layout.tableOverflow <= 0, `${language} ${viewport.width}px: table wrapper overflow ${layout.tableOverflow}`);
+        assert.ok(layout.cellsBeyondDialog <= 1, `${language} ${viewport.width}px: cell extends past dialog by ${layout.cellsBeyondDialog}`);
+        assert.equal(layout.columnHeaders, 6);
+        assert.equal(layout.rowHeaders, 4);
+        assert.equal(layout.cells, 20);
+      }
+
+      // Phone compactness: on a 390x844 phone, the Diagnostics heading and filter stay above the fold.
+      await f.page.setViewportSize({ width: 390, height: 844 });
+      const failedHeading = dialog.getByRole("heading", { name: copy(language, "healthFailed"), exact: true });
+      const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
+      const headingBox = (await failedHeading.boundingBox())!;
+      const triggerBox = (await trigger.boundingBox())!;
+      assert.ok(headingBox.y + headingBox.height <= 844, `${language} 390x844: diagnostics heading sits above the fold`);
+      assert.ok(triggerBox.y + triggerBox.height <= 844 && triggerBox.height >= 44 && triggerBox.width >= 44, `${language} 390x844: filter button is touch-sized above the fold`);
+
+      // Narrow phone failed card: Requeue stacks below full-width text without crushing metadata/warnings.
+      await f.page.setViewportSize({ width: 320, height: 568 });
+      const blockedItem = dialog.locator("ul > li").nth(1);
+      await blockedItem.scrollIntoViewIfNeeded();
+      await blockedItem.getByText(copy(language, "healthPurgeBlocked"), { exact: true }).waitFor();
+      await blockedItem.getByText(copy(language, "healthExhausted"), { exact: true }).waitFor();
+      const cardMetrics = await blockedItem.evaluate(el => {
+        const textBlock = el.firstElementChild!.getBoundingClientRect();
+        const button = el.querySelector("button")!.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const innerWidth = el.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        return { textWidthRatio: textBlock.width / innerWidth, buttonBelowText: button.top >= textBlock.bottom - 1, buttonHeight: button.height };
+      });
+      assert.ok(cardMetrics.textWidthRatio >= 0.9, `${language} 320px: job text spans full card width (${cardMetrics.textWidthRatio.toFixed(2)})`);
+      assert.equal(cardMetrics.buttonBelowText, true, `${language} 320px: Requeue stacks below text`);
+      assert.ok(cardMetrics.buttonHeight >= 44, `${language} 320px: Requeue keeps 44px touch height`);
+
+      // Filter popover fits within 320px and switches to populated Pending and Expired views; paging fires loadMore(25).
+      const loadMore = dialog.getByRole("button", { name: copy(language, "loadOlder"), exact: true });
+      await loadMore.scrollIntoViewIfNeeded();
+      assert.ok((await loadMore.boundingBox())!.height >= 44);
+      await loadMore.click();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      const panel = filterPanel(f.page);
+      await panel.waitFor();
+      const panelBox = (await panel.boundingBox())!;
+      assert.ok(panelBox.x >= 0 && panelBox.x + panelBox.width <= 320.5, `${language} 320px: filter popover fits viewport`);
+      await panel.getByRole("radio", { name: copy(language, "healthPending"), exact: true }).click();
+      await closeFilters(f.page);
+      await dialog.getByText(copy(language, "healthRetry"), { exact: true }).waitFor();
+      await trigger.click();
+      await panel.getByRole("radio", { name: copy(language, "healthExpired"), exact: true }).click();
+      await closeFilters(f.page);
+      await dialog.getByRole("heading", { name: copy(language, "healthExpired"), exact: true }).waitFor();
+      const loadCalls = await f.page.evaluate(() => (window as unknown as { healthLoadMore: unknown[] }).healthLoadMore);
+      assert.deepEqual(loadCalls, [{ view: "failed", count: 25 }]);
+      assert.deepEqual(f.errors, []);
+      assert.equal(f.uploads(), 0);
+    } finally { await f.context.close(); }
+  });
+}
+
 test("customer sign-in masks a wrong password, then admits the named customer through the real form", async () => {
   const context = await newContext(await browsers.get());
   try {
@@ -1551,6 +1709,73 @@ test("an open Ticket announces leaving filtered results in Queue, Board and Tabl
     }
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
+});
+
+for (const [language, view] of [["en", "queue"], ["th", "table"]] as const) test(`staff ${language} ${view}: status menu and move button keep keyboard focus while the move saves`, async () => {
+  const intercepted = new EventEmitter();
+  let release: (() => void) | undefined;
+  let writes = 0;
+  const { page, context, token, errors } = await open("staff", language, async context => {
+    await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const message = JSON.parse(String(raw));
+        if (message.type === "Mutation" && message.udfPath === "tickets:updateTicketStatus") {
+          writes++;
+          release = () => { release = undefined; server.send(raw); };
+          intercepted.emit("move");
+        } else server.send(raw);
+      });
+    });
+  });
+  try {
+    const title = `Status focus ${language} ${crypto.randomUUID()}`;
+    const { ticket } = await convex.mutation(api.tickets.createTextTicket, { token, projectKey: "POS", title, description: "", requestId: crypto.randomUUID() });
+    const number = formatTicketNumber(ticket.ticketNumber, "POS");
+    if (view === "table") await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${baseURL}/staff?project=POS&view=${view}&ticket=${ticket._id}`);
+    const detail = view === "queue"
+      ? page.getByRole("region", { name: title, exact: true })
+      : page.getByRole("dialog", { name: number, exact: true });
+    const status = detail.locator('[data-slot="dropdown-menu-trigger"]');
+    const label = (key: "new" | "inProgress" | "done") => `${copy(language, "detailStatus")} · ${copy(language, key)} · ${number}`;
+    const focused = (control: Locator) => control.evaluate(element => element === document.activeElement);
+    const saving = detail.getByRole("status").filter({ hasText: copy(language, "statusWriting") });
+
+    assert.equal(await status.getAttribute("aria-label"), label("new"));
+    await status.focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("menuitemradio", { name: copy(language, "inProgress"), exact: true }).focus();
+    await Promise.all([once(intercepted, "move", { signal: AbortSignal.timeout(5000) }), page.keyboard.press("Enter")]);
+    await page.getByRole("menu").waitFor({ state: "detached" });
+    await saving.waitFor();
+    assert.equal(await status.getAttribute("aria-disabled"), "true");
+    assert.equal(await focused(status), true, "Focus stays on the status trigger during the save");
+    await page.keyboard.press("Enter");
+    assert.equal(await page.getByRole("menu").count(), 0, "A busy trigger does not open");
+    assert.ok(release);
+    release();
+    await saving.waitFor({ state: "detached" });
+    await detail.getByRole("button", { name: label("inProgress"), exact: true }).waitFor();
+    assert.equal(await status.getAttribute("aria-disabled"), null);
+    assert.equal(await focused(status), true, "Focus stays on the status trigger after the save");
+
+    const resolve = detail.getByRole("button", { name: `${copy(language, "queueResolve")} · ${number}`, exact: true });
+    await resolve.focus();
+    await Promise.all([once(intercepted, "move", { signal: AbortSignal.timeout(5000) }), page.keyboard.press("Enter")]);
+    await saving.waitFor();
+    assert.equal(await resolve.getAttribute("aria-disabled"), "true");
+    assert.equal(await focused(resolve), true, "Focus stays on the move button during the save");
+    await page.keyboard.press("Enter");
+    assert.ok(release);
+    release();
+    await detail.getByRole("button", { name: label("done"), exact: true }).waitFor();
+    await saving.waitFor({ state: "detached" });
+    assert.equal(await focused(detail.getByRole("button", { name: `${copy(language, "queueReopen")} · ${number}`, exact: true })), true, "Focus stays on the move button after the save");
+    assert.equal(writes, 2, "Busy controls never send a second move");
+    assert.equal((await convex.query(api.tickets.getWorkspaceTicket, { token, projectId: ticket.projectId, ticket: ticket._id }))?.status, "done");
+    assert.deepEqual(errors, []);
+  } finally { release?.(); await context.close(); }
 });
 
 test("a status check finishing in another Project is shown once on return", async () => {

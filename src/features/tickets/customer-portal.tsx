@@ -93,12 +93,12 @@ export function CustomerPortal({ viewer, onLogout }: {
 
   return <main className="aurora-canvas min-h-screen px-3 pt-3 sm:px-5">
     <header className="aurora-toolbar relative z-30 mx-auto max-w-6xl">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-3 py-2.5 sm:px-5 sm:py-3">
-        <ProductWordmark />
-        {projects && project ? <div className="order-last min-w-0 max-w-full basis-full sm:order-none sm:basis-auto sm:flex-1">
-          <ProjectSwitcher projects={projects} current={project} onSelect={selectProject} />
+      <div className="flex min-w-0 items-center gap-2 px-3 py-2 sm:gap-3 sm:px-5 sm:py-3">
+        <div className={cn("shrink-0", project && "hidden sm:block")}><ProductWordmark /></div>
+        {projects && project ? <div className="min-w-0 flex-1">
+          <ProjectSwitcher compact projects={projects} current={project} onSelect={selectProject} />
         </div> : null}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           {project && <TicketInbox role="customer" compact key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
           <DropdownMenu {...toolsMenu.root}>
             <DropdownMenuTrigger ref={toolsMenu.triggerRef} render={<Button type="button" variant="outline" className="min-h-11 min-w-11 gap-1.5 rounded-lg px-3" />}
