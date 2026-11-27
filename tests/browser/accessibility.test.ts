@@ -204,6 +204,8 @@ for (const language of ["en", "th"] as const) {
       const health = page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       await health.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
       await expectAccessible(page, `staff ${language} operations health`);
+      await page.setViewportSize({ width: 360, height: 740 });
+      await expectAccessible(page, `staff ${language} operations health mobile`);
       await health.getByRole("button", { name: copy(language, "ticketFilters"), exact: true }).press("Enter");
       await page.getByRole("dialog", { name: copy(language, "ticketFilters"), exact: true }).waitFor();
       await expectAccessible(page, `staff ${language} diagnostic filters`);
