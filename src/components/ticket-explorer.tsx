@@ -1,11 +1,12 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Columns3, ListFilter, Loader2, RotateCw, Table2 } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Columns3, Loader2, RotateCw, Table2 } from "lucide-react";
 import type { Id } from "@convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
+import { TicketFilterPopover } from "@/components/ticket-filter-popover";
 import { TicketCard, type OpenTicket } from "@/components/ticket-card";
 import { createFilterQuery, createFilterRule } from "@/components/reui/filters/filters-query";
 import type { FilterQuery } from "@/components/reui/filters/filters-types";
-import { filterTickets, sortTickets, type ExplorerSort, type ExplorerTag } from "@/lib/ticket-explorer";
+import { countCommittedRules, filterTickets, sortTickets, type ExplorerSort, type ExplorerTag } from "@/lib/ticket-explorer";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -19,12 +20,46 @@ const TicketExplorerFilters = lazy(() => import("@/components/ticket-explorer-fi
 const TicketTable = lazy(() => import("@/components/ticket-table").then(module => ({ default: module.TicketTable })));
 const StaffBoard = lazy(() => import("@/components/staff-board").then(module => ({ default: module.StaffBoard })));
 
+const noRules: FilterQuery = createFilterQuery();
 const priorityRule = createFilterRule({ id: "high-or-critical", path: ["urgencyScore"], operator: "between", value: [51, 100] });
 
 function laneCounts(rows: TicketSummary[]) {
   const counts = { new: 0, acknowledged: 0, in_progress: 0, waiting: 0, done: 0 };
   for (const row of rows) counts[row.status]++;
   return counts;
+}
+
+/**
+ * The loaded-Ticket rules and the High or critical shortcut. Scoped to a Project,
+ * so a different Project starts with no rules rather than another Project's tags.
+ */
+export function useTicketFilterRules(scope: string) {
+  const [state, setState] = useState(() => ({ scope, query: noRules, highUrgency: false }));
+  if (state.scope !== scope) setState({ scope, query: noRules, highUrgency: false });
+  return {
+    query: state.query,
+    highUrgency: state.highUrgency,
+    count: useMemo(() => countCommittedRules(state.query), [state.query]) + Number(state.highUrgency),
+    setQuery: useCallback((query: FilterQuery) => setState(previous => ({ ...previous, query })), []),
+    toggleHighUrgency: useCallback(() => setState(previous => ({ ...previous, highUrgency: !previous.highUrgency })), []),
+    reset: () => setState({ scope, query: noRules, highUrgency: false }),
+  };
+}
+export type TicketFilterRules = ReturnType<typeof useTicketFilterRules>;
+
+/** The panel body shared by the staff toolbar and the standalone Explorer. */
+export function TicketFilterFields({ rules, tags, children }: { rules: TicketFilterRules; tags: ExplorerTag[]; children?: ReactNode }) {
+  const { t } = useI18n();
+  const c = useExplorerCopy();
+  return <div className="flex min-w-0 flex-col gap-2.5">
+    {children}
+    <Button type="button" variant="ghost" size="sm" className={cn("aurora-control min-h-11 w-fit rounded-lg md:min-h-8", rules.highUrgency && "bg-primary/15 text-primary")}
+      aria-pressed={rules.highUrgency} onClick={rules.toggleHighUrgency}>{c.highOrCritical}</Button>
+    <Suspense fallback={<p role="status" className="py-3 text-sm text-muted-foreground">{t("syncing")}</p>}>
+      <TicketExplorerFilters query={rules.query} onChange={rules.setQuery} tags={tags} />
+    </Suspense>
+    <p className="text-xs text-muted-foreground">{c.loadedScope}</p>
+  </div>;
 }
 
 type Page = { status: string; loadMore: (count: number) => void };
@@ -39,30 +74,33 @@ type Workspace = {
   orderKey: string;
   onOrder: (ordered: Id<"tickets">[]) => void;
   onFocusFirst: (id: Id<"tickets">) => void;
-  onFiltersOpen: (open: boolean) => void;
   hasMore: boolean;
   loadingMore: boolean;
   loadMore: () => void;
   busy: ReadonlySet<string>;
 };
 
-export function TicketExplorer({ projectId, items, archivedItems, tags, search, onSearch, showArchived, totals, pages, archive, loading, searchHasMore, archiveSearchHasMore, onSelect, onMove, onRestore, workspace }: {
+export function TicketExplorer({ projectId, items, archivedItems, tags, search, onSearch, showArchived, totals, pages, archive, loading, searchHasMore, archiveSearchHasMore, onSelect, onMove, onRestore, workspace, filters }: {
   projectId: Id<"projects">; items: TicketSummary[]; archivedItems: TicketSummary[];
-  tags: ExplorerTag[]; search: string; onSearch: (search: string) => void; showArchived: boolean;
+  tags: ExplorerTag[]; search: string;
+  /** Standalone only: offers Clear search beside the filter button. The staff toolbar search clears itself. */
+  onSearch?: (search: string) => void; showArchived: boolean;
   totals: Partial<Record<TicketStatus, number>>; pages: Record<TicketStatus, Page>; archive?: Page;
   loading: boolean; searchHasMore?: boolean; archiveSearchHasMore?: boolean;
   onSelect: OpenTicket;
   onMove: (item: TicketSummary, status: TicketStatus) => Promise<number | null>;
   onRestore: (id: Id<"tickets">) => void;
   workspace?: Workspace;
+  /** Rules owned by the staff toolbar. The standalone Explorer owns its own. */
+  filters?: TicketFilterRules;
 }) {
   const { language, t } = useI18n();
   const c = useExplorerCopy();
   const [localView, setLocalView] = useState<"board" | "table">("board");
   const view = workspace?.view ?? localView;
-  const [filterQuery, setFilterQuery] = useState<FilterQuery>(() => createFilterQuery());
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [highUrgency, setHighUrgency] = useState(false);
+  const ownRules = useTicketFilterRules(projectId);
+  const rules = filters ?? ownRules;
+  const { query: filterQuery, highUrgency } = rules;
   const [searchLane, setSearchLane] = useState<{ query: string; lane: TicketStatus } | null>(null);
   const [boardLane, setBoardLane] = useState<TicketStatus>(DEFAULT_STAFF_LANE);
   const effectiveQuery = useMemo(() => highUrgency
@@ -98,14 +136,7 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
     if (view === "focus" && !ticketOpen && !loading && first) focusFirst?.(first);
   }, [view, ticketOpen, loading, first, focusFirst]);
 
-  const onFiltersOpen = workspace?.onFiltersOpen;
-  useEffect(() => {
-    onFiltersOpen?.(filtersOpen);
-    return () => onFiltersOpen?.(false);
-  }, [onFiltersOpen, filtersOpen]);
-
-  const rules = filterQuery.rules.length;
-  const filtering = rules > 0 || highUrgency;
+  const filtering = rules.count > 0;
   const board = view === "board" && (!workspace || !showArchived);
   const loadedByLane = useMemo(() => board ? laneCounts(items) : undefined, [board, items]);
   const shownByLane = useMemo(() => board && (filtering || search) ? laneCounts(active) : undefined, [board, filtering, search, active]);
@@ -130,25 +161,13 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
     else setBoardLane(lane);
   };
   const fallback = <p role="status" className="py-3 text-sm text-muted-foreground">{t("syncing")}</p>;
-  const filters = <Suspense fallback={fallback}><TicketExplorerFilters query={filterQuery} onChange={setFilterQuery} tags={tags} /></Suspense>;
-  const reset = () => { onSearch(""); setFilterQuery(createFilterQuery()); setHighUrgency(false); };
   const summary = (item: TicketSummary) => <TicketCard key={item._id} item={item} onSelect={onSelect} selected={item._id === selectedId}
     busy={workspace?.busy.has(item._id)} onMove={(_id, status) => { void onMove(item, status); }} onRestore={onRestore} />;
 
   return <section className="min-w-0 space-y-3">
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Button type="button" variant="ghost" size="sm" className={cn("aurora-control min-h-11 rounded-lg md:min-h-8", highUrgency && "bg-primary/15 text-primary")} aria-pressed={highUrgency}
-        onClick={() => setHighUrgency(value => !value)}>{c.highOrCritical}</Button>
-      {workspace ? <details className="min-w-0 flex-1 open:basis-full" open={filtersOpen} onToggle={event => {
-        const open = event.currentTarget.open;
-        setFiltersOpen(open);
-      }}>
-        <summary className="aurora-control flex w-fit min-h-11 cursor-pointer list-none items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring md:min-h-8">
-          <ListFilter aria-hidden className="size-4" />{t("queueFilters")}{rules > 0 ? ` (${rules})` : ""}
-        </summary>
-        {filtersOpen && <div className="aurora-panel mt-1.5 space-y-2 rounded-xl p-2">{filters}<p className="text-xs text-muted-foreground">{c.loadedScope}</p></div>}
-      </details> : <div className="min-w-0 basis-full md:flex-1">{filters}</div>}
-      {(search || filtering) && <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" onClick={reset}>{c.clearAll}</Button>}
+    <div className={cn("flex flex-wrap items-center gap-1.5", workspace && "empty:hidden")}>
+      {!filters && <TicketFilterPopover activeCount={rules.count} onClear={rules.reset}><TicketFilterFields rules={rules} tags={tags} /></TicketFilterPopover>}
+      {!workspace && search && onSearch && <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" onClick={() => onSearch("")}>{t("clearSearch")}</Button>}
       {!workspace && <div className="flex rounded-md border border-transparent bg-field p-1" role="group" aria-label={c.view}>
         <Button size="sm" variant={view === "board" ? "secondary" : "ghost"} aria-pressed={view === "board"} onClick={() => setLocalView("board")}><Columns3 />{c.board}</Button>
         <Button size="sm" variant={view === "table" ? "secondary" : "ghost"} aria-pressed={view === "table"} onClick={() => setLocalView("table")}><Table2 />{c.table}</Button>

@@ -1,6 +1,6 @@
 import { useT3Proof, useT3ReleaseAvailable } from "@/features/t3/adapters/connection";
 import { TicketInbox } from "./ticket-inbox";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -8,10 +8,12 @@ import type { TicketSummary } from "../../../shared/ticket-contracts";
 import { useRoutingSettings } from "@/features/routing/adapters/convex";
 import { useRoutingCopy } from "@/features/routing/routing-copy";
 import { NewProjectDialog, NoProjects, ProjectMembersDialog, useCurrentProject } from "@/components/project-controls";
-import { TicketExplorer } from "@/components/ticket-explorer";
+import { TicketExplorer, TicketFilterFields, useTicketFilterRules } from "@/components/ticket-explorer";
+import { TicketFilterPopover } from "@/components/ticket-filter-popover";
 import { statuses } from "@/components/ticket-status";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { useExplorerCopy } from "@/lib/explorer-copy";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { TicketSearchInput } from "./ticket-search-input";
@@ -32,9 +34,15 @@ const RoutingWorkspace = lazy(() => import("@/features/routing/routing-workspace
 const StaffHealth = lazy(() => import("@/features/operations/staff-health").then(module => ({ default: module.StaffHealth })));
 const TeamAdministration = lazy(() => import("@/components/account-dialogs").then(module => ({ default: module.TeamAdministration })));
 
-const selectClass = "aurora-control min-h-11 max-w-full rounded-lg px-2.5 text-sm max-sm:w-full md:min-h-9";
+const selectClass = "aurora-control min-h-11 w-full rounded-lg px-2.5 text-sm md:min-h-9";
 type TicketId = Id<"tickets">;
 const emptyTickets: TicketSummary[] = [];
+
+// Mount the full tag subscription with the open panel, including its portal lifetime.
+function StaffFilterFields(props: ComponentProps<typeof TicketFilterFields>) {
+  const allTags = useTicketTags();
+  return <TicketFilterFields {...props} tags={allTags ?? props.tags} />;
+}
 
 export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Settings, lineSettings, onLineSettings }: {
   viewer: { staffId: string; name: string; email: string; role: "owner" | "staff" };
@@ -60,7 +68,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const requestT3Proof = useT3Proof();
   const t3Available = useT3ReleaseAvailable();
   const [tool, setTool] = useState<ProjectTool | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const desktop = useMediaQuery("(min-width: 1024px)");
   const [restoring, setRestoring] = useState<Set<string>>(() => new Set());
   const inFlight = useRef(new Set<string>());
   const moves = useTicketStatusMoves(project?._id, operations.status);
@@ -109,8 +117,14 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const listView = showArchived && nav.listView === "board" ? "table" : nav.listView;
   const assignmentFilter = !showArchived && project ? nav.assignment : undefined;
   const data = useStaffTickets(project?._id, listView, filter, query, assignmentFilter);
-  const allTags = useTicketTags(filtersOpen);
-  const tags = useMemo(() => allTags ?? data.items.flatMap(item => item.tags), [allTags, data.items]);
+  const tags = useMemo(() => Array.from(new Map(data.items.flatMap(item => item.tags.map(tag => [tag._id, tag] as const))).values()), [data.items]);
+  const rules = useTicketFilterRules(project?._id ?? "");
+  // Archive has no status or assignment scope; its loaded rules and shortcut still apply.
+  const filterCount = rules.count + (showArchived ? 0 : Number(filter !== nav.defaultFilter) + Number(nav.assignment !== undefined));
+  const clearFilters = () => {
+    rules.reset();
+    withSearch(() => { void nav.resetFilters(); });
+  };
   const ticket = project && (!nav.project || nav.project === project.key) ? nav.ticket : null;
   const selected = useWorkspaceTicket(ticket, project?._id);
   const selectedId = selected?._id ?? null;
@@ -226,25 +240,33 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
         {project === null ? <NoProjects action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
           project === undefined ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
             <div className={`aurora-toolbar relative z-20 md:sticky md:top-2 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
-              <TicketSearchInput className="min-w-0 grow basis-full sm:basis-52" value={searchInput} onChange={typeSearch} onClear={clearSearch} />
-              {!showArchived && <label className="min-w-0 max-sm:flex-1"><span className="sr-only">{t("ticketStatus")}</span>
-                <select className={selectClass} value={filter} onChange={event => {
-                  const status = event.target.value;
-                  withSearch(() => { void nav.setFilter(status); });
-                }}>
-                  <option value="active">{t("activeTickets")}</option><option value="all">{t("allTickets")}</option>
-                  {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
-                </select>
-              </label>}
-              {!showArchived && <label className="min-w-0 max-sm:flex-[1.3]"><span className="sr-only">{routingCopy.assignment}</span>
-                <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
-                  const scope = event.target.value;
-                  withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });
-                }}>
-                  <option value="">{routingCopy.all}</option><option value="mine">{routingCopy.mine}</option>
-                  <option value="unassigned">{routingCopy.unassigned}</option>
-                </select>
-              </label>}
+              <div className="flex min-w-0 grow basis-full items-center gap-1.5 sm:basis-64">
+                <TicketSearchInput className="min-w-0 flex-1" value={searchInput} onChange={typeSearch} onClear={clearSearch} />
+                {!single && (!split || desktop) && <TicketFilterPopover key={project._id} activeCount={filterCount} onClear={clearFilters}>
+                  <StaffFilterFields rules={rules} tags={tags}>
+                    {!showArchived && <>
+                      <label className="flex min-w-0 flex-col gap-1 text-sm font-medium">{t("ticketStatus")}
+                        <select className={selectClass} value={filter} onChange={event => {
+                          const status = event.target.value;
+                          withSearch(() => { void nav.setFilter(status); });
+                        }}>
+                          <option value="active">{t("activeTickets")}</option><option value="all">{t("allTickets")}</option>
+                          {statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
+                        </select>
+                      </label>
+                      <label className="flex min-w-0 flex-col gap-1 text-sm font-medium">{routingCopy.assignment}
+                        <select className={selectClass} value={nav.assignment ?? ""} onChange={event => {
+                          const scope = event.target.value;
+                          withSearch(() => { void nav.setAssignment(scope === "mine" || scope === "unassigned" ? scope : undefined); });
+                        }}>
+                          <option value="">{routingCopy.all}</option><option value="mine">{routingCopy.mine}</option>
+                          <option value="unassigned">{routingCopy.unassigned}</option>
+                        </select>
+                      </label>
+                    </>}
+                  </StaffFilterFields>
+                </TicketFilterPopover>}
+              </div>
               <div className="max-sm:basis-full">
                 <StaffViewSwitcher archived={showArchived} view={listView} onSelect={view => withSearch(() => { void nav.setView(view); })} />
               </div>
@@ -253,12 +275,12 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
               <div className={single ? "hidden" : split ? "hidden lg:block" : "min-w-0"}>
             {data.invalidSearch ? <p role="alert" className="text-sm text-destructive">{t("searchLimit")}</p> : <TicketExplorer
               key={project._id} projectId={project._id} items={showArchived ? emptyTickets : data.items} archivedItems={showArchived ? data.items : emptyTickets}
-              tags={tags} search={query} onSearch={clearSearch} showArchived={showArchived}
+              tags={tags} search={query} showArchived={showArchived} filters={rules}
               totals={data.totals ?? {}} pages={data.lanes} loading={data.loading}
               searchHasMore={data.searchHasMore} archiveSearchHasMore={data.searchHasMore}
               onSelect={onSelect} onMove={moves.moveItem} onRestore={id => { void restoreItem(id).catch(error => toast.error(localizeError(error, t))); }}
               workspace={{ view: nav.view === "focus" && inlineDetail ? "focus" : listView, lane: nav.lane, onLaneChange: lane => withSearch(() => { void nav.setLane(lane); }), ticketOpen: Boolean(ticket), visibleStatuses: data.visibleStatuses, selectedId: selectedId, orderKey: `${project.key}/${filter}/${assignmentFilter ?? ""}`, onOrder: orderChanged,
-                onFocusFirst: focusFirst, onFiltersOpen: setFiltersOpen, hasMore: data.hasMore, loadingMore: data.loadingMore, loadMore: data.loadMore, busy }} />}
+                onFocusFirst: focusFirst, hasMore: data.hasMore, loadingMore: data.loadingMore, loadMore: data.loadMore, busy }} />}
               </div>
               {inlineDetail && <div className="min-w-0 space-y-2">
                 {detail}

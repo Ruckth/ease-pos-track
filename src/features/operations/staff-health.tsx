@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { FilterChoices, TicketFilterPopover } from "@/components/ticket-filter-popover";
 import { Button } from "@/components/ui/button";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { useHealth, useJobDiagnostics } from "./adapters/health";
@@ -8,11 +9,17 @@ const kinds = { cancellation: "healthCancellation", intent_expiry: "healthExpiry
 const states = { pending: "healthPending", running: "healthRunning", completed: "healthCompleted", failed: "healthFailed", superseded: "healthSuperseded" } as const;
 const outcomes = { deleted: "healthDeleted", absent_verified: "healthDeleted", failed_retryable: "healthRetry", failed_permanent: "healthPermanent",
   unknown: "healthUnknown", not_configured: "healthNotConfigured", ownership_unverified: "healthUnverified", ownership_conflict: "healthConflict" } as const;
+const diagnosticViews = [
+  { value: "failed", labelKey: "healthFailed" },
+  { value: "pending", labelKey: "healthPending" },
+  { value: "expired", labelKey: "healthExpired" },
+] as const;
 
 export function StaffHealth() {
   const { t, formatDate } = useI18n();
   const health = useHealth();
   const [view, setView] = useState<"failed" | "pending" | "expired">("failed");
+  const currentView = diagnosticViews.find(option => option.value === view) ?? diagnosticViews[0];
   if (!health) return <p role="status">{t("syncing")}</p>;
   return <section className="space-y-4">
     <dl className="grid gap-2 text-sm">
@@ -27,8 +34,13 @@ export function StaffHealth() {
       <tbody>{Object.entries(kinds).map(([kind, label]) => <tr key={kind}><th scope="row" className="py-2 text-left">{t(label)}</th>
         {Object.keys(states).map(state => <td className="text-center" key={state}>{health.counts[`${kind}:${state}`]}</td>)}</tr>)}</tbody>
     </table></div>
-    <div className="flex flex-wrap gap-2">{(["failed", "pending", "expired"] as const).map(mode => <Button key={mode} variant={view === mode ? "default" : "outline"}
-      aria-pressed={view === mode} onClick={() => setView(mode)}>{t(mode === "expired" ? "healthExpired" : states[mode])}</Button>)}</div>
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="min-w-0 text-sm font-semibold text-foreground">{t(currentView.labelKey)}</h3>
+      <TicketFilterPopover activeCount={view === "failed" ? 0 : 1} onClear={() => setView("failed")}>
+        <FilterChoices label={t("healthDiagnosticView")} value={view} onChange={setView}
+          options={diagnosticViews.map(option => ({ value: option.value, label: t(option.labelKey) }))} />
+      </TicketFilterPopover>
+    </div>
     <JobDiagnostics key={view} view={view} />
   </section>;
 }

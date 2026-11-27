@@ -31,7 +31,9 @@ test("staff board loads full routing settings only when routing is opened", asyn
     try {
       await page.getByRole("dialog").getByRole("button", { name: copy("en", "closeDialog") }).click();
       await page.locator("#staff-ticket-results button[data-ticket-id]").first().waitFor();
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
       await page.getByRole("combobox", { name: "Assignment", exact: true }).waitFor();
+      await page.keyboard.press("Escape");
       assert.equal(settingsSubscriptions, 0);
       const routing = await routingDialog(page);
       await routing.getByRole("button", { name: "Availability", exact: true }).waitFor();
@@ -99,7 +101,9 @@ test("named staff use rules, review, Mine and manual holds while the customer se
       await queue.getByText("Assignment saved.", { exact: true }).waitFor();
       await staff.page.keyboard.press("Escape");
       await assignment.getByText("Local Owner · Hardware", { exact: true }).waitFor();
+      await staff.page.getByRole("button", { name: "Filters", exact: true }).click();
       await staff.page.getByRole("combobox", { name: "Assignment", exact: true }).selectOption("mine");
+      await staff.page.keyboard.press("Escape");
       await staff.page.locator("#staff-ticket-results").getByText(title, { exact: true }).first().waitFor();
 
       await assignment.getByRole("combobox", { name: "Assignee", exact: true }).selectOption({ label: "Local Staff" });

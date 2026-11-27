@@ -160,6 +160,11 @@ for (const language of ["en", "th"] as const) {
       const health = page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       await health.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
       await expectAccessible(page, `staff ${language} operations health`);
+      await health.getByRole("button", { name: copy(language, "ticketFilters"), exact: true }).press("Enter");
+      await page.getByRole("dialog", { name: copy(language, "ticketFilters"), exact: true }).waitFor();
+      await expectAccessible(page, `staff ${language} diagnostic filters`);
+      await page.keyboard.press("Escape");
+      await health.waitFor();
       assert.deepEqual(errors, []);
     } finally { await context.close(); }
   });

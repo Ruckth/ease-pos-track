@@ -6,6 +6,8 @@ import { ProductWordmark } from "@/components/product-wordmark";
 import { queueNeighbors } from "@/lib/staff-ticket-queue";
 import { LanguageMenuGroup } from "@/components/language-menu";
 import { NoProjects, ProjectSwitcher, useCurrentProject } from "@/components/project-controls";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { FilterChoices, TicketFilterPopover } from "@/components/ticket-filter-popover";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { CustomerTicketWizard } from "./customer-ticket-wizard";
@@ -65,7 +67,7 @@ export function CustomerPortal({ viewer, onLogout }: {
     const frame = requestAnimationFrame(() => {
       if (scrollOrigin.current !== null) window.scrollTo({ top: scrollOrigin.current, behavior: "instant" });
       scrollOrigin.current = null;
-      // Filtering can close detail while focus remains in the search/select.
+      // Filtering can close detail while focus remains in the search or filter controls.
       // Browser Back removes the focused panel; recover that lost focus only.
       if (document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement) return;
       const row = focusTicket.current && document.querySelector<HTMLElement>(`button[data-ticket-id="${CSS.escape(focusTicket.current)}"]`);
@@ -134,7 +136,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         <ProjectTicketsBoundary key={project?._id ?? "none"}>
           <CustomerTickets project={project} onNewTicket={composer.show} onSelect={openTicket}
             ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
-            onFilter={navigation.setFilter} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
+            onFilter={navigation.setFilter} onResetFilters={navigation.resetFilters} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />
         </ProjectTicketsBoundary>
         {project ? <CustomerTicketDialog ticket={selected} ticketId={ticket} onClose={navigation.closeTicket}
           inResults={selectedId && visible.projectId === projectId ? visible.ids?.includes(selectedId) : undefined}
@@ -190,9 +192,9 @@ function ProjectUnavailable() {
   return <p role="alert" className="aurora-panel p-4 text-sm text-foreground">{t("projectMissing")}</p>;
 }
 
-function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onQuery, onVisibleIds }: {
+function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpen, filter, query, onFilter, onResetFilters, onQuery, onVisibleIds }: {
   project: ProjectSummary | null | undefined; onNewTicket: () => void; onSelect: (id: Id<"tickets">) => void;
-  selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string) => void; onQuery: (query: string) => void;
+  selectedId: Id<"tickets"> | null; ticketOpen: boolean; filter: string; query: string; onFilter: (filter: string | undefined) => void; onResetFilters: () => void; onQuery: (query: string) => void;
   onVisibleIds: (ids: Id<"tickets">[] | undefined) => void;
 }) {
   const { t } = useI18n();
@@ -200,6 +202,8 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   const tickets = page.results;
   const counts = useMemo(() => customerQueueCounts(tickets), [tickets]);
   const statusScope = filter === "all" || filter === "waiting" || filter === "done" ? filter : "active";
+  const activeFilterCount = statusScope === "active" ? 0 : 1;
+  const desktop = useMediaQuery("(min-width: 1024px)");
   const browseTickets = useMemo(() => customerQueue(tickets, statusScope), [tickets, statusScope]);
   const text = query.trim();
   const searching = text.length > 0;
@@ -227,7 +231,7 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
     ? t(search?.hasMore ? "searchLoaded" : "searchMatches", { count: visibleTickets.length })
     : t("customerQueueCount", { shown: visibleTickets.length, loaded: tickets.length });
   const [announcement, setAnnouncement] = useState("");
-  const statusSelect = useRef<HTMLSelectElement>(null);
+  const filterTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!loaded || !project || pending || invalidSearch) return;
     const timer = window.setTimeout(() => setAnnouncement(countLabel), 250);
@@ -237,15 +241,13 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
   if (!project || !loaded) return <div className="aurora-panel grid min-h-48 place-items-center" role="status"><Loader2 className="size-6 animate-spin text-primary" /><span className="sr-only">{t("syncingTickets")}</span></div>;
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-label={t("yourTickets")}>
     <span className="sr-only" role="status" aria-live="polite">{pending || invalidSearch ? "" : announcement}</span>
-    <div className="aurora-toolbar mb-3 flex flex-wrap items-end gap-3 p-3">
-      <TicketSearchInput className="min-w-40 flex-1 basis-full space-y-1 text-sm font-medium text-foreground sm:basis-auto"
+    <div className="aurora-toolbar mb-3 flex items-end gap-2 p-3 sm:gap-3">
+      <TicketSearchInput className="min-w-0 flex-1 space-y-1 text-sm font-medium text-foreground"
         value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
-      <div className="grid w-full gap-1 text-sm font-medium text-foreground sm:w-auto">
-        <label htmlFor="customer-ticket-status">{t("ticketStatus")}</label>
-        <select id="customer-ticket-status" ref={statusSelect} className="aurora-control min-h-11 max-w-full rounded-lg px-3 text-sm font-normal text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={statusScope} onChange={event => onFilter(event.target.value)}>
-          {options.map(option => <option key={option.value} value={option.value}>{option.label}{!searching ? ` (${option.count})` : ""}</option>)}
-        </select>
-      </div>
+      {(!ticketOpen || desktop) && <TicketFilterPopover activeCount={activeFilterCount} triggerRef={filterTrigger} onClear={onResetFilters}>
+        <FilterChoices label={t("ticketStatus")} value={statusScope} onChange={onFilter}
+          options={options.map(option => ({ ...option, count: searching ? undefined : option.count }))} />
+      </TicketFilterPopover>}
     </div>
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
       : pending ? <div className="ticket-surface flex items-center gap-2 p-5 text-sm" role="status"><Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />{t("syncingTickets")}</div>
@@ -253,7 +255,7 @@ function CustomerTickets({ project, onNewTicket, onSelect, selectedId, ticketOpe
       : <div>
         <p className="px-1 pb-2 text-xs text-muted-foreground">{countLabel}</p>
         {visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
-          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t(searching ? "customerQueueSearchEmpty" : "customerQueueEmpty")}</p>{statusScope !== "all" && <Button variant="outline" className="min-h-11 rounded-lg" onClick={() => { statusSelect.current?.focus(); onFilter("all"); }}>{t(searching ? "customerQueueSearchAllStatuses" : "showAllTickets")}</Button>}</div>}
+          : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t(searching ? "customerQueueSearchEmpty" : "customerQueueEmpty")}</p>{statusScope !== "all" && <Button variant="outline" className="min-h-11 rounded-lg" onClick={() => { filterTrigger.current?.focus(); onFilter("all"); }}>{t(searching ? "customerQueueSearchAllStatuses" : "showAllTickets")}</Button>}</div>}
       </div>}
     {!searching && page.status !== "Exhausted" ? <Button className="mt-4 min-h-11 rounded-lg" disabled={page.status !== "CanLoadMore"} onClick={() => page.loadMore(20)}>{page.status === "LoadingMore" ? <Loader2 className="animate-spin" /> : null}{t("loadOlder")}</Button> : null}
   </section>;

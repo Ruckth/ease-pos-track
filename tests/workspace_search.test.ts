@@ -5,6 +5,7 @@ import {
   MAX_WORKSPACE_QUERY_LENGTH,
   parseWorkspaceSearch,
   projectWorkspaceSearch,
+  resetWorkspaceFilters,
   staffWorkspaceSearch,
   stringifyWorkspaceSearch,
 } from "../src/app/workspace-search";
@@ -70,4 +71,18 @@ test("Project switches clear the previous Project's selection and result context
   });
   assert.equal(stringifyWorkspaceSearch(projectWorkspaceSearch(previous, "OPS", "table")), "?project=OPS&view=table");
   assert.equal(stringifyWorkspaceSearch(projectWorkspaceSearch(previous, "OPS")), "?project=OPS");
+});
+
+test("clearing filters restores the default status and assignment in one entry and keeps search, view and Archive", () => {
+  const open = { project: "POS", q: "printer", view: "queue" as const, lane: "new" as const, ticket: "t1", section: "media" as const };
+  assert.deepEqual(resetWorkspaceFilters({ ...open, filter: "done", assignment: "mine" }, "active"),
+    { project: "POS", q: "printer", view: "queue", lane: "new", ticket: undefined, section: undefined, archived: undefined, filter: undefined, assignment: undefined });
+  // Assignment alone keeps the open Ticket, as choosing an assignment does.
+  assert.deepEqual(resetWorkspaceFilters({ ...open, assignment: "unassigned" }, "active"), { ...open, archived: undefined, filter: undefined, assignment: undefined });
+  // Board defaults to every status, so an explicit Active scope is the applied one.
+  assert.equal(resetWorkspaceFilters({ ...open, view: "board", filter: "active" }, "all").filter, undefined);
+  assert.equal(resetWorkspaceFilters({ ...open, filter: "active" }, "active").filter, undefined);
+  assert.equal(resetWorkspaceFilters({ ...open, archived: true, filter: "new" }, "active").archived, undefined);
+  const unchanged = [{ ...open }, { ...open, filter: "archive" as const, assignment: "mine" as const }, { ...open, archived: true as const }];
+  for (const search of unchanged) assert.equal(resetWorkspaceFilters(search, "active"), search);
 });
