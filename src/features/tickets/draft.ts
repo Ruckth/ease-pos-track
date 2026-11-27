@@ -1,5 +1,6 @@
 import type { Id } from "@convex/_generated/dataModel";
 import type { AnnotationDraftInput, AnnotationUpdateInput, PendingMedia } from "@/lib/types";
+import { attachmentName, editedAttachmentName, nameForPreparedAttachment } from "@/lib/attachment-names";
 import { withoutPendingAnnotationsForMedia } from "@/lib/pending-annotations";
 import { distinguishUploadFiles, submitTicketDraft, type SubmitTicketDeps, type TicketDraft } from "@/lib/ticket-submit";
 import { MEDIA_POLICY } from "../../../shared/ticket-contracts";
@@ -54,6 +55,15 @@ export class DisposableTicketDraft {
     if (!this.canEdit()) return;
     this.change({ items: [...this.state.items, ...files.map(file => ({ id: this.resources.requestKey(), file, previewUrl: this.resources.createURL(file), isVideo: file.type.startsWith("video/") }))] });
   };
+  renameAttachment = (id: string, input?: string) => {
+    if (!this.canEdit()) return;
+    const item = this.state.items.find(item => item.id === id);
+    if (!item) return;
+    const name = input === undefined ? item.file.name : editedAttachmentName(input, item.file.name);
+    if (name === null || name === attachmentName(item)) return;
+    const replacement = { ...item, name: name === item.file.name ? undefined : name };
+    this.change({ items: this.state.items.map(candidate => candidate === item ? replacement : candidate) });
+  };
   reorder = (items: PendingMedia[]) => {
     if (!this.canEdit() || items.length !== this.state.items.length || new Set(items.map(item => item.id)).size !== items.length) return;
     const owned = new Map(this.state.items.map(item => [item.id, item]));
@@ -91,7 +101,8 @@ export class DisposableTicketDraft {
     const reviewed = new File([file], `image-${this.resources.requestKey()}.${extension}`, { type: file.type });
     const previewUrl = this.resources.createURL(reviewed);
     this.reviewedFiles.add(reviewed);
-    const replacement = { ...expected, file: reviewed, previewUrl };
+    const name = expected.name === undefined ? undefined : nameForPreparedAttachment(expected, reviewed);
+    const replacement = { ...expected, file: reviewed, previewUrl, name };
     this.change({ items: this.state.items.map(item => item === expected ? replacement : item), annotations });
     this.resources.revokeURL(expected.previewUrl);
     return true;
@@ -148,7 +159,9 @@ export class DisposableTicketDraft {
           const file = prepare ? await prepare(item.file) : item.file;
           controller.signal.throwIfAborted();
           if (!item.isVideo && file.size > MEDIA_POLICY.image.maxBytes) throw new Error("IMAGE_TOO_LARGE");
-          items.push({ ...item, file });
+          const name = nameForPreparedAttachment(item, file);
+          const uploadFile = name === file.name ? file : new File([file], name, { type: file.type, lastModified: file.lastModified });
+          items.push({ ...item, file: uploadFile });
         }
         controller.signal.throwIfAborted();
         validateFiles(items.map(item => item.file));

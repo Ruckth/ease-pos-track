@@ -15,6 +15,8 @@ import type { MediaItem } from "@/lib/types";
 import { readUploadCancelResponse } from "@/lib/upload-cancel";
 import type { uploadFiles } from "@/uploadthing";
 import { definitiveUploadRejection, reconcileUploadWrite } from "../../shared/upload-receipt";
+import { splitAttachmentName } from "@/lib/attachment-names";
+import { MEDIA_POLICY } from "../../shared/ticket-contracts";
 import { fileSignature } from "../../shared/media-policy";
 import { errorCode } from "../../shared/errors";
 
@@ -89,12 +91,17 @@ export function distinguishUploadFiles(items: PendingMedia[]): PendingMedia[] {
   return items.map((item, index) => {
     const { file } = item;
     if (counts.get(fileSignature(file)) === 1) return item;
-    const extension = file.name.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? "";
+    const { stem, extension } = item.name ? splitAttachmentName(file.name)
+      : { stem: "", extension: file.name.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? "" };
     let revision = 0;
     let name: string;
     let signature: string;
     do {
-      name = `attachment-${index + 1}-${++revision}${extension}`;
+      const suffix = `-${index + 1}-${++revision}`;
+      const available = MEDIA_POLICY.maxFileNameLength - suffix.length;
+      const retainedExtension = extension.length < available ? extension : "";
+      const shortened = (stem || "attachment").slice(0, available - retainedExtension.length).replace(/[\uD800-\uDBFF]$/, "");
+      name = (shortened || "a") + suffix + retainedExtension;
       signature = fileSignature({ name, size: file.size, type: file.type });
     } while (used.has(signature));
     used.add(signature);

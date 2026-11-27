@@ -1,4 +1,5 @@
-import type { Annotation, MediaItem } from "@/lib/types";
+import { attachmentName } from "@/lib/attachment-names";
+import type { Annotation, MediaItem, PendingMedia } from "@/lib/types";
 
 export type PendingAnnotation = {
   id: string;
@@ -60,11 +61,11 @@ export function pendingAnnotationsForCreate(
 }
 
 export function pendingMediaForViewer(
-  media: Array<PendingMediaRef & { file: File; previewUrl: string }>,
+  media: Array<Pick<PendingMedia, "id" | "file" | "name" | "previewUrl">>,
 ): MediaItem[] {
   return media.map((item) => ({
     key: item.id,
-    name: item.file.name,
+    name: attachmentName(item),
     size: item.file.size,
     type: item.file.type,
     url: item.previewUrl,
