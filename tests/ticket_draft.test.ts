@@ -234,6 +234,19 @@ test("submission uploads prepared images, never videos, and keeps the originals 
   assert.deepEqual(declared, [[{ name: "photo.webp", size: 4, type: "image/webp" }, { name: video.name, size: video.size, type: video.type }]]);
 });
 
+test("renamed attachments keep the chosen stem through image preparation and retain the original preview", async () => {
+  const prepared = new File(["webp"], "photo.webp", { type: "image/webp" });
+  const { draft, image, video, declared, deps } = preparedFixture(async () => prepared);
+  const [photo, clip] = draft.getSnapshot().items;
+  draft.renameAttachment(photo.id, "Receipt.v2.jpg");
+  draft.renameAttachment(clip.id, "Terminal freeze");
+  assert.equal(draft.getSnapshot().items[0].file, image);
+  assert.equal(draft.getSnapshot().items[0].previewUrl, photo.previewUrl);
+  assert.equal(draft.getSnapshot().items[0].name, "Receipt.v2.jpg");
+  assert.equal(await draft.submit(deps), true);
+  assert.deepEqual(declared, [[{ name: "Receipt.v2.webp", size: 4, type: "image/webp" }, { name: "Terminal freeze.mp4", size: video.size, type: video.type }]]);
+});
+
 test("a failed or oversized preparation leaves the draft intact with its error, and a retry prepares again", async () => {
   let outcome: "invalid" | "large" | "ok" = "invalid";
   const { draft, image, declared, deps } = preparedFixture(async () => {
@@ -300,7 +313,8 @@ test("an uncertain partial upload retries frozen files, annotations and cover or
     now: () => 42,
   });
   const image = (text: string) => new File([text], "same.png", { type: "image/png" });
-  draft.addFiles([image("old"), image("A"), image("B")]);
+  draft.addFiles([image("old"), image("A"), new File(["B"], "other.png", { type: "image/png" })]);
+  for (const item of draft.getSnapshot().items.slice(1)) draft.renameAttachment(item.id, "Payment");
   const original = draft.getSnapshot().items[0];
   const crop = { x: 0, y: 0, width: 1, height: 1 };
   assert.equal(draft.applyImageEdit(original, image("reviewed"), crop), true);
@@ -325,7 +339,7 @@ test("an uncertain partial upload retries frozen files, annotations and cover or
       if (firstUpload) {
         assert.deepEqual(await Promise.all(files.map(file => file.text())), ["reviewed", "A", "B"]);
         assert.equal(files[0], before.items[0].file);
-        assert.notEqual(files[1].name, files[2].name);
+        assert.deepEqual(files.slice(1).map(file => file.name), ["Payment-2-1.png", "Payment-3-1.png"]);
       } else {
         assert.deepEqual(await Promise.all(files.map(file => file.text())), ["reviewed", "A"]);
       }
@@ -350,6 +364,9 @@ test("an uncertain partial upload retries frozen files, annotations and cover or
 
   assert.equal(await draft.submit(deps), false);
   assert.equal(draft.getSnapshot().retryLocked, true);
+  draft.setError(new Error("Another form error"));
+  draft.renameAttachment(before.items[1].id, "Changed file");
+  assert.equal(draft.getSnapshot().items[1].name, "Payment.png");
   draft.setTitle("Changed title");
   draft.setDescription("Changed description");
   draft.remove(before.items[1]);

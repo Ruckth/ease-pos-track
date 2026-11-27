@@ -10,7 +10,7 @@ export type AnnotationEvent = Omit<Doc<"annotationEvents">, "sessionId" | "actor
 export type TicketEvent = Omit<Doc<"ticketEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
 
 export type ProjectSummary = { _id: Id<"projects">; name: string; key: string };
-export type PendingMedia = { id: string; file: File; previewUrl: string; isVideo: boolean };
+export type PendingMedia = { id: string; file: File; previewUrl: string; isVideo: boolean; name?: string };
 export type AnnotationDraftInput = {
   mediaIndex: number;
   kind: "point" | "time";
