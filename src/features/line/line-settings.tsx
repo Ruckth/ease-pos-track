@@ -193,7 +193,7 @@ function BotDetail({ bot, back, assistantReady }: { bot: LineBot; back: () => vo
                 </Button>;
               })}
               {capture?.projectEnabled && chat.kind === "group" && chat.state === "active" && bot.state === "active" &&
-                <ChatCaptureSwitch chat={chat} enabled={capture.chats.some(item => item.chatId === chat._id && item.enabled)} />}
+                <ChatCaptureSwitch chat={chat} enabled={capture.chats.some(item => item.chatId === chat._id && item.joinedAt === chat.joinedAt && item.enabled)} />}
               {chat.state === "active" && !capture?.projectEnabled && ((assistantReady && bot.state === "active") || chat.assistantEnabled) &&
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => actions.setAssistantEnabled({
                   chatId: chat._id, joinedAt: chat.joinedAt, enabled: !chat.assistantEnabled,

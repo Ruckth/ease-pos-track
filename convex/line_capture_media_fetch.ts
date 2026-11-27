@@ -1,3 +1,4 @@
+import { receiptPreviewImages } from "../shared/fixtures/line-capture-screenshots";
 import { imageSize } from "image-size";
 import { localLineFixtureToken } from "./adapters/line";
 import { localFixturesEnabled, requireLocalFixtures } from "./local_fixtures";
@@ -203,6 +204,12 @@ export async function readBoundedResponse(
  * allowing local preview and tests to stage JPEG/PNG and warning scenarios with no credentials.
  */
 export function fixtureContentResponse(messageId: string): Response {
+  if (messageId.startsWith("fixture-png-fixture-review-")) {
+    return new Response(fromBase64(receiptPreviewImages.checkout), { headers: { "Content-Type": "image/png" } });
+  }
+  if (messageId.startsWith("fixture-jpeg-fixture-review-")) {
+    return new Response(fromBase64(receiptPreviewImages.receipt), { headers: { "Content-Type": "image/jpeg" } });
+  }
   if (messageId.startsWith("fixture-expired-")) return new Response(null, { status: 410 });
   if (messageId.startsWith("fixture-error-")) return new Response(null, { status: 503 });
   if (messageId.startsWith("fixture-oversized-")) {

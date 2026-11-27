@@ -10,55 +10,20 @@ import {
   staffQuery,
 } from "./functions";
 import { openLineSecret } from "./line_crypto";
-import { captureKind } from "./line_capture_schema";
-import type { LineCaptureMediaEvent } from "./domain/line_capture";
 import * as domain from "./line_capture_media_domain";
 import { fetchCapturedLineContent, validateCapturedImage } from "./line_capture_media_fetch";
 import {
   intakeMediaContentType,
-  intakeMediaFileType,
   intakeMediaWarningCode,
 } from "./line_capture_media_schema";
 
 const mediaIdArg = { mediaId: v.id("intakeMedia") };
-
-const mediaEventValidator = v.object({
-  webhookEventId: v.string(),
-  timestamp: v.number(),
-  kind: captureKind,
-  lineChatId: v.string(),
-  messageId: v.string(),
-  senderDigest: v.string(),
-  fileType: intakeMediaFileType,
-  contentProvider: v.optional(v.union(v.literal("line"), v.literal("external"))),
-  imageSet: v.optional(v.object({ id: v.string(), index: v.number(), total: v.number() })),
-  imageSetInvalid: v.optional(v.literal(true)),
-});
-
-/**
- * Webhook dispatch entry point called by `convex/line_webhook.ts` after signature
- * verification and webhook acceptance. Persists signed file metadata and schedules
- * bounded staging or image-before-text retry without blocking the webhook response.
- */
-export async function receiveLineCaptureMedia(
-  ctx: ActionCtx,
-  args: { botId: Id<"lineBots">; events: LineCaptureMediaEvent[] },
-) {
-  if (!args.events.length) return [];
-  return ctx.runMutation(internal.line_capture_media.ingest, args);
-}
 
 /** Staff UI query for staged private screenshots & warnings on one intake (including linked). */
 export const list = staffQuery({
   name: "line_capture_media:list",
   args: { intakeId: v.id("lineCaptureIntakes") },
   handler: (ctx, { intakeId }) => domain.listIntakeMediaForStaff(ctx, { intakeId }),
-});
-
-export const ingest = internalJobMutation({
-  name: "line_capture_media:ingest",
-  args: { botId: v.id("lineBots"), events: v.array(mediaEventValidator) },
-  handler: (ctx, args) => domain.ingestCaptureMediaEvents(ctx, args),
 });
 
 export const retryMatch = internalJobMutation({

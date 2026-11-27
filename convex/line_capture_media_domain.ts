@@ -646,23 +646,37 @@ export async function recordStagedMedia(
   }
 
   const open = row.writes ?? [];
-  const remaining = open.filter(write => write.marker !== input.marker);
-  const claimed = remaining.length < open.length;
+  const write = open.find(item => item.marker === input.marker);
+  const blob = write ? await ctx.db.system.get("_storage", input.storageId) : null;
+  const owned = !!write
+    && !!blob
+    && blob.contentType === mediaWriteType(write.marker)
+    && blob.size === write.size
+    && blob.sha256 === hexToBase64(write.sha256);
+
+  // Never adopt or mark an unverified/unowned storageId for deletion.
+  if (!owned) {
+    return { settled: false, state: row.state };
+  }
+
+  const remaining = open.filter(item => item.marker !== input.marker);
   const writeClaim = { writes: remaining, writeCheckAt: remaining.length ? row.writeCheckAt : undefined };
 
   const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId);
   const auth = !unsent ? await verifyMediaAuthority(ctx, row, now) : null;
   const otherBytes = auth ? await otherIntakeMediaBytes(ctx, auth.intake._id, row._id) : 0;
-  const sizeExceeded = input.size > LINE_CAPTURE_MAX_TOTAL_BYTES || otherBytes + input.size > LINE_CAPTURE_MAX_TOTAL_BYTES;
+  const sizeExceeded = write.size > LINE_CAPTURE_MAX_TOTAL_BYTES || otherBytes + write.size > LINE_CAPTURE_MAX_TOTAL_BYTES;
 
-  const settleable = claimed
-    && row.state === "staging"
+  const settleable = row.state === "staging"
     && row.leaseId === input.leaseId
     && (row.leaseExpiresAt ?? 0) > now
     && !unsent
     && row.expiresAt > now
     && !!auth
-    && !sizeExceeded;
+    && !sizeExceeded
+    && input.size === write.size
+    && input.sha256 === write.sha256
+    && input.contentType === write.contentType;
 
   if (!settleable) {
     const discarded = discardedWith(row.discarded, input.storageId);
@@ -694,9 +708,9 @@ export async function recordStagedMedia(
     ...writeClaim,
     state: "ready",
     storageId: input.storageId,
-    contentType: input.contentType,
-    sha256: input.sha256,
-    size: input.size,
+    contentType: write.contentType,
+    sha256: write.sha256,
+    size: write.size,
     width: input.width,
     height: input.height,
     intakeRevision: auth!.intake.revision,
@@ -952,7 +966,8 @@ export async function expireStagedMedia(
   for (const row of activeReady) {
     const unsent = await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId);
     const intake = row.intakeId ? await ctx.db.get(row.intakeId) : null;
-    const intakeGone = !intake || intake.state === "withdrawn" || intake.state === "dismissed" || intake.unsentAt !== undefined;
+    const intakeGone = !intake || intake.state === "withdrawn" || intake.state === "dismissed"
+      || intake.unsentAt !== undefined || intake.redactedAt !== undefined;
     if (unsent || intakeGone) {
       const hasBlobs = !!row.storageId || row.discarded.length > 0;
       await ctx.db.patch(row._id, {
@@ -1028,20 +1043,42 @@ export async function reclaimFixtureMediaStorage(
     if ((row.writes?.length ?? 0) > 0) continue;
 
     const terminal = isTerminalState(row.state);
-    const toDelete = [...row.discarded, ...(terminal && row.storageId ? [row.storageId] : [])];
-    for (const storageId of toDelete) {
-      if (await ctx.db.system.get(storageId)) {
-        await ctx.storage.delete(storageId);
-        deletedBlobs++;
+    const remainingDiscarded: Id<"_storage">[] = [];
+    let failed = false;
+
+    for (const storageId of row.discarded) {
+      try {
+        if (await ctx.db.system.get("_storage", storageId)) {
+          await ctx.storage.delete(storageId);
+          deletedBlobs++;
+        }
+      } catch {
+        remainingDiscarded.push(storageId);
+        failed = true;
       }
     }
+
+    let remainingStorageId = row.storageId;
+    if (terminal && row.storageId) {
+      try {
+        if (await ctx.db.system.get("_storage", row.storageId)) {
+          await ctx.storage.delete(row.storageId);
+          deletedBlobs++;
+        }
+        remainingStorageId = undefined;
+      } catch {
+        failed = true;
+      }
+    }
+
+    const pending = remainingDiscarded.length > 0 || (terminal && remainingStorageId !== undefined);
     await ctx.db.patch(row._id, {
-      discarded: [],
-      ...(terminal ? { storageId: undefined } : {}),
-      reclaimAfter: undefined,
+      discarded: remainingDiscarded,
+      ...(terminal ? { storageId: remainingStorageId } : {}),
+      reclaimAfter: pending ? now + 60_000 : undefined,
       updatedAt: now,
     });
-    rowsReclaimed++;
+    if (!failed) rowsReclaimed++;
   }
 
   return { rows: rowsReclaimed, deletedBlobs };
@@ -1090,7 +1127,8 @@ export async function resolveCapturedMediaForStaff(
 
   // Unsend or withdrawal immediately hides bytes even before cleanup runs.
   if (row.state === "withdrawn" || row.withdrawnAt !== undefined
-    || intake.state === "withdrawn" || intake.state === "dismissed" || intake.unsentAt !== undefined
+    || intake.state === "withdrawn" || intake.state === "dismissed"
+    || intake.unsentAt !== undefined || intake.redactedAt !== undefined
     || await captureMessageUnsent(ctx, row.botId, row.lineChatId, row.messageId)) {
     return { ok: false, status: 410, code: "MEDIA_WITHDRAWN" };
   }

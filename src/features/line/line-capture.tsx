@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -72,19 +72,29 @@ function IntakeRow({ intake, project, saved }: { intake: CaptureIntake; project:
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
-  const actionable = ["captured", "review", "needs_details"].includes(intake.state) && !intake.unsent;
+  const [expired, setExpired] = useState(() => Date.now() >= intake.expiresAt);
+  useEffect(() => {
+    const remaining = intake.expiresAt - Date.now();
+    setExpired(remaining <= 0);
+    // Source content expires after 24h. A redacted history row can live longer than a browser timer.
+    if (remaining <= 0 || remaining > 0x7fffffff) return;
+    const timer = window.setTimeout(() => setExpired(true), remaining);
+    return () => window.clearTimeout(timer);
+  }, [intake.expiresAt]);
+  const sourceVisible = !expired && !intake.unsent;
+  const actionable = ["captured", "review", "needs_details"].includes(intake.state) && sourceVisible;
   const label = { captured: "captureReceived", needs_details: "captureNeedsDetails", review: "captureReceived", linked: "captureLinked",
     dismissed: "captureDismissed", withdrawn: "captureWithdrawn", failed: "captureUnavailable" } as const;
   return <li className="grid min-w-0 gap-2 rounded-lg border p-3">
-    <div className="flex flex-wrap items-baseline justify-between gap-2"><strong>{intake.chatName}</strong>
-      <span className="text-xs text-muted-foreground">{t(label[intake.state])} · {formatDate(intake.createdAt)}</span>
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><strong>{sourceVisible ? intake.chatName : ""}</strong>
+      <span className="text-xs text-muted-foreground">{t(expired && !intake.receipts.length ? "captureExpired" : label[intake.state])} · {formatDate(intake.createdAt)}</span>
     </div>
-    {intake.text && <p className="whitespace-pre-wrap break-words text-sm">{intake.text}</p>}
+    {sourceVisible && intake.text && <p className="whitespace-pre-wrap break-words text-sm">{intake.text}</p>}
     {intake.warning && <p className="text-sm" role="status">{t(intake.warning === "LINE_CAPTURE_CHAT_UNAVAILABLE" ? "captureUnavailable" : intake.warning === "LINE_CAPTURE_EXPIRED" ? "captureExpired" : "captureFileWarning")}</p>}
     {intake.conflict && <p className="text-sm">{t("captureConflict")}</p>}
-    {open && !intake.unsent && <CaptureMedia intakeId={intake._id} />}
+    {open && sourceVisible && <CaptureMedia intakeId={intake._id} />}
     {intake.receipts.map(receipt => receipt.number && <p key={receipt.candidateKey} className="text-sm">{t("captureSavedTicket", { ticket: receipt.number })}</p>)}
-    {intake.correction && <div className="grid gap-2 rounded border p-2">
+    {sourceVisible && intake.correction && <div className="grid gap-2 rounded border p-2">
       <strong>{t("captureCorrection")}</strong><p className="whitespace-pre-wrap break-words">{intake.correction.text}</p>
       <Button variant="outline" disabled={busy} onClick={async () => {
         setBusy(true); setError(false);
@@ -93,7 +103,7 @@ function IntakeRow({ intake, project, saved }: { intake: CaptureIntake; project:
       }}>{t("captureAcknowledged")}</Button>
       {error && <p role="alert">{t("captureFailed")}</p>}
     </div>}
-    {(actionable || intake.state === "linked") && <><Button className="justify-self-start" size="sm" variant="outline" aria-expanded={open}
+    {(actionable || (sourceVisible && intake.state === "linked" && intake.chatName)) && <><Button className="justify-self-start" size="sm" variant="outline" aria-expanded={open}
       onClick={() => setOpen(!open)}>{t(open ? "cancel" : "captureReview")}</Button>
       {open && actionable && <IntakeDecision intake={intake} project={project} saved={saved} />}</>}
   </li>;

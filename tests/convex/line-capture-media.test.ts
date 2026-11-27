@@ -29,8 +29,11 @@ const APP = "http://127.0.0.1:5173";
 const LINE_KEY_B64 = btoa("0123456789abcdef0123456789abcdef");
 const CHAT_LINE_ID = "Cfixture-group-01";
 const SENDER_USER_ID = "Ucustomer-01";
+const BASE_TIME = 1_795_656_000_000;
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(BASE_TIME);
   vi.stubEnv("LOCAL_FIXTURES_ENABLED", "true");
   vi.stubEnv("LINE_CAPTURE_ENABLED", "true");
   vi.stubEnv("CONVEX_CLOUD_URL", "http://127.0.0.1:3212");
@@ -59,8 +62,7 @@ async function setupCaptureFixture() {
   const [staff, alice] = seed.sessions;
   const projectId = seed.projects[0].id;
   const secret = "fixture-line-secret-value";
-  const now = Date.now();
-  const joinedAt = now - 60_000;
+  const joinedAt = BASE_TIME - 60_000;
 
   const { botId, chatId, webhookSlug, botLineUserId } = await t.run(async ctx => {
     const botLineUserId = "Ufixture-POS";
@@ -80,8 +82,8 @@ async function setupCaptureFixture() {
       state: "active",
       allowDirectChats: false,
       signatureFailures: 0,
-      createdAt: now - 120_000,
-      updatedAt: now - 120_000,
+      createdAt: BASE_TIME - 120_000,
+      updatedAt: BASE_TIME - 120_000,
     });
     const chatId = await ctx.db.insert("lineChats", {
       botId,
@@ -101,6 +103,10 @@ async function setupCaptureFixture() {
   // Enable capture on the project and group as admitted owner/staff.
   await t.raw.withIdentity({ subject: staff }).mutation(api.line_capture.setProjectCapture, { projectId, enabled: true });
   await t.raw.withIdentity({ subject: staff }).mutation(api.line_capture.setChatCapture, { chatId, joinedAt, enabled: true });
+
+  // Advance clock cleanly past opt-in timestamps.
+  const now = BASE_TIME + 1_000;
+  vi.setSystemTime(now);
 
   const postWebhook = async (events: unknown[]) => {
     const body = JSON.stringify({ destination: botLineUserId, events });
@@ -164,30 +170,33 @@ async function setupCaptureFixture() {
     });
   };
 
+  const settle = async (advanceMs = 100) => {
+    await vi.advanceTimersByTimeAsync(advanceMs);
+    await t.raw.finishInProgressScheduledFunctions();
+  };
+
   const allMedia = () => t.run(ctx => ctx.db.query("intakeMedia").collect());
   const allIntakes = () => t.run(ctx => ctx.db.query("lineCaptureIntakes").collect());
   const allBlobs = () => t.run(ctx => ctx.db.system.query("_storage").collect());
 
   return {
-    t, seed, staff, alice, projectId, botId, chatId, joinedAt,
-    postWebhook, mentionEvent, imageEvent, unsendEvent, fetchMedia,
+    t, seed, staff, alice, projectId, botId, chatId, joinedAt, now,
+    postWebhook, mentionEvent, imageEvent, unsendEvent, fetchMedia, settle,
     allMedia, allIntakes, allBlobs,
   };
 }
 
 test("signed mention + two screenshots in order (out-of-order imageSet) stage privately and serve bytes only to staff", async () => {
-  vi.useFakeTimers();
   const f = await setupCaptureFixture();
-  const now = Date.now();
 
   // Send mention + 2 screenshots where imageSet index 2 arrives before index 1.
   const res = await f.postWebhook([
-    f.mentionEvent("msg-mention-1", "@bot Receipt printer stopped", now),
-    f.imageEvent("fixture-jpeg-2", now + 500, { imageSet: { id: "set-a", index: 2, total: 2 } }),
-    f.imageEvent("fixture-png-1", now + 1000, { imageSet: { id: "set-a", index: 1, total: 2 } }),
+    f.mentionEvent("msg-mention-1", "@bot Receipt printer stopped", f.now),
+    f.imageEvent("fixture-jpeg-2", f.now + 500, { imageSet: { id: "set-a", index: 2, total: 2 } }),
+    f.imageEvent("fixture-png-1", f.now + 1000, { imageSet: { id: "set-a", index: 1, total: 2 } }),
   ]);
   expect(res.status).toBe(200);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const [intake] = await f.allIntakes();
   expect(intake).toBeTruthy();
@@ -197,7 +206,7 @@ test("signed mention + two screenshots in order (out-of-order imageSet) stage pr
   expect(summary!.warnings).toEqual([]);
   expect(summary!.hasWarning).toBe(false);
   expect(summary!.items).toHaveLength(2);
-  // Ordered by imageSetIndex [1, 2] regardless of arrival order!
+  // Ordered by imageSetIndex [1, 2] regardless of arrival order.
   expect(summary!.items.map(item => [item.index, item.messageId, item.contentType])).toEqual([
     [1, "fixture-png-1", "image/png"],
     [2, "fixture-jpeg-2", "image/jpeg"],
@@ -246,12 +255,10 @@ test("signed mention + two screenshots in order (out-of-order imageSet) stage pr
 });
 
 test("image-before-text coordinates via bounded durable retry once mention arrives", async () => {
-  vi.useFakeTimers();
   const f = await setupCaptureFixture();
-  const now = Date.now();
 
   // Image arrives FIRST before any mention intake exists.
-  const imgRes = await f.postWebhook([f.imageEvent("fixture-png-early", now)]);
+  const imgRes = await f.postWebhook([f.imageEvent("fixture-png-early", f.now)]);
   expect(imgRes.status).toBe(200);
 
   const rows = await f.allMedia();
@@ -260,12 +267,12 @@ test("image-before-text coordinates via bounded durable retry once mention arriv
   expect(await f.allBlobs()).toHaveLength(0); // No bytes downloaded while unmatched.
 
   // Text mention arrives 1 second later in a separate webhook.
-  vi.advanceTimersByTime(1_000);
-  const textRes = await f.postWebhook([f.mentionEvent("msg-mention-late", "@bot Screenshot first", now + 1_000)]);
+  await vi.advanceTimersByTimeAsync(1_000);
+  const textRes = await f.postWebhook([f.mentionEvent("msg-mention-late", "@bot Screenshot first", f.now + 1_000)]);
   expect(textRes.status).toBe(200);
 
-  // Advance timers so the scheduled bounded retryMatch runs and stages the image.
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  // Advance past the 2s bounded retry delay so retryMatch binds and stages the image.
+  await f.settle(3_000);
 
   const [intake] = await f.allIntakes();
   const summary = await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: intake._id });
@@ -280,18 +287,16 @@ test("image-before-text coordinates via bounded durable retry once mention arriv
 });
 
 test("imageSet overflow, malformed imageSetInvalid, PDFs and >2 images mark warnings without silently selecting a subset", async () => {
-  vi.useFakeTimers();
   const f = await setupCaptureFixture();
-  const now = Date.now();
 
   // Case 1: imageSet with total=3 -> IMAGE_SET_OVERFLOW, nothing staged.
   await f.postWebhook([
-    f.mentionEvent("msg-overflow", "@bot Too many photos", now),
-    f.imageEvent("fixture-png-o1", now + 100, { imageSet: { id: "set-big", index: 1, total: 3 } }),
-    f.imageEvent("fixture-png-o2", now + 200, { imageSet: { id: "set-big", index: 2, total: 3 } }),
-    f.imageEvent("fixture-png-o3", now + 300, { imageSet: { id: "set-big", index: 3, total: 3 } }),
+    f.mentionEvent("msg-overflow", "@bot Too many photos", f.now),
+    f.imageEvent("fixture-png-o1", f.now + 100, { imageSet: { id: "set-big", index: 1, total: 3 } }),
+    f.imageEvent("fixture-png-o2", f.now + 200, { imageSet: { id: "set-big", index: 2, total: 3 } }),
+    f.imageEvent("fixture-png-o3", f.now + 300, { imageSet: { id: "set-big", index: 3, total: 3 } }),
   ]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const [overflowIntake] = await f.allIntakes();
   expect(overflowIntake.warning).toBe("IMAGE_SET_OVERFLOW");
@@ -301,13 +306,13 @@ test("imageSet overflow, malformed imageSetInvalid, PDFs and >2 images mark warn
   expect(await f.allBlobs()).toHaveLength(0);
 
   // Case 2: Malformed upstream imageSet (Claude parser sets imageSetInvalid: true) -> IMAGE_SET_METADATA_INCOMPLETE.
-  const tBadSet = now + 5 * 60_000;
+  const tBadSet = f.now + 5 * 60_000;
   vi.setSystemTime(tBadSet);
   await f.postWebhook([
     f.mentionEvent("msg-badset", "@bot Broken set metadata", tBadSet),
     f.imageEvent("fixture-png-badset", tBadSet + 100, { imageSet: { id: "set-broken", index: 0, total: 2 } }),
   ]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const badSetIntake = (await f.allIntakes()).find(row => row.messageId === "msg-badset")!;
   expect(badSetIntake.warning).toBe("IMAGE_SET_METADATA_INCOMPLETE");
@@ -324,7 +329,7 @@ test("imageSet overflow, malformed imageSetInvalid, PDFs and >2 images mark warn
     f.imageEvent("fixture-video-1", t2 + 200, { fileType: "video" }),
     f.imageEvent("fixture-ext-1", t2 + 300, { contentProvider: { type: "external" } }),
   ]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const filesIntake = (await f.allIntakes()).find(row => row.messageId === "msg-files")!;
   const filesSummary = await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: filesIntake._id });
@@ -343,30 +348,28 @@ test("imageSet overflow, malformed imageSetInvalid, PDFs and >2 images mark warn
     f.imageEvent("fixture-png-s1", t3 + 100),
     f.imageEvent("fixture-png-s2", t3 + 200),
   ]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const threeIntake = (await f.allIntakes()).find(row => row.messageId === "msg-three")!;
   expect((await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: threeIntake._id }))!.items.filter(i => i.url)).toHaveLength(2);
 
   await f.postWebhook([f.imageEvent("fixture-png-s3", t3 + 300)]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const afterThird = await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: threeIntake._id });
   expect(afterThird!.warnings).toContain("MEDIA_COUNT_LIMIT_EXCEEDED");
   expect(afterThird!.items.filter(i => i.url)).toEqual([]);
 });
 
-test("linked screenshots obey 24h expiry, unsend hides bytes immediately, and fixture-only cleanup never deletes unowned blobs", async () => {
-  vi.useFakeTimers();
+test("linked screenshots obey 24h expiry, unsend hides bytes immediately, and fixture-only cleanup handles failures safely", async () => {
   const f = await setupCaptureFixture();
-  const now = Date.now();
 
   await f.postWebhook([
-    f.mentionEvent("msg-life", "@bot Screen flicker", now),
-    f.imageEvent("fixture-png-keep", now + 100),
-    f.imageEvent("fixture-jpeg-unsend", now + 200),
+    f.mentionEvent("msg-life", "@bot Screen flicker", f.now),
+    f.imageEvent("fixture-png-keep", f.now + 100),
+    f.imageEvent("fixture-jpeg-unsend", f.now + 200),
   ]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const [intake] = await f.allIntakes();
   // Link the intake to a new Ticket.
@@ -385,7 +388,7 @@ test("linked screenshots obey 24h expiry, unsend hides bytes immediately, and fi
   expect((await f.fetchMedia(f.staff, unsendItem.url!)).status).toBe(200);
 
   // Unsend arrives AFTER fetch (recorded in Claude's lineCaptureUnsends): bytes hidden IMMEDIATELY before cleanup.
-  await f.postWebhook([f.unsendEvent("fixture-jpeg-unsend", now + 500)]);
+  await f.postWebhook([f.unsendEvent("fixture-jpeg-unsend", f.now + 500)]);
   const unsentResp = await f.fetchMedia(f.staff, unsendItem.url!);
   expect([unsentResp.status, (await unsentResp.json()).code]).toEqual([410, "MEDIA_WITHDRAWN"]);
 
@@ -396,49 +399,61 @@ test("linked screenshots obey 24h expiry, unsend hides bytes immediately, and fi
   const unownedBlobId = await f.t.run(async ctx => ctx.storage.store(new Blob(["unowned-blob"], { type: "text/plain" })));
 
   // Advance past 24h staging expiry: linked screenshot is IMMEDIATELY hidden even with cleanup off.
-  vi.setSystemTime(now + LINE_CAPTURE_STAGING_TTL_MS + 1_000);
+  vi.setSystemTime(f.now + LINE_CAPTURE_STAGING_TTL_MS + 1_000);
   const expiredResp = await f.fetchMedia(f.staff, keepItem.url!);
   expect([expiredResp.status, (await expiredResp.json()).code]).toEqual([410, "MEDIA_EXPIRED"]);
   const afterExpiry = await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: intake._id });
-  expect(afterExpiry!.items).toEqual([]);
-  expect(afterExpiry!.expiredCount).toBe(1);
+  expect(afterExpiry).toBeNull();
 
   // Expire sweep transitions rows without deleting blobs.
   const blobsBeforeExpire = (await f.allBlobs()).length;
-  const expiredStats = await f.t.run(ctx => expireStagedMedia(ctx, { now: now + LINE_CAPTURE_STAGING_TTL_MS + 2_000 }));
+  const expiredStats = await f.t.run(ctx => expireStagedMedia(ctx, { now: f.now + LINE_CAPTURE_STAGING_TTL_MS + 2_000 }));
   expect(expiredStats.expired).toBeGreaterThanOrEqual(1);
   expect((await f.allBlobs()).length).toBe(blobsBeforeExpire);
 
   // Retention hold blocks fixture cleanup.
   vi.stubEnv("TICKET_RETENTION_HOLD", "true");
-  const heldResult = await f.t.run(ctx => reclaimFixtureMediaStorage(ctx, { now: now + LINE_CAPTURE_STAGING_TTL_MS + 3_000 }));
+  const heldResult = await f.t.run(ctx => reclaimFixtureMediaStorage(ctx, { now: f.now + LINE_CAPTURE_STAGING_TTL_MS + 3_000 }));
   expect(heldResult.deletedBlobs).toBe(0);
 
-  // Release retention hold: fixture-only cleanup deletes ONLY owned fixture blobs, leaving unownedBlobId intact.
+  // Release retention hold, but simulate failed storage.delete -> pending records stay intact with retry reclaimAfter!
   vi.stubEnv("TICKET_RETENTION_HOLD", "false");
-  const reclaimed = await f.t.run(ctx => reclaimFixtureMediaStorage(ctx, { now: now + LINE_CAPTURE_STAGING_TTL_MS + 3_000 }));
+  const failedReclaim = await f.t.run(async ctx => {
+    const failingCtx = Object.assign(Object.create(ctx), {
+      storage: {
+        ...ctx.storage,
+        delete: async () => { throw new Error("TRANSIENT_STORAGE_ERROR"); },
+      },
+    });
+    return reclaimFixtureMediaStorage(failingCtx, { now: f.now + LINE_CAPTURE_STAGING_TTL_MS + 3_000 });
+  });
+  expect(failedReclaim).toEqual({ rows: 0, deletedBlobs: 0 });
+  const stillPending = await f.allMedia();
+  expect(stillPending.every(r => r.storageId !== undefined && (r.reclaimAfter ?? 0) > f.now + LINE_CAPTURE_STAGING_TTL_MS + 3_000)).toBe(true);
+  expect((await f.allBlobs()).length).toBe(blobsBeforeExpire);
+
+  // Once storage.delete recovers past backoff, fixture cleanup deletes ONLY owned fixture blobs and keeps unownedBlobId.
+  const reclaimed = await f.t.run(ctx => reclaimFixtureMediaStorage(ctx, { now: f.now + LINE_CAPTURE_STAGING_TTL_MS + 120_000 }));
   expect(reclaimed.deletedBlobs).toBe(2);
 
   const remainingBlobs = await f.allBlobs();
   expect(remainingBlobs.map(b => b._id)).toEqual([unownedBlobId]);
 });
 
-test("pre-store reservation reconciles interrupted writes and fences late settlement without touching unowned blobs", async () => {
-  vi.useFakeTimers();
+test("pre-store reservation reconciles interrupted writes, rejects unverified storageIds, and fences late settlement", async () => {
   const f = await setupCaptureFixture();
-  const now = Date.now();
 
-  await f.postWebhook([f.mentionEvent("msg-res", "@bot Crash recovery test", now)]);
+  await f.postWebhook([f.mentionEvent("msg-res", "@bot Crash recovery test", f.now)]);
   const [intake] = await f.allIntakes();
 
   // Ingest without scheduling so we can drive claim -> reserve -> crash -> reconcile deterministically.
   const [ingested] = await f.t.run(ctx => ingestCaptureMediaEvents(ctx, {
     botId: f.botId,
-    now,
+    now: f.now,
     schedule: false,
     events: [{
       webhookEventId: "ev-reconcile-1",
-      timestamp: now + 100,
+      timestamp: f.now + 100,
       kind: "group",
       lineChatId: CHAT_LINE_ID,
       messageId: "fixture-png-crash",
@@ -448,7 +463,7 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
     }],
   }));
 
-  const claim = await f.t.run(ctx => claimMediaForStaging(ctx, { mediaId: ingested.mediaId, now, scheduleRecovery: false }));
+  const claim = await f.t.run(ctx => claimMediaForStaging(ctx, { mediaId: ingested.mediaId, now: f.now, scheduleRecovery: false }));
   expect(claim).toBeTruthy();
 
   const pngBytes = fixturePngBytes();
@@ -459,32 +474,66 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
     sha256: pngSha,
     size: pngBytes.byteLength,
     contentType: "image/png",
-    now,
+    now: f.now,
   }));
   expect(reservation.ok).toBe(true);
   if (!reservation.ok) throw new Error("expected reservation");
 
-  // Simulate action storing blob with private marker, PLUS an unrelated unowned blob, then crashing before recordStaged.
-  const { storedId, unownedId } = await f.t.run(async ctx => {
+  // Simulate action storing blob with private marker, PLUS an unrelated real owned blob (e.g., from another feature), then crashing.
+  const { storedId, otherOwnedId } = await f.t.run(async ctx => {
     const storedId = await ctx.storage.store(new Blob([pngBytes], { type: reservation.writeContentType }));
-    const unownedId = await ctx.storage.store(new Blob([pngBytes], { type: "image/png" }));
-    return { storedId, unownedId };
+    const otherOwnedId = await ctx.storage.store(new Blob([pngBytes], { type: "image/png" }));
+    return { storedId, otherOwnedId };
   });
 
-  // Reconciliation adopts the exact marked blob and leaves the unowned blob untouched.
-  const reconciled = await f.t.run(ctx => reconcileMediaWrites(ctx, ingested.mediaId, now + 10_000));
+  // Attempting to pass another real blob to recordStagedMedia with wrong OR matching marker fails ownership proof and leaves it untouched.
+  const spoofedWrongMarker = await f.t.run(ctx => recordStagedMedia(ctx, {
+    mediaId: ingested.mediaId,
+    leaseId: claim!.leaseId,
+    marker: "wrong-marker",
+    sha256: pngSha,
+    size: pngBytes.byteLength,
+    contentType: "image/png",
+    width: 16,
+    height: 16,
+    storageId: otherOwnedId,
+    now: f.now,
+  }));
+  expect(spoofedWrongMarker.settled).toBe(false);
+
+  const spoofedRightMarker = await f.t.run(ctx => recordStagedMedia(ctx, {
+    mediaId: ingested.mediaId,
+    leaseId: claim!.leaseId,
+    marker: reservation.marker,
+    sha256: pngSha,
+    size: pngBytes.byteLength,
+    contentType: "image/png",
+    width: 16,
+    height: 16,
+    storageId: otherOwnedId,
+    now: f.now,
+  }));
+  expect(spoofedRightMarker.settled).toBe(false);
+
+  const afterSpoof = await f.t.run(ctx => ctx.db.get(ingested.mediaId));
+  expect(afterSpoof!.storageId).toBeUndefined();
+  expect(afterSpoof!.discarded).toEqual([]); // Unverified storageId was NOT added to discarded!
+  expect(afterSpoof!.writes).toHaveLength(1); // Original write reservation still intact for reconciliation!
+
+  // Reconciliation adopts the exact marked blob and leaves otherOwnedId untouched.
+  const reconciled = await f.t.run(ctx => reconcileMediaWrites(ctx, ingested.mediaId, f.now + 10_000));
   expect(reconciled!.state).toBe("ready");
   expect(reconciled!.storageId).toBe(storedId);
   expect(reconciled!.writes).toEqual([]);
 
-  // Now test late settlement after lease expiry: blob goes to discarded, never exposed.
+  // Now test late settlement after lease expiry: verified owned blob goes to discarded, never exposed.
   const [lateIngested] = await f.t.run(ctx => ingestCaptureMediaEvents(ctx, {
     botId: f.botId,
-    now,
+    now: f.now,
     schedule: false,
     events: [{
       webhookEventId: "ev-late-1",
-      timestamp: now + 200,
+      timestamp: f.now + 200,
       kind: "group",
       lineChatId: CHAT_LINE_ID,
       messageId: "fixture-jpeg-late",
@@ -493,7 +542,7 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
       contentProvider: "line",
     }],
   }));
-  const lateClaim = await f.t.run(ctx => claimMediaForStaging(ctx, { mediaId: lateIngested.mediaId, now, scheduleRecovery: false }));
+  const lateClaim = await f.t.run(ctx => claimMediaForStaging(ctx, { mediaId: lateIngested.mediaId, now: f.now, scheduleRecovery: false }));
   const jpegBytes = fixtureJpegBytes();
   const jpegSha = await sha256Hex(jpegBytes);
   const lateRes = await f.t.run(ctx => reserveMediaWrite(ctx, {
@@ -502,12 +551,12 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
     sha256: jpegSha,
     size: jpegBytes.byteLength,
     contentType: "image/jpeg",
-    now,
+    now: f.now,
   }));
   if (!lateRes.ok) throw new Error("expected reservation");
   const lateBlobId = await f.t.run(ctx => ctx.storage.store(new Blob([jpegBytes], { type: lateRes.writeContentType })));
 
-  // Settle AFTER lease expired -> must NOT settle; blob recorded in discarded!
+  // Settle AFTER lease expired -> must NOT settle; verified blob recorded in discarded!
   const lateSettle = await f.t.run(ctx => recordStagedMedia(ctx, {
     mediaId: lateIngested.mediaId,
     leaseId: lateClaim!.leaseId,
@@ -518,27 +567,27 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
     width: 16,
     height: 16,
     storageId: lateBlobId,
-    now: now + MEDIA_LEASE_MS + 5_000,
+    now: f.now + MEDIA_LEASE_MS + 5_000,
   }));
   expect(lateSettle.settled).toBe(false);
   const lateRow = await f.t.run(ctx => ctx.db.get(lateIngested.mediaId));
   expect(lateRow!.storageId).toBeUndefined();
   expect(lateRow!.discarded).toContain(lateBlobId);
 
-  // Fixture cleanup removes the discarded late blob and NEVER deletes unownedId or active storedId.
-  const reclaimed = await f.t.run(ctx => reclaimFixtureMediaStorage(ctx, { now: now + MEDIA_LEASE_MS + 10_000 }));
+  // Fixture cleanup removes the discarded late blob and NEVER deletes otherOwnedId or active storedId.
+  const reclaimed = await f.t.run(ctx => reclaimFixtureMediaStorage(ctx, { now: f.now + MEDIA_LEASE_MS + 10_000 }));
   expect(reclaimed.deletedBlobs).toBe(1);
   const blobs = await f.allBlobs();
-  expect(blobs.map(b => b._id).sort()).toEqual([storedId, unownedId].sort());
+  expect(blobs.map(b => b._id).sort()).toEqual([storedId, otherOwnedId].sort());
 
   // Also test 8 MiB combined intake size budget blocking both items cleanly (no silent subset).
   const [sizeIngested] = await f.t.run(ctx => ingestCaptureMediaEvents(ctx, {
     botId: f.botId,
-    now,
+    now: f.now,
     schedule: false,
     events: [{
       webhookEventId: "ev-size-2",
-      timestamp: now + 300,
+      timestamp: f.now + 300,
       kind: "group",
       lineChatId: CHAT_LINE_ID,
       messageId: "fixture-png-size-2",
@@ -547,8 +596,8 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
       contentProvider: "line",
     }],
   }));
-  await f.t.run(ctx => withdrawMediaByMessage(ctx, { botId: f.botId, messageId: "fixture-jpeg-late", now }));
-  const sizeClaim = await f.t.run(ctx => claimMediaForStaging(ctx, { mediaId: sizeIngested.mediaId, now, scheduleRecovery: false }));
+  await f.t.run(ctx => withdrawMediaByMessage(ctx, { botId: f.botId, messageId: "fixture-jpeg-late", now: f.now }));
+  const sizeClaim = await f.t.run(ctx => claimMediaForStaging(ctx, { mediaId: sizeIngested.mediaId, now: f.now, scheduleRecovery: false }));
   if (sizeClaim) {
     const overBudget = await f.t.run(ctx => reserveMediaWrite(ctx, {
       mediaId: sizeIngested.mediaId,
@@ -556,25 +605,23 @@ test("pre-store reservation reconciles interrupted writes and fences late settle
       sha256: pngSha,
       size: LINE_CAPTURE_MAX_TOTAL_BYTES, // combined with pngBytes.byteLength > 8 MiB!
       contentType: "image/png",
-      now,
+      now: f.now,
     }));
     expect(overBudget).toEqual({ ok: false, code: "MEDIA_SIZE_LIMIT_EXCEEDED" });
-    const afterBudget = await f.t.run(ctx => listIntakeMediaForStaff(ctx, { intakeId: intake._id, now }));
+    const afterBudget = await f.t.run(ctx => listIntakeMediaForStaff(ctx, { intakeId: intake._id, now: f.now }));
     expect(afterBudget!.warnings).toContain("MEDIA_SIZE_LIMIT_EXCEEDED");
     expect(afterBudget!.items.filter(item => item.url)).toEqual([]);
   }
 });
 
 test("bot leave and Project archive immediately hide staged media bytes", async () => {
-  vi.useFakeTimers();
   const f = await setupCaptureFixture();
-  const now = Date.now();
 
   await f.postWebhook([
-    f.mentionEvent("msg-arch", "@bot Printer offline", now),
-    f.imageEvent("fixture-png-arch", now + 100),
+    f.mentionEvent("msg-arch", "@bot Printer offline", f.now),
+    f.imageEvent("fixture-png-arch", f.now + 100),
   ]);
-  await f.t.raw.finishAllScheduledFunctions(vi.runAllTimers);
+  await f.settle();
 
   const [intake] = await f.allIntakes();
   const summary = await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: intake._id });
@@ -582,7 +629,7 @@ test("bot leave and Project archive immediately hide staged media bytes", async 
   expect((await f.fetchMedia(f.staff, url)).status).toBe(200);
 
   // Bot leave hides bytes immediately.
-  await f.t.run(ctx => ctx.db.patch(f.chatId, { state: "left", leftAt: now + 500 }));
+  await f.t.run(ctx => ctx.db.patch(f.chatId, { state: "left", leftAt: f.now + 500 }));
   expect((await f.fetchMedia(f.staff, url)).status).toBe(404);
   expect(await f.t.raw.withIdentity({ subject: f.staff }).query(api.line_capture_media.list, { intakeId: intake._id })).toBeNull();
 
@@ -590,6 +637,6 @@ test("bot leave and Project archive immediately hide staged media bytes", async 
   await f.t.run(ctx => ctx.db.patch(f.chatId, { state: "active", leftAt: undefined }));
   expect((await f.fetchMedia(f.staff, url)).status).toBe(200);
 
-  await f.t.run(ctx => ctx.db.patch(f.projectId, { archivedAt: now + 1_000 }));
+  await f.t.run(ctx => ctx.db.patch(f.projectId, { archivedAt: f.now + 1_000 }));
   expect((await f.fetchMedia(f.staff, url)).status).toBe(404);
 });

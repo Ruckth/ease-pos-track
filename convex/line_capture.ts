@@ -119,7 +119,7 @@ export const list = staffQuery({
       // LINE-sourced content is shown only while the intake is still admitted (linked ones included).
       const visible = !!current && chat?.projectId === owner._id;
       return {
-        _id: intake._id, state: failed ? "failed" as const : intake.state, revision: intake.revision,
+        _id: intake._id, state: failed ? "failed" as const : intake.state, revision: intake.revision, expiresAt: intake.expiresAt,
         chatName: visible ? chat!.displayNameOverride ?? chat!.name : "",
         kind: intake.kind, text: visible ? intake.text : "", createdAt: intake.createdAt, updatedAt: intake.updatedAt,
         conflict: intake.conflict === true, unsent: intake.unsentAt !== undefined,
@@ -169,10 +169,7 @@ export const finish = staffMutation({
     if (intake.revision !== expectedRevision) throw new Error("LINE_CAPTURE_REVISION_CHANGED");
     const now = Date.now();
     if (!await currentCaptureIntake(ctx, intakeId, now)) throw new Error("LINE_CAPTURE_UNAVAILABLE");
-    if (input.type === "dismiss") {
-      if (intake.state === "linked") throw new Error("LINE_CAPTURE_ALREADY_LINKED");
-
-    }
+    if (input.type === "dismiss" && intake.state === "linked") throw new Error("LINE_CAPTURE_ALREADY_LINKED");
     const chat = await ctx.db.get(intake.chatId);
     if (!chat || chat.projectId !== target._id) throw new Error("LINE_CAPTURE_UNAVAILABLE");
     // Receipts are bounded so expiry can always remove them with their intake.
