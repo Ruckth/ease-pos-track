@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, Paperclip, Pencil, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Maximize2, Minimize2, ChevronDown, ChevronLeft, ChevronRight, Copy, LoaderCircle, Paperclip, Pencil, RotateCcw } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -11,6 +11,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { staffTicketActions } from "@/lib/staff-ticket-queue";
 import { type Annotation, isActiveAnnotation, type Ticket, type TicketStatus } from "@/lib/types";
@@ -90,7 +91,7 @@ export function TicketDetailPanel(props: PanelProps) {
       close();
     }
   }} aria-label={ticket ? undefined : t("ticket")} aria-labelledby={ticket ? heading : undefined}
-    className="aurora-ticket min-w-0 space-y-4 p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5">{content}</section>;
+    className="aurora-ticket min-w-0 space-y-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5">{content}</section>;
   return <Dialog open mobileFullScreen placement={props.focusMode ? "fullscreen" : "side"} onOpenChange={open => { if (!open) close(); }} title={title}>{content}</Dialog>;
 }
 
@@ -107,10 +108,10 @@ function TicketListNotice({ inResults }: { inResults?: boolean }) {
 function Disclosure({ title, children, icon }: { title: string; children: ReactNode; icon?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const id = useId();
-  return <section className="border-t">
+  return <section>
     <Button variant="ghost" type="button" aria-expanded={open} aria-controls={id}
-      className="h-auto min-h-11 w-full justify-start whitespace-normal px-0 text-left" onClick={() => setOpen(!open)}>
-      {icon}{title}<ChevronDown className={cn("ml-auto", open && "rotate-180")} />
+      className="h-auto min-h-11 w-full justify-start whitespace-normal px-0 text-left font-medium hover:bg-transparent" onClick={() => setOpen(!open)}>
+      {icon}{title}<ChevronDown className={cn("ml-auto text-muted-foreground transition-transform", open && "rotate-180")} />
     </Button>
     <div id={id} className={open ? "pb-3" : undefined}>{open && children}</div>
   </section>;
@@ -181,16 +182,25 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       : <p className="text-sm text-muted-foreground">{t("noDescription")}</p>}
   </>;
 
-  return <div className="min-w-0 space-y-4 [overflow-wrap:anywhere] [&_button:not(.absolute)]:min-h-11">
+  const StatusIcon = meta.icon;
+  const statusLabel = t(!staff && ticket.status === "waiting" ? "customerQueueWaiting" : meta.labelKey);
+  const statusBadge = <Badge variant="outline" className={cn("min-h-8 gap-1.5 rounded-full px-2.5 text-sm font-medium", meta.tone)}>
+    <StatusIcon aria-hidden className="size-3.5" />{statusLabel}
+  </Badge>;
+
+  return <div className="min-w-0 space-y-3 [overflow-wrap:anywhere] [&_button:not(.absolute)]:min-h-11">
     <header className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="inline-flex min-h-11 items-center gap-1.5 rounded font-mono text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2" aria-label={`${t("copy")} ${number}`} onClick={async () => {
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <button type="button" className="-ms-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 font-mono text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${t("copy")} ${number}`} onClick={async () => {
           try { await navigator.clipboard.writeText(number); toast.success(t("ticketCopied")); }
           catch { toast.error(t("ticketCopyFailed")); }
         }}>{number}<Copy className="size-3.5" /></button>
-        <Badge variant="outline" className={meta.tone}>{t(!staff && ticket.status === "waiting" ? "customerQueueWaiting" : meta.labelKey)}</Badge>
+        {props.role === "staff" && !archived
+          ? <StatusMenu status={ticket.status} busy={props.statusBusy} number={number} onSelect={status => props.onMove(ticket._id, status)} />
+          : statusBadge}
       </div>
-      <h2 id={props.heading} className="text-xl font-semibold leading-tight">{ticket.title}</h2>
+      <h2 id={props.heading} className="text-xl font-semibold leading-tight tracking-tight">{ticket.title}</h2>
+      {!staff && !archived && <p className="text-sm text-muted-foreground">{t(customerProgress[ticket.status])}</p>}
       {staff && description}
     </header>
     {!staff && <TicketConversation ticket={ticket} role="customer">{description}</TicketConversation>}
@@ -198,7 +208,6 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
     {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
       <div className="flex flex-wrap items-center gap-2">
         {props.role === "staff" && <Button disabled={props.statusBusy} aria-label={t(primary.label) + " · " + number} onClick={() => props.onMove(ticket._id, primary.status)}>{t(primary.label)}<ArrowRight /></Button>}
-        {!staff && <p className="w-full text-sm text-muted-foreground">{t(customerProgress[ticket.status])}</p>}
         <Button type="button" variant="outline" ref={editButton} onClick={() => setEdit("content")}><Pencil />{t(staff ? "edit" : "editTicket")}</Button>
       </div>
       {props.role === "staff" && props.statusRecovery}
@@ -206,16 +215,16 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       {staff && <TicketConversation ticket={ticket} role="staff" />}
     </>}
     {staff && <TicketAssignment ticket={ticket} />}
-    <div>
-      {ticket.media.length > 0 && <section className="border-t">
+    <div className="aurora-inset rounded-xl px-3 [&>section+section]:border-t [&>section+section]:border-border/60">
+      {ticket.media.length > 0 && <section>
         <Button ref={mediaButton} type="button" variant="ghost" aria-expanded={mediaOpen} aria-controls={mediaId}
-          className="min-h-11 w-full justify-start px-0" onClick={() => {
+          className="min-h-11 w-full justify-start px-0 font-medium hover:bg-transparent" onClick={() => {
             if (mediaOpen && viewer.current) viewer.current.requestClose(() => setMediaOpen(false));
             else setMediaOpen(!mediaOpen);
           }}>
-          <Paperclip />{t("detailMedia", { count: ticket.media.length })}<ChevronDown className={cn("ml-auto", mediaOpen && "rotate-180")} />
+          <Paperclip />{t("detailMedia", { count: ticket.media.length })}<ChevronDown className={cn("ml-auto text-muted-foreground transition-transform", mediaOpen && "rotate-180")} />
         </Button>
-        <div id={mediaId}>{mediaOpen && <Suspense fallback={<p role="status">{t("syncing")}</p>}>
+        <div id={mediaId} className={mediaOpen ? "pb-3" : undefined}>{mediaOpen && <Suspense fallback={<p role="status">{t("syncing")}</p>}>
           <MediaViewer ref={handle => {
             viewer.current = handle;
             if (handle && pendingPin.current) { handle.focusAnnotation(pendingPin.current); pendingPin.current = null; }
@@ -235,12 +244,6 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       {!archived && <Disclosure title={t("detailActions")}>
         <div className="space-y-4">
           {props.role === "staff" && <>
-            <label className="flex flex-wrap items-center justify-between gap-2 text-sm">{t("detailStatus")}
-              <select className="min-h-11 rounded-md glass-field px-2" value={ticket.status} disabled={props.statusBusy} onChange={event => {
-                const status = statuses.find(value => value.value === event.target.value);
-                if (status) props.onMove(ticket._id, status.value);
-              }}>{statuses.map(status => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}</select>
-            </label>
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <span>{ticket.urgencyScore === undefined ? t("urgencyUnscored") : t("urgencyScoreValue", { score: ticket.urgencyScore })}</span>
               <Button type="button" ref={urgencyButton} variant="outline" onClick={() => setEdit("urgency")}>{t("detailUrgency")}</Button>
@@ -252,7 +255,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
         </div>
       </Disclosure>}
     </div>
-    <footer className="border-t pt-3 text-xs leading-5 text-muted-foreground">
+    <footer className="px-1 text-xs leading-5 text-muted-foreground">
       {t("createdAt", { date: formatDate(ticket.createdAt) })} · {t("updatedOn", { date: formatDate(ticket.updatedAt) })}
     </footer>
     <AlertDialog open={confirming} onOpenChange={setConfirming} title={t(staff ? "archive" : "deleteTicket")}
@@ -262,4 +265,34 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
         else void changeLifecycle();
       }} />
   </div>;
+}
+
+/** Staff status popup: every workflow state, current one checked. Moves go
+ * through the caller so busy, conflict and undo rules stay shared. */
+function StatusMenu({ status, busy, number, onSelect }: { status: TicketStatus; busy?: boolean; number: string; onSelect: (status: TicketStatus) => void }) {
+  const { t } = useI18n();
+  const meta = statusMeta(status);
+  const Icon = meta.icon;
+  const label = t(meta.labelKey);
+  return <DropdownMenu>
+    <DropdownMenuTrigger disabled={busy} aria-label={`${t("detailStatus")} · ${label} · ${number}`} title={t("detailStatus")}
+      className={cn("aurora-control inline-flex min-h-11 items-center gap-1.5 rounded-full ps-3 pe-2.5 text-sm font-medium transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 data-[popup-open]:border-primary/60", meta.text)}>
+      <Icon aria-hidden className="size-4 shrink-0" />{label}
+      {busy ? <LoaderCircle aria-hidden className="size-4 animate-spin text-muted-foreground" /> : <ChevronDown aria-hidden className="size-4 text-muted-foreground" />}
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuRadioGroup value={status} onValueChange={value => {
+        const next = statuses.find(option => option.value === value);
+        if (next && next.value !== status) onSelect(next.value);
+      }}>
+        <DropdownMenuLabel>{t("detailStatus")}</DropdownMenuLabel>
+        {statuses.map(option => {
+          const OptionIcon = option.icon;
+          return <DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
+            <OptionIcon aria-hidden className={option.text} />{t(option.labelKey)}
+          </DropdownMenuRadioItem>;
+        })}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }
