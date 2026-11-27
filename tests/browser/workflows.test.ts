@@ -1309,9 +1309,11 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await files(customer.page, "reply-photo.png", picker);
     const removePhoto = customer.page.getByRole("button", { name: copy(language, "removeFile", { name: "reply-photo.png" }), exact: true });
     await removePhoto.waitFor();
-    await removePhoto.click();
-
     await replyBox.fill("It also happens on our second register.");
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.click();
+    assert.equal(await replyBox.inputValue(), "It also happens on our second register.");
+    await removePhoto.click();
     await customerSend.click();
     await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
 
@@ -1355,15 +1357,17 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await staff.page.getByText(copy(language, "questionSent"), { exact: true }).waitFor();
     assert.equal((await convex.query(api.tickets.getTicket, { token: staff.token, id }))?.status, "waiting");
 
-    await customer.page.getByText(question, { exact: true }).waitFor();
+    await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor();
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
     await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).waitFor();
     assert.ok((await customerRow.locator("[data-ticket-excerpt]").innerText()).includes(question));
     await customerRow.click();
     const descriptionBox = await customer.page.getByRole("article").getByText(description, { exact: true }).boundingBox();
-    const questionBox = await customer.page.getByText(question, { exact: true }).boundingBox();
+    const questionBox = await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).boundingBox();
     const composerBox = await replyBox.boundingBox();
     assert.ok(questionBox && composerBox && descriptionBox && descriptionBox.y < questionBox.y && questionBox.y < composerBox.y);
+    await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).click();
+    assert.equal(await replyBox.evaluate(input => input === document.activeElement), true);
     const sharedPage = customer.page.getByRole("link", { name: copy(language, "openPageNamed", { name: "details.html" }), exact: true });
     assert.equal(await sharedPage.getAttribute("href"), hostedUrl);
     if (language === "en") await expectAccessible(customer.page, "Customer Ticket thread");
@@ -1385,8 +1389,14 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await customer.page.getByRole("alert").filter({ hasText: copy(language, "threadInvalidLink") }).waitFor();
     await address.fill("https://example.com/device");
     await customer.page.getByRole("button", { name: copy(language, "threadAddLink"), exact: true }).click();
+    await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customerRow.click();
+    assert.equal(await replyBox.inputValue(), reply);
+    await customer.page.getByText(copy(language, "threadQuoting", { quote: "details.html" }), { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "threadRemoveLink"), exact: true }).waitFor();
     await customerSend.click();
     await customer.page.getByText(copy(language, "replySent"), { exact: true }).waitFor();
+    await customer.page.getByRole("button", { name: copy(language, "threadAnswerQuestion"), exact: true }).waitFor({ state: "hidden" });
     await staff.page.getByText(reply, { exact: true }).waitFor();
     await staff.page.getByText(copy(language, "threadCustomerReplied"), { exact: true }).first().waitFor();
     const external = staff.page.getByRole("link", { name: copy(language, "threadOpenLinkNamed", { name: "example.com" }), exact: true });

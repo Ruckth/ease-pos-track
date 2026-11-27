@@ -1,5 +1,5 @@
 import { FileCode2, Link2, Paperclip, Send, X } from "lucide-react";
-import { lazy, Suspense, useId, useRef, useState, type FormEvent, type RefObject } from "react";
+import { lazy, Suspense, useId, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from "react";
 import { toast } from "sonner";
 import { useAccessToken } from "@/app/adapter";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,6 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
-import type { Id } from "@convex/_generated/dataModel";
 import type { Ticket } from "@/lib/types";
 import { IMAGE_SOURCE_BYTES } from "../../../shared/image-optimization";
 import { validateFiles } from "../../../shared/media-policy";
@@ -16,7 +15,8 @@ import { MAX_TICKET_REPLY_LINK_LENGTH, normalizeTicketReplyUrl } from "../../../
 import { useDraftAdapter, useTicketCapabilities } from "./adapter";
 import type { useConversation, TicketMessage as Message } from "./adapters/conversation";
 import { useConversationPages } from "./adapters/pages";
-import type { DisposableTicketDraft, DraftSnapshot } from "./draft";
+import type { DraftSnapshot } from "./draft";
+import type { ReplyLink, TicketReplyDraft } from "./reply-drafts";
 
 const TicketPages = lazy(() => import("./ticket-pages").then(module => ({ default: module.TicketPages })));
 
@@ -24,9 +24,8 @@ const replyNoReceiptErrors = new Set([
   "INVALID_INPUT", "PAGE_UNAVAILABLE", "TICKET_RESOLVED", "VERSION_CONFLICT",
 ]);
 
-type ReplyLink = { kind: "external"; url: string } | { kind: "page"; pageId: Id<"ticketPages"> };
-export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo, clearReply, textarea, send }: {
-  owner: DisposableTicketDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean; replyTo?: Message; clearReply: () => void;
+export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send }: {
+  draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
   textarea: RefObject<HTMLTextAreaElement | null>; send: ReturnType<typeof useConversation>["send"];
 }) {
   const { t, formatDate } = useI18n();
@@ -35,12 +34,13 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
   const mediaEnabled = useTicketCapabilities()?.mediaEnabled === true;
   const messageId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [link, setLink] = useState<ReplyLink>();
+  const { owner } = draft;
+  const { replyTo, link, requestReply } = useSyncExternalStore(draft.subscribe, draft.getSelection);
+  const setLink = (next?: ReplyLink) => draft.update({ link: next });
   const [linkField, setLinkField] = useState<string>();
   const [pickingPage, setPickingPage] = useState(false);
   const [publishingPage, setPublishingPage] = useState(false);
   const [pageUploadBusy, setPageUploadBusy] = useState(false);
-  const [requestReply, setRequestReply] = useState(false);
   const [sent, setSent] = useState<"replySent" | "questionSent">();
   const pages = useConversationPages(ticket._id, role === "staff" && mediaEnabled && (pickingPage || link?.kind === "page"));
   const progress = state.progress;
@@ -79,12 +79,6 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     } catch { owner.setError(new Error("INVALID_LINK")); return false; }
   }
 
-  function clearComposer() {
-    clearReply();
-    setLink(undefined);
-    setRequestReply(false);
-  }
-
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage) return;
@@ -103,7 +97,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
       onCleanupError: error => toast.error(localizeError(error, t)),
     });
     if (ok) {
-      clearComposer();
+      draft.clear();
       setSent(requestReply ? "questionSent" : "replySent");
     }
   }
@@ -121,7 +115,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     <label htmlFor={messageId} className="block text-sm font-medium">{t("replyLabel")}</label>
     {quoteLabel && <div className="flex min-w-0 items-center gap-2 rounded-md border-l-2 border-primary/50 bg-muted/60 px-2">
       <p className="line-clamp-2 flex-1 text-xs">{t("threadQuoting", { quote: quoteLabel })}</p>
-      <Button type="button" variant="ghost" size="icon" disabled={!canEdit} onClick={clearReply} aria-label={t("threadRemoveQuote")}><X aria-hidden /></Button>
+      <Button type="button" variant="ghost" size="icon" disabled={!canEdit} onClick={() => draft.update({ replyTo: undefined })} aria-label={t("threadRemoveQuote")}><X aria-hidden /></Button>
     </div>}
     <Textarea id={messageId} ref={textarea} className="min-h-16 resize-y" maxLength={2000} placeholder={t("threadWriteReply")} readOnly={!canEdit}
       value={state.description} onChange={event => { owner.setDescription(event.target.value); setSent(undefined); }}
@@ -188,7 +182,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     </Dialog>}
     {role === "staff" && <label className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
       <input type="checkbox" className="size-4 accent-primary" checked={requestReply} disabled={!canEdit}
-        onChange={event => setRequestReply(event.target.checked)} />{t("threadRequestReply")}
+        onChange={event => draft.update({ requestReply: event.target.checked })} />{t("threadRequestReply")}
     </label>}
     <div className="flex flex-wrap items-center gap-1">
       {mediaEnabled && <><input ref={fileInput} data-slot="ticket-reply-files" type="file" accept="image/*,video/*" hidden multiple
@@ -212,7 +206,7 @@ export function TicketReplyForm({ owner, state, ticket, role, writable, replyTo,
     {state.retryLocked && !busy && <Button type="button" variant="outline" size="sm" onClick={() => {
       if (!window.confirm(t("threadDiscardReplyConfirm"))) return;
       owner.discard();
-      clearComposer();
+      draft.clear();
     }}>{t("discardDraft")}</Button>}
     {state.error != null && <p role="alert" className="text-sm text-destructive">{localizeError(state.error, t)}</p>}
     {busy && state.items.length > 0 && <progress className="w-full" aria-label={t("submitting")} value={progress} max={100} />}

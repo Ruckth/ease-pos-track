@@ -1,5 +1,5 @@
 import { ExternalLink, FileCode2, Link2, MessageCircle, Paperclip, PlayCircle } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import type { Id } from "@convex/_generated/dataModel";
@@ -7,7 +7,7 @@ import type { MediaItem, Ticket } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TicketReplyForm } from "./ticket-reply-form";
 import { useConversation, type TicketMessage as Message } from "./adapters/conversation";
-import { DisposableTicketDraft } from "./draft";
+import { useTicketReplyDraft } from "./reply-drafts";
 
 type Props = { ticket: Ticket; onOpenMedia: (key: string) => void } & (
   { role: "staff"; children?: never } | { role: "customer"; children: ReactNode }
@@ -44,16 +44,8 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const list = useRef<HTMLOListElement>(null);
   const { messages, send } = useConversation(ticket._id, true);
-  const [replyTo, setReplyTo] = useState<Message>();
-  const [owner] = useState(() => new DisposableTicketDraft(ticket.projectId));
-  const lifetime = useRef({ generation: 0 });
-  useEffect(() => {
-    const active = lifetime.current;
-    const generation = ++active.generation;
-    return () => queueMicrotask(() => {
-      if (generation === active.generation) owner.dispose();
-    });
-  }, [owner]);
+  const replyDraft = useTicketReplyDraft(ticket._id, ticket.projectId);
+  const { owner } = replyDraft;
   const draft = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const loading = messages.status === "LoadingFirstPage";
   const writable = ticket.status !== "done";
@@ -61,9 +53,11 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
   const mediaFromReplies = new Set(ticket.replyMediaKeys ?? []);
   const openingMedia = role === "customer" ? ticket.media.filter(file => !mediaFromReplies.has(file.key)) : [];
   const visibleIds = new Set(messages.results.map(message => message._id));
+  const needsReply = role === "customer" && ticket.status === "waiting" && ticket.latestReply?.awaitingCustomer === true;
+  const question = needsReply ? messages.results.find(message => message.role === "staff" && message.requestReply) : undefined;
 
   function focusReply(message: Message) {
-    setReplyTo(message);
+    replyDraft.update({ replyTo: message });
     textarea.current?.focus();
   }
 
@@ -73,6 +67,16 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
   }
 
   return <div className="min-w-0 space-y-4">
+    {needsReply && <aside aria-label={t("feedNeedsReply")} className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4">
+      <div className="min-w-0 flex-1 basis-52 space-y-1">
+        <p className="text-sm font-semibold">{t("feedNeedsReply")}</p>
+        {question?.body && <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">{question.body}</p>}
+      </div>
+      <Button type="button" className="min-h-11" disabled={loading || !canQuote} onClick={() => {
+        if (question) focusReply(question);
+        else textarea.current?.focus();
+      }}>{t("threadAnswerQuestion")}</Button>
+    </aside>}
     {role === "customer" && <article className="aurora-inset min-w-0 space-y-3 rounded-xl p-3 sm:p-4">
       <PostAuthor label={t(ticket.origin === "staff" ? "threadTeam" : "threadYou")} role={ticket.origin} time={formatDate(ticket.createdAt)} />
       {children}
@@ -96,8 +100,8 @@ function ConversationThread({ ticket, role, children, onOpenMedia }: Props) {
           </ol>
           : <p className="text-sm text-muted-foreground">{t("noTicketMessages")}</p>}
       </>}
-      {!loading && <TicketReplyForm owner={owner} state={draft} ticket={ticket} role={role} writable={writable}
-        replyTo={replyTo} clearReply={() => setReplyTo(undefined)} textarea={textarea} send={send} />}
+      {!loading && <TicketReplyForm draft={replyDraft} state={draft} ticket={ticket} role={role} writable={writable}
+        textarea={textarea} send={send} />}
     </section>
   </div>;
 }
