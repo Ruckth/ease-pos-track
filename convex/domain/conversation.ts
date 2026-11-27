@@ -3,7 +3,7 @@ import { paginationOptsValidator } from "convex/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { actorFields } from "../authz";
-import { legacyMediaEnabled, requireLegacyMedia } from "../pilot_access";
+import { hasLegacyAccess, requireLegacyMedia } from "../pilot_access";
 import { mediaItemValidator, messageLinkValidator } from "../schema";
 import { requireCurrentVersion } from "../../shared/ticket-state";
 import { validateMediaItems } from "../../shared/media-policy";
@@ -40,9 +40,10 @@ const sameKeys = (a: string[] | undefined, b: string[]) => (a ?? []).length === 
 const effectiveRequestReply = (row: Pick<Message, "role" | "requestReply">) =>
   row.role === "staff" ? row.requestReply ?? true : undefined;
 
-async function hydrateLink(ctx: QueryCtx, ticketId: Id<"tickets">, link: StoredLink | undefined): Promise<HydratedLink | undefined> {
+async function hydrateLink(ctx: QueryCtx, ticketId: Id<"tickets">, link: StoredLink | undefined, hostedPagesEnabled: boolean): Promise<HydratedLink | undefined> {
   if (!link) return undefined;
   if (link.kind === "external") return { kind: "external", url: link.url };
+  if (!hostedPagesEnabled) return undefined;
   const page = await ctx.db.get(link.pageId);
   // Only this Ticket's own pages are hydrated; anything else reads as unavailable.
   if (!page || page.ticketId !== ticketId) return { kind: "page", pageId: link.pageId, title: "" };
@@ -65,15 +66,16 @@ export const pageMessages = queryOperation({
     if (!Number.isInteger(numItems) || numItems < 1 || numItems > 30) throw new Error("INVALID_INPUT");
     const result = await ctx.db.query("ticketMessages").withIndex("by_ticket", q => q.eq("ticketId", args.id))
       .order("desc").paginate({ ...args.paginationOpts, maximumRowsRead: 30, maximumBytesRead: 256_000 });
-    const mediaByKey = new Map(legacyMediaEnabled() ? ticket.media.map(item => [item.key, item]) : []);
+    const legacyAccess = await hasLegacyAccess(ctx);
+    const mediaByKey = new Map(legacyAccess ? ticket.media.map(item => [item.key, item]) : []);
     const page = await Promise.all(result.page.map(async row => {
       const quoted = row.inReplyTo ? await ctx.db.get(row.inReplyTo) : null;
       const quote = quoted && quoted.ticketId === ticket._id ? {
         id: quoted._id, role: quoted.role, body: ticketExcerpt(quoted.body, QUOTE_EXCERPT),
-        ...(quoted.link ? { link: await hydrateLink(ctx, ticket._id, quoted.link) } : {}),
+        ...(quoted.link ? { link: await hydrateLink(ctx, ticket._id, quoted.link, legacyAccess) } : {}),
         ...(quoted.mediaKeys?.some(key => mediaByKey.has(key)) ? { hasMedia: true } : {}),
       } : undefined;
-      const link = await hydrateLink(ctx, ticket._id, row.link);
+      const link = await hydrateLink(ctx, ticket._id, row.link, legacyAccess);
       const requestReply = effectiveRequestReply(row);
       return {
         _id: row._id, _creationTime: row._creationTime, role: row.role, body: row.body,
@@ -140,6 +142,7 @@ export const sendMessage = mutationOperation({
       if (!target || target.ticketId !== ticket._id) throw new Error("INVALID_INPUT");
     }
     if (link?.kind === "page") {
+      if (!await hasLegacyAccess(ctx)) throw new Error("PAGE_UNAVAILABLE");
       const page = await ctx.db.get(link.pageId);
       if (!page || page.ticketId !== ticket._id || page.state !== "published") throw new Error("PAGE_UNAVAILABLE");
     }
