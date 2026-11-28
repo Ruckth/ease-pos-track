@@ -13,7 +13,9 @@ export type MarkupLabels = {
   loadError: (code: ImageMarkupErrorCode) => string;
   /** Concrete reason for an export failure code; the generic message otherwise. */
   exportError: (code: ImageMarkupErrorCode) => string;
-  tools: string; moreTools: string; select: string; pan: string; hintPan: string;
+  tools: string; select: string; pan: string; hintPan: string;
+  /** Phone toolbar labels; the full tool name stays the accessible name. */
+  panShort: string; maskShort: string;
   view: string; zoomIn: string; zoomOut: string; zoomLevel: string; fitImage: string; fitWidth: string; previewRegion: string;
   fineSteps: string; position: string; left: string; top: string; circle: string; crop: string; mask: string; eraser: string;
   hintSelect: string; hintResizeCircle: string; hintTouchSize: string; hintCircle: string; hintCrop: string; hintMask: string; hintErase: string; hintSecondCorner: string;
@@ -45,7 +47,8 @@ const en: MarkupLabels = {
   exportError: (code) => code === IMAGE_MARKUP_ERRORS.tooLarge
     ? "The edited image is over 8 MB. Crop to a smaller area, then review again. Your edits are still here."
     : en.exportFailed,
-  tools: "Editing tools", moreTools: "More tools", select: "Select", pan: "Pan", circle: "Circle", crop: "Crop", mask: "Hide details", eraser: "Eraser",
+  tools: "Editing tools", select: "Select", pan: "Pan", circle: "Circle", crop: "Crop", mask: "Hide details", eraser: "Eraser",
+  panShort: "Pan", maskShort: "Hide",
   hintPan: "Drag to move the view. Two fingers move it with any tool.",
   view: "View", zoomIn: "Zoom in", zoomOut: "Zoom out", zoomLevel: "Zoom level", fitImage: "Fit image", fitWidth: "Fit width",
   previewRegion: "Attachment preview. Swipe, scroll or use the arrow keys to move around.",
@@ -92,7 +95,8 @@ const th: MarkupLabels = {
   exportError: (code) => code === IMAGE_MARKUP_ERRORS.tooLarge
     ? "รูปภาพที่แก้ไขแล้วใหญ่เกิน 8 MB ครอบตัดให้เล็กลงแล้วตรวจทานอีกครั้ง การแก้ไขของคุณยังอยู่"
     : th.exportFailed,
-  tools: "เครื่องมือแก้ไข", moreTools: "เครื่องมือเพิ่มเติม", select: "เลือก", pan: "เลื่อนมุมมอง", circle: "วงกลม", crop: "ครอบตัด", mask: "ปิดบังข้อมูล", eraser: "ยางลบ",
+  tools: "เครื่องมือแก้ไข", select: "เลือก", pan: "เลื่อนมุมมอง", circle: "วงกลม", crop: "ครอบตัด", mask: "ปิดบังข้อมูล", eraser: "ยางลบ",
+  panShort: "เลื่อน", maskShort: "ปิดบัง",
   hintPan: "ลากเพื่อเลื่อนมุมมอง ใช้สองนิ้วได้กับทุกเครื่องมือ",
   view: "มุมมอง", zoomIn: "ซูมเข้า", zoomOut: "ซูมออก", zoomLevel: "ระดับการซูม", fitImage: "พอดีกรอบ", fitWidth: "พอดีความกว้าง",
   previewRegion: "ตัวอย่างไฟล์แนบ ปัด เลื่อน หรือใช้ปุ่มลูกศรเพื่อดูส่วนอื่นของรูป",

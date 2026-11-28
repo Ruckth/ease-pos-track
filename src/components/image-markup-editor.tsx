@@ -4,10 +4,11 @@ import { exportMarkupImage, imageMarkupErrorCode, loadMarkupImage, type MarkupMa
 import { markupLabels, type ImageMarkupErrorCode } from "@/lib/markup-labels";
 import { nextSizeStep, scaleLimits, scaleRect, SIZE_STEP, stepLimits } from "@/lib/markup-geometry";
 import type { PendingMedia } from "@/lib/types";
-import { AlertTriangle, ArrowLeft, Check, Loader2, Maximize2, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { AlertTriangle, ArrowLeft, Check, Loader2, Maximize2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { adjustRect, clamp, ImageMarkupCanvas, ImageMarkupPreview, type MarkupPin, type MarkupPoint, type MarkupTool } from "./image-markup-canvas";
-import { ImageMarkupInspector, ImageMarkupToolbar, type CircleSizing, type MarkupField, type StrokeChoice } from "./image-markup-controls";
+import { CircleSize, EXPANDED, HistoryControls, ImageMarkupFineTune, ImageMarkupToolbar, type CircleSizing, type MarkupField, type StrokeChoice } from "./image-markup-controls";
 
 type Reviewed = { source: File; file: File; url: string; crop: MarkupRect; width: number; height: number; failed: boolean; marks: readonly MarkupMark[] };
 type Phase = "edit" | "exporting" | "review" | "applying";
@@ -45,6 +46,9 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
   const [tool, setTool] = useState<MarkupTool>("circle");
   const [corner, setCorner] = useState<MarkupPoint | null>(null);
   const [strokeChoice, setStrokeChoice] = useState<StrokeChoice>("medium");
+  const [tuneOpen, setTuneOpen] = useState(false);
+  /** Opening Fine-tune from its button moves focus into the panel, which comes earlier in tab order. */
+  const focusTuning = useRef(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<Phase>("edit");
@@ -76,6 +80,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
     group.current = null;
     setSelectedId(null);
     setCorner(null);
+    setTuneOpen(false);
     setReviewed(null);
     setPhase("edit");
     exportToken.current++;
@@ -92,6 +97,13 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
   useEffect(() => {
     if (phase === "review") reviewHeading.current?.focus();
   }, [phase]);
+
+  useEffect(() => {
+    if (!tuneOpen || !focusTuning.current) return;
+    focusTuning.current = false;
+    // The panel itself takes focus (announced as the Fine-tune group); Tab continues into its controls.
+    editBody.current?.querySelector<HTMLElement>("#image-markup-precise")?.focus();
+  }, [tuneOpen]);
 
   const W = image?.width ?? 1, H = image?.height ?? 1;
   const base = Math.min(W, H);
@@ -116,6 +128,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
 
   function save(next: readonly MarkupMark[], message: string) {
     group.current = null;
+    if (next.length === 0 && tool !== "circle") setTuneOpen(false);
     setHistory((h) => ({ stack: [...h.stack.slice(0, h.pos + 1), next], pos: h.pos + 1 }));
     setNotice(message);
     setError("");
@@ -153,20 +166,26 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
     if (!key) setNotice(labels.resized(nameOf(next), next.width, next.height));
   }
 
+  function switchTool(next: MarkupTool) {
+    if (next !== tool) setTuneOpen(false);
+    setTool(next);
+  }
+
   function chooseTool(next: MarkupTool) {
     endGroup();
     if (next !== tool && editBody.current) editBody.current.scrollTop = 0;
-    setTool(next);
+    switchTool(next);
     setCorner(null);
     if (next !== "select" && next !== "erase" && next !== "pan") setSelectedId(null);
     setNotice("");
   }
 
-  function select(id: number | null) {
+  function select(id: number | null, fromFineTune = false) {
     endGroup();
     setSelectedId(id);
     setCorner(null);
-    if (tool !== "erase") setTool("select");
+    if (fromFineTune) setTool("select");
+    else if (tool !== "erase") switchTool("select");
     const m = marks.find((x) => x.id === id);
     setNotice(m ? labels.selected(nameOf(m)) : "");
   }
@@ -174,7 +193,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
   function addMark(kind: MarkupMark["kind"], rect: MarkupRect) {
     const existing = kind === "crop" ? crop : null;
     const m: MarkupMark = { ...rect, kind, id: existing?.id ?? nextId.current++, stroke: strokeOf(strokeChoice) };
-    setTool("select");
+    switchTool("select");
     setSelectedId(m.id);
     setCorner(null);
     save(existing ? replace(m) : [...marks, m], labels.selected(nameOf(m)));
@@ -235,7 +254,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
     setHistory({ ...history, pos });
     const changed = next.find((m) => !prev.includes(m)) ?? null;
     setSelectedId(changed?.id ?? (next.some((m) => m.id === selectedId) ? selectedId : null));
-    setTool("select");
+    switchTool("select");
+    if (next.length === 0) setTuneOpen(false);
     setCorner(null);
     setNotice(delta === -1 ? labels.undone : labels.redone);
   }
@@ -251,7 +271,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
     x1 = clamp(Math.floor(x1), 0, W); y1 = clamp(Math.floor(y1), 0, H);
     x2 = clamp(Math.ceil(x2), 0, W); y2 = clamp(Math.ceil(y2), 0, H);
     setSelectedId(crop.id);
-    setTool("select");
+    switchTool("select");
     commit({ ...crop, x: x1, y: y1, width: x2 - x1, height: y2 - y1 });
   }
 
@@ -316,7 +336,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
 
   if (reviewed && (phase === "review" || phase === "applying")) {
     return (
-      <section className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2" aria-labelledby="image-markup-review-title">
+      <section className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3" aria-labelledby="image-markup-review-title">
         <h3 id="image-markup-review-title" ref={reviewHeading} tabIndex={-1} className="text-base font-semibold outline-none">{labels.reviewTitle}</h3>
         <p className="text-sm text-muted-foreground">{labels.reviewHint}</p>
         <ImageMarkupPreview
@@ -327,10 +347,10 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
         {reviewed.width > 0 && (
           <p className="hidden text-sm tabular-nums text-muted-foreground sm:block">{labels.outputMeta(reviewed.width, reviewed.height, formatBytes(reviewed.file.size), reviewed.file.type.replace("image/", "").toUpperCase())}</p>
         )}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <div className="flex shrink-0 flex-wrap justify-end gap-2 max-sm:border-t max-sm:pt-2">
-          <Button type="button" size="touch" variant="outline" onClick={backToEdit} disabled={phase === "applying"}><ArrowLeft aria-hidden="true" />{labels.backToEdit}</Button>
-          <Button type="button" size="touch" onClick={apply} disabled={phase === "applying" || reviewed.failed || !reviewed.width} aria-busy={phase === "applying"}>
+        {error && <p role="alert" className="shrink-0 text-sm text-destructive">{error}</p>}
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t pt-2 sm:pt-3">
+          <Button type="button" size="touch" variant="outline" className="px-3" onClick={backToEdit} disabled={phase === "applying"}><ArrowLeft aria-hidden="true" />{labels.backToEdit}</Button>
+          <Button type="button" size="touch" className="px-5 max-sm:flex-1" onClick={apply} disabled={phase === "applying" || reviewed.failed || !reviewed.width} aria-busy={phase === "applying"}>
             {phase === "applying" ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Check aria-hidden="true" />}
             {phase === "applying" ? labels.applying : labels.apply}
           </Button>
@@ -352,55 +372,68 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
   const hints: Record<MarkupTool, string> = { select: labels.hintSelect, pan: labels.hintPan, circle: labels.hintCircle, crop: labels.hintCrop, mask: labels.hintMask, erase: labels.hintErase };
   const busy = phase === "exporting";
   const needsAction = notice === labels.areaTooSmall || notice === labels.finishSelection;
+  const showStroke = tool === "circle" || !!circleSelected;
+  const canTune = marks.length > 0 || showStroke;
+  const removeLabel = selected?.kind === "crop" ? labels.resetCrop : labels.removeSelected;
+  function toggleTuning() {
+    focusTuning.current = !tuneOpen;
+    setTuneOpen(!tuneOpen);
+  }
 
   return (
-    <div className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2" onKeyDown={rootKey}>
-      <ImageMarkupToolbar
-        tool={tool} labels={labels} onTool={chooseTool} disabled={busy}
-        canUndo={history.pos > 0} canRedo={history.pos < history.stack.length - 1}
-        onUndo={() => travel(-1)} onRedo={() => travel(1)}
-      />
-      <p className="shrink-0 text-sm leading-5 text-muted-foreground">
-        {circleSelected ? <>
-          <span className="[@media(pointer:coarse)]:hidden">{labels.hintResizeCircle}</span>
-          <span className="hidden [@media(pointer:coarse)]:inline">{labels.hintTouchSize}</span>
-        </> : corner ? labels.hintSecondCorner : hints[tool]}
-      </p>
+    <div className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3" onKeyDown={rootKey}>
+      <ImageMarkupToolbar tool={tool} labels={labels} onTool={chooseTool} disabled={busy} />
       <p id="image-markup-keyboard-hint" className="sr-only">{labels.keyboardHint}</p>
-      <div ref={editBody} inert={busy || undefined} className="grid gap-3 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:gap-2 max-sm:overflow-y-auto">
-        <ImageMarkupCanvas
-          image={image} marks={marks} selectedId={selectedId} tool={tool} pins={placedPins} corner={corner} minSize={minSize} labels={labels}
-          onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
-          onMoveSelected={(dx, dy) => adjustSelected("move", dx, dy)}
-          onEscape={() => { setCorner(null); setNotice(""); }}
-          onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
-          onWheelEnd={() => endGroup("wheel")}
-        />
-        <p className={needsAction ? "text-sm" : "sr-only"} role="status">{notice}</p>
-        {excluded.length > 0 && (
-          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-            <AlertTriangle aria-hidden="true" className="size-4 shrink-0 text-destructive" />
-            <span className="min-w-0 flex-1">{labels.pinsOutside(excluded.map((p) => `[${p.label}]`).join(", "))}</span>
-            <Button type="button" size="touch" variant="outline" onClick={expandCrop}><Maximize2 aria-hidden="true" />{labels.expandCrop}</Button>
-          </div>
+      {/* The actions below stay in view: smaller screens scroll this area, large ones show Fine-tune beside the photo. */}
+      <div ref={editBody} inert={busy || undefined} className={cn("flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto sm:gap-3", tuneOpen && "lg:flex-row lg:overflow-hidden")}>
+        <div className={cn("flex min-h-[min(24rem,55dvh)] min-w-0 flex-1 flex-col gap-2 sm:gap-3", tuneOpen && "lg:min-h-0 lg:overflow-y-auto")}>
+          <ImageMarkupCanvas
+            image={image} marks={marks} selectedId={selectedId} tool={tool} pins={placedPins} corner={corner} minSize={minSize} labels={labels}
+            actions={<HistoryControls labels={labels} canUndo={history.pos > 0} canRedo={history.pos < history.stack.length - 1} onUndo={() => travel(-1)} onRedo={() => travel(1)} />}
+            onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
+            onMoveSelected={(dx, dy) => adjustSelected("move", dx, dy)}
+            onEscape={() => { setCorner(null); setNotice(""); }}
+            onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
+            onWheelEnd={() => endGroup("wheel")}
+            below={
+              // One fixed slot under the photo: the tool's hint, or the size control once a circle is selected.
+              <div className="flex min-h-[4.25rem] shrink-0 flex-col justify-center">
+                {circle ? <CircleSize sizing={circle} labels={labels} /> : <p className="text-sm leading-5 text-muted-foreground">{corner ? labels.hintSecondCorner : hints[tool]}</p>}
+              </div>
+            }
+          />
+          <p className={needsAction ? "shrink-0 text-sm" : "sr-only"} role="status">{notice}</p>
+          {excluded.length > 0 && (
+            <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+              <AlertTriangle aria-hidden="true" className="size-4 shrink-0 text-destructive" />
+              <span className="min-w-0 flex-1">{labels.pinsOutside(excluded.map((p) => `[${p.label}]`).join(", "))}</span>
+              <Button type="button" size="touch" variant="outline" onClick={expandCrop}><Maximize2 aria-hidden="true" />{labels.expandCrop}</Button>
+            </div>
+          )}
+        </div>
+        {tuneOpen && (
+          <ImageMarkupFineTune
+            id="image-markup-precise" className="lg:max-h-full lg:w-[22rem] lg:self-start lg:overflow-y-auto" marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
+            strokeChoice={selected?.kind === "circle" ? choiceOf(selected.stroke) : strokeChoice}
+            showStroke={showStroke}
+            onSelect={(id) => select(id, true)}
+            onResize={(dw, dh) => adjustSelected(dw ? "e" : "s", dw, dh)}
+            onMove={(dx, dy) => adjustSelected("move", dx, dy)}
+            onSet={setGeometry}
+            onStroke={changeStroke}
+          />
         )}
-        <ImageMarkupInspector
-          key={tool} marks={marks} selected={selected} labels={labels} nameOf={nameOf} step={step} imageWidth={W} imageHeight={H} minSize={minSize}
-          strokeChoice={selected?.kind === "circle" ? choiceOf(selected.stroke) : strokeChoice}
-          showStroke={tool === "circle" || !!circleSelected}
-          circle={circle}
-          onSelect={select}
-          onResize={(dw, dh) => adjustSelected(dw ? "e" : "s", dw, dh)}
-          onMove={(dx, dy) => adjustSelected("move", dx, dy)}
-          onSet={setGeometry}
-          onStroke={changeStroke}
-          onRemove={() => erase(selected)}
-        />
       </div>
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <div className="flex shrink-0 flex-wrap justify-end gap-2 max-sm:border-t max-sm:pt-2">
-        <Button type="button" size="touch" variant="outline" onClick={onCancel}><X aria-hidden="true" />{labels.cancel}</Button>
-        <Button ref={reviewButton} type="button" size="touch" onClick={review} disabled={busy || excluded.length > 0} aria-busy={busy}>
+      {error && <p role="alert" className="shrink-0 text-sm text-destructive">{error}</p>}
+      <div className="flex shrink-0 items-center gap-2 border-t pt-2 sm:pt-3">
+        <Button
+          type="button" size="touch" variant="outline" className={cn("px-3", EXPANDED)} disabled={busy || !canTune}
+          aria-expanded={tuneOpen} aria-controls={tuneOpen ? "image-markup-precise" : undefined}
+          onClick={toggleTuning}
+        ><SlidersHorizontal aria-hidden="true" />{labels.fineTune}</Button>
+        <Button type="button" size="icon-touch" variant="outline" aria-label={removeLabel} title={removeLabel} disabled={busy || !selected} onClick={() => erase(selected)}><Trash2 aria-hidden="true" /></Button>
+        <span aria-hidden="true" className="mx-1 h-7 w-px shrink-0 bg-border sm:hidden" />
+        <Button ref={reviewButton} type="button" size="touch" className="px-5 max-sm:flex-1 sm:ms-auto" onClick={review} disabled={busy || excluded.length > 0} aria-busy={busy}>
           {busy ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Check aria-hidden="true" />}
           {busy ? labels.reviewing : labels.review}
         </Button>

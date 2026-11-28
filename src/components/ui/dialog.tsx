@@ -14,6 +14,8 @@ type DialogProps = {
   initialFocus?: () => HTMLElement | null;
   mobileFullScreen?: boolean;
   mobileWorkspace?: boolean;
+  /** With placement "fullscreen": a full-height column on every screen size; children own their scrolling. */
+  workspace?: boolean;
   placement?: "center" | "side" | "fullscreen";
   children: React.ReactNode;
 };
@@ -38,7 +40,7 @@ function useReturnFocus(open: boolean) {
   }, []);
 }
 
-export function Dialog({ open, onOpenChange, title, description, dismissible = true, keepMounted = false, mobileFullScreen = false, mobileWorkspace = false, placement = "center", initialFocus, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, title, description, dismissible = true, keepMounted = false, mobileFullScreen = false, mobileWorkspace = false, workspace = false, placement = "center", initialFocus, children }: DialogProps) {
   const { t } = useI18n();
   const finalFocus = useReturnFocus(open);
   const side = placement === "side";
@@ -76,6 +78,7 @@ export function Dialog({ open, onOpenChange, title, description, dismissible = t
             ? "md:left-auto md:w-[min(42rem,75%)]"
             : placement === "center" && "sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-h-[calc(100dvh-2rem)] sm:rounded-[1.25rem]",
           mobileWorkspace && "max-sm:inset-x-0 max-sm:bottom-auto max-sm:top-[var(--dialog-top,0px)] max-sm:flex max-sm:h-[var(--dialog-height,100dvh)] max-sm:max-h-none max-sm:flex-col max-sm:overflow-hidden max-sm:rounded-none",
+          workspace && placement === "fullscreen" && "sm:flex sm:flex-col sm:overflow-hidden",
           "motion-safe:transition-[transform,opacity] data-ending-style:opacity-0 data-starting-style:opacity-0",
         )}>
           <div className={cn("aurora-dialog-edge sticky top-0 z-20 flex shrink-0 items-start justify-between gap-3 border-b border-border/50 px-4 py-3.5 sm:px-5 sm:py-4", mobileWorkspace && "max-sm:items-center max-sm:px-3 max-sm:pb-1 max-sm:pt-[calc(.25rem+env(safe-area-inset-top))]")}>
@@ -87,7 +90,7 @@ export function Dialog({ open, onOpenChange, title, description, dismissible = t
               <X className="size-4" />
             </BaseDialog.Close>
           </div>
-          <div className={cn("aurora-dialog-body p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-5", placement === "fullscreen" && "mx-auto max-w-4xl", mobileWorkspace && "w-full max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:overflow-y-auto max-sm:px-3 max-sm:pt-2 max-sm:pb-[calc(.5rem+env(safe-area-inset-bottom))]")}>{children}</div>
+          <div className={cn("aurora-dialog-body p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-5", placement === "fullscreen" && "mx-auto max-w-4xl", workspace && placement === "fullscreen" && "sm:flex sm:min-h-0 sm:w-full sm:flex-1 sm:flex-col", mobileWorkspace && "w-full max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:overflow-y-auto max-sm:px-3 max-sm:pt-2 max-sm:pb-[calc(.5rem+env(safe-area-inset-bottom))]")}>{children}</div>
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

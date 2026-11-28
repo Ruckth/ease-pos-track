@@ -16,13 +16,6 @@ const browsers = suiteBrowser();
 after(() => browsers.close());
 const open = async (role: "staff" | "customer", language?: Language, configure?: (context: BrowserContext) => Promise<void>) => openWith(await browsers.get(), role, language, configure);
 
-async function selectMarkupMenu(page: Page, trigger: string, item: string) {
-  await page.getByRole("button", { name: trigger, exact: true }).tap();
-  const menu = page.getByRole("menu");
-  await menu.getByRole("menuitemradio", { name: item, exact: true }).tap();
-  await menu.waitFor({ state: "hidden" });
-}
-
 async function placeOnSurface(surface: Locator, x: number, y: number, input: "tap" | "click" = "tap") {
   await surface.scrollIntoViewIfNeeded();
   // The target can move during a keyboard resize or after changing tools.
@@ -73,8 +66,8 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
     const button = (name: string) => editor.getByRole("button", { name, exact: true });
     const surface = editor.getByRole("application");
     const viewport = surface.locator("../..");
-    await selectMarkupMenu(page, labels.view, labels.fitWidth);
-    await selectMarkupMenu(page, labels.moreTools, labels.pan);
+    await button(labels.fitWidth).tap();
+    await button(labels.pan).tap();
     await viewport.scrollIntoViewIfNeeded();
     const available = (await viewport.boundingBox())!;
     const before = await viewport.evaluate(el => el.scrollTop);
@@ -106,7 +99,7 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
     await button(labels.review).tap();
     const preview = editor.locator("img");
     await preview.waitFor();
-    await selectMarkupMenu(page, labels.view, labels.fitWidth);
+    await button(labels.fitWidth).tap();
     const measured = (await preview.boundingBox())!;
     assert.ok(measured.width > 300 && measured.height > 1200);
     const pixel = await preview.evaluate(async (el, pos) => {
@@ -118,6 +111,75 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
     assert.deepEqual(pixel, [24, 35, 48, 255]);
     assert.equal(uploads(), 0);
     assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("desktop screenshot markup keeps its zoom center and Fine-tune selection on a short screen", async () => {
+  const { context, page } = await openWith(await browsers.get(), "customer", "en", undefined, {
+    viewport: { width: 1280, height: 500 },
+  });
+  try {
+    const labels = markupLabels("en");
+    const name = "desktop-receipt.png";
+    await attachLongReceipt(page, name);
+    await page.getByRole("button", { name: copy("en", "editImageNamed", { name }), exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: copy("en", "editDraftImage"), exact: true });
+    const control = (label: string) => dialog.getByRole("button", { name: label, exact: true });
+    const surface = dialog.getByRole("application", { name: labels.canvasLabel });
+    const viewport = surface.locator("../..");
+    const center = () => surface.evaluate(el => {
+      const photo = el.getBoundingClientRect();
+      const frame = el.parentElement!.parentElement!;
+      const bounds = frame.getBoundingClientRect();
+      return {
+        x: (bounds.left + frame.clientLeft + frame.clientWidth / 2 - photo.left) / photo.width,
+        y: (bounds.top + frame.clientTop + frame.clientHeight / 2 - photo.top) / photo.height,
+      };
+    });
+    await viewport.waitFor();
+    for (let step = 0; step < 4; step++) {
+      await control(labels.zoomIn).click();
+      const point = await center();
+      assert.ok(Math.abs(point.x - 0.5) < 0.02 && Math.abs(point.y - 0.5) < 0.02,
+        `Zoom step ${step + 1} keeps the receipt centered (${point.x}, ${point.y})`);
+    }
+
+    const frame = (await viewport.boundingBox())!;
+    await page.mouse.click(frame.x + frame.width / 2, frame.y + frame.height / 2);
+    await control(labels.circle).click();
+    const tune = control(labels.fineTune);
+    await tune.press("Enter");
+    const panel = dialog.getByRole("group", { name: labels.fineTune, exact: true });
+    await panel.waitFor();
+    assert.ok(await panel.evaluate(el => el === document.activeElement && el.matches(":focus-visible")));
+    const marks = panel.getByRole("combobox", { name: labels.marks });
+    await marks.focus();
+    await marks.selectOption({ index: 1 });
+    assert.ok(await marks.evaluate(el => el === document.activeElement));
+    assert.equal(await control(labels.select).getAttribute("aria-pressed"), "true");
+    await panel.getByRole("spinbutton", { name: `${labels.width} (px)`, exact: true }).waitFor();
+    await viewport.evaluate(el => { el.scrollLeft = 0; });
+    const narrowed = await viewport.evaluate(el => el.clientWidth);
+    const surfaceElement = (await surface.elementHandle())!;
+    await page.waitForFunction(surface => {
+      const frame = surface.parentElement!.parentElement!;
+      const canvas = frame.querySelector("canvas")!;
+      return canvas.offsetLeft === 0 && Math.abs(canvas.getBoundingClientRect().width - frame.clientWidth) < 1;
+    }, surfaceElement);
+    await tune.click();
+    await page.waitForFunction(({ surface, narrowed }) => {
+      const frame = surface.parentElement!.parentElement!;
+      const canvas = frame.querySelector("canvas")!;
+      return frame.clientWidth > narrowed && Math.abs(canvas.getBoundingClientRect().width - frame.clientWidth) < 1;
+    }, { surface: surfaceElement, narrowed });
+
+    await tune.click();
+    await control(labels.undo).click();
+    await panel.waitFor({ state: "hidden" });
+    await control(labels.redo).click();
+    assert.equal(await tune.getAttribute("aria-expanded"), "false");
+    const review = (await control(labels.review).boundingBox())!;
+    assert.ok(review.y + review.height <= 500);
   } finally { await context.close(); }
 });
 
@@ -415,12 +477,12 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
 
     await surface.waitFor();
     await assertNoOverflow("initial 320px editor");
-    for (const label of [labels.circle, labels.mask, labels.moreTools, labels.undo, labels.redo]) {
+    for (const label of [labels.select, labels.pan, labels.circle, labels.crop, labels.mask, labels.eraser, labels.zoomIn, labels.zoomOut, labels.fitWidth, labels.fitImage, labels.undo, labels.redo]) {
       const box = await control(label).boundingBox();
-      assert.ok(box && box.height >= 44, `${label} has a 44 px touch target height`);
+      assert.ok(box && box.width >= 44 && box.height >= 44, `${label} has a 44 × 44 px touch target`);
     }
     const circleBoxBefore = (await control(labels.circle).boundingBox())!;
-    await selectMarkupMenu(page, labels.moreTools, labels.pan);
+    await control(labels.pan).tap();
     const circleBoxAfterPan = (await control(labels.circle).boundingBox())!;
     assert.ok(Math.abs(circleBoxAfterPan.x - circleBoxBefore.x) <= 1 && Math.abs(circleBoxAfterPan.y - circleBoxBefore.y) <= 1, "mode switch kept toolbar buttons stationary");
     await control(labels.circle).tap();
@@ -471,7 +533,7 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
       viewport.dispatchEvent(new Event("resize"));
     });
     await control(labels.fineTune).tap();
-    await selectMarkupMenu(page, labels.moreTools, labels.eraser);
+    await control(labels.eraser).tap();
     const boxNow = (await surface.boundingBox())!;
     await surface.tap({ position: { x: boxNow.width * 0.5, y: boxNow.height * 0.5 } });
     assert.equal(await surface.locator("ellipse").count(), 0);
@@ -708,20 +770,17 @@ for (const [role, language] of [["customer", "en"], ["staff", "th"]] as const) {
       await control(labels.mask).click();
       await place(0.3, 0.25);
       await place(0.52, 0.42);
-      if (role === "customer") await selectMarkupMenu(page, labels.moreTools, labels.eraser);
-      else await control(labels.eraser).click();
+      await control(labels.eraser).click();
       await place(0.25, 0.68);
       await control(labels.undo).click();
       await control(labels.redo).click();
-      if (role === "customer") await selectMarkupMenu(page, labels.moreTools, labels.crop);
-      else await control(labels.crop).click();
+      await control(labels.crop).click();
       await place(0.02, 0.02);
       await place(0.20, 0.20);
       assert.ok(await control(labels.review).isDisabled());
       await control(labels.expandCrop).click();
       assert.equal(await control(labels.review).isDisabled(), false);
-      if (role === "customer") await selectMarkupMenu(page, labels.moreTools, labels.crop);
-      else await control(labels.crop).click();
+      await control(labels.crop).click();
       await place(0.12, 0.12);
       await place(0.94, 0.94);
       await control(labels.review).click();

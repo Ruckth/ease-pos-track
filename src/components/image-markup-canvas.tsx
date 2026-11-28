@@ -2,7 +2,8 @@ import {
   MARKUP_CIRCLE_COLOR, MARKUP_CIRCLE_HALO_COLOR, MARKUP_CIRCLE_HALO_EXTRA, MARKUP_MASK_COLOR, type MarkupMark, type MarkupRect,
 } from "@/lib/image-markup";
 import type { MarkupLabels } from "@/lib/markup-labels";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { ZoomControls } from "./image-markup-controls";
 import { useWheelResize } from "./image-markup-wheel";
 
@@ -56,6 +57,13 @@ const rectFrom = (a: MarkupPoint, b: MarkupPoint): MarkupRect => ({
   x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y),
 });
 
+/**
+ * The stage takes the free space; the photo box hugs the photo, with anything passed as
+ * `below` right under it, until zooming makes the box fill the stage.
+ */
+const STAGE = "flex min-h-12 flex-1 flex-col gap-2";
+const VIEWPORT = "mx-auto min-h-12 max-w-full shrink overflow-auto overscroll-contain rounded-md border bg-muted";
+
 /** Zoom stops in CSS px per source px; 100% shows real pixels, 400% makes one pixel easy to hit. */
 const ZOOM_STOPS = [0.1, 0.25, 0.5, 1, 2, 4];
 const MAX_DETAIL = 4;
@@ -68,25 +76,28 @@ type ZoomView = "fit" | "width" | number;
  */
 export function useMarkupZoom(W: number, H: number) {
   const viewport = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<ZoomView>("fit");
   const [box, setBox] = useState({ width: 0, maxHeight: 220 });
-  const anchor = useRef<{ point: MarkupPoint; offset: MarkupPoint } | null>(null);
+  const anchor = useRef<{ point: MarkupPoint; client?: MarkupPoint } | null>(null);
 
   useLayoutEffect(() => {
     const el = viewport.current;
-    if (!el) return;
-    const measure = () => setBox((b) => {
-      const width = Math.max(120, el.clientWidth);
-      const maxHeight = window.matchMedia("(max-width: 639px)").matches
-        ? Math.max(48, el.clientHeight)
-        : Math.max(220, Math.round(window.innerHeight * 0.55));
-      return b.width === width && b.maxHeight === maxHeight ? b : { width, maxHeight };
-    });
+    const st = stage.current;
+    if (!el || !st) return;
+    const below = Array.from(st.children).filter((child) => child instanceof HTMLElement && child !== el) as HTMLElement[];
+    const measure = () => {
+      // Reserve space for the content below the photo and its frame border.
+      const gap = parseFloat(getComputedStyle(st).rowGap) || 0;
+      const reserved = below.reduce((sum, child) => sum + child.offsetHeight + gap, 0);
+      const width = Math.max(1, st.clientWidth - 2);
+      const maxHeight = Math.max(48, st.clientHeight - 2 - reserved);
+      setBox((b) => b.width === width && b.maxHeight === maxHeight ? b : { width, maxHeight });
+    };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    window.addEventListener("resize", measure);
-    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+    for (const child of [st, ...below]) observer.observe(child);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => { setView("fit"); }, [W, H]);
@@ -97,7 +108,11 @@ export function useMarkupZoom(W: number, H: number) {
   const scale = clamp(view === "fit" ? fitScale : view === "width" ? widthScale : view, fitScale, maxScale) || 1;
   const display = { width: Math.max(1, Math.round(W * scale)), height: Math.max(1, Math.round(H * scale)) };
 
-  const keepPoint = useCallback((el: HTMLDivElement, point: MarkupPoint, offset: MarkupPoint, atScale: number) => {
+  const keepPoint = useCallback((el: HTMLDivElement, point: MarkupPoint, atScale: number, client?: MarkupPoint) => {
+    const rect = el.getBoundingClientRect();
+    const offset = client
+      ? { x: client.x - rect.left - el.clientLeft, y: client.y - rect.top - el.clientTop }
+      : { x: el.clientWidth / 2, y: el.clientHeight / 2 };
     const leading = Math.max(0, (el.clientWidth - Math.round(W * atScale)) / 2);
     el.scrollLeft = point.x * atScale + leading - offset.x;
     el.scrollTop = point.y * atScale - offset.y;
@@ -106,15 +121,16 @@ export function useMarkupZoom(W: number, H: number) {
   useLayoutEffect(() => {
     const el = viewport.current, a = anchor.current;
     anchor.current = null;
-    if (el && a) keepPoint(el, a.point, a.offset, scale);
-  }, [keepPoint, scale]);
+    if (el && a) keepPoint(el, a.point, scale, a.client);
+  }, [keepPoint, scale, view]);
 
   function zoomTo(next: ZoomView) {
+    if (next === view) return;
     const el = viewport.current;
     if (el) {
       const leading = Math.max(0, (el.clientWidth - display.width) / 2);
       const offset = { x: el.clientWidth / 2, y: el.clientHeight / 2 };
-      anchor.current = { point: { x: (el.scrollLeft + offset.x - leading) / scale, y: (el.scrollTop + offset.y) / scale }, offset };
+      anchor.current = { point: { x: (el.scrollLeft + offset.x - leading) / scale, y: (el.scrollTop + offset.y) / scale } };
     }
     setView(next);
   }
@@ -122,20 +138,18 @@ export function useMarkupZoom(W: number, H: number) {
   function pinchTo(next: number, point: MarkupPoint, client: MarkupPoint) {
     const el = viewport.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const offset = { x: client.x - rect.left - el.clientLeft, y: client.y - rect.top - el.clientTop };
     const nextScale = clamp(next, fitScale, maxScale);
     if (nextScale === scale) {
       anchor.current = null;
-      keepPoint(el, point, offset, scale);
+      keepPoint(el, point, scale, client);
     } else {
-      anchor.current = { point, offset };
+      anchor.current = { point, client };
     }
     setView(nextScale <= fitScale ? "fit" : nextScale);
   }
   const eps = 1e-6;
   return {
-    viewport, view, scale, display, maxHeight: box.maxHeight, pinchTo,
+    viewport, stage, view, scale, display, maxHeight: box.maxHeight, pinchTo,
     percent: Math.round(scale * 100),
     canZoomIn: scale < maxScale - eps,
     canZoomOut: scale > fitScale + eps,
@@ -158,24 +172,26 @@ export function ImageMarkupPreview({ url, alt, width, height, labels, onLoad, on
   const zoom = useMarkupZoom(width || 1, height || 1);
   const known = width > 0 && height > 0;
   return (
-    <div className="grid gap-2 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {known && <ZoomControls zoom={zoom} labels={labels} />}
-      <div
-        ref={zoom.viewport}
-        tabIndex={0}
-        role="region"
-        aria-label={labels.previewRegion}
-        className="w-full overflow-auto overscroll-contain rounded-md border bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-12 max-sm:flex-1 sm:max-h-[var(--markup-max-height)]"
-        style={{ "--markup-max-height": `${zoom.maxHeight + 2}px` } as CSSProperties}
-      >
-        <img
-          src={url}
-          alt={alt}
-          className={known ? "mx-auto block max-w-none" : "mx-auto block h-auto max-h-[55dvh] max-w-full object-contain"}
-          style={known ? zoom.display : undefined}
-          onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
-          onError={onError}
-        />
+      <div ref={zoom.stage} className={STAGE}>
+        <div
+          ref={zoom.viewport}
+          tabIndex={0}
+          role="region"
+          aria-label={labels.previewRegion}
+          className={cn(VIEWPORT, "outline-none focus-visible:ring-2 focus-visible:ring-ring", !known && "w-full")}
+          style={known ? { width: zoom.display.width + 2 } : undefined}
+        >
+          <img
+            src={url}
+            alt={alt}
+            className={known ? "mx-auto block max-w-none" : "mx-auto block h-auto max-h-[55dvh] max-w-full object-contain"}
+            style={known ? zoom.display : undefined}
+            onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+            onError={onError}
+          />
+        </div>
       </div>
     </div>
   );
@@ -187,7 +203,7 @@ type Gesture =
   | { kind: "pan"; origin: MarkupPoint; scroll: MarkupPoint; pinch?: { distance: number; scale: number; point: MarkupPoint } };
 
 export function ImageMarkupCanvas({
-  image, marks, selectedId, tool, pins, corner, minSize, labels,
+  image, marks, selectedId, tool, pins, corner, minSize, labels, actions, below,
   onSelect, onCommit, onPlace, onRect, onErase, onMoveSelected, onEscape, onWheelResize, onWheelEnd,
 }: {
   image: ImageBitmap;
@@ -198,6 +214,10 @@ export function ImageMarkupCanvas({
   corner: MarkupPoint | null;
   minSize: number;
   labels: MarkupLabels;
+  /** Shown at the end of the view row, e.g. Undo and Redo. */
+  actions?: ReactNode;
+  /** Kept directly under the photo, e.g. the tool hint or size control. */
+  below?: ReactNode;
   onSelect: (id: number | null) => void;
   /** A finished move/resize drag: one undo step. */
   onCommit: (mark: MarkupMark) => void;
@@ -236,6 +256,13 @@ export function ImageMarkupCanvas({
   const syncRef = useRef(syncWindow);
   syncRef.current = syncWindow;
   useLayoutEffect(() => { syncRef.current(); }, [display.width, display.height, zoom.maxHeight]);
+  useLayoutEffect(() => {
+    const el = viewport.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => syncRef.current());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [viewport]);
 
   const dpr = Math.min(2, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
   const rasterW = Math.max(1, Math.round(win.width * dpr)), rasterH = Math.max(1, Math.round(win.height * dpr));
@@ -467,86 +494,89 @@ export function ImageMarkupCanvas({
   const handleSize = s(10), handleHit = s(coarse ? 44 : 32);
 
   return (
-    <div className="grid gap-2 max-sm:flex max-sm:min-h-[6.25rem] max-sm:flex-1 max-sm:flex-col">
-      <ZoomControls zoom={zoom} labels={labels} />
-      <div
-        ref={viewport}
-        className="w-full overflow-auto overscroll-contain rounded-md border bg-muted max-sm:min-h-12 max-sm:flex-1 sm:max-h-[var(--markup-max-height)]"
-        style={{ "--markup-max-height": `${zoom.maxHeight + 2}px` } as CSSProperties}
-        onScroll={syncWindow}
-      >
-        <div className="relative mx-auto" style={display}>
-          <canvas
-            ref={canvas} width={rasterW} height={rasterH} aria-hidden="true"
-            className="absolute block" style={{ left: win.left, top: win.top, width: win.width, height: win.height }}
-          />
-          <svg
-            ref={svg}
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            className="absolute inset-0 size-full touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            style={{ cursor: tool === "pan" ? "grab" : tool === "select" ? "default" : "crosshair" }}
-            tabIndex={0}
-            role="application"
-            aria-label={labels.canvasLabel}
-            aria-describedby="image-markup-keyboard-hint"
-            onPointerDown={down}
-            onPointerMove={move}
-            onPointerUp={up}
-            onPointerCancel={cancel}
-            onLostPointerCapture={cancel}
-            onKeyDown={key}
-            onBlur={() => setCursor(null)}
-          >
-            {shown.filter((m) => m.kind === "circle").map((m) => (
-              <g key={m.id} pointerEvents="none">
-                <ellipse cx={m.x + m.width / 2} cy={m.y + m.height / 2} rx={m.width / 2} ry={m.height / 2} fill="none" stroke={MARKUP_CIRCLE_HALO_COLOR} strokeWidth={m.stroke + MARKUP_CIRCLE_HALO_EXTRA} />
-                <ellipse cx={m.x + m.width / 2} cy={m.y + m.height / 2} rx={m.width / 2} ry={m.height / 2} fill="none" stroke={MARKUP_CIRCLE_COLOR} strokeWidth={m.stroke} />
-              </g>
-            ))}
-            {shown.filter((m) => m.kind === "mask").map((m) => (
-              <rect key={m.id} x={m.x} y={m.y} width={m.width} height={m.height} fill={MARKUP_MASK_COLOR} pointerEvents="none" />
-            ))}
-            {crop && (
-              <g pointerEvents="none">
-                <path fillRule="evenodd" fill="rgba(18,34,41,.5)" d={`M0 0H${W}V${H}H0Z M${crop.x} ${crop.y}h${crop.width}v${crop.height}h${-crop.width}Z`} />
-                <rect x={crop.x} y={crop.y} width={crop.width} height={crop.height} fill="none" stroke="#22835c" strokeWidth={s(2)} />
-              </g>
-            )}
-            {pins.map((pin) => (
-              <g key={pin.label} pointerEvents="none" aria-hidden="true">
-                <circle cx={pin.x} cy={pin.y} r={s(11)} fill="#1d4ed8" stroke="white" strokeWidth={s(2)} />
-                <text x={pin.x} y={pin.y} dy="0.35em" textAnchor="middle" fontSize={s(12)} fontWeight={700} fill="white">{pin.label}</text>
-              </g>
-            ))}
-            {dragRect && (
-              <rect x={dragRect.x} y={dragRect.y} width={dragRect.width} height={dragRect.height} fill={tool === "mask" ? "rgba(24,35,48,.6)" : "none"} stroke="#13714d" strokeWidth={s(1.5)} strokeDasharray={`${s(4)} ${s(3)}`} pointerEvents="none" />
-            )}
-            {selected && (tool === "select" || tool === "pan") && (
-              <g>
-                <rect x={selected.x} y={selected.y} width={selected.width} height={selected.height} fill="none" stroke="#13714d" strokeWidth={s(1.5)} strokeDasharray={`${s(4)} ${s(3)}`} pointerEvents="none" />
-                {tool === "select" && sides.map((side) => {
-                  const h = handlePoint(selected, side);
-                  const padding = smallMark ? handleHit / 4 : 0;
-                  const hitX = h.x + (side.includes("w") ? -padding : side.includes("e") ? padding : 0);
-                  const hitY = h.y + (side.includes("n") ? -padding : side.includes("s") ? padding : 0);
-                  return (
-                    <g key={side} data-handle={side} style={{ cursor: `${side}-resize` }}>
-                      <rect x={hitX - handleHit / 2} y={hitY - handleHit / 2} width={handleHit} height={handleHit} fill="transparent" />
-                      <rect x={h.x - handleSize / 2} y={h.y - handleSize / 2} width={handleSize} height={handleSize} fill="white" stroke="#13714d" strokeWidth={s(1.5)} />
-                    </g>
-                  );
-                })}
-              </g>
-            )}
-            {[corner, cursor].filter((p): p is MarkupPoint => !!p).map((p, i) => (
-              <g key={i} pointerEvents="none">
-                <rect x={p.x - s(5)} y={p.y - s(5)} width={s(10)} height={s(10)} fill="none" stroke="white" strokeWidth={s(3)} />
-                <rect x={p.x - s(5)} y={p.y - s(5)} width={s(10)} height={s(10)} fill="none" stroke="#008951" strokeWidth={s(1.5)} />
-              </g>
-            ))}
-          </svg>
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <ZoomControls zoom={zoom} labels={labels} actions={actions} />
+      <div ref={zoom.stage} className={STAGE}>
+        <div
+          ref={viewport}
+          className={VIEWPORT}
+          style={{ width: display.width + 2 }}
+          onScroll={syncWindow}
+        >
+          <div className="relative mx-auto" style={display}>
+            <canvas
+              ref={canvas} width={rasterW} height={rasterH} aria-hidden="true"
+              className="absolute block" style={{ left: win.left, top: win.top, width: win.width, height: win.height }}
+            />
+            <svg
+              ref={svg}
+              viewBox={`0 0 ${W} ${H}`}
+              preserveAspectRatio="none"
+              className="absolute inset-0 size-full touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              style={{ cursor: tool === "pan" ? "grab" : tool === "select" ? "default" : "crosshair" }}
+              tabIndex={0}
+              role="application"
+              aria-label={labels.canvasLabel}
+              aria-describedby="image-markup-keyboard-hint"
+              onPointerDown={down}
+              onPointerMove={move}
+              onPointerUp={up}
+              onPointerCancel={cancel}
+              onLostPointerCapture={cancel}
+              onKeyDown={key}
+              onBlur={() => setCursor(null)}
+            >
+              {shown.filter((m) => m.kind === "circle").map((m) => (
+                <g key={m.id} pointerEvents="none">
+                  <ellipse cx={m.x + m.width / 2} cy={m.y + m.height / 2} rx={m.width / 2} ry={m.height / 2} fill="none" stroke={MARKUP_CIRCLE_HALO_COLOR} strokeWidth={m.stroke + MARKUP_CIRCLE_HALO_EXTRA} />
+                  <ellipse cx={m.x + m.width / 2} cy={m.y + m.height / 2} rx={m.width / 2} ry={m.height / 2} fill="none" stroke={MARKUP_CIRCLE_COLOR} strokeWidth={m.stroke} />
+                </g>
+              ))}
+              {shown.filter((m) => m.kind === "mask").map((m) => (
+                <rect key={m.id} x={m.x} y={m.y} width={m.width} height={m.height} fill={MARKUP_MASK_COLOR} pointerEvents="none" />
+              ))}
+              {crop && (
+                <g pointerEvents="none">
+                  <path fillRule="evenodd" fill="rgba(18,34,41,.5)" d={`M0 0H${W}V${H}H0Z M${crop.x} ${crop.y}h${crop.width}v${crop.height}h${-crop.width}Z`} />
+                  <rect x={crop.x} y={crop.y} width={crop.width} height={crop.height} fill="none" stroke="#22835c" strokeWidth={s(2)} />
+                </g>
+              )}
+              {pins.map((pin) => (
+                <g key={pin.label} pointerEvents="none" aria-hidden="true">
+                  <circle cx={pin.x} cy={pin.y} r={s(11)} fill="#1d4ed8" stroke="white" strokeWidth={s(2)} />
+                  <text x={pin.x} y={pin.y} dy="0.35em" textAnchor="middle" fontSize={s(12)} fontWeight={700} fill="white">{pin.label}</text>
+                </g>
+              ))}
+              {dragRect && (
+                <rect x={dragRect.x} y={dragRect.y} width={dragRect.width} height={dragRect.height} fill={tool === "mask" ? "rgba(24,35,48,.6)" : "none"} stroke="#13714d" strokeWidth={s(1.5)} strokeDasharray={`${s(4)} ${s(3)}`} pointerEvents="none" />
+              )}
+              {selected && (tool === "select" || tool === "pan") && (
+                <g>
+                  <rect x={selected.x} y={selected.y} width={selected.width} height={selected.height} fill="none" stroke="#13714d" strokeWidth={s(1.5)} strokeDasharray={`${s(4)} ${s(3)}`} pointerEvents="none" />
+                  {tool === "select" && sides.map((side) => {
+                    const h = handlePoint(selected, side);
+                    const padding = smallMark ? handleHit / 4 : 0;
+                    const hitX = h.x + (side.includes("w") ? -padding : side.includes("e") ? padding : 0);
+                    const hitY = h.y + (side.includes("n") ? -padding : side.includes("s") ? padding : 0);
+                    return (
+                      <g key={side} data-handle={side} style={{ cursor: `${side}-resize` }}>
+                        <rect x={hitX - handleHit / 2} y={hitY - handleHit / 2} width={handleHit} height={handleHit} fill="transparent" />
+                        <rect x={h.x - handleSize / 2} y={h.y - handleSize / 2} width={handleSize} height={handleSize} fill="white" stroke="#13714d" strokeWidth={s(1.5)} />
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
+              {[corner, cursor].filter((p): p is MarkupPoint => !!p).map((p, i) => (
+                <g key={i} pointerEvents="none">
+                  <rect x={p.x - s(5)} y={p.y - s(5)} width={s(10)} height={s(10)} fill="none" stroke="white" strokeWidth={s(3)} />
+                  <rect x={p.x - s(5)} y={p.y - s(5)} width={s(10)} height={s(10)} fill="none" stroke="#008951" strokeWidth={s(1.5)} />
+                </g>
+              ))}
+            </svg>
+          </div>
         </div>
+        {below}
       </div>
     </div>
   );
