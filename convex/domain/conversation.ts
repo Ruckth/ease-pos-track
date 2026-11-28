@@ -220,7 +220,7 @@ export const sendMessage = mutationOperation({
     if (args.inReplyTo && (!replyTarget || replyTarget.ticketId !== ticket._id)) throw new Error("INVALID_INPUT");
     const expectsAnswer = actor.role === "customer" && ticket.status === "waiting"
       && (ticket.latestReply?.awaitingCustomer || !ticket.latestReply?.answeredCustomerRequest);
-    if (args.answeringRequest && !expectsAnswer) throw new Error("VERSION_CONFLICT");
+    if (args.answeringRequest !== undefined && args.answeringRequest !== Boolean(expectsAnswer)) throw new Error("VERSION_CONFLICT");
     if (expectsAnswer) {
       // Older clients submit the Ticket version and may quote a question.
       // New clients bind to the question independently of any conversation quote.
@@ -230,7 +230,7 @@ export const sendMessage = mutationOperation({
       if (args.answeringRequest) {
         if (args.answerRequest === undefined || args.answerRequest !== (request?._id ?? null)
           || (ticket.latestReply?.awaitingCustomer && !request)) throw new Error("VERSION_CONFLICT");
-      } else if (replyTarget && effectiveRequestReply(replyTarget) && replyTarget._id !== request?._id) {
+      } else if (request && replyTarget && effectiveRequestReply(replyTarget) && replyTarget._id !== request._id) {
         throw new Error("VERSION_CONFLICT");
       }
     }

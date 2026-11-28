@@ -129,6 +129,10 @@ test("old Waiting clients replay unmarked messages and submit matching-version i
   const nextAsk = await t.mutation(api.conversations.send, { token: staff, id, body: "Which register?", requestId: "newer-ask", expectedVersion: 1 });
   expect(await t.mutation(api.conversations.send, { ...legacyAnswer, expectedVersion: 1 })).toBe(accepted);
   expect(await t.query(api.conversations.openRequest, { token: alice, id })).toMatchObject({ _id: nextAsk });
+  await t.mutation(api.tickets.updateTicketStatus, { token: staff, id, status: "in_progress", expectedVersion: 1 });
+  await t.mutation(api.tickets.updateTicketStatus, { token: staff, id, status: "waiting", expectedVersion: 2 });
+  await t.mutation(api.conversations.send, { ...legacyAnswer, body: "A new detail", requestId: "manual-legacy-quote", expectedVersion: 3 });
+  expect((await t.query(api.tickets.getTicket, { token: alice, id }))?.latestReply).toMatchObject({ answeredCustomerRequest: true });
 });
 
 test("a newer question supersedes an earlier question or manual answer without changing Ticket version", async () => {
@@ -139,7 +143,14 @@ test("a newer question supersedes an earlier question or manual answer without c
   await t.mutation(api.tickets.updateTicketStatus, { token: staff, id, status: "waiting", expectedVersion: 0 });
   const ask = (requestId: string, body: string) => t.mutation(api.conversations.send, { token: staff, id, body, requestId, expectedVersion: 1 });
   const a = await ask("question-a", "What outlet?");
+  await t.mutation(api.conversations.send, {
+    token: alice, id, body: "Outlet 3", requestId: "answered-a", expectedVersion: 1, answeringRequest: true, answerRequest: a,
+  });
+  const ordinary = { token: alice, id, body: "Another observation", requestId: "ordinary", expectedVersion: 1, answeringRequest: false };
+  const posted = await t.mutation(api.conversations.send, ordinary);
   const b = await ask("question-b", "What serial number?");
+  expect(await t.mutation(api.conversations.send, ordinary)).toBe(posted);
+  await expect(t.mutation(api.conversations.send, { ...ordinary, requestId: "racing-note" })).rejects.toThrow("VERSION_CONFLICT");
   const answer = { token: alice, id, body: "Serial 123", requestId: "bound-to-b", expectedVersion: 1, answeringRequest: true };
   for (const request of [null, a]) {
     await expect(t.mutation(api.conversations.send, { ...answer, answerRequest: request })).rejects.toThrow("VERSION_CONFLICT");

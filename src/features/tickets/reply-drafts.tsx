@@ -14,7 +14,8 @@ type ReplySelection = {
   evidence?: MessageEvidenceInput;
   link?: ReplyLink;
   requestReply: boolean;
-  answer?: TicketAnswer;
+  // null binds a draft to ordinary conversation even if a new question arrives.
+  answer?: TicketAnswer | null;
   submittedAnswer?: TicketAnswer;
 };
 

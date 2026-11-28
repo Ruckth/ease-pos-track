@@ -123,7 +123,26 @@ test("customer opening viewport keeps the first Ticket below one sticky toolbar"
 });
 
 test("customer merges a stale edit and reconfirms archive against the reviewed version", { timeout: 60_000 }, async () => {
-  const { page, context, token, errors } = await open("customer");
+  let simulateLostRequest = false;
+  let archiveAttempts = 0;
+  const { page, context, token, errors } = await open("customer", "en", async context => {
+    await context.routeWebSocket(url => url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === "Mutation" && msg.udfPath === "tickets:archiveTicket") {
+          archiveAttempts++;
+          if (simulateLostRequest) {
+            simulateLostRequest = false;
+            socket.send(JSON.stringify({ type: "MutationResponse", requestId: msg.requestId, success: false, result: "Connection interrupted", logLines: [] }));
+            return;
+          }
+        }
+        server.send(raw);
+      });
+      server.onMessage(raw => socket.send(raw));
+    });
+  });
   const project = seed.projects.find(project => project.key === "POS")!;
   try {
     const title = `Concurrent Ticket ${crypto.randomUUID()}`;
@@ -173,12 +192,18 @@ test("customer merges a stale edit and reconfirms archive against the reviewed v
     await submit.click();
     await confirm.getByText(/Title updated before archive/).waitFor();
     assert.equal((await convex.query(api.tickets.customerArchiveState, { token, id, projectId: project.id }))?.lifecycle, "active");
+    simulateLostRequest = true;
+    await submit.click();
+    await confirm.getByText(/still active.*try archiving it again/).waitFor();
+    assert.equal(archiveAttempts, 2);
+    assert.equal((await convex.query(api.tickets.customerArchiveState, { token, id, projectId: project.id }))?.lifecycle, "active");
     await submit.evaluate(button => {
       if (!(button instanceof HTMLButtonElement)) throw new Error("Expected the archive confirmation button");
       button.click();
       button.click();
     });
     await confirm.waitFor({ state: "hidden" });
+    assert.equal(archiveAttempts, 3);
     await page.waitForURL(url => !url.searchParams.has("ticket"));
     assert.deepEqual(await convex.query(api.tickets.customerArchiveState, { token, id, projectId: project.id }), { lifecycle: "archived", version: 5 });
     assert.deepEqual(errors, []);
@@ -383,12 +408,15 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     if (language === "th") {
       await staff.page.getByRole("combobox", { name: copy(language, "threadAttachPage"), exact: true }).selectOption(published._id);
     }
+    await replyBox.fill("An ordinary note started before the question.");
     await staff.page.getByLabel(copy(language, "threadRequestReply"), { exact: true }).check();
     await staff.page.getByRole("button", { name: copy(language, "sendQuestion"), exact: true }).click();
     await staff.page.getByText(copy(language, "questionSent"), { exact: true }).waitFor();
     assert.equal((await convex.query(api.tickets.getTicket, { token: staff.token, id }))?.status, "waiting");
 
     await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor();
+    assert.equal(await customerSend.isDisabled(), true);
+    assert.equal(await replyBox.inputValue(), "An ordinary note started before the question.");
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
     await customer.page.getByRole("group", { name: copy(language, "filterTickets") })
       .getByRole("button", { name: new RegExp("^" + copy(language, "customerQueueWaiting")) }).click();

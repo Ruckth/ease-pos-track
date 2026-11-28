@@ -34,7 +34,7 @@ export function CustomerTicketDialog(props: DetailNavigation & {
 }
 
 type ArchivePrompt =
-  | { state: "ready"; version: number; title: string; status: Ticket["status"]; updatedAt: number; reviewed?: boolean; error?: string }
+  | { state: "ready"; version: number; title: string; status: Ticket["status"]; updatedAt: number; reviewed?: "retry" | "review"; error?: string }
   | { state: "unknown" | "conflict" | "unavailable" | "archived"; version: number };
 
 function CustomerArchive({ ticket, unresolvedVersion, onUncertain, onCancel, onArchived }: {
@@ -68,9 +68,9 @@ function CustomerArchive({ ticket, unresolvedVersion, onUncertain, onCancel, onA
       if (outcome === "archived" && latest) {
         onUncertain(undefined);
         setPrompt({ state: "archived", version: latest.version });
-      } else if (outcome === "review" && latest?.lifecycle === "active") {
+      } else if ((outcome === "review" || outcome === "retry") && latest?.lifecycle === "active") {
         onUncertain(undefined);
-        setPrompt({ state: "ready", version: latest.version, title: latest.title, status: latest.status, updatedAt: latest.updatedAt, reviewed: true });
+        setPrompt({ state: "ready", version: latest.version, title: latest.title, status: latest.status, updatedAt: latest.updatedAt, reviewed: outcome });
       } else {
         setPrompt({ state, version });
       }
@@ -122,7 +122,7 @@ function CustomerArchive({ ticket, unresolvedVersion, onUncertain, onCancel, onA
       : prompt.state === "archived" ? t("detailBack") : checkAgain ? translate("Check again", "ตรวจสอบอีกครั้ง") : action}
     keepOpen busy={busy} confirmDisabled={prompt.state === "unavailable"} onConfirm={() => { void confirm(); }}>
     {prompt.state === "ready" && prompt.reviewed && <div className="mt-3 space-y-1 text-sm">
-      <p>{translate("This Ticket changed. Review the latest details before confirming.", "Ticket นี้มีการเปลี่ยนแปลง โปรดตรวจสอบรายละเอียดล่าสุดก่อนยืนยัน")}</p>
+      <p>{prompt.reviewed === "retry" ? translate("This Ticket is still active. Confirm to try archiving it again.", "Ticket นี้ยังใช้งานอยู่ ยืนยันเพื่อลองเก็บเข้าคลังอีกครั้ง") : translate("This Ticket changed. Review the latest details before confirming.", "Ticket นี้มีการเปลี่ยนแปลง โปรดตรวจสอบรายละเอียดล่าสุดก่อนยืนยัน")}</p>
       <p className="break-words font-medium">{number} · {prompt.title}</p>
       <p>{t(statusMeta(prompt.status).labelKey)} · {t("updatedOn", { date: formatDate(prompt.updatedAt) })}</p>
     </div>}

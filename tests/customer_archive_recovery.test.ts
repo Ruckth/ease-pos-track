@@ -15,6 +15,7 @@ test("unknown and unclassified structured archive failures require a read before
 test("a later archive establishes current lifecycle, leaving the submission outcome unknown", () => {
   assert.equal(archiveReadDisposition({ lifecycle: "archived", version: 6 }, 3), "archived");
   assert.equal(archiveReadDisposition({ lifecycle: "active", version: 4 }, 3), "review");
-  assert.equal(archiveReadDisposition({ lifecycle: "active", version: 3 }, 3), "unresolved");
+  assert.equal(archiveReadDisposition({ lifecycle: "active", version: 3 }, 3), "retry");
+  assert.equal(archiveReadDisposition({ lifecycle: "active", version: 2 }, 3), "unresolved");
   assert.equal(archiveReadDisposition(null, 3), "unresolved");
 });

@@ -16,5 +16,6 @@ export function archiveReadDisposition(
   submittedVersion: number,
 ) {
   if (latest?.lifecycle === "archived") return "archived";
-  return latest && latest.version > submittedVersion ? "review" : "unresolved";
+  if (!latest || latest.version < submittedVersion) return "unresolved";
+  return latest.version === submittedVersion ? "retry" : "review";
 }
