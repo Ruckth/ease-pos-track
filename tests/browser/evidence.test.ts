@@ -154,6 +154,10 @@ if (label === "after") for (const role of ["staff", "customer"] as const) for (c
           const filters = page.getByRole("group", { name: copy(language, "filterTickets") }).getByRole("button");
           assert.equal(await filters.count(), 4);
           assert.equal(await filters.evaluateAll(buttons => new Set(buttons.map(button => button.getBoundingClientRect().top)).size), 1);
+          for (const filter of await filters.all()) {
+            const visibleLabel = await filter.locator("[aria-hidden='true']").first().innerText();
+            assert.equal(await filter.and(page.getByRole("button", { name: visibleLabel })).count(), 1, `Accessible name contains ${visibleLabel}`);
+          }
         }
         const row = (await firstTicket.boundingBox())!;
         assert.ok(row.y + row.height <= page.viewportSize()!.height, "The first Ticket is fully visible");
