@@ -49,15 +49,16 @@ export function AnnotationActivityEntry({ event }: { event: AnnotationEvent }) {
             aria-expanded={expanded}
             aria-controls={comparisonId}
             onClick={() => setExpanded((open) => !open)}
-            className="inline-flex min-h-8 items-center rounded px-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex min-h-11 items-center rounded px-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {expanded ? copy.hideFullText : copy.showFullText}
           </button>
         </span>
       ) : null}
-      {summary.textTruncated && expanded ? (
+      {summary.textTruncated ? (
         <dl
           id={comparisonId}
+          hidden={!expanded}
           className="mt-2 space-y-1.5 rounded-md border bg-muted/40 p-2.5 text-xs leading-5"
         >
           <div>
