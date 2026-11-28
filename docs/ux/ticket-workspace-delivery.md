@@ -6,21 +6,43 @@ The customer queue index is additive. Existing rows keep the compatibility read 
 
 ## Measured workflows
 
-The images on the left come from the original audit fixture. The images on the right come from Chromium on the updated application with local synthetic Tickets. Ticket contents, data volumes and account features differ between these revisions. The camera comparison shows the additional approval step after capture.
+Each pair uses Chromium 151 on the same disposable Project, signed-in role, synthetic Ticket dataset, application language and viewport. The baseline is `2e0f6c7`, the version of main when this work started. The candidate is `d162031`. The original audit used `f745763` with different data, including the historical camera example below.
 
-| Surface | Original application | Implemented workflow |
+| Surface | Before · `2e0f6c7` | After · `d162031` |
 | --- | --- | --- |
-| Staff workspace at 390px | ![Staff board before the compact toolbar](workspace-evidence/staff-before.webp) | ![Staff controls in a single row above the board](workspace-evidence/staff-after.webp) |
-| Customer workspace at 390px | ![Customer queue with earlier header and summary](workspace-evidence/customer-before.webp) | ![Customer Project, actions and filters above the first Ticket](workspace-evidence/customer-after.webp) |
-| Staff board at 1100px | ![Earlier staff lanes extending below the viewport](workspace-evidence/board-before.webp) | ![One visible staff lane with a status chooser](workspace-evidence/board-after.webp) |
-| Customer Ticket creation at 390px | ![English three-step form in the audited build](workspace-evidence/composer-before.webp) | ![Thai direct form with optional step-by-step guide](workspace-evidence/composer-after-th.webp) |
-| Camera | ![Original camera capture](workspace-evidence/camera-before.webp) | ![Captured photo with Retake and Use photo](workspace-evidence/camera-review.webp) |
+| Staff Board · English · 320 × 844 | ![Narrow staff Board before](workspace-evidence/matched-staff-en-320-queue-before.webp) | ![Narrow staff Board after](workspace-evidence/matched-staff-en-320-queue-after.webp) |
+| Staff Queue · Thai · 320 × 844 | ![Narrow staff Queue before](workspace-evidence/matched-staff-th-320-queue-before.webp) | ![Narrow staff Queue after](workspace-evidence/matched-staff-th-320-queue-after.webp) |
+| Staff Queue · Thai · 390 × 844 | ![Staff Queue before](workspace-evidence/matched-staff-th-390-queue-before.webp) | ![Staff Queue after](workspace-evidence/matched-staff-th-390-queue-after.webp) |
+| Staff Board · English · 1280 × 900 | ![Staff Board before](workspace-evidence/matched-staff-en-1280-queue-before.webp) | ![Staff Board after](workspace-evidence/matched-staff-en-1280-queue-after.webp) |
+| Customer queue · Thai · 390 × 844 | ![Customer queue before](workspace-evidence/matched-customer-th-390-queue-before.webp) | ![Customer queue after](workspace-evidence/matched-customer-th-390-queue-after.webp) |
+| Customer queue · English · 1280 × 900 | ![Customer queue before](workspace-evidence/matched-customer-en-1280-queue-before.webp) | ![Customer queue after](workspace-evidence/matched-customer-en-1280-queue-after.webp) |
+| New Ticket · Thai · 390 × 844 | ![Blank Ticket form before](workspace-evidence/matched-customer-th-390-composer-before.webp) | ![Blank Ticket form after](workspace-evidence/matched-customer-th-390-composer-after.webp) |
+| New Ticket · English · 1280 × 900 | ![Blank Ticket form before](workspace-evidence/matched-customer-en-1280-composer-before.webp) | ![Blank Ticket form after](workspace-evidence/matched-customer-en-1280-composer-after.webp) |
+| Operations health · Thai · 390 × 844 | ![Operations health before](workspace-evidence/matched-staff-th-390-health-before.webp) | ![Operations health after](workspace-evidence/matched-staff-th-390-health-after.webp) |
 
-At 390px both signed-in toolbars measured **54px**. Every visible toolbar control measured at least **44 × 44px**. At 1100px the staff board had one selectable lane and zero horizontal document overflow. At 1280px it displayed five lanes. Customer and staff phone journeys opened three Tickets in three activations. These measurements used synthetic data in Chromium.
+At **320px and 390px** in English and Thai, both signed-in toolbars went from **62px to 54px** with zero horizontal document overflow. Each visible toolbar button on the candidate measured at least **44 × 44px**. The staff Project switcher measured **67 × 44px** in both languages at 320px, with the full `POS` key visible alongside Search, Ticket inbox, New Ticket and More options. The staff Board rendered five stacked lanes at 390px in the baseline. The candidate rendered one selectable lane there and five at 1280px.
+
+| First visible Ticket button, measured from the top of the viewport | Before | After |
+| --- | ---: | ---: |
+| Staff Queue · Thai · 390px | 361px | 233px |
+| Staff Queue · Thai · 320px | 377px | 280px |
+| Staff Board · English · 1280px | 332px | 302px |
+| Customer queue · English · 1280px | 482px | 434px |
+| Customer queue · English · 390px | 458px | 460px |
+| Customer queue · Thai · 390px | 458px | 470px |
+
+The candidate customer phone toolbar brings New Ticket into the top row. Despite the shorter toolbar, the first Ticket is 2px lower in English and 12px lower in Thai at 390px. The full first Ticket remains visible, ending at 553px and 563px respectively. The same synthetic Tickets were available in each run. The default customer filter in the candidate puts Waiting Tickets in their own view, so the first Ticket in the default view changes from fixture 148 to fixture 145.
+
+Both composers start with the direct form. The candidate adds the optional step-by-step guide alongside Submit Ticket. Operations health distinguishes missing credentials from a deliberately disabled cleanup switch and shows what each state means. In the pictured fixture, the new total and failed-filter count both show zero.
+
+| Historical camera comparison | Original audit · `f745763` | Candidate photo review |
+| --- | --- | --- |
+| Immediately after capture | ![Original camera capture](workspace-evidence/camera-before.webp) | ![Captured photo with Retake and Use photo](workspace-evidence/camera-review.webp) |
 
 | Media recovery | Keyboard and magnification |
 | --- | --- |
 | ![A failed note save retains its text and retry control](workspace-evidence/note-retry.webp) | ![Focused corner note at simulated 200 percent zoom](workspace-evidence/note-zoom.webp) |
+| ![Thai photo note controls above a simulated keyboard](workspace-evidence/note-keyboard-th.webp) | At 390 × 320, the simulated keyboard leaves Move pin, Cancel, and Save note visible and touchable. The English test also passed at 320 × 320. |
 | ![Nearby video timestamps expanded at 320px](workspace-evidence/video-notes.webp) | A grouped timestamp returned focus to its originating control. At 320px, each of four corner notes could be opened by keyboard at both 100% and 200% zoom. |
 
 ## Staff workspace and triage

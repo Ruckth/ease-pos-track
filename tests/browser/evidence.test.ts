@@ -33,6 +33,7 @@ for (const [role, language, width] of [["customer", "en", 1280], ["customer", "t
     const { page, context } = await openWith(await browsers.get(), role, language as Language);
     try {
       await page.setViewportSize({ width, height: width < 640 ? 844 : 900 });
+      await page.getByRole("button", { name: copy(language, "chooseFiles"), exact: true }).waitFor();
       await shot(page, `${role}-${language}-${width}-composer`);
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       await page.getByRole("dialog").waitFor({ state: "hidden" });
