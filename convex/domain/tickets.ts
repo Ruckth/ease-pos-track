@@ -6,7 +6,7 @@ import { notifyIntake } from "./staff_inbox";
 import { recordCustomerUpdate } from "./inbox";
 import { validateAnnotationBudget, type AnnotationRecord } from "../annotation_state";
 import { requireLegacyMedia } from "../pilot_access";
-import { requireCurrentVersion } from "../../shared/ticket-state";
+import { requireCurrentVersion, ticketCustomerQueueGroup } from "../../shared/ticket-state";
 
 export type MediaItem = Doc<"tickets">["media"][number];
 
@@ -174,6 +174,7 @@ export async function applyTicketChange(
   const endedWaiting = plan.before.status === "waiting" && plan.after.status !== "waiting";
   await ctx.db.patch(input.doc._id, {
     ...plan.patch, inboxVisibilityVersion: visibilityVersion,
+    customerQueueGroup: ticketCustomerQueueGroup(plan.after.status),
     ...(endedWaiting && latestReply ? {
       latestReply: { ...latestReply, awaitingCustomer: false, answeredCustomerRequest: undefined },
     } : {}),
@@ -201,6 +202,7 @@ export async function recordAnnotationEvent(
   ctx: MutationCtx,
   input: {
     ticketId: Id<"tickets">;
+    ticketEventId?: Id<"ticketEvents">;
     annotationId: string;
     action: "created" | "updated" | "deleted" | "restored" | "update_undone";
     before?: AnnotationRecord;
@@ -249,6 +251,7 @@ export async function createTicketRecord(ctx: MutationCtx, input: NewTicket) {
     lifecycle: "active",
     description: input.description,
     status: "new",
+    customerQueueGroup: "active",
     ticketNumber,
     media: input.media,
     annotations,

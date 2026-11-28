@@ -10,8 +10,10 @@ test("a ticket without media keeps idempotency but skips UploadThing", async () 
   let uploadCalled = false;
   let intentFiles: Array<{ name: string; size: number; type: string }> | undefined;
   let createdMediaLength = -1;
+  const phases: string[] = [];
+  const ticketId = "text-only-ticket" as Id<"tickets">;
 
-  await submitTicketDraft(
+  const confirmed = await submitTicketDraft(
     {
       token: "session-token",
       createUploadIntent: async (args) => {
@@ -22,11 +24,15 @@ test("a ticket without media keeps idempotency but skips UploadThing", async () 
         uploadCalled = true;
         return [];
       },
+      onProgress: () => phases.push("uploading"),
+      onSaving: () => phases.push("saving"),
       createTicket: async (args) => {
+        phases.push("create");
         createdMediaLength = args.media.length;
         assert.equal(args.uploadIntentId, intentId);
         assert.equal(args.uploadIntentSecret, "s".repeat(48));
         assert.equal(args.requestId, "draft-idempotency-key");
+        return ticketId;
       },
     },
     {
@@ -41,6 +47,8 @@ test("a ticket without media keeps idempotency but skips UploadThing", async () 
   assert.deepEqual(intentFiles, []);
   assert.equal(uploadCalled, false);
   assert.equal(createdMediaLength, 0);
+  assert.deepEqual(phases, ["saving", "create"]);
+  assert.equal(confirmed, ticketId);
 });
 
 test("an attached intent still validates the original create request through its receipt", async () => {

@@ -1,7 +1,7 @@
 import { useT3Proof, useT3ReleaseAvailable } from "@/features/t3/adapters/connection";
 import { TicketInbox } from "./ticket-inbox";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Archive, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
 import type { TicketSummary } from "../../../shared/ticket-contracts";
@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useExplorerCopy } from "@/lib/explorer-copy";
+import { useStaffCopy } from "@/lib/staff-copy";
+import { openAndDone } from "@/lib/kanban-board";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { TicketSearchInput } from "./ticket-search-input";
 import { queueNeighbors } from "@/lib/staff-ticket-queue";
@@ -23,10 +25,15 @@ import { SubmitTicket } from "./staff-composer";
 import { StaffTicketDialog } from "./staff-ticket-dialog";
 import { useComposer } from "./use-composer";
 import { useTicketOperations } from "./use-ticket-operations";
+import { TicketOperationFailure } from "./operations";
+import { useFreshTicket } from "./adapters/fresh-ticket-status";
+import { formatTicketNumber } from "../../../shared/ticket-numbers";
 import { useWorkspaceNavigation, type ListView } from "./use-workspace-navigation";
 import { StaffViewSwitcher, StaffWorkspaceNavigation, type ProjectTool } from "./staff-workspace-navigation";
 import { useTicketStatusMoves } from "./use-ticket-status-moves";
 import { DiscardTicketDraft } from "./discard-ticket-draft";
+import { SavedSearchMenu } from "./saved-search-menu";
+import { clearSavedSearches } from "./saved-searches";
 
 const LineSettings = lazy(() => import("@/features/line/line-settings").then(module => ({ default: module.LineSettings })));
 const ConnectT3Code = lazy(() => import("@/features/t3/connect-t3-code").then(module => ({ default: module.ConnectT3Code })));
@@ -54,13 +61,19 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   onLineSettings?: (open: boolean, bot?: string) => void;
 }) {
   const owner = viewer.role === "owner";
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const copy = useExplorerCopy();
+  const staffCopy = useStaffCopy();
   const { copy: routingCopy } = useRoutingCopy();
   const nav = useWorkspaceNavigation("staff");
   const { projects, current: project, select: selectProject } = useCurrentProject(nav.project, nav.selectProject);
-  const composer = useComposer(project, onLogout);
+  // Saved searches never outlive the signed-in session that made them.
+  const composer = useComposer(project, async () => { clearSavedSearches(); await onLogout(); });
+  const composerLabel = composer.foreignDraft
+    ? (language === "th" ? "ทำฉบับร่างต่อ" : "Continue draft")
+    : t(composer.hasDraft ? "resumeTicket" : "newTicket");
   const operations = useTicketOperations();
+  const readTicket = useFreshTicket();
   // Media, retention health and Project creation stay closed in a named pilot.
   const capabilities = useTicketCapabilities();
   const legacyToolsEnabled = capabilities?.mediaEnabled === true;
@@ -90,12 +103,14 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   };
   const focusSource = useRef<HTMLElement | null>(null);
   const returnPoint = useRef<{ project: string; id: TicketId; scroll: number } | null>(null);
-  const [searchInput, setSearchInput] = useState(nav.query);
+  const exactProject = project && nav.project === project.key;
+  const scopedQuery = exactProject ? nav.query : "";
+  const [searchInput, setSearchInput] = useState(scopedQuery);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useLayoutEffect(() => {
-    setSearchInput(nav.query);
+    setSearchInput(scopedQuery);
     return () => clearTimeout(searchTimer.current);
-  }, [nav.locationKey, nav.query, project?._id]);
+  }, [nav.locationKey, scopedQuery, project?._id]);
   const commitSearch = nav.setQuery;
   const typeSearch = (value: string) => {
     setSearchInput(value);
@@ -105,18 +120,19 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const clearSearch = () => {
     clearTimeout(searchTimer.current);
     setSearchInput("");
-    if (nav.query) commitSearch("");
+    if (scopedQuery) commitSearch("");
   };
   const withSearch = (action: () => void) => {
     clearTimeout(searchTimer.current);
     nav.withQuery(searchInput, action);
   };
-  const query = nav.query.trim();
+  const query = scopedQuery.trim();
   const filter = nav.filter;
   const showArchived = filter === "archive";
   const listView = showArchived && nav.listView === "board" ? "table" : nav.listView;
   const assignmentFilter = !showArchived && project ? nav.assignment : undefined;
-  const data = useStaffTickets(project?._id, listView, filter, query, assignmentFilter);
+  const data = useStaffTickets(exactProject ? project._id : undefined, listView, filter, query, assignmentFilter);
+  const totals = data.totals ? openAndDone(data.totals) : null;
   const tags = useMemo(() => Array.from(new Map(data.items.flatMap(item => item.tags.map(tag => [tag._id, tag] as const))).values()), [data.items]);
   const rules = useTicketFilterRules(project?._id ?? "");
   // Archive has no status or assignment scope; its loaded rules and shortcut still apply.
@@ -180,12 +196,24 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     return () => cancelAnimationFrame(frame);
   }, [ticket, project?.key]);
 
-  async function restoreItem(id: TicketId) {
+  /** Resolves true only once the restore is confirmed, so callers keep the Ticket open otherwise. */
+  async function restoreItem(id: TicketId): Promise<boolean> {
     const item = data.items.find(row => row._id === id) ?? (selected?._id === id ? selected : null);
-    if (!item || busy.has(id) || inFlight.current.has(id)) return;
+    if (!item || busy.has(id) || inFlight.current.has(id)) return false;
     inFlight.current.add(id);
     setRestoring(new Set(inFlight.current));
-    try { await operations.restore(item); }
+    try { await operations.restore(item); return true; }
+    catch (error) {
+      // A conflict or rejection is reported; the row's live subscription carries the latest version.
+      if (!(error instanceof TicketOperationFailure) || error.disposition !== "unknown") throw error;
+      // Absence from the archive cannot tell restore, purge claim and lost access apart, so read the Ticket by ID.
+      const reference = formatTicketNumber(item.ticketNumber, item.projectKey);
+      const current = await readTicket(item.projectId, item._id).catch(() => undefined);
+      if (current?.lifecycle === "active") { toast.success(staffCopy.restoreConfirmed(reference)); return true; }
+      if (current?.lifecycle === "archived") toast.info(staffCopy.restoreStillArchived(reference));
+      else toast.error(staffCopy.restoreUnresolved(reference));
+      return false;
+    }
     finally { inFlight.current.delete(id); setRestoring(new Set(inFlight.current)); }
   }
   async function archiveItem(id: TicketId) {
@@ -205,6 +233,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const inlineDetail = listView === "queue";
   const split = inlineDetail && Boolean(ticket);
   const single = nav.view === "focus" && split;
+  const skipTarget = split && (!desktop || single) ? "staff-ticket-detail" : project ? "staff-results-heading" : "staff-ticket-results";
   const toolLoading = <p role="status" className="text-sm text-muted-foreground">{t("syncing")}</p>;
   const detail = <StaffTicketDialog ticket={selected} ticketId={ticket} onClose={nav.closeTicket} inline={inlineDetail} focusMode={nav.view === "focus"}
     inResults={selectedId && !data.loading ? order.includes(selectedId) : undefined}
@@ -214,34 +243,57 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     initialSection={nav.section} onMove={(_id, status) => { if (selected) void moves.moveItem(selected, status); }} onArchive={archiveItem} onRestore={restoreItem} />;
 
   return <main className="aurora-canvas min-h-screen">
-    {project && !single && <a href="#staff-ticket-results" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:p-3 focus:ring-2" onClick={event => {
+    <a href={`#${skipTarget}`} className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:p-3 focus:ring-2" onClick={event => {
       event.preventDefault();
-      document.getElementById("staff-ticket-results")?.focus();
-    }}>{t("queueSkip")}</a>}
+      const target = document.getElementById(skipTarget);
+      (target?.querySelector<HTMLElement>("h2") ?? target)?.focus();
+    }}>{t("queueSkip")}</a>
     <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 pt-3 sm:px-5 xl:px-7"}>
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation inbox={project && <TicketInbox compact key={project._id} role="staff" projectId={project._id} projectKey={project.key} openTicket={onSelect} />} projects={projects} current={project} archived={showArchived} hideOnPhone={split}
+        search={exactProject && <div className="flex min-w-0 items-center gap-1">
+          <TicketSearchInput className="min-w-0 flex-1" showLabel={!desktop} label={staffCopy.searchLabel(project.key)} value={searchInput} onChange={typeSearch} onClear={clearSearch} />
+          <SavedSearchMenu key={project._id} staffId={viewer.staffId} projectId={project._id} projectKey={project.key} query={searchInput} archived={showArchived} onRestore={saved => {
+            clearTimeout(searchTimer.current);
+            setSearchInput(saved.query);
+            nav.withQuery(saved.query, () => { if (saved.archived !== showArchived) void nav.setFilter(saved.archived ? "archive" : undefined); }, true);
+          }} />
+        </div>}
+        searchActive={Boolean(searchInput)}
+        newTicket={(project || composer.owner) && <>
+          <Button type="button" className="min-h-11 min-w-11 px-2.5 sm:px-3" aria-describedby={composer.hasDraft && !composer.open ? "staff-draft-project" : undefined} aria-expanded={composer.open}
+            aria-label={composerLabel} title={composerLabel} onClick={composer.show}>
+            <Plus aria-hidden /><span className={composer.foreignDraft ? undefined : "max-sm:sr-only"}>{composerLabel}</span>
+          </Button>
+        </>}
         legacyToolsEnabled={legacyToolsEnabled} lineEnabled={lineEnabled} t3Available={t3Available}
         onArchive={archived => withSearch(() => { void nav.setFilter(archived ? "archive" : undefined); })} onSelectProject={chooseProject} onTool={openTool} onLogout={composer.signOut} owner={owner} signedInAs={viewer.email} />
       </div>
-      <div className="mx-auto w-full min-w-0 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-5">
-        <div className={`mb-3 flex-wrap items-center justify-between gap-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
-          <h1 className="text-2xl font-semibold tracking-tight">{showArchived ? t("archive") : nav.listView === "queue" ? t("queueTitle") : copy.results}</h1>
-          {(project || composer.owner) && <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {composer.hasDraft && composer.project && <span id="staff-draft-project" className="max-w-32 truncate text-xs font-medium text-muted-foreground" title={composer.project.name}>
-              {composer.project.name} ({composer.project.key})
-            </span>}
-            <Button type="button" className="min-h-11" aria-describedby={composer.hasDraft ? "staff-draft-project" : undefined} aria-expanded={composer.open} onClick={composer.show}>
-              <Plus aria-hidden />{composer.hasDraft ? t("resumeTicket") : t("newTicket")}
-            </Button>
-          </div>}
-        </div>
+      <div className="mx-auto w-full min-w-0 py-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pt-4">
+        {composer.hasDraft && !composer.open && composer.owner && composer.project &&
+          <aside className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2">
+            <div id="staff-draft-project" className="min-w-0">
+              <p className="break-words text-sm font-medium">{composer.project.name} ({composer.project.key})</p>
+              <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>
+            </div>
+            {composer.foreignDraft && <DiscardTicketDraft owner={composer.owner} busy={composer.busy} startCurrent onDiscard={composer.startCurrentProject} />}
+          </aside>}
         {!ticket && moves.recovery}
-        {project === null ? <NoProjects action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
-          project === undefined ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
-            <div className={`aurora-toolbar relative z-20 md:sticky md:top-2 mb-3 flex-wrap items-center gap-1.5 rounded-xl p-1.5 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
-              <div className="flex min-w-0 grow basis-full items-center gap-1.5 sm:basis-64">
-                <TicketSearchInput className="min-w-0 flex-1" value={searchInput} onChange={typeSearch} onClear={clearSearch} />
+        {project === null ? <NoProjects headingId="staff-ticket-results" action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
+          project === undefined ? <div id="staff-ticket-results" tabIndex={-1} role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
+            <div className={`mb-3 flex-wrap items-center gap-x-3 gap-y-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
+              <div className="min-w-0">
+                <h1 id="staff-results-heading" tabIndex={-1} className="text-lg font-semibold leading-tight tracking-tight sm:text-2xl">{showArchived ? t("archive") : nav.listView === "queue" ? t("queueTitle") : copy.results}</h1>
+                {!showArchived && totals && <p className="text-xs tabular-nums text-muted-foreground sm:text-sm">
+                  <span className="sr-only">{copy.results}: </span>{staffCopy.totals(totals.open, totals.done)}
+                </p>}
+              </div>
+              <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5">
+                <Button type="button" variant="ghost" aria-pressed={showArchived}
+                  className={`min-h-11 min-w-11 gap-1.5 px-2.5 md:min-h-9 ${showArchived ? "bg-primary/15 text-primary hover:bg-primary/15" : "text-muted-foreground"}`}
+                  onClick={() => withSearch(() => { void nav.setFilter(showArchived ? undefined : "archive"); })}>
+                  <Archive aria-hidden /><span className="max-sm:sr-only">{staffCopy.showArchived}</span>
+                </Button>
                 {!single && (!split || desktop) && <TicketFilterPopover key={project._id} activeCount={filterCount} onClear={clearFilters}>
                   <StaffFilterFields rules={rules} tags={tags}>
                     {!showArchived && <>
@@ -266,8 +318,6 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
                     </>}
                   </StaffFilterFields>
                 </TicketFilterPopover>}
-              </div>
-              <div className="max-sm:basis-full">
                 <StaffViewSwitcher archived={showArchived} view={listView} onSelect={view => withSearch(() => { void nav.setView(view); })} />
               </div>
             </div>
@@ -291,10 +341,10 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
       </div>
     </div>
 
-    <Dialog open={composer.open} mobileFullScreen initialFocus={() => document.getElementById("title")}
+    <Dialog open={composer.open} mobileFullScreen dismissible={!composer.busy} initialFocus={() => document.getElementById("title")}
       onOpenChange={composer.setOpen} title={t("newTicket")} description={composer.project ? `${composer.project.name} (${composer.project.key})` : undefined}>
       {composer.owner && <SubmitTicket key={composer.project?._id} draftOwner={composer.owner} active={composer.open} onSubmissionComplete={afterSubmit} />}
-      {composer.hasDraft && <DiscardTicketDraft busy={composer.busy} onDiscard={composer.discard} />}
+      {composer.hasDraft && composer.owner && <DiscardTicketDraft busy={composer.busy} owner={composer.owner} onDiscard={composer.discard} />}
     </Dialog>
     {t3Settings && <Dialog open onOpenChange={() => onT3Settings?.(false)} title={t("connectT3")}>
       <Suspense fallback={toolLoading}><ConnectT3Code key={viewer.staffId} requestProof={requestT3Proof} /></Suspense>

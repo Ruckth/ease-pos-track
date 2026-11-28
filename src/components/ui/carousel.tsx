@@ -7,6 +7,11 @@ import { ArrowLeft, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n"
+import {
+  INTERACTIVE_MEDIA_SELECTOR,
+  carouselArrowDirection,
+  shouldCarouselHandleKey,
+} from "@/lib/media-ux-copy"
 
 type CarouselApi = UseEmblaCarouselType[1]
 type UseCarouselParameters = Parameters<typeof useEmblaCarousel>
@@ -18,6 +23,7 @@ type CarouselProps = {
   plugins?: CarouselPlugin
   orientation?: "horizontal" | "vertical"
   keyboardNavigation?: boolean
+  inertOffscreenSlides?: boolean
   setApi?: (api: CarouselApi) => void
 }
 
@@ -28,6 +34,8 @@ type CarouselContextProps = {
   scrollNext: () => void
   canScrollPrev: boolean
   canScrollNext: boolean
+  slidesInView: number[]
+  inertOffscreenSlides: boolean
 } & CarouselProps
 
 const CarouselContext = React.createContext<CarouselContextProps | null>(null)
@@ -48,8 +56,9 @@ const Carousel = React.forwardRef<
 >(
   (
     {
-      orientation = "horizontal",
+      orientation,
       keyboardNavigation = true,
+      inertOffscreenSlides = false,
       opts,
       setApi,
       plugins,
@@ -59,23 +68,37 @@ const Carousel = React.forwardRef<
     },
     ref
   ) => {
+    const effectiveOrientation: "horizontal" | "vertical" =
+      orientation ?? (opts?.axis === "y" ? "vertical" : "horizontal")
     const [carouselRef, api] = useEmblaCarousel(
       {
+        ...(inertOffscreenSlides ? { inViewThreshold: 0.5 } : {}),
         ...opts,
-        axis: orientation === "horizontal" ? "x" : "y",
+        axis: effectiveOrientation === "horizontal" ? "x" : "y",
       },
       plugins
     )
     const [canScrollPrev, setCanScrollPrev] = React.useState(false)
     const [canScrollNext, setCanScrollNext] = React.useState(false)
+    const [slidesInView, setSlidesInView] = React.useState<number[]>([0])
 
-    const onSelect = React.useCallback((api: CarouselApi) => {
-      if (!api) {
+    const onSelect = React.useCallback((currentApi: CarouselApi) => {
+      if (!currentApi) {
         return
       }
 
-      setCanScrollPrev(api.canScrollPrev())
-      setCanScrollNext(api.canScrollNext())
+      setCanScrollPrev(currentApi.canScrollPrev())
+      setCanScrollNext(currentApi.canScrollNext())
+      const inView = currentApi.slidesInView()
+      setSlidesInView(
+        inView.length > 0 ? inView : [currentApi.selectedScrollSnap()]
+      )
+    }, [])
+
+    const onSlidesInView = React.useCallback((currentApi: CarouselApi) => {
+      if (!currentApi) return
+      const inView = currentApi.slidesInView()
+      if (inView.length > 0) setSlidesInView(inView)
     }, [])
 
     const scrollPrev = React.useCallback(() => {
@@ -88,16 +111,25 @@ const Carousel = React.forwardRef<
 
     const handleKeyDown = React.useCallback(
       (event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (!keyboardNavigation || (event.target as Element).closest("input,textarea,video,[data-pin-surface]")) return
-        if (event.key === "ArrowLeft") {
-          event.preventDefault()
-          scrollPrev()
-        } else if (event.key === "ArrowRight") {
-          event.preventDefault()
-          scrollNext()
-        }
+        const direction = carouselArrowDirection(event.key, effectiveOrientation)
+        if (!direction) return
+        const target = event.target instanceof Element ? event.target : null
+        const canHandle = shouldCarouselHandleKey({
+          keyboardNavigation,
+          defaultPrevented: event.defaultPrevented,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          isCarouselRoot: event.target === event.currentTarget,
+          isCarouselNav: Boolean(target?.closest("[data-carousel-nav]")),
+          inInteractiveControl: Boolean(target?.closest(INTERACTIVE_MEDIA_SELECTOR)),
+        })
+        if (!canHandle) return
+        event.preventDefault()
+        if (direction === "prev") scrollPrev()
+        else scrollNext()
       },
-      [keyboardNavigation, scrollPrev, scrollNext]
+      [effectiveOrientation, keyboardNavigation, scrollPrev, scrollNext]
     )
 
     React.useEffect(() => {
@@ -116,12 +148,16 @@ const Carousel = React.forwardRef<
       onSelect(api)
       api.on("reInit", onSelect)
       api.on("select", onSelect)
+      api.on("settle", onSlidesInView)
+      api.on("slidesInView", onSlidesInView)
 
       return () => {
         api?.off("select", onSelect)
         api?.off("reInit", onSelect)
+        api?.off("settle", onSlidesInView)
+        api?.off("slidesInView", onSlidesInView)
       }
-    }, [api, onSelect])
+    }, [api, onSelect, onSlidesInView])
 
     return (
       <CarouselContext.Provider
@@ -129,17 +165,18 @@ const Carousel = React.forwardRef<
           carouselRef,
           api: api,
           opts,
-          orientation:
-            orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),
+          orientation: effectiveOrientation,
           scrollPrev,
           scrollNext,
           canScrollPrev,
           canScrollNext,
+          slidesInView,
+          inertOffscreenSlides,
         }}
       >
         <div
           ref={ref}
-          onKeyDownCapture={handleKeyDown}
+          onKeyDown={handleKeyDown}
           className={cn("relative", className)}
           role="region"
           aria-roledescription="carousel"
@@ -177,15 +214,24 @@ CarouselContent.displayName = "CarouselContent"
 
 const CarouselItem = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => {
-  const { orientation } = useCarousel()
+  React.HTMLAttributes<HTMLDivElement> & { slideIndex?: number }
+>(({ className, slideIndex, inert, "aria-hidden": ariaHidden, ...props }, ref) => {
+  const { orientation, inertOffscreenSlides, slidesInView } = useCarousel()
+  const offscreen =
+    inertOffscreenSlides &&
+    slideIndex !== undefined &&
+    slidesInView.length > 0 &&
+    !slidesInView.includes(slideIndex)
+  const resolvedInert = inert ?? (offscreen || undefined)
+  const resolvedAriaHidden = ariaHidden ?? (offscreen || undefined)
 
   return (
     <div
       ref={ref}
       role="group"
       aria-roledescription="slide"
+      inert={resolvedInert}
+      aria-hidden={resolvedAriaHidden}
       className={cn(
         "min-w-0 shrink-0 grow-0 basis-full",
         orientation === "horizontal" ? "pl-4" : "pt-4",
@@ -207,6 +253,7 @@ const CarouselPrevious = React.forwardRef<
   return (
     <Button
       ref={ref}
+      data-carousel-nav="true"
       variant={variant}
       size={size}
       className={cn(
@@ -220,7 +267,7 @@ const CarouselPrevious = React.forwardRef<
       onClick={scrollPrev}
       {...props}
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4" aria-hidden="true" />
       <span className="sr-only">{t("previousSlide")}</span>
     </Button>
   )
@@ -237,6 +284,7 @@ const CarouselNext = React.forwardRef<
   return (
     <Button
       ref={ref}
+      data-carousel-nav="true"
       variant={variant}
       size={size}
       className={cn(
@@ -250,7 +298,7 @@ const CarouselNext = React.forwardRef<
       onClick={scrollNext}
       {...props}
     >
-      <ArrowRight className="h-4 w-4" />
+      <ArrowRight className="h-4 w-4" aria-hidden="true" />
       <span className="sr-only">{t("nextSlide")}</span>
     </Button>
   )

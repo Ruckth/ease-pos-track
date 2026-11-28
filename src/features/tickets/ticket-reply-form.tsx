@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { formatClock, isActiveAnnotation, type Ticket } from "@/lib/types";
+import { errorCode } from "../../../shared/errors";
 import { IMAGE_SOURCE_BYTES } from "../../../shared/image-optimization";
 import { validateFiles } from "../../../shared/media-policy";
 import { MEDIA_POLICY } from "../../../shared/ticket-contracts";
@@ -25,8 +26,8 @@ const replyNoReceiptErrors = new Set([
   "COMMENT_NOT_FOUND", "INVALID_INPUT", "MEDIA_UNAVAILABLE", "PAGE_UNAVAILABLE", "TICKET_RESOLVED", "VERSION_CONFLICT",
 ]);
 
-export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send }: {
-  draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
+export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send, needsAnswer }: {
+  needsAnswer: boolean; draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
   textarea: RefObject<HTMLTextAreaElement | null>; send: ReturnType<typeof useConversation>["send"];
 }) {
   const { t, formatDate } = useI18n();
@@ -36,7 +37,7 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
   const messageId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const { owner } = draft;
-  const { replyTo, evidence, link, requestReply } = useSyncExternalStore(draft.subscribe, draft.getSelection);
+  const { replyTo, evidence, link, requestReply, answerVersion, submittedAnswerVersion } = useSyncExternalStore(draft.subscribe, draft.getSelection);
   const setEvidence = (next?: MessageEvidenceInput) => draft.update({ evidence: next });
   const setLink = (next?: ReplyLink) => draft.update({ link: next });
   const [linkField, setLinkField] = useState<string>();
@@ -48,7 +49,7 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
   const pages = useConversationPages(ticket._id, role === "staff" && mediaEnabled && (pickingPage || link?.kind === "page"));
   const activeAnnotations = (ticket.annotations ?? []).filter(isActiveAnnotation);
   const progress = state.progress;
-  const busy = progress !== null;
+  const busy = owner.isSubmitting();
   const locked = busy || state.retryLocked;
   const canEdit = writable && !locked;
   const canSubmit = writable || state.retryLocked;
@@ -87,23 +88,29 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
     event.preventDefault();
     if (!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence) return;
     setSent(undefined);
+    const version = state.retryLocked ? submittedAnswerVersion : answerVersion ?? (needsAnswer ? ticket.version : undefined);
+    if (!state.retryLocked) draft.update({ submittedAnswerVersion: version });
     const ok = await owner.submit({
       token: accessToken ?? "",
       mediaEnabled: mediaEnabled && state.items.length > 0,
       createUploadIntent,
       noReceiptErrors: replyNoReceiptErrors,
-      createTicket: ({ requestId, description, media, uploadIntentId, uploadIntentSecret }) =>
-        send({
-          id: ticket._id, expectedVersion: ticket.version, body: description, requestId,
+      createTicket: async ({ requestId, description, media, uploadIntentId, uploadIntentSecret }) => {
+        await send({
+          id: ticket._id, expectedVersion: version ?? ticket.version, body: description, requestId,
           inReplyTo: replyTo?._id, requestReply: role === "staff" ? requestReply : undefined, link,
+          answeringRequest: version === undefined ? undefined : true,
           ...(evidence ? { evidence } : {}),
           ...(media.length ? { media, uploadIntentId, uploadIntentSecret } : {}),
-        }),
+        });
+      },
       onCleanupError: error => toast.error(localizeError(error, t)),
     });
     if (ok) {
       draft.clear();
       setSent(requestReply ? "questionSent" : "replySent");
+    } else if (errorCode(owner.getSnapshot().error) === "VERSION_CONFLICT") {
+      draft.update({ answerVersion: undefined });
     }
   }
 
@@ -246,7 +253,7 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
       <Button type="submit" size="sm" className="ml-auto" disabled={!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence}>
         <Send aria-hidden />{t(requestReply ? "sendQuestion" : "sendReply")}
       </Button>
-      {busy && state.items.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={owner.cancel}>{t("cancelUpload")}</Button>}
+      {state.stage === "upload" && <Button type="button" variant="ghost" size="sm" onClick={owner.cancel}>{t("cancelUpload")}</Button>}
     </div>
     {state.retryLocked && !busy && <Button type="button" variant="outline" size="sm" onClick={() => {
       if (!window.confirm(t("threadDiscardReplyConfirm"))) return;
@@ -254,7 +261,7 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
       draft.clear();
     }}>{t("discardDraft")}</Button>}
     {state.error != null && <p role="alert" className="text-sm text-destructive">{localizeError(state.error, t)}</p>}
-    {busy && state.items.length > 0 && <progress className="w-full" aria-label={t("submitting")} value={progress} max={100} />}
+    {state.stage === "upload" && progress !== null && <progress className="w-full" aria-label={t("submitting")} value={progress} max={100} />}
     <p role="status" className="text-sm text-muted-foreground">
       {state.retryLocked ? t("threadRetry") : !writable ? t("threadClosed") : sent ? t(sent) : null}
     </p>

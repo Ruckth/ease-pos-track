@@ -79,6 +79,7 @@ test("named staff use rules, review, Mine and manual holds while the customer se
       await classification.getByText("เครื่องพิมพ์ · ใบเสร็จว่าง", { exact: true }).waitFor();
       assert.equal(await product.isVisible(), false);
       await customer.page.getByRole("button", { name: copy("th", "submitTicket"), exact: true }).click();
+      await customer.page.getByRole("button", { name: "ดู Ticket", exact: true }).click();
       await customer.page.waitForURL(/ticket=/);
       await customer.page.getByRole("heading", { name: title }).waitFor();
       const ticket = new URL(customer.page.url()).searchParams.get("ticket");

@@ -10,10 +10,10 @@ function row(id: string, status: TicketSummary["status"], createdAt: number, tit
     createdAt, updatedAt: createdAt, tagIds: [], tags: [], urgencyScore: undefined, archivedAt: undefined };
 }
 
-test("customer Active includes Waiting and keeps it first even after a newer Ticket arrives", () => {
+test("customer Active groups New, Acknowledged and In progress in descending Ticket order", () => {
   const rows = [row("newest", "new", 50), row("waiting", "waiting", 1), row("working", "in_progress", 5), row("done", "done", 100)];
-  assert.deepEqual(customerQueue(rows, "active").map(item => item._id), ["waiting", "newest", "working"]);
-  assert.deepEqual(customerQueueCounts(rows), { all: 4, active: 3, waiting: 1, done: 1 });
+  assert.deepEqual(customerQueue(rows, "active").map(item => item._id), ["newest", "working"]);
+  assert.deepEqual(customerQueueCounts(rows), { all: 4, active: 2, waiting: 1, done: 1 });
   assert.equal(rows[0]._id, "newest", "ordering must not mutate subscription data");
 });
 
@@ -25,7 +25,7 @@ test("customer feed prioritizes replies needed and then recent thread activity",
   const latest = { ...row("latest", "in_progress", 3), latestReply: {
     role: "customer" as const, at: 15, excerpt: "Register 2", awaitingCustomer: false,
   } };
-  assert.deepEqual(customerQueue([waiting, question, latest, row("new", "new", 4)], "active").map(item => item._id),
+  assert.deepEqual(customerQueue([waiting, question, latest, row("new", "new", 4)], "all").map(item => item._id),
     ["question", "waiting", "latest", "new"]);
 });
 

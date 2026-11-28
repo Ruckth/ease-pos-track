@@ -158,6 +158,7 @@ export const sendMessage = mutationOperation({
     id: v.id("tickets"), body: v.string(), requestId: v.string(),
     expectedVersion: v.number(), inReplyTo: v.optional(v.id("ticketMessages")),
     requestReply: v.optional(v.boolean()),
+    answeringRequest: v.optional(v.boolean()),
     link: v.optional(messageLinkValidator),
     evidence: v.optional(messageEvidenceValidator),
     media: v.optional(v.array(mediaItemValidator)),
@@ -175,6 +176,8 @@ export const sendMessage = mutationOperation({
     const media = args.media ?? [];
     const hasMedia = media.length > 0 || args.uploadIntentId !== undefined || args.uploadIntentSecret !== undefined;
     if (actor.role === "customer" && (args.requestReply === true || args.link?.kind === "page")) throw new Error("STAFF_ONLY");
+    if (args.answeringRequest && actor.role !== "customer") throw new Error("INVALID_INPUT");
+    const answerVersion = args.answeringRequest ? args.expectedVersion : undefined;
     const requestReply = actor.role === "staff" ? args.requestReply ?? true : undefined;
     const link = normalizeLink(args.link);
     const evidence = normalizeMessageEvidence(args.evidence);
@@ -198,7 +201,7 @@ export const sendMessage = mutationOperation({
         || previous.body !== body || previous.inReplyTo !== args.inReplyTo || effectiveRequestReply(previous) !== requestReply
         || linkKey(previous.link) !== linkKey(link) || messageEvidenceKey(previous.evidence) !== messageEvidenceKey(evidence)
         || !sameKeys(previous.mediaKeys, mediaKeys)
-        || previous.uploadIntentId !== args.uploadIntentId) throw new Error("REQUEST_ID_CONFLICT");
+        || previous.answerVersion !== answerVersion || previous.uploadIntentId !== args.uploadIntentId) throw new Error("REQUEST_ID_CONFLICT");
       if (hasMedia) {
         requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId!), actor, args.uploadIntentSecret!);
         await verifyAssetReceipts(ctx, args.uploadIntentId!, media, ticket._id);
@@ -207,9 +210,14 @@ export const sendMessage = mutationOperation({
     }
 
     if (ticket.status === "done") throw new Error("TICKET_RESOLVED");
-    if (args.inReplyTo) {
-      const target = await ctx.db.get(args.inReplyTo);
-      if (!target || target.ticketId !== ticket._id) throw new Error("INVALID_INPUT");
+    const replyTarget = args.inReplyTo && await ctx.db.get(args.inReplyTo);
+    if (args.inReplyTo && (!replyTarget || replyTarget.ticketId !== ticket._id)) throw new Error("INVALID_INPUT");
+    const expectsAnswer = actor.role === "customer" && ticket.status === "waiting"
+      && (ticket.latestReply?.awaitingCustomer || !ticket.latestReply?.answeredCustomerRequest);
+    if (expectsAnswer && answerVersion === undefined) throw new Error("VERSION_CONFLICT");
+    if (answerVersion !== undefined) {
+      requireCurrentVersion(ticket, answerVersion);
+      if (!expectsAnswer) throw new Error("VERSION_CONFLICT");
     }
     if (link?.kind === "page") {
       if (!await hasLegacyAccess(ctx)) throw new Error("PAGE_UNAVAILABLE");
@@ -246,7 +254,7 @@ export const sendMessage = mutationOperation({
     }
     const answeredCustomerRequest = ticket.status === "waiting" && !requestReply
       && (ticket.latestReply?.answeredCustomerRequest === true
-        || (actor.role === "customer" && ticket.latestReply?.awaitingCustomer === true));
+        || answerVersion !== undefined);
     // Thread activity has its own timestamp and leaves the Ticket version alone.
     await ctx.db.patch(ticket._id, {
       ...(intent ? { replyMediaKeys: [...(ticket.replyMediaKeys ?? []), ...mediaKeys] } : {}),
@@ -263,6 +271,7 @@ export const sendMessage = mutationOperation({
       ticketId: args.id, role: actor.role, authorSessionId: ctx.session._id, customerId: actor.customerId, staffId: actor.staffId,
       body, requestId, inReplyTo: args.inReplyTo,
       ...(requestReply === undefined ? {} : { requestReply }),
+      ...(answerVersion === undefined ? {} : { answerVersion }),
       ...(link ? { link } : {}),
       ...(evidence ? { evidence } : {}),
       ...(intent ? { mediaKeys, uploadIntentId: intent._id } : {}),

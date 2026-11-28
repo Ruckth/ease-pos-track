@@ -3,7 +3,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
-import { ticketStatus } from "../schema";
+import { customerQueueGroup, ticketStatus } from "../schema";
 import { parseTicketReference } from "../../shared/ticket-numbers";
 import { queryOperation } from "./operation";
 import { requireRoutingStaff } from "./routing_identity";
@@ -55,6 +55,8 @@ export function ticketSummary(row: Doc<"tickets">, tags: PublicTag[], role: Read
     ...(row.latestReply ? { latestReply: row.latestReply } : {}),
     ...(row.origin === "staff" ? { openedByStaff: true } : {}),
     ...(role === "staff" ? { urgencyScore: row.urgencyScore } : {}),
+    // Staff-only: a blocked purge keeps an eligible archived Ticket restorable.
+    ...(role === "staff" && row.lifecycle === "archived" && row.purgeBlocked ? { purgeBlocked: true as const } : {}),
     lifecycle: row.lifecycle,
     tagIds: row.tagIds ?? [], tags,
     archivedAt: row.archivedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
@@ -90,6 +92,8 @@ const pageTicketRows = queryOperation({
     projectId: v.id("projects"),
     lifecycle: v.union(v.literal("active"), v.literal("archived")),
     status: v.optional(ticketStatus),
+    customerGroup: v.optional(customerQueueGroup),
+    legacyCustomerGroup: v.optional(v.boolean()),
     assignmentFilter: v.optional(v.union(v.literal("mine"), v.literal("unassigned"))),
     paginationOpts: paginationOptsValidator,
   },
@@ -104,10 +108,25 @@ const pageTicketRows = queryOperation({
     }
     const named = args.assignmentFilter ? await requireRoutingStaff(ctx, ctx.session) : null;
     const assignee = args.assignmentFilter === "mine" ? named?.staffId : undefined;
-    const query = ctx.actor.role === "customer"
-      ? ctx.db.query("tickets").withIndex("by_owner_project", q => q.eq("ownerCustomerId", ctx.actor.role === "customer" ? ctx.actor.customerId : undefined)
-        .eq("projectId", project._id).eq("lifecycle", args.lifecycle))
-      : args.assignmentFilter
+    if (ctx.actor.role === "customer") {
+      if (args.status !== undefined) throw new Error("INVALID_INPUT");
+      const { customerId } = ctx.actor;
+      const { customerGroup: group } = args;
+      const owned = ctx.db.query("tickets").withIndex("by_owner_project", q => q.eq("ownerCustomerId", customerId)
+        .eq("projectId", project._id).eq("lifecycle", args.lifecycle));
+      if (!group) return await owned.order("desc").paginate(opts);
+      if (args.legacyCustomerGroup) {
+        const filtered = owned.filter(q => group === "active"
+          ? q.and(q.neq(q.field("status"), "waiting"), q.neq(q.field("status"), "done"))
+          : q.eq(q.field("status"), group));
+        return await filtered.order("desc").paginate(opts);
+      }
+      return await ctx.db.query("tickets").withIndex("by_owner_project_group", q => q.eq("ownerCustomerId", customerId)
+        .eq("projectId", project._id).eq("lifecycle", args.lifecycle).eq("customerQueueGroup", group))
+        .order("desc").paginate(opts);
+    }
+    if (args.customerGroup !== undefined || args.legacyCustomerGroup !== undefined) throw new Error("INVALID_INPUT");
+    const query = args.assignmentFilter
         ? args.status === undefined
           ? ctx.db.query("tickets").withIndex("by_project_assignee", q => q.eq("projectId", project._id)
             .eq("lifecycle", args.lifecycle).eq("assigneeStaffId", assignee))
@@ -116,8 +135,6 @@ const pageTicketRows = queryOperation({
       : args.status !== undefined
         ? ctx.db.query("tickets").withIndex("by_project_lane", q => q.eq("projectId", project._id).eq("lifecycle", args.lifecycle).eq("status", args.status!))
         : ctx.db.query("tickets").withIndex("by_project_lifecycle", q => q.eq("projectId", project._id).eq("lifecycle", args.lifecycle));
-    // Customer status tabs filter only their loaded summaries in the UI.
-    if (ctx.actor.role === "customer" && args.status !== undefined) throw new Error("INVALID_INPUT");
     return await query.order("desc").paginate(opts);
   },
 });
@@ -150,8 +167,21 @@ export const laneTotals = queryOperation({
   },
 });
 
+/** During rollout, a legacy row keeps this owner and Project on the compatibility read. */
+export const customerQueueIndexReady = queryOperation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const project = await requireUsableProject(ctx, ctx.actor, args.projectId);
+    if (ctx.actor.role !== "customer") throw new Error("INVALID_INPUT");
+    const { customerId } = ctx.actor;
+    return !(await ctx.db.query("tickets").withIndex("by_owner_project_group", q => q.eq("ownerCustomerId", customerId)
+      .eq("projectId", project._id).eq("lifecycle", "active").eq("customerQueueGroup", undefined)).first());
+  },
+});
+
 const SEARCH_LIMIT = 50;
 const OPEN_STATUSES = ["new", "acknowledged", "in_progress", "waiting"] as const;
+const CUSTOMER_ACTIVE_STATUSES = ["new", "acknowledged", "in_progress"] as const;
 
 /** The index ranks each status independently and does not expose comparable
  * scores. Interleave equal rank positions in workflow order. Read one extra
@@ -198,7 +228,7 @@ export const searchTickets = queryOperation({
       const row = await ctx.db.query("tickets").withIndex("by_project_ticket", q =>
         q.eq("projectKey", reference.projectKey).eq("ticketNumber", reference.ticketNumber)).unique();
       const visible = row && row.projectId === project._id && row.lifecycle === args.lifecycle
-        && (!args.activeOnly || row.status !== "done")
+        && (!args.activeOnly || row.status !== "done" && (ctx.actor.role === "staff" || row.status !== "waiting"))
         && (args.status === undefined || row.status === args.status)
         && (!args.assignmentFilter || row.assigneeStaffId === assignee)
         && (ctx.actor.role === "staff" || row.ownerCustomerId === ctx.actor.customerId);
@@ -211,7 +241,7 @@ export const searchTickets = queryOperation({
       return status === undefined ? assigned : assigned.eq("status", status);
     });
     const rows = args.activeOnly
-      ? await mergeRankedLanes(OPEN_STATUSES.map(searchLane))
+      ? await mergeRankedLanes((ctx.actor.role === "customer" ? CUSTOMER_ACTIVE_STATUSES : OPEN_STATUSES).map(searchLane))
       : await searchLane(args.status).take(SEARCH_LIMIT + 1);
     const resolveTags = ticketTagResolver(ctx);
     const matches = await Promise.all(rows.slice(0, SEARCH_LIMIT).map(async row => ticketSummary(row, await resolveTags(row), ctx.actor.role)));

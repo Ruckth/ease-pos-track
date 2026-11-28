@@ -102,6 +102,13 @@ for (const [role, language] of [["staff", "en"], ["customer", "th"]] as const) {
       await page.keyboard.type(name);
       assert.equal(await title.getAttribute("aria-invalid"), null, "Typing clears the invalid state");
       await page.keyboard.press("Enter");
+      const receipt = composer.getByRole("heading", { name: /POS-\d+/ });
+      await receipt.waitFor();
+      assert.equal(await isFocused(receipt), true, "Confirmation focuses the Ticket receipt");
+      await page.keyboard.press("Tab");
+      const view = composer.getByRole("button", { name: language === "th" ? "ดู Ticket" : "View Ticket", exact: true });
+      assert.equal(await isFocused(view), true);
+      await page.keyboard.press("Enter");
       await composer.waitFor({ state: "hidden" });
       await page.waitForFunction(() => new URL(location.href).searchParams.has("ticket"));
       const id = new URL(page.url()).searchParams.get("ticket") as Id<"tickets">;
@@ -186,7 +193,8 @@ for (const language of ["en", "th"] as const) {
       await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       await page.getByRole("button", { name: copy(language, "queueLabel"), exact: true }).click();
       await page.getByPlaceholder(copy(language, "search"), { exact: true }).fill(name);
-      await page.getByRole("button", { name: copy(language, "archive"), exact: true }).click();
+      await openHeaderMenu(page, copy(language, "queueMore"));
+      await page.getByRole("menuitemradio", { name: copy(language, "archive"), exact: true }).click();
       const row = page.locator(`button[data-ticket-id="${ticket._id}"]:visible`);
       await row.focus();
       await page.keyboard.press("Enter");

@@ -52,9 +52,8 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
     reply: reply.excerpt || t(reply.hasLink ? "feedLinkReply" : "feedAttachmentReply"),
   }) : item.excerpt;
   const updatedAt = Math.max(item.updatedAt, reply?.at ?? 0);
-  const updatedLater = updatedAt - item.createdAt >= 60_000;
-  const activity = t(updatedLater ? "updatedOn" : "createdAt", { date: formatDate(updatedAt) });
-  const needsReply = waiting && reply?.awaitingCustomer === true;
+  const activity = t("updatedOn", { date: formatDate(updatedAt) });
+  const needsReply = waiting && (reply?.awaitingCustomer === true || !reply?.answeredCustomerRequest);
   const youReplied = waiting && !needsReply && (reply?.answeredCustomerRequest || reply?.role === "customer");
   const description = [excerpt ? excerptId : "", needsReply || youReplied ? replyStateId : "", activityId].filter(Boolean).join(" ");
 
@@ -103,7 +102,7 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
       <span className="ml-auto inline-flex items-center gap-1">
         <time data-ticket-activity className="whitespace-nowrap tabular-nums" dateTime={new Date(updatedAt).toISOString()} title={activity}>
           <span id={activityId} className="sr-only">{activity}</span>
-          <span aria-hidden="true">{activityLabel(language, updatedAt, t("customerQueueYesterday"))}</span>
+          <span aria-hidden="true">{t("updatedOn", { date: activityLabel(language, updatedAt, t("customerQueueYesterday")) })}</span>
         </time>
         <ChevronRight className="hidden size-3.5 shrink-0 text-primary transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none sm:block" aria-hidden="true" />
       </span>

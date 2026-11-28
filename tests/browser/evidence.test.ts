@@ -2,7 +2,8 @@
 // local seed. Runs only when EVIDENCE_LABEL is set (for example `before` on the
 // base commit and `after` on the candidate), so the images share data,
 // Chromium, viewport and locale. Screens hold synthetic fixture data only.
-import { mkdirSync } from "node:fs";
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { after, test as nodeTest } from "node:test";
 import type { Page } from "playwright";
@@ -63,6 +64,40 @@ for (const [role, language, width] of [["customer", "en", 1280], ["customer", "t
           await shot(page, `${role}-${language}-${width}-toast`);
         }
       }
+    } finally { await context.close(); }
+  });
+}
+
+if (label === "after") for (const role of ["staff", "customer"] as const) {
+  test(`${role} toolbar measurements`, async () => {
+    const { page, context } = await openWith(await browsers.get(), role, "en");
+    const metrics = [];
+    try {
+      await page.getByRole("dialog").getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
+      const toolbar = page.locator("main header").first();
+      for (const width of [320, 390, 1100, 1279, 1280]) {
+        await page.setViewportSize({ width, height: 844 });
+        const laneCount = width >= 1280 ? 5 : 1;
+        if (role === "staff") await page.waitForFunction(expected => document.querySelectorAll('[data-slot="kanban-column"]').length === expected, laneCount);
+        await settle(page);
+        const geometry = await toolbar.evaluate(el => ({
+          height: el.getBoundingClientRect().height,
+          overflow: document.documentElement.scrollWidth - innerWidth,
+          controls: Array.from(el.querySelectorAll("button")).filter(button => button.getClientRects().length && !button.closest('[role="menu"]')).map(button => {
+            const { width, height } = button.getBoundingClientRect();
+            return { label: button.getAttribute("aria-label") || button.textContent?.trim(), width, height };
+          }),
+        }));
+        assert.ok(geometry.overflow <= 1, `${role} ${width}px overflow ${geometry.overflow}`);
+        assert.equal(await toolbar.getByText(copy("en", "appName"), { exact: true }).count(), 0);
+        if (width === 390) {
+          assert.ok(geometry.height >= 48 && geometry.height <= 56, `${role} toolbar height ${geometry.height}px`);
+          for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, JSON.stringify(control));
+        }
+        metrics.push({ role, width, ...geometry, ...(role === "staff" ? { lanes: laneCount } : {}) });
+        if (width === 390 || width === 1100) await shot(page, `${role}-en-${width}-workspace`);
+      }
+      writeFileSync(path.join(dir, `toolbar-${role}.json`), JSON.stringify(metrics, null, 2));
     } finally { await context.close(); }
   });
 }

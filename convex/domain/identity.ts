@@ -130,8 +130,10 @@ export async function viewerFor(ctx: Ctx, admission: Doc<"sessionAdmissions">) {
     const customer = await ctx.db.get(admission.customerId);
     if (!customer || customer.status !== "active" || customer.generation !== admission.generation
       || !customerCredentialIsCurrent(customer, await identityRecoveryAdmission(ctx))) return null;
+    const identity = customer.clerkManaged ? await ctx.db.get(admission.userId) : null;
     return {
       kind: "customer" as const, customerId: customer._id, username: customer.username,
+      email: identity?.googleEmailVerified ? identity.googleEmail ?? null : null,
       displayName: customer.displayName, clerkManaged: customer.clerkManaged === true,
       needsRecoveryCode: !customer.clerkManaged && customer.recoveryCodeDigest === undefined,
       recoveryEnrollmentRequired: customer.recoveryEnrollmentRequired === true,

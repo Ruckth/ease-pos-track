@@ -6,7 +6,16 @@ import { distinguishUploadFiles, submitTicketDraft, type SubmitTicketDeps, type 
 import { MEDIA_POLICY } from "../../../shared/ticket-contracts";
 import { validateFiles } from "../../../shared/media-policy";
 
-export type DraftSnapshot = TicketDraft & { progress: number | null; error: unknown; retryLocked?: boolean };
+export type ComposerStep = 1 | 2 | 3;
+export type SubmitStage = "upload" | "canceling" | "saving" | "confirmed";
+export type DraftSnapshot = TicketDraft & {
+  progress: number | null; error: unknown; retryLocked?: boolean;
+  stage: SubmitStage | null; step: ComposerStep | null; canceled: boolean;
+  confirmedId?: Id<"tickets">;
+};
+type DraftSubmitDeps = Omit<SubmitTicketDeps, "signal" | "onSaving" | "onProgress" | "onRequestConflict" | "createTicket" | "reconciling"> & {
+  createTicket: (args: Parameters<SubmitTicketDeps["createTicket"]>[0] & { projectId: Id<"projects"> }) => ReturnType<SubmitTicketDeps["createTicket"]>;
+};
 type ImageCrop = { x: number; y: number; width: number; height: number };
 type Resources = { prepareImage?: (file: File) => Promise<File>; createURL: (file: File) => string; revokeURL: (url: string) => void; requestKey: () => string; now: () => number };
 
@@ -15,13 +24,11 @@ export class DisposableTicketDraft {
   private state: DraftSnapshot;
   private listeners = new Set<() => void>();
   private controller: AbortController | null = null;
-  private submission: ReturnType<typeof submitTicketDraft> | null = null;
+  private submission: Promise<boolean> | null = null;
   private disposed = false;
   private retry?: { draft: TicketDraft; mediaEnabled?: boolean };
   private reviewedFiles = new WeakSet<File>();
-  /** Set only after the create receipt is reconciled and cancellation checked. */
-  private submittedId: Id<"tickets"> | undefined;
-  get lastSubmittedId() { return this.submittedId; }
+  get lastSubmittedId() { return this.state.confirmedId; }
   constructor(readonly projectId: Id<"projects">, private resources: Resources = {
     prepareImage: async file => (await import("@/lib/optimize-image")).optimizeBrowserImage(file),
     createURL: file => URL.createObjectURL(file), revokeURL: url => URL.revokeObjectURL(url),
@@ -30,21 +37,22 @@ export class DisposableTicketDraft {
     this.state = this.empty();
   }
   private empty(): DraftSnapshot {
-    return { title: "", description: "", routingClassification: undefined, items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null, retryLocked: false };
+    return { title: "", description: "", routingClassification: undefined, items: [], annotations: [], idempotencyKey: this.resources.requestKey(), progress: null, error: null, retryLocked: false, stage: null, step: null, canceled: false, confirmedId: undefined };
   }
   getSnapshot = () => this.state;
   hasContent = () => {
     const { title, description, routingClassification, items, annotations } = this.state;
     return Boolean(title || description || routingClassification || items.length || annotations.length);
   };
-  isSubmitting = () => this.state.progress !== null;
+  isSubmitting = () => this.state.stage !== null && this.state.stage !== "confirmed";
+  setStep = (step: ComposerStep | null) => this.change({ step });
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private change(patch: Partial<DraftSnapshot>) {
     if (this.disposed) return;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach(listener => listener());
   }
-  private canEdit() { return !this.disposed && !this.controller && !this.retry; }
+  private canEdit() { return !this.disposed && !this.controller && !this.retry && this.state.stage !== "confirmed"; }
   setTitle = (title: string) => { if (this.canEdit()) this.change({ title }); };
   setDescription = (description: string) => { if (this.canEdit()) this.change({ description }); };
   setRoutingClassification = (routingClassification: TicketDraft["routingClassification"]) => {
@@ -138,23 +146,29 @@ export class DisposableTicketDraft {
     this.change(this.empty());
   };
   cancel = () => {
-    if (this.controller && !this.controller.signal.aborted) this.controller.abort();
+    if (!this.controller || this.state.stage !== "upload" || this.controller.signal.aborted) return;
+    this.change({ stage: "canceling" });
+    this.controller.abort();
   };
   cancelAndSettle = async () => {
     this.cancel();
     // submit records failures on the draft. Wait for its guarded cleanup, too.
     await this.submission?.catch(() => {});
   };
-  async submit(deps: Omit<SubmitTicketDeps, "signal" | "onProgress" | "onRequestConflict" | "createTicket" | "reconciling"> & {
-    createTicket: (args: Parameters<SubmitTicketDeps["createTicket"]>[0] & { projectId: Id<"projects"> }) => Promise<unknown>;
-  }) {
-    if (this.disposed || this.controller) return false;
+  async submit(deps: DraftSubmitDeps) {
+    if (this.disposed || this.controller || this.state.stage === "confirmed") return false;
     const controller = new AbortController();
     this.controller = controller;
+    const submission = this.runSubmission(deps, controller);
+    this.submission = submission;
+    try { return await submission; }
+    finally { if (this.submission === submission) this.submission = null; }
+  }
+  private async runSubmission(deps: DraftSubmitDeps, controller: AbortController) {
     const previous = this.retry;
     let prepared = previous;
     const draft = this.state;
-    this.change({ progress: 0, error: null });
+    this.change({ stage: draft.items.length ? "upload" : "saving", progress: null, error: null, canceled: false });
     try {
       if (!prepared) {
         if (deps.mediaEnabled === false && (draft.items.length || draft.annotations.length)) throw new Error("PILOT_MEDIA_DISABLED");
@@ -183,35 +197,38 @@ export class DisposableTicketDraft {
         };
       }
       this.retry = prepared;
-      this.submission = submitTicketDraft({
+      const created = await submitTicketDraft({
         ...deps,
         mediaEnabled: prepared.mediaEnabled,
         reconciling: !!previous,
         createTicket: args => deps.createTicket({ ...args, projectId: this.projectId }),
         signal: controller.signal,
-        onProgress: progress => { if (this.controller === controller) this.change({ progress }); },
+        onSaving: () => { if (this.controller === controller) this.change({ stage: "saving", progress: null }); },
+        onProgress: progress => {
+          if (this.controller === controller && this.state.stage === "upload") this.change({ progress });
+        },
         onRequestConflict: () => {
           if (this.controller !== controller) return;
           this.retry = undefined;
           this.change({ idempotencyKey: this.resources.requestKey(), retryLocked: false });
         },
       }, prepared.draft);
-      const created = await this.submission;
       if (this.disposed || this.controller !== controller) return false;
-      controller.signal.throwIfAborted();
-      this.submittedId = typeof created === "string" ? created as Id<"tickets"> : undefined;
+      const confirmedId = created || undefined;
       this.release();
-      this.change(this.empty());
+      this.change({ ...this.empty(), confirmedId, stage: confirmedId ? "confirmed" : null });
       return true;
     } catch (error) {
-      if (this.controller === controller) this.change({ error, retryLocked: !!this.retry });
+      if (this.controller === controller) {
+        const canceled = this.state.stage === "canceling";
+        this.change({ error: canceled && !this.retry ? null : error, retryLocked: !!this.retry, canceled });
+      }
       return false;
     } finally {
-      this.submission = null;
       if (this.controller === controller) {
         if (!controller.signal.aborted) controller.abort();
         this.controller = null;
-        this.change({ progress: null });
+        this.change({ stage: null, progress: null });
       }
     }
   }

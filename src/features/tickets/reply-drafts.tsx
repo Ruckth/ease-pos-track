@@ -12,6 +12,8 @@ type ReplySelection = {
   evidence?: MessageEvidenceInput;
   link?: ReplyLink;
   requestReply: boolean;
+  answerVersion?: number;
+  submittedAnswerVersion?: number;
 };
 
 export class TicketReplyDraft {
@@ -26,8 +28,8 @@ export class TicketReplyDraft {
   getSelection = () => this.selection;
 
   canQuote = () => {
-    const { progress, retryLocked } = this.owner.getSnapshot();
-    return progress === null && !retryLocked;
+    const { retryLocked } = this.owner.getSnapshot();
+    return !this.owner.isSubmitting() && !retryLocked;
   };
 
   subscribe = (listener: () => void) => {
@@ -40,7 +42,7 @@ export class TicketReplyDraft {
     this.listeners.forEach(listener => listener());
   };
 
-  clear = () => this.update({ replyTo: undefined, evidence: undefined, link: undefined, requestReply: false });
+  clear = () => this.update({ replyTo: undefined, evidence: undefined, link: undefined, requestReply: false, answerVersion: undefined, submittedAnswerVersion: undefined });
 }
 
 const ReplyDrafts = createContext<Map<Id<"tickets">, TicketReplyDraft> | null>(null);

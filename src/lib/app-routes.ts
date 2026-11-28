@@ -18,6 +18,7 @@ type RouteSession = "loading" | "signed-out" | "pending" | SessionRole;
 
 type AppRoute =
   | { page: "loading" }
+  | { page: "unavailable" }
   | { page: "redirect"; to: string }
   | { page: "staff-login" }
   | { page: "staff-invite" }
@@ -78,12 +79,12 @@ export function resolveAppRoute(pathname: string, session: RouteSession): AppRou
     case APP_PATHS.staffHome:
     case APP_PATHS.root:
       return { page: "redirect", to: APP_PATHS.staffLogin };
+    case "/customer/register":
+      return { page: "redirect", to: APP_PATHS.customerLogin };
+    case APP_PATHS.staffT3Settings:
+    case APP_PATHS.staffLineSettings:
+      return { page: "redirect", to: APP_PATHS.staffLogin };
     default:
-      return {
-        page: "redirect",
-        to: path.startsWith(`${APP_PATHS.customerHome}/`)
-          ? APP_PATHS.customerLogin
-          : APP_PATHS.staffLogin,
-      };
+      return { page: "unavailable" };
   }
 }

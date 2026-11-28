@@ -230,7 +230,7 @@ test("a Clerk account needs a Project invitation, keeps its customer identity an
   expect(viewer).toMatchObject({ kind: "customer", clerkManaged: true, needsRecoveryCode: false });
   vi.advanceTimersByTime(1000);
   const returning = await signIn(t, "return-customer", "user_customer", "changed@fixture.test");
-  expect(await t.query(api.identity.viewer, { token: returning.session })).toEqual(viewer);
+  expect(await t.query(api.identity.viewer, { token: returning.session })).toEqual({ ...viewer, email: "changed@fixture.test" });
   expect((await t.query(api.projects.listProjects, { token: returning.session })).map(p => p.key)).toEqual(["POS"]);
   await expect(t.mutation(api.identity.createRecoveryCode, { token: returning.session })).rejects.toThrow("ACCESS_UNAVAILABLE");
   const other = await signIn(t, "other-customer", "user_other", "changed@fixture.test");

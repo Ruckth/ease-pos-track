@@ -10,16 +10,17 @@ import {
   useRouteContext,
 } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { WorkspaceError } from "@/components/error-boundary";
 import { AppToaster } from "@/components/ui/sonner";
 import { CustomerJoinPage, CustomerRecoverPage, CustomerSignInPage, PendingIdentityPage, StaffInvitePage, StaffSignInPage } from "@/components/auth-screens";
 import { APP_PATHS, homePathForRole, loginPathForRole, normalizePathname } from "@/lib/app-routes";
 import { useI18n } from "@/lib/i18n";
 import type { SessionRole } from "@/lib/session";
 import {
-  currentInvitation, guardSession, syncInvitation, takeReturnTarget, useAuthState, useLeave, type AuthState,
+  currentInvitation, guardSession, userIsSigningOut, syncInvitation, takeReturnTarget, useAuthState, useLeave, type AuthState,
 } from "./auth-store";
 import { useSessionActions } from "./adapter";
 import { guardRedirect } from "./route-guards";
@@ -29,10 +30,10 @@ export type RouterContext = { auth: AuthState };
 
 const RecoveryCodePanel = lazy(() => import("@/components/account-dialogs").then(m => ({ default: m.RecoveryCodePanel })));
 
-function Pending() {
+function Pending({ session = false }: { session?: boolean }) {
   const { t } = useI18n();
-  return <main className="aurora-canvas grid min-h-screen place-items-center" role="status">
-    <Loader2 aria-hidden="true" className="size-7 animate-spin text-muted-foreground" /><span className="sr-only">{t("loadingWorkspace")}</span>
+  return <main className="aurora-canvas flex min-h-screen flex-col items-center justify-center gap-3" role="status">
+    <Loader2 aria-hidden="true" className="size-7 motion-safe:animate-spin text-muted-foreground" /><span>{t(session ? "checkingSession" : "loadingWorkspace")}</span>
   </main>;
 }
 
@@ -66,6 +67,19 @@ function Gate({ children }: { children: ReactNode }) {
   return children;
 }
 
+function UnavailableRoute() {
+  const { t } = useI18n();
+  const path = useLocation({ select: location => location.pathname });
+  const customer = path.startsWith("/customer/");
+  useEffect(() => { document.title = t("pageUnavailable"); }, [t]);
+  return <main className="aurora-canvas grid min-h-screen place-items-center px-4">
+    <section className="aurora-panel space-y-3 p-6">
+      <h1 ref={focusHeading} tabIndex={-1} className="text-xl font-semibold">{t("pageUnavailable")}</h1>
+      <a className="text-primary underline" href={customer ? APP_PATHS.customerLogin : APP_PATHS.staffLogin}>{t(customer ? "customerSignIn" : "staffSignIn")}</a>
+    </section>
+  </main>;
+}
+
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   // One guard for every location, unknown paths included.
   beforeLoad: ({ context, location }) => {
@@ -78,7 +92,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
     if (href) throw redirect({ href, replace: true });
   },
   component: () => <Gate><Outlet /></Gate>,
-  notFoundComponent: () => <Gate><Pending /></Gate>,
+  notFoundComponent: () => <Gate><UnavailableRoute /></Gate>,
 });
 
 /**
@@ -98,10 +112,15 @@ function StaffLogin() {
   return <StaffSignInPage />;
 }
 
+declare module "@tanstack/react-router" {
+  interface HistoryState { customerUsername?: string }
+}
+
 function CustomerLogin() {
+  const username = useLocation({ select: location => location.state.customerUsername });
   const navigate = customerLoginRoute.useNavigate();
-  return <CustomerSignInPage onForgotPassword={() => void navigate({ to: APP_PATHS.customerRecover, search: true })}
-    onReturnToJoin={currentInvitation() ? () => void navigate({ to: APP_PATHS.customerJoin }) : undefined} />;
+  return <CustomerSignInPage initialUsername={username} onForgotPassword={() => void navigate({ to: APP_PATHS.customerRecover, search: true })}
+    onReturnToJoin={currentInvitation() ? value => void navigate({ to: APP_PATHS.customerJoin, state: { customerUsername: value } }) : undefined} />;
 }
 
 function CustomerRecover() {
@@ -110,12 +129,13 @@ function CustomerRecover() {
 }
 
 function CustomerJoin() {
+  const username = useLocation({ select: location => location.state.customerUsername });
   const navigate = customerJoinRoute.useNavigate();
   const { auth } = customerJoinRoute.useRouteContext();
   const { signOut } = useSessionActions();
-  return <CustomerJoinPage invitation={currentInvitation()} signedInAs={auth.status === "signed-in" ? auth.viewer.kind : null}
+  return <CustomerJoinPage initialUsername={username} invitation={currentInvitation()} signedInAs={auth.status === "signed-in" ? auth.viewer.kind : null}
     onSignOut={signOut}
-    onExistingAccount={() => void navigate({ to: APP_PATHS.customerLogin })}
+    onExistingAccount={value => void navigate({ to: APP_PATHS.customerLogin, state: { customerUsername: value } })}
     onDone={projectKey => void navigate({ to: APP_PATHS.customerHome, search: projectKey ? { project: projectKey } : {} })} />;
 }
 
@@ -125,6 +145,7 @@ function StaffInvite() {
   return <StaffInvitePage pending={auth.status === "signed-in" && auth.viewer.kind === "pending"} onSignOut={() => leave(APP_PATHS.staffLogin)} />;
 }
 
+const unavailableRoute = createRoute({ getParentRoute: () => rootRoute, path: "$", component: UnavailableRoute });
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: APP_PATHS.root, component: Pending });
 const staffLoginRoute = createRoute({ getParentRoute: () => rootRoute, path: APP_PATHS.staffLogin, validateSearch: authSearch, component: StaffLogin });
 const staffInviteRoute = createRoute({ getParentRoute: () => rootRoute, path: APP_PATHS.staffInvite, component: StaffInvite });
@@ -164,6 +185,7 @@ const customerRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  unavailableRoute,
   staffLoginRoute,
   staffInviteRoute,
   customerLoginRoute,
@@ -175,6 +197,7 @@ const routeTree = rootRoute.addChildren([
 
 export const router = createRouter({
   routeTree,
+  defaultErrorComponent: WorkspaceError,
   scrollRestoration: true,
   context: { auth: { status: "signed-out" } },
   parseSearch: parseWorkspaceSearch,
@@ -191,12 +214,22 @@ declare module "@tanstack/react-router" {
  */
 export function AppRouter() {
   const auth = useAuthState();
+  const { t } = useI18n();
+  const [expired, setExpired] = useState(() => new URLSearchParams(window.location.search).get("expired") === "1");
   const previous = useRef<AuthState | null>(null);
   const pathname = useSyncExternalStore(router.history.subscribe, () => router.history.location.pathname);
   const customerRoute = pathname === APP_PATHS.customerHome || pathname.startsWith(APP_PATHS.customerHome + "/");
   const viewer = auth !== "loading" && auth.status === "signed-in" ? auth.viewer : undefined;
   const customerTheme = normalizePathname(pathname) === APP_PATHS.customerJoin
     || (viewer && viewer.kind !== "pending" ? viewer.kind === "customer" : customerRoute);
+
+  useEffect(() => {
+    if (!viewer || viewer.kind === "pending") return;
+    if (pathname === APP_PATHS.customerHome) document.title = t("yourTickets");
+    if (pathname === APP_PATHS.staffHome) document.title = t("internalBoard");
+    if (pathname === APP_PATHS.staffT3Settings) document.title = "T3 Code";
+    if (pathname === APP_PATHS.staffLineSettings) document.title = "LINE";
+  }, [pathname, viewer, t]);
 
   // Portalled dialogs, drag previews and native form controls share the workspace palette.
   useLayoutEffect(() => {
@@ -207,13 +240,18 @@ export function AppRouter() {
     if (auth === "loading") return;
     const before = previous.current;
     previous.current = auth;
+    if (auth.status === "signed-in") setExpired(false);
+    else if (before?.status === "signed-in" && !userIsSigningOut()) setExpired(true);
     if (before !== null && before !== auth) void router.invalidate();
   }, [auth]);
 
   return (
     <>
+      {expired && auth !== "loading" && auth.status === "signed-out" &&
+        (pathname === APP_PATHS.staffLogin || pathname === APP_PATHS.customerLogin) &&
+        <p role="status" className="bg-muted px-4 py-2 text-center text-sm">{t("sessionExpired")}</p>}
       <AppToaster theme={customerTheme ? "light" : "dark"} />
-      {auth === "loading" ? <Pending /> : <RouterProvider router={router} context={{ auth }} />}
+      {auth === "loading" ? <Pending session /> : <RouterProvider router={router} context={{ auth }} />}
     </>
   );
 }

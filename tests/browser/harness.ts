@@ -124,9 +124,9 @@ export async function open(browser: Browser, role: "staff" | "customer", languag
   page.setDefaultTimeout(10_000);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`${baseURL}/${role}?project=POS`);
+  await page.goto(`${baseURL}/${role}?project=POS`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   try {
-    await page.getByRole("button", { name: copy(language, "newTicket"), exact: true }).first().click();
+    await page.getByRole("button", { name: copy(language, "newTicket"), exact: true }).first().click({ timeout: 30_000 });
   } catch (error) {
     console.error("App startup failure", page.url(), (await page.locator("body").innerText()).slice(-3000), errors);
     await context.close(); throw error;

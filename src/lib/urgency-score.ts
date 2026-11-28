@@ -16,3 +16,12 @@ export const urgencyTone: Record<UrgencyBand, string> = {
   high: "border-orange-300 bg-orange-50 text-orange-800 dark:bg-orange-950 dark:text-orange-200 dark:border-orange-700",
   critical: "border-red-300 bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200 dark:border-red-700",
 };
+
+/** An urgency field draft: blank clears; otherwise a whole number from 1 to 100. */
+export function parseUrgencyDraft(value: string): { valid: true; score: number | undefined } | { valid: false } {
+  const text = value.trim();
+  if (text === "") return { valid: true, score: undefined };
+  if (!/^\d+$/.test(text)) return { valid: false };
+  const score = Number(text);
+  return score >= 1 && score <= 100 ? { valid: true, score } : { valid: false };
+}

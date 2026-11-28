@@ -1,5 +1,5 @@
 import { errorCode } from "../../shared/errors";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 
 export type Language = "th" | "en";
 const STORAGE_KEY = "ease-pos-tracking-language";
@@ -101,7 +101,7 @@ const en = {
   customerQueueEmpty: "No loaded Tickets match this view.",
   customerQueueNoAccess: "Project access is unavailable. Choose another Project or keep your draft for later.",
   customerQueueDraftProject: "Your draft stays in {{project}}. Continue it or discard it before starting a Ticket in another Project.",
-  customerQueueYouReplied: "You replied",
+  customerQueueYouReplied: "Reply sent · awaiting staff",
   customerQueueYesterday: "Yesterday",
   customerQueueDraftLabel: "Unsent draft",
   customerQueueDraftHint: "Saved in this tab until you send it, reload or sign out.",
@@ -219,7 +219,14 @@ const en = {
 
   // Sign-in surfaces
   filePosition: "Position of {{name}}", reorderFile: "Reorder {{name}}",
-  loadingWorkspace: "Loading…",
+  checkingSession: "Checking your session…",
+  loadingWorkspace: "Loading your workspace…",
+  skipToTickets: "Skip to Tickets",
+  fallbackProject: "The requested Project is unavailable. Showing {{project}}.",
+  fallbackProjectEmpty: "The requested Project is unavailable. Your account has no available Projects.",
+  serviceUnavailable: "Ticket service unavailable",
+  serviceUnavailableHint: "Try again when the service is available.",
+  validPasswordLength: "Password length and spacing meet the requirements.",
   threadClosed: "Replies are closed. You can still copy your draft.",
   ticketConversation: "Conversation",
   replyLabel: "Your reply", sendQuestion: "Send question", sendReply: "Send reply",
@@ -654,7 +661,7 @@ const th: Record<keyof typeof en, string> = {
   customerQueueEmpty: "ไม่มี Ticket ที่โหลดแล้วตรงกับมุมมองนี้",
   customerQueueNoAccess: "ไม่สามารถเข้าถึงโครงการนี้ เลือกโครงการอื่นหรือเก็บฉบับร่างไว้ก่อน",
   customerQueueDraftProject: "ฉบับร่างยังอยู่ใน {{project}} ทำต่อหรือลบทิ้งก่อนเริ่ม Ticket ในโครงการอื่น",
-  customerQueueYouReplied: "คุณตอบแล้ว",
+  customerQueueYouReplied: "ส่งคำตอบแล้ว · รอทีมงาน",
   customerQueueYesterday: "เมื่อวาน",
   customerQueueDraftLabel: "ฉบับร่างที่ยังไม่ส่ง",
   customerQueueDraftHint: "เก็บไว้ในแท็บนี้จนกว่าจะส่ง โหลดหน้าใหม่ หรือออกจากระบบ",
@@ -772,7 +779,14 @@ const th: Record<keyof typeof en, string> = {
 
   // Sign-in surfaces
   filePosition: "ลำดับของ {{name}}", reorderFile: "เปลี่ยนลำดับ {{name}}",
-  loadingWorkspace: "กำลังโหลด…",
+  checkingSession: "กำลังตรวจสอบการเข้าสู่ระบบ…",
+  loadingWorkspace: "กำลังโหลดพื้นที่ทำงาน…",
+  skipToTickets: "ข้ามไปยังรายการเรื่อง",
+  fallbackProject: "ไม่สามารถเปิดโปรเจกต์ที่ขอได้ กำลังแสดง {{project}}",
+  fallbackProjectEmpty: "ไม่สามารถเปิดโปรเจกต์ที่ขอได้ บัญชีนี้ยังไม่มีโปรเจกต์ที่เปิดได้",
+  serviceUnavailable: "ระบบแจ้งเรื่องยังไม่พร้อมใช้งาน",
+  serviceUnavailableHint: "ลองอีกครั้งเมื่อระบบกลับมาใช้งานได้",
+  validPasswordLength: "ความยาวและการเว้นวรรคของรหัสผ่านถูกต้อง",
   threadClosed: "ปิดรับคำตอบแล้ว คุณยังสามารถคัดลอกฉบับร่างได้",
   ticketConversation: "บทสนทนา",
   replyLabel: "คำตอบของคุณ", sendQuestion: "ส่งคำถาม", sendReply: "ส่งคำตอบ",
@@ -1109,12 +1123,18 @@ const th: Record<keyof typeof en, string> = {
   pageUnavailable: "หน้าเว็บนี้ไม่พร้อมใช้งานแล้ว",
 };
 
-type Key = keyof typeof en;
+export type TranslationKey = keyof typeof en;
+type Key = TranslationKey;
 type I18n = { language: Language; setLanguage: (language: Language) => void; t: (key: Key, values?: Record<string, string | number>) => string; formatDate: (timestamp: number) => string };
 const I18nContext = createContext<I18n | null>(null);
 
-export function resolveLanguage(stored: string | null): Language {
-  return stored === "en" ? "en" : "th";
+export function resolveLanguage(stored: string | null, preferred: readonly string[] = []): Language {
+  if (stored === "en" || stored === "th") return stored;
+  for (const locale of preferred) {
+    const language = locale.split("-")[0].toLowerCase();
+    if (language === "en" || language === "th") return language;
+  }
+  return "th";
 }
 
 export function translate(language: Language, key: Key, values: Record<string, string | number> = {}) {
@@ -1134,15 +1154,19 @@ export function formatLocalizedDate(language: Language, timestamp: number) {
 }
 
 function savedLanguage(): Language {
-  return resolveLanguage(window.localStorage.getItem(STORAGE_KEY));
+  try { return resolveLanguage(window.localStorage.getItem(STORAGE_KEY), navigator.languages); }
+  catch { return resolveLanguage(null, navigator.languages); }
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(savedLanguage);
-  useEffect(() => { document.documentElement.lang = language; }, [language]);
+  useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
   const value = useMemo<I18n>(() => ({
     language,
-    setLanguage(next) { window.localStorage.setItem(STORAGE_KEY, next); setLanguageState(next); },
+    setLanguage(next) {
+      setLanguageState(next);
+      try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* Storage can be disabled for this tab. */ }
+    },
     t(key, values = {}) { return translate(language, key, values); },
     formatDate(timestamp) { return formatLocalizedDate(language, timestamp); },
   }), [language]);
@@ -1288,9 +1312,13 @@ const errorKeys: Record<string, Key> = {
   AUTH_REQUIRED: "sessionExpired",
 };
 
-export function localizeError(error: unknown, t: I18n["t"]) {
+export function errorMessageKey(error: unknown): Key {
   const code = errorCode(error);
-  return code && Object.prototype.hasOwnProperty.call(errorKeys, code) ? t(errorKeys[code]) : t("genericError");
+  return code && Object.prototype.hasOwnProperty.call(errorKeys, code) ? errorKeys[code] : "genericError";
+}
+
+export function localizeError(error: unknown, t: I18n["t"]) {
+  return t(errorMessageKey(error));
 }
 
 export const translations = { en, th };

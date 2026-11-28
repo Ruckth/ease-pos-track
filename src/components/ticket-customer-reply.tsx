@@ -7,7 +7,7 @@ export function TicketCustomerReply({ item }: {
   item: Pick<TicketSummary, "latestReply" | "lifecycle" | "status">;
 }) {
   const { t } = useI18n();
-  if (item.lifecycle !== "active" || item.status === "done" || item.latestReply?.role !== "customer") return null;
+  if (item.lifecycle !== "active" || item.status === "done" || !(item.latestReply?.role === "customer" || item.status === "waiting" && item.latestReply?.answeredCustomerRequest)) return null;
   return <Badge variant="outline" className="gap-1 border-primary/25 bg-primary/5">
     <MessageCircle className="size-3" aria-hidden />{t("threadCustomerReplied")}
   </Badge>;

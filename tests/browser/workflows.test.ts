@@ -34,25 +34,25 @@ for (const language of ["en", "th"] as const) {
       await openHeaderMenu(f.page, copy(language, "queueMore"));
       await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
-      await dialog.getByText(copy(language, "healthStorage"), { exact: true }).waitFor();
+      await dialog.getByText(language === "en" ? "Storage credential" : "ข้อมูลรับรองพื้นที่จัดเก็บ", { exact: true }).waitFor();
       assert.equal(await dialog.getByRole("table", { name: copy(language, "healthCounts") }).count(), 1);
       await f.page.setViewportSize({ width: 360, height: 740 });
       const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
       for (const key of ["healthFailed", "healthPending", "healthExpired"] as const) {
         await trigger.click();
-        const choice = filterPanel(f.page).getByRole("radio", { name: copy(language, key), exact: true });
+        const choice = filterPanel(f.page).getByRole("radio", { name: new RegExp(`^${copy(language, key)}(?: \\(\\d+\\))?$`) });
         await choice.click();
         assert.equal(await choice.isChecked(), true);
         await closeFilters(f.page);
         assert.equal(await trigger.evaluate(el => document.activeElement === el), true);
-        await dialog.getByRole("heading", { name: copy(language, key), exact: true }).waitFor();
+        await dialog.getByRole("heading", { name: new RegExp(`^${copy(language, key)}(?: \\(\\d+\\))?$`) }).waitFor();
         assert.equal(await trigger.getAttribute("aria-label"), key === "healthFailed" ? copy(language, "ticketFilters") : copy(language, "ticketFiltersApplied", { count: 1 }));
         await dialog.getByText(copy(language, "healthPageHint"), { exact: true }).waitFor();
       }
       await trigger.click();
       await filterPanel(f.page).getByRole("button", { name: copy(language, "ticketFiltersClear") }).click();
       await closeFilters(f.page);
-      await dialog.getByRole("heading", { name: copy(language, "healthFailed"), exact: true }).waitFor();
+      await dialog.getByRole("heading", { name: new RegExp(`^${copy(language, "healthFailed")} \\(\\d+\\)$`) }).waitFor();
       assert.equal(await trigger.getAttribute("aria-label"), copy(language, "ticketFilters"));
       assert.doesNotMatch(await dialog.innerText(), /local-only-callback-fixture|https?:|UPLOADTHING_TOKEN|UPLOAD_CALLBACK_SECRET/);
       assert.deepEqual(f.errors, []);
@@ -80,66 +80,151 @@ for (const language of ["en", "th"] as const) test(`customer ${language}: Ticket
     const project = projectSwitcher(page, language);
     const inbox = header.getByRole("button", { name: copy(language, "ticketInbox"), exact: true });
     const account = header.getByRole("button", { name: copy(language, "customerQueueMore"), exact: true });
+    const create = header.getByRole("button", { name: copy(language, "newTicket"), exact: true });
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 });
       assert.equal(await wordmark.isVisible(), false);
-      await project.getByText("POS", { exact: true }).waitFor();
+      const projectKey = project.getByText("POS", { exact: true });
+      await projectKey.waitFor();
       assert.equal(await project.innerText(), "POS");
+      assert.ok(await projectKey.evaluate(el => el.scrollWidth <= el.clientWidth + 1), "Project key is readable without clipping");
       const toolbar = await header.boundingBox();
-      assert.ok(toolbar && toolbar.height <= 64, `Header height at ${width}px: ${toolbar?.height}`);
-      for (const control of [project, inbox, account]) {
+      assert.ok(toolbar && toolbar.height <= 56, `Header height at ${width}px: ${toolbar?.height}`);
+      for (const control of [project, create, inbox, account]) {
         const box = await control.boundingBox();
         assert.ok(box && box.height >= 44 && box.x >= 0 && box.x + box.width <= width);
         assert.ok(Math.abs(box.y + box.height / 2 - (toolbar.y + toolbar.height / 2)) <= 1);
       }
     }
     await page.setViewportSize({ width: 1280, height: 900 });
-    await wordmark.waitFor();
+    assert.equal(await wordmark.count(), 0);
     await project.getByText(/\(POS\)/).waitFor();
     assert.match(await project.innerText(), /\(POS\)/);
+  } finally { await context.close(); }
+});
+
+test("customer opening viewport keeps the first Ticket below one sticky toolbar", async () => {
+  const { page, context } = await open("customer");
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${baseURL}/customer?project=POS`);
+    const toolbar = page.locator("main > header");
+    const first = page.locator("button[data-ticket-id]").first();
+    await first.waitFor();
+    const bounds = await first.boundingBox();
+    assert.ok(bounds && bounds.y <= 608 && bounds.y + bounds.height <= 844);
+    assert.equal(await page.getByRole("button", { name: copy("en", "newTicket"), exact: true }).count(), 1);
+    await page.evaluate(() => window.scrollTo(0, 300));
+    await page.waitForFunction(() => window.scrollY > 0);
+    const sticky = await toolbar.boundingBox();
+    assert.ok(sticky && sticky.y >= 0 && sticky.y <= 4 && sticky.height <= 56);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+  } finally { await context.close(); }
+});
+
+test("customer merges a stale edit and reconfirms archive against the reviewed version", { timeout: 60_000 }, async () => {
+  const { page, context, token, errors } = await open("customer");
+  const project = seed.projects.find(project => project.key === "POS")!;
+  try {
+    const title = `Concurrent Ticket ${crypto.randomUUID()}`;
+    const id = await convex.mutation(api.tickets.createTicket, {
+      token, projectId: project.id, title, description: "Original details", media: [], requestId: crypto.randomUUID(),
+    });
+    await page.goto(`${baseURL}/customer?project=${project.key}&ticket=${id}`);
+    const edit = page.getByRole("button", { name: copy("en", "editTicket"), exact: true });
+    await edit.click();
+    const topic = page.locator("#customer-edit-title");
+    await page.waitForFunction(() => document.activeElement?.id === "customer-edit-title");
+    await topic.fill("Local draft title");
+    assert.equal(await edit.count(), 0);
+    for (const leave of [() => topic.press("Escape"), () => page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click()]) {
+      const dialog = page.waitForEvent("dialog").then(async prompt => {
+        assert.match(prompt.message(), /Discard unsaved changes/);
+        await prompt.dismiss();
+      });
+      await Promise.all([dialog, leave()]);
+      assert.equal(await topic.inputValue(), "Local draft title");
+      assert.equal(new URL(page.url()).searchParams.get("ticket"), id);
+    }
+    await convex.mutation(api.tickets.editTicket, { token, id, expectedVersion: 0, title, description: "Latest saved details" });
+    await page.getByRole("button", { name: copy("en", "save"), exact: true }).click();
+    const titleChoices = page.getByRole("group", { name: copy("en", "topic"), exact: true });
+    const descriptionChoices = page.getByRole("group", { name: copy("en", "reviewDescription"), exact: true });
+    await titleChoices.getByRole("radio", { name: /^My draft/ }).check();
+    await descriptionChoices.getByRole("radio", { name: /^Latest saved/ }).check();
+    await page.getByRole("button", { name: "Apply choices", exact: true }).click();
+    assert.equal(await topic.inputValue(), "Local draft title");
+    await convex.mutation(api.tickets.editTicket, { token, id, expectedVersion: 1, title, description: "Latest saved details again" });
+    await page.getByRole("button", { name: copy("en", "save"), exact: true }).click();
+    await titleChoices.getByRole("radio", { name: /^My draft/ }).check();
+    await descriptionChoices.getByRole("radio", { name: /^Latest saved/ }).check();
+    await page.getByRole("button", { name: "Apply choices", exact: true }).click();
+    assert.equal(await topic.inputValue(), "Local draft title");
+    await page.getByRole("button", { name: copy("en", "save"), exact: true }).click();
+    await page.getByRole("heading", { name: "Local draft title", exact: true }).waitFor();
+    assert.equal((await convex.query(api.tickets.getTicket, { token, id }))?.description, "Latest saved details again");
+
+    await page.getByRole("button", { name: copy("en", "detailActions"), exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "archive"), exact: true }).click();
+    const confirm = page.getByRole("alertdialog", { name: "Archive Ticket", exact: true });
+    await confirm.getByText(/eligible for permanent deletion after 30 days/).waitFor();
+    await convex.mutation(api.tickets.editTicket, { token, id, expectedVersion: 3, title: "Title updated before archive", description: "Latest saved details" });
+    const submit = confirm.getByRole("button", { name: "Archive Ticket", exact: true });
+    await submit.click();
+    await confirm.getByText(/Title updated before archive/).waitFor();
+    assert.equal((await convex.query(api.tickets.customerArchiveState, { token, id, projectId: project.id }))?.lifecycle, "active");
+    await submit.evaluate(button => {
+      if (!(button instanceof HTMLButtonElement)) throw new Error("Expected the archive confirmation button");
+      button.click();
+      button.click();
+    });
+    await confirm.waitFor({ state: "hidden" });
+    await page.waitForURL(url => !url.searchParams.has("ticket"));
+    assert.deepEqual(await convex.query(api.tickets.customerArchiveState, { token, id, projectId: project.id }), { lifecycle: "archived", version: 5 });
+    assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });
 
 for (const language of ["en", "th"] as const) test(`customer ${language}: phone filters preserve search and restore the linked status on Back`, async () => {
   const { page, context } = await open("customer", language);
   try {
-    await page.setViewportSize({ width: 360, height: 740 });
+    await page.setViewportSize({ width: 320, height: 740 });
     await page.goto(`${baseURL}/customer?project=POS&filter=waiting&q=Printer`);
-    const trigger = filterTrigger(page);
-    await page.getByRole("button", { name: copy(language, "ticketFiltersApplied", { count: 1 }), exact: true }).waitFor();
-    const indicator = trigger.locator('[data-slot="ticket-filter-indicator"]');
-    assert.equal(await indicator.isVisible(), true);
-    assert.equal(await indicator.innerText(), "");
-    await trigger.press("Enter");
-    const waiting = filterPanel(page).getByRole("radio", { name: copy(language, "customerQueueWaiting"), exact: true });
-    assert.equal(await waiting.isChecked(), true);
-    await waiting.press("ArrowDown");
+    const filters = page.getByRole("group", { name: copy(language, "filterTickets") });
+    const waiting = filters.getByRole("button", { name: copy(language, "customerQueueWaiting"), exact: true });
+    const resolved = filters.getByRole("button", { name: copy(language, "resolvedTickets"), exact: true });
+    const active = filters.getByRole("button", { name: copy(language, "customerQueueAllActive"), exact: true });
+    assert.equal(await waiting.getAttribute("aria-pressed"), "true");
+    assert.equal(await filters.getByRole("button").count(), 4);
+    for (const button of await filters.getByRole("button").all()) {
+      const bounds = await button.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 320 && bounds.height >= 44);
+    }
+    await resolved.press("Enter");
     await page.waitForURL(url => url.searchParams.get("filter") === "done");
-    const bounds = await filterPanel(page).boundingBox();
-    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 360);
-    await filterPanel(page).getByRole("button", { name: copy(language, "ticketFiltersClear"), exact: true }).click();
+    await page.waitForFunction(() => document.activeElement?.id === "customer-results-heading");
+    await active.click();
     await page.waitForURL(url => !url.searchParams.has("filter") && url.searchParams.get("q") === "Printer");
-    await closeFilters(page);
-    assert.equal(await trigger.evaluate(el => document.activeElement === el), true);
-    assert.equal(await trigger.getAttribute("aria-label"), copy(language, "ticketFilters"));
     await page.goBack();
     await page.waitForURL(url => url.searchParams.get("filter") === "done" && url.searchParams.get("q") === "Printer");
-    await page.getByRole("button", { name: copy(language, "ticketFiltersApplied", { count: 1 }), exact: true }).waitFor();
+    assert.equal(await resolved.getAttribute("aria-pressed"), "true");
   } finally { await context.close(); }
 });
 
-test("customer filter panel closes when resizing hides the list beside an open Ticket", async () => {
+test("customer status group follows the list when resizing beside an open Ticket", async () => {
   const { page, context } = await open("customer");
   try {
     await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.locator("button[data-ticket-id]").first().click();
     await page.waitForURL(url => url.searchParams.has("ticket"));
-    await openFilters(page);
+    const filters = page.getByRole("group", { name: copy("en", "filterTickets") });
+    await filters.waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
-    await filterPanel(page).waitFor({ state: "hidden" });
+    await filters.waitFor({ state: "hidden" });
     await page.setViewportSize({ width: 1280, height: 800 });
-    assert.equal(await filterTrigger(page).getAttribute("aria-expanded"), "false");
+    await filters.waitFor();
+    assert.equal(await filters.getByRole("button").count(), 4);
   } finally { await context.close(); }
 });
 
@@ -148,10 +233,9 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
   try {
     await page.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
     const query = page.getByLabel(copy("en", "customerQueueSearch"), { exact: true });
+    const filters = page.getByRole("group", { name: copy("en", "filterTickets") });
     const setStatus = async (key: "allTickets" | "customerQueueAllActive") => {
-      await openFilters(page);
-      await filterPanel(page).getByRole("radio", { name: new RegExp("^" + copy("en", key) + "(?:$|\\s)") }).click();
-      await closeFilters(page);
+      await filters.getByRole("button", { name: new RegExp("^" + copy("en", key)) }).click();
     };
     const older = page.getByRole("button", { name: copy("en", "loadOlder"), exact: true });
     const rows = page.locator("button[data-ticket-id]");
@@ -184,8 +268,8 @@ test("customer search finds older Tickets and can include resolved Tickets", asy
     await noMatches.waitFor();
     await page.getByRole("button", { name: copy("en", "customerQueueSearchAllStatuses"), exact: true }).click();
     await targetRow.waitFor();
-    assert.equal(await filterTrigger(page).getAttribute("aria-label"), "Filters, 1 applied");
-    assert.equal(await filterTrigger(page).evaluate(el => document.activeElement === el), true);
+    assert.equal(await filters.getByRole("button", { name: copy("en", "allTickets"), exact: true }).getAttribute("aria-pressed"), "true");
+    await page.waitForFunction(() => document.activeElement?.id === "customer-results-heading");
     assert.equal(new URL(page.url()).searchParams.get("filter"), "all");
     assert.equal(await query.inputValue(), reference);
     await targetRow.click();
@@ -233,6 +317,7 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
     await customer.title.fill(name);
     await customer.page.locator("#customer-ticket-description").fill(description);
     await customer.page.getByRole("button", { name: copy(language, "submitTicket"), exact: true }).click();
+    await customer.page.getByRole("button", { name: language === "th" ? "ดู Ticket" : "View Ticket", exact: true }).click();
     await customer.page.getByRole("dialog").waitFor({ state: "hidden" });
     await customer.page.getByRole("heading", { name, exact: true }).waitFor();
     const id = new URL(customer.page.url()).searchParams.get("ticket") as Id<"tickets">;
@@ -305,6 +390,8 @@ for (const language of ["en", "th"] as const) test(`${language}: customer Ticket
 
     await customer.page.locator("[data-message-id]").getByText(question, { exact: true }).waitFor();
     await customer.page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click();
+    await customer.page.getByRole("group", { name: copy(language, "filterTickets") })
+      .getByRole("button", { name: new RegExp("^" + copy(language, "customerQueueWaiting")) }).click();
     await customerRow.getByText(copy(language, "feedNeedsReply"), { exact: true }).waitFor();
     assert.ok((await customerRow.locator("[data-ticket-excerpt]").innerText()).includes(question));
     if (language === "en") {
@@ -560,13 +647,127 @@ test("customer thread quotes exact files, notes and saved video moments via keyb
     assert.equal(await noteQuoteButton.count(), 0);
 
     // 5. Customer Recent history excludes internal urgency changes.
-    await customer.page.getByRole("button", { name: copy("en", "detailHistory"), exact: true }).click();
-    await customer.page.getByText(copy("en", "actionCreated"), { exact: true }).waitFor();
-    assert.equal(await customer.page.getByText(copy("en", "actionUrgencyChanged"), { exact: true }).count(), 0);
+    const history = customer.page.locator("summary").filter({ hasText: copy("en", "detailHistory") });
+    await history.click();
+    const historyEntries = history.locator("..");
+    await historyEntries.getByText(copy("en", "actionCreated"), { exact: true }).waitFor();
+    assert.equal(await historyEntries.getByText(copy("en", "actionUrgencyChanged"), { exact: true }).count(), 0);
+    assert.equal(await historyEntries.getByText(copy("en", "actionAnnotationChanged"), { exact: true }).count(), 0);
+    assert.equal(await historyEntries.locator("ol time").count(), 4, "keeps three note events plus Ticket creation");
     assert.equal(customer.uploads(), 0);
     assert.deepEqual(customer.errors, []);
   } finally {
     await customer.context.close();
+  }
+});
+
+test("staff history uses native disclosure, dates, edit excerpts and independent activity paging", async () => {
+  const staff = await open("staff", "en");
+  const startingTitle = `History ${crypto.randomUUID()}`;
+  const originalDescription = "Original description";
+  const longDescription = `First line\n${"Long content ".repeat(25)}\nFinal line`;
+  const latestTitle = `${startingTitle} 29`;
+  try {
+    const { ticket } = await convex.mutation(api.tickets.createTextTicket, {
+      token: staff.token, projectKey: "POS", title: startingTitle, description: originalDescription, requestId: crypto.randomUUID(),
+    });
+    let version = ticket.version;
+    for (let index = 0; index < 30; index++) {
+      const edit = await convex.mutation(api.tickets.editTicket, {
+        token: staff.token, id: ticket._id, expectedVersion: version,
+        title: `${startingTitle} ${index}`, description: index === 29 ? longDescription : originalDescription,
+      });
+      version = edit.version;
+    }
+    await staff.page.goto(`${baseURL}/staff?project=POS&view=table&ticket=${ticket._id}`);
+    await staff.page.getByRole("heading", { name: latestTitle, exact: true }).waitFor();
+    const summary = staff.page.locator("summary").filter({ hasText: copy("en", "detailHistory") });
+    const details = summary.locator("..");
+    const older = details.getByRole("button", { name: "Show older Ticket events" });
+    assert.equal(await details.getAttribute("open"), null);
+    await summary.press("Enter");
+    await older.waitFor();
+    assert.equal(await details.getAttribute("open"), "");
+    const stamps = details.locator("ol time");
+    assert.equal(await stamps.count(), 30);
+    const dates = await stamps.evaluateAll(times => new Set(times.map(time => new Date(time.getAttribute("datetime")!).toDateString())).size);
+    assert.equal(await details.locator("ol h3").count(), dates);
+    assert.ok(await stamps.first().getAttribute("title"));
+    assert.equal(await details.getByText("Staff", { exact: true }).count(), 30);
+    const changes = details.locator("ol > li").first().locator("details");
+    await changes.locator("summary").press("Enter");
+    await changes.getByRole("heading", { name: "Title", exact: true }).waitFor();
+    const after = changes.getByText(/^First line/);
+    assert.ok((await after.textContent())?.includes("First line\n"));
+    assert.doesNotMatch((await after.textContent())!, /Final line/);
+    await changes.getByRole("button", { name: "Show full text" }).click();
+    assert.equal(await after.textContent(), longDescription);
+    const titleOnly = details.locator("ol > li").nth(1).locator("details");
+    await titleOnly.locator("summary").press("Enter");
+    assert.equal(await titleOnly.getByRole("heading", { name: "Description" }).count(), 0);
+    await older.click();
+    await details.getByText(copy("en", "actionCreated"), { exact: true }).waitFor();
+    assert.equal(await stamps.count(), 31);
+    assert.deepEqual(staff.errors, []);
+  } finally {
+    await staff.context.close();
+  }
+});
+
+test("older note history reaches event 31 without advancing the Ticket history cursor", async () => {
+  const staff = await open("staff", "en");
+  try {
+    const name = `Note history ${crypto.randomUUID()}`;
+    const projectId = seed.projects.find(project => project.key === "POS")!.id;
+    const file = {
+      key: `fake-note-history-${crypto.randomUUID()}`, name: "note-history.png", size: 1, type: "image/png",
+      url: "https://fixture.invalid/note-history.png",
+    };
+    const intent = await convex.mutation(api.uploads.createUploadIntent, {
+      token: staff.token, idempotencyKey: crypto.randomUUID(), files: [{ name: file.name, size: file.size, type: file.type }],
+    });
+    await convex.mutation(api.uploads.recordUploadedFile, {
+      callbackToken: "local-only-callback-fixture", intentId: intent.intentId, secret: intent.secret, file,
+    });
+    const id = await convex.mutation(api.tickets.createTicket, {
+      token: staff.token, projectId, title: name, description: "", requestId: crypto.randomUUID(), media: [file],
+      uploadIntentId: intent.intentId, uploadIntentSecret: intent.secret,
+    });
+    const ticket = (await convex.query(api.tickets.getTicket, { token: staff.token, id }))!;
+    const note = await convex.mutation(api.annotations.addAnnotation, {
+      token: staff.token, id, expectedVersion: ticket.version, mediaIndex: 0, kind: "point", x: .25, y: .5, text: "Original",
+    });
+    let expectedVersion = note.version;
+    for (let index = 1; index <= 30; index++) {
+      ({ version: expectedVersion } = await convex.mutation(api.annotations.updateAnnotation, {
+        token: staff.token, id, expectedVersion, annotationId: note.annotationId, text: `Note change ${index}`,
+      }));
+    }
+    await staff.page.goto(`${baseURL}/staff?project=POS&view=table&ticket=${id}`);
+    const summary = staff.page.locator("summary").filter({ hasText: copy("en", "detailHistory") });
+    await summary.click();
+    const history = summary.locator("..");
+    const olderNotes = history.getByRole("button", { name: "Show older note changes", exact: true });
+    const olderTicket = history.getByRole("button", { name: "Show older Ticket events", exact: true });
+    const noteCreated = history.getByText(`${copy("en", "comment", { label: 1 })} ${copy("en", "actionCreated")}`, { exact: true });
+    const ticketCreated = history.getByText(copy("en", "actionCreated"), { exact: true });
+    await olderNotes.waitFor();
+    await olderTicket.waitFor();
+    assert.equal(await history.locator("ol time").count(), 30);
+    assert.equal(await noteCreated.count(), 0);
+    await olderNotes.click();
+    await noteCreated.waitFor();
+    assert.equal(await history.locator("ol time").count(), 31);
+    assert.equal(await ticketCreated.count(), 0);
+    assert.equal(await olderTicket.isEnabled(), true);
+    await olderTicket.click();
+    await ticketCreated.waitFor();
+    assert.equal(await history.locator("ol time").count(), 32, "the loaded note and its newly loaded generic event fold together");
+    assert.equal(await history.getByText(copy("en", "actionAnnotationChanged"), { exact: true }).count(), 0);
+    assert.equal(staff.uploads(), 0);
+    assert.deepEqual(staff.errors, []);
+  } finally {
+    await staff.context.close();
   }
 });
 
@@ -591,16 +792,15 @@ for (const language of ["en", "th"] as const) {
       await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       const requeue = dialog.getByRole("button", { name: copy(language, "healthRequeue"), exact: true });
-      const prompts: string[] = [];
-      f.page.once("dialog", async prompt => { prompts.push(prompt.message()); await prompt.dismiss(); });
-      await requeue.click();
+      const confirm = f.page.getByRole("alertdialog");
       const calls = () => f.page.evaluate(() => (window as unknown as { healthRequeues: unknown[] }).healthRequeues);
-      assert.deepEqual(await calls(), []);
-      f.page.once("dialog", async prompt => { prompts.push(prompt.message()); await prompt.accept(); });
       await requeue.click();
+      await confirm.getByRole("button", { name: copy(language, "cancel"), exact: true }).click();
+      assert.deepEqual(await calls(), []);
+      await requeue.click();
+      await confirm.getByRole("button", { name: language === "en" ? "Requeue deletion" : "จัดคิวการลบ", exact: true }).click();
       await f.page.getByText(copy(language, "healthRequeued"), { exact: true }).waitFor();
       assert.deepEqual(await calls(), [{ jobId: "fake-purge" }]);
-      assert.deepEqual(prompts, [copy(language, "healthPurgeConfirm"), copy(language, "healthPurgeConfirm")]);
       assert.deepEqual(f.errors, []);
       assert.equal(f.uploads(), 0);
     } finally { await f.context.close(); }
@@ -680,13 +880,13 @@ for (const language of ["en", "th"] as const) {
         assert.ok(layout.tableOverflow <= 0, `${language} ${viewport.width}px: table wrapper overflow ${layout.tableOverflow}`);
         assert.ok(layout.cellsBeyondDialog <= 1, `${language} ${viewport.width}px: cell extends past dialog by ${layout.cellsBeyondDialog}`);
         assert.equal(layout.columnHeaders, 6);
-        assert.equal(layout.rowHeaders, 4);
-        assert.equal(layout.cells, 20);
+        assert.equal(layout.rowHeaders, 5, "four job kinds and their total");
+        assert.equal(layout.cells, 25);
       }
 
       // Phone compactness: on a 390x844 phone, the Diagnostics heading and filter stay above the fold.
       await f.page.setViewportSize({ width: 390, height: 844 });
-      const failedHeading = dialog.getByRole("heading", { name: copy(language, "healthFailed"), exact: true });
+      const failedHeading = dialog.getByRole("heading", { name: new RegExp(`^${copy(language, "healthFailed")} \\(\\d+\\)$`) });
       const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
       const headingBox = (await failedHeading.boundingBox())!;
       const triggerBox = (await trigger.boundingBox())!;
@@ -721,7 +921,7 @@ for (const language of ["en", "th"] as const) {
       await panel.waitFor();
       const panelBox = (await panel.boundingBox())!;
       assert.ok(panelBox.x >= 0 && panelBox.x + panelBox.width <= 320.5, `${language} 320px: filter popover fits viewport`);
-      await panel.getByRole("radio", { name: copy(language, "healthPending"), exact: true }).click();
+      await panel.getByRole("radio", { name: new RegExp(`^${copy(language, "healthPending")} \\(\\d+\\)$`) }).click();
       await closeFilters(f.page);
       await dialog.getByText(copy(language, "healthRetry"), { exact: true }).waitFor();
       await trigger.click();
@@ -834,6 +1034,86 @@ test("staff filter badge counts URL scopes and clears them together while preser
   } finally { await context.close(); }
 });
 
+test("staff keeps typed search private and runs shared queries only for the requested Project", async () => {
+  const query = `Private search ${crypto.randomUUID()}`;
+  const searchRequests: { projectId: string; search: string }[] = [];
+  const requests = new EventEmitter();
+  const { context, page, token } = await open("staff", "en", async context => {
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { value: {
+        writeText: async (text: string) => { document.documentElement.dataset.copiedSearchLink = text; },
+      } });
+    });
+    await context.routeWebSocket(url => url.hostname === "127.0.0.1" && url.pathname.endsWith("/sync"), socket => {
+      const server = socket.connectToServer();
+      socket.onMessage(raw => {
+        const message = JSON.parse(String(raw));
+        if (message.type === "ModifyQuerySet") {
+          for (const change of message.modifications) {
+            if (change.type === "Add" && change.udfPath === "tickets:searchTickets") {
+              searchRequests.push(change.args[0]);
+              requests.emit("search");
+            }
+          }
+        }
+        server.send(raw);
+      });
+    });
+  });
+  try {
+    const projectId = seed.projects.find(project => project.key === "POS")!.id;
+    await convex.mutation(api.tickets.createTextTicket, {
+      token, projectKey: "POS", title: query, description: "", requestId: crypto.randomUUID(),
+    });
+    const posSearch = page.getByRole("textbox", { name: "Search POS Tickets", exact: true });
+    const appSearch = page.getByRole("textbox", { name: "Search APP Tickets", exact: true });
+    await page.goto(`${baseURL}/staff?project=POS&view=table`);
+    const typedRequest = once(requests, "search", { signal: AbortSignal.timeout(15000) });
+    await posSearch.fill(query);
+    await typedRequest;
+    assert.deepEqual(searchRequests.map(({ projectId, search }) => ({ projectId, search })), [{ projectId, search: query }]);
+    assert.equal(new URL(page.url()).searchParams.has("q"), false);
+    assert.equal(await page.evaluate(value => JSON.stringify(history.state).includes(value), query), false);
+    await page.getByRole("button", { name: "Saved searches", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Copy search link", exact: true }).click();
+    await page.getByText("Search link copied", { exact: true }).waitFor();
+    const sharedLink = (await page.locator("html").getAttribute("data-copied-search-link"))!;
+    assert.equal(new URL(sharedLink).searchParams.get("q"), query);
+    assert.equal(new URL(sharedLink).searchParams.get("project"), "POS");
+    assert.equal(new URL(page.url()).searchParams.has("q"), false);
+
+    await chooseProject(page, "APP");
+    await appSearch.waitFor();
+    assert.equal(await appSearch.inputValue(), "");
+    await page.goBack();
+    await page.waitForFunction(value => document.querySelector<HTMLInputElement>('input[placeholder="Search"]')?.value === value, query);
+    assert.equal(await posSearch.inputValue(), query);
+    assert.equal(new URL(page.url()).searchParams.has("q"), false);
+    await page.reload();
+    await posSearch.waitFor();
+    assert.equal(await posSearch.inputValue(), "");
+
+    await page.goto(sharedLink);
+    await posSearch.waitFor();
+    assert.equal(await posSearch.inputValue(), query);
+    await page.reload();
+    await posSearch.waitFor();
+    assert.equal(await posSearch.inputValue(), query);
+    assert.equal(new URL(page.url()).searchParams.get("q"), query);
+
+    searchRequests.length = 0;
+    for (const key of ["UNKNOWN", ""]) {
+      await page.goto(`${baseURL}/staff?${new URLSearchParams({ ...(key && { project: key }), q: query })}`);
+      await page.waitForURL(url => url.searchParams.has("project") && !url.searchParams.has("q"));
+      await page.getByPlaceholder("Search", { exact: true }).waitFor();
+      assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "");
+    }
+    assert.deepEqual(searchRequests, [], "an unknown or missing Project never sends its shared query to the fallback");
+  } finally {
+    await context.close();
+  }
+});
+
 test("staff restores each Project’s view and returns to the Ticket trigger", async () => {
   const { page, context } = await open("staff");
   const views = page.getByRole("group", { name: "Ticket view" });
@@ -852,9 +1132,10 @@ test("staff restores each Project’s view and returns to the Ticket trigger", a
     await views.getByRole("button", { name: "Board", exact: true }).click();
     await expectStatus("all");
     await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
-    const destinations = page.getByRole("navigation", { name: copy("en", "project"), exact: true });
-    await destinations.getByRole("button", { name: "Archive", exact: true }).click();
-    await destinations.getByRole("button", { name: "Tickets", exact: true }).click();
+    for (const destination of ["Archive", "Tickets"]) {
+      await openHeaderMenu(page, copy("en", "queueMore"));
+      await page.getByRole("menuitemradio", { name: destination, exact: true }).click();
+    }
     await expectStatus("all");
     await page.waitForFunction(() => document.querySelectorAll('[data-slot="kanban-column"]').length === 5);
     await openFilters(page);
@@ -1014,7 +1295,7 @@ test("a status check finishing in another Project is shown once on return", asyn
     await page.getByPlaceholder(copy("en", "search"), { exact: true }).fill(title);
     await Promise.all([
       page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket"),
-      page.getByRole("button", { name: `Acknowledge · ${number}`, exact: true }).click(),
+      page.getByRole("button", { name: new RegExp(`^Acknowledge · ${number} ` ) }).click(),
     ]);
     await chooseProject(page, "APP");
     const finished = page.waitForEvent("requestfinished", req => req.url().endsWith("/api/query"));
@@ -1066,8 +1347,8 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     await f.page.keyboard.press("Escape");
     await closeFilters(f.page);
     await search.fill("unmatchedfixturetext");
-    await f.page.waitForURL(url => url.searchParams.get("q") === "unmatchedfixturetext");
     await f.page.getByText("No Tickets match these filters.", { exact: true }).waitFor();
+    assert.equal(new URL(f.page.url()).searchParams.has("q"), false);
     const clear = f.page.getByRole("button", { name: copy("en", "clearSearch"), exact: true });
     await clear.click();
     await f.page.waitForURL(url => !url.searchParams.has("q"));
@@ -1082,9 +1363,9 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     // Staff archive goes through the real confirmation. Cancel and Escape both
     // dismiss it without a write; focus returns to the Archive trigger.
     const archiveTrigger = dialog.getByRole("button", { name: copy("en", "archive"), exact: true });
-    const confirm = f.page.getByRole("alertdialog", { name: copy("en", "archive"), exact: true });
+    const confirm = f.page.getByRole("alertdialog", { name: /^Archive POS-\d+\?$/ });
     await archiveTrigger.click();
-    await confirm.getByText(copy("en", "archiveConfirm"), { exact: true }).waitFor();
+    await confirm.getByText(/30/).waitFor();
     await confirm.getByRole("button", { name: copy("en", "cancel"), exact: true }).click();
     await confirm.waitFor({ state: "hidden" });
     await archiveTrigger.focus();
@@ -1333,15 +1614,21 @@ test("Thai keyboard customer recovery returns to sign-in and resumes Join with t
     await page.getByRole("heading", { name: copy("th", "joinTitle", { project: "Customer App" }) }).waitFor();
     const joinPath = `${baseURL}/customer/join`;
     await page.waitForURL(joinPath);
-    const useExisting = page.getByRole("button", { name: copy("th", "haveAccountQuestion"), exact: true });
+    const useExisting = page.getByRole("link", { name: copy("th", "haveAccountQuestion"), exact: true });
+    await page.locator("#join-username").fill("fixture-name");
+    await page.locator("#new-password").fill("fixture passphrase only");
     await useExisting.press("Enter");
     await page.waitForURL(`${baseURL}/customer/login`);
-    await page.getByRole("button", { name: copy("th", "backToInvitation"), exact: true }).press("Enter");
+    assert.equal(await page.locator("#customer-username").inputValue(), "fixture-name");
+    assert.equal(await page.locator("#customer-password").inputValue(), "");
+    await page.locator("#customer-username").fill("");
+    await page.getByRole("link", { name: copy("th", "backToInvitation"), exact: true }).press("Enter");
     await page.waitForURL(joinPath);
     await useExisting.press("Enter");
     const userField = page.getByRole("textbox", { name: copy("th", "username"), exact: true });
     await userField.waitFor();
-    assert.equal(await userField.evaluate(element => element === document.activeElement), true);
+    assert.equal(await page.getByRole("heading", { level: 1 }).evaluate(element => element === document.activeElement), true);
+    await userField.focus();
     await page.keyboard.insertText(username);
     await page.keyboard.press("Tab");
     await page.keyboard.insertText("ใส่รหัสผ่านผิด");
@@ -1354,11 +1641,12 @@ test("Thai keyboard customer recovery returns to sign-in and resumes Join with t
     await page.waitForURL(`${baseURL}/customer/recover`);
     await checkInMemoryOnly();
     await page.getByRole("link", { name: copy("th", "customerSignIn"), exact: true }).press("Enter");
-    await page.getByRole("button", { name: copy("th", "backToInvitation"), exact: true }).waitFor();
+    await page.getByRole("link", { name: copy("th", "backToInvitation"), exact: true }).waitFor();
     await forgot.press("Enter");
     const recoverUsername = page.locator("#recover-username");
     await recoverUsername.waitFor();
-    assert.equal(await recoverUsername.evaluate(element => element === document.activeElement), true);
+    assert.equal(await page.getByRole("heading", { level: 1 }).evaluate(element => element === document.activeElement), true);
+    await recoverUsername.focus();
     await page.keyboard.insertText(` ${username.toUpperCase()} `);
     await page.keyboard.press("Tab");
     await page.keyboard.insertText(saved.code.toLowerCase());
@@ -1374,9 +1662,10 @@ test("Thai keyboard customer recovery returns to sign-in and resumes Join with t
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     await page.waitForURL(`${baseURL}/customer/login`);
-    await page.getByRole("button", { name: copy("th", "backToInvitation"), exact: true }).waitFor();
+    await page.getByRole("link", { name: copy("th", "backToInvitation"), exact: true }).waitFor();
     await checkInMemoryOnly();
-    assert.equal(await userField.evaluate(element => element === document.activeElement), true);
+    assert.equal(await page.getByRole("heading", { level: 1 }).evaluate(element => element === document.activeElement), true);
+    await userField.focus();
     await page.keyboard.insertText(username);
     await page.keyboard.press("Tab");
     await page.keyboard.insertText(newPassword);

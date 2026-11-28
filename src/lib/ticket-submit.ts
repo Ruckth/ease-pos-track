@@ -54,10 +54,11 @@ export type SubmitTicketDeps = {
     annotations: CreateAnnotationInput[];
     uploadIntentId?: Id<"uploadIntents">;
     uploadIntentSecret?: string;
-  }) => Promise<unknown>;
+  }) => Promise<Id<"tickets"> | void>;
   /** Injectable at the upload boundary so the zero-media path is regression tested. */
   uploadMedia?: typeof uploadFiles;
   onProgress?: (percent: number) => void;
+  onSaving?: () => void;
   signal?: AbortSignal;
   /** A previous attempt may have written against this request key. */
   reconciling?: boolean;
@@ -125,17 +126,19 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
   let creating = false;
   try {
     deps.signal?.throwIfAborted();
+    const startSaving = () => {
+      deps.signal?.throwIfAborted();
+      creating = true;
+      deps.onSaving?.();
+    };
     if (deps.mediaEnabled === false) {
       if (draft.items.length || draft.annotations.length) throw new Error("PILOT_MEDIA_DISABLED");
-      return await reconcileUploadWrite(() => {
-        deps.signal?.throwIfAborted();
-        creating = true;
-        return deps.createTicket({
-          requestId: draft.idempotencyKey, title: draft.title,
-          description: draft.description, media: [], annotations: [],
-          ...(draft.routingClassification ? { routingClassification: draft.routingClassification } : {}),
-        });
-      });
+      startSaving();
+      return await reconcileUploadWrite(() => deps.createTicket({
+        requestId: draft.idempotencyKey, title: draft.title,
+        description: draft.description, media: [], annotations: [],
+        ...(draft.routingClassification ? { routingClassification: draft.routingClassification } : {}),
+      }));
     }
     const items = distinguishUploadFiles(draft.items);
     const intent = await reconcileUploadWrite(() => deps.createUploadIntent({
@@ -178,8 +181,7 @@ export async function submitTicketDraft(deps: SubmitTicketDeps, draft: TicketDra
 
     const resolved = media.filter((item): item is MediaItem => item !== undefined);
     if (resolved.length !== draft.items.length) throw new Error("UPLOAD_INCOMPLETE");
-    deps.signal?.throwIfAborted();
-    creating = true;
+    startSaving();
     const created = await reconcileUploadWrite(() => deps.createTicket({
       requestId: draft.idempotencyKey,
       title: draft.title,

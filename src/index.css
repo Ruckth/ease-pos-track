@@ -217,7 +217,7 @@
 
   @media (max-width: 639px) {
     .aurora-dialog-body:has(> form > .aurora-composer-footer) { padding-bottom: 0; }
-    .aurora-composer-footer { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
+    .aurora-composer-footer { padding-bottom: calc(.75rem + env(safe-area-inset-bottom)); }
   }
 
   @media (min-width: 640px) {

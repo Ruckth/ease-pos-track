@@ -8,6 +8,7 @@ import { after, test as nodeTest } from "node:test";
 import type { BrowserContextOptions, Page } from "playwright";
 import { capture, EVIDENCE_DIR, newContext } from "../../scripts/browser-evidence";
 import { baseURL, copy, open as openWith, suiteBrowser, type Language } from "./harness";
+import { mediaUxCopy } from "../../src/lib/media-ux-copy";
 
 const browsers = suiteBrowser();
 after(() => browsers.close());
@@ -219,7 +220,9 @@ for (const theme of ["light", "dark"] as const) test(`notifications ${theme}: tw
   });
   try {
     await page.getByRole("button", { name: "Update two Tickets", exact: true }).click();
-    const undo = page.getByRole("button", { name: copy("en", "undo"), exact: true });
+    const notices = page.locator("[data-sonner-toast]");
+    const undoFor = (ticket: string) => notices.filter({ hasText: ticket }).getByRole("button", { name: copy("en", "undo"), exact: true });
+    const undo = undoFor("POS-0002");
     await page.waitForFunction(() => document.querySelectorAll("[data-sonner-toast]").length === 2);
     const undoBox = await undo.first().boundingBox();
     assert.ok(undoBox && undoBox.width >= 44 && undoBox.height >= 44, "Undo has a 44 px touch target");
@@ -230,9 +233,9 @@ for (const theme of ["light", "dark"] as const) test(`notifications ${theme}: tw
     assert.doesNotMatch(surface, /rgb\(236, 253, 243\)/);
     await shot(page, `notices-${theme}-390`);
     // The newest toast is first; each Undo calls only its own Ticket's event.
-    await undo.first().click();
+    await undoFor("POS-0002").click();
     await page.locator("#undone").filter({ hasText: /^event-B-\d+$/ }).waitFor();
-    await undo.first().click();
+    await undoFor("POS-0001").click();
     await page.locator("#undone").filter({ hasText: /^event-B-\d+,event-A-\d+$/ }).waitFor();
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
@@ -278,5 +281,312 @@ test("staff phone menu returns focus after Team and detail actions have touch ta
       const bounds = await button.boundingBox();
       assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, "detail action has a 44 px touch target");
     }
+  } finally { await context.close(); }
+});
+
+test("media upload nested drag/drop cue stays synchronized across nested leaves, null relatedTarget, external exits, and drop", async () => {
+  const { context, page, errors } = await harness("case=media-upload-drag");
+  try {
+    const region = page.getByRole("region", { name: "Media upload drag harness" });
+    const dropCue = region.locator('[data-drop-cue="active"]');
+    const dispatchDrag = (selector: string, type: string, relatedSelector?: string | null) =>
+      page.evaluate(({ selector, type, relatedSelector }) => {
+        const target = document.querySelector(selector)!;
+        const relatedTarget = relatedSelector ? document.querySelector(relatedSelector) : null;
+        target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, relatedTarget }));
+      }, { selector, type, relatedSelector });
+
+    const dropRootSelector = '[aria-label="Media upload drag harness"] [data-slot="media-upload-dropzone"]';
+    const nestedBtnSelector = `[aria-label="Media upload drag harness"] button[aria-label="${copy("en", "openMedia", { name: "photo-1.png" })}"]`;
+    const nestedImgSelector = '[aria-label="Media upload drag harness"] img[alt="photo-1.png"]';
+
+    // Enter container -> enter nested child -> leave container to nested child: cue stays active.
+    await dispatchDrag(dropRootSelector, "dragenter");
+    await dropCue.waitFor({ state: "visible" });
+    await dispatchDrag(nestedBtnSelector, "dragenter", dropRootSelector);
+    await dispatchDrag(dropRootSelector, "dragleave", nestedBtnSelector);
+    assert.equal(await dropCue.isVisible(), true);
+
+    // Nested dragenter + dragleave with relatedTarget=null keeps depth > 0 and cue active.
+    await dispatchDrag(nestedImgSelector, "dragenter", null);
+    await dispatchDrag(nestedBtnSelector, "dragleave", null);
+    assert.equal(await dropCue.isVisible(), true);
+
+    // Leaving to an external sibling clears the cue immediately without getting stuck.
+    await dispatchDrag(nestedImgSelector, "dragleave", "#outside-drop-peer");
+    await dropCue.waitFor({ state: "hidden" });
+
+    // Re-enter once and leave with relatedTarget=null clears cleanly when depth reaches 0.
+    await dispatchDrag(dropRootSelector, "dragenter", null);
+    await dropCue.waitFor({ state: "visible" });
+    await dispatchDrag(dropRootSelector, "dragleave", null);
+    await dropCue.waitFor({ state: "hidden" });
+
+    // Dropping a valid image clears the cue and adds the file.
+    await dispatchDrag(dropRootSelector, "dragenter", null);
+    await dropCue.waitFor({ state: "visible" });
+    await page.evaluate((selector) => {
+      const target = document.querySelector(selector)!;
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], "dropped.png", { type: "image/png" }));
+      target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }, dropRootSelector);
+    await dropCue.waitFor({ state: "hidden" });
+    await page.locator("#upload-count").filter({ hasText: "3" }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("camera capture encodes JPEG once per shot, reuses Blob URL preview, and releases on retake, use, and cancel", async () => {
+  const context = await newContext(await browsers.get(), {
+    reducedMotion: "reduce",
+    permissions: ["camera"],
+    viewport: { width: 1280, height: 900 },
+  });
+  await context.addInitScript(() => {
+    localStorage.setItem("ease-pos-tracking-language", "en");
+    const stats = { toDataURL: 0, toBlob: 0, created: [] as string[], revoked: [] as string[] };
+    Object.assign(window, { __cameraStats: stats });
+    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function (...args) {
+      stats.toDataURL += 1;
+      return origToDataURL.apply(this, args);
+    };
+    const origToBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+      stats.toBlob += 1;
+      return origToBlob.call(this, callback, type, quality);
+    };
+    const origCreate = URL.createObjectURL.bind(URL);
+    const origRevoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (blob) => {
+      const url = origCreate(blob);
+      stats.created.push(url);
+      return url;
+    };
+    URL.revokeObjectURL = (url) => {
+      stats.revoked.push(url);
+      origRevoke(url);
+    };
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(10_000);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    const labels = mediaUxCopy("en");
+    await page.goto(`${baseURL}/tests/browser/components.html?case=camera-capture`);
+    const readStats = () => page.evaluate(() => (window as unknown as { __cameraStats: { toDataURL: number; toBlob: number; created: string[]; revoked: string[] } }).__cameraStats);
+
+    await page.getByRole("button", { name: "Open camera", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: copy("en", "camera"), exact: true });
+    const takePhoto = dialog.getByRole("button", { name: copy("en", "takePhoto"), exact: true });
+    await page.waitForFunction(() => {
+      const btn = [...document.querySelectorAll("button")].find(el => el.textContent?.trim() === "Take photo");
+      return Boolean(btn && !btn.hasAttribute("disabled"));
+    });
+    const preview = dialog.getByRole("img", { name: labels.capturedPreview, exact: true });
+
+    // Shot 1: single toBlob encode, zero toDataURL, blob: URL preview.
+    await takePhoto.click();
+    await preview.waitFor();
+    assert.match((await preview.getAttribute("src")) ?? "", /^blob:/);
+    const afterShot1 = await readStats();
+    assert.equal(afterShot1.toDataURL, 0);
+    assert.equal(afterShot1.toBlob, 1);
+    assert.equal(afterShot1.created.length, 1);
+    assert.equal(afterShot1.revoked.length, 0);
+
+    // Retake releases the first preview URL.
+    await dialog.getByRole("button", { name: labels.retakePhoto, exact: true }).click();
+    await preview.waitFor({ state: "hidden" });
+    const afterRetake = await readStats();
+    assert.deepEqual(afterRetake.revoked, afterRetake.created);
+
+    // Shot 2 + Use photo encodes once more and releases preview URL on approval.
+    await takePhoto.click();
+    await preview.waitFor();
+    await dialog.getByRole("button", { name: labels.usePhoto, exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    const afterUse = await readStats();
+    assert.equal(afterUse.toDataURL, 0);
+    assert.equal(afterUse.toBlob, 2);
+    assert.deepEqual(afterUse.revoked, afterUse.created);
+    await page.locator("#captured-files").filter({ hasText: "image/jpeg" }).waitFor();
+
+    // Shot 3 + Cancel releases preview URL on dismiss.
+    await page.getByRole("button", { name: "Open camera", exact: true }).click();
+    await page.waitForFunction(() => {
+      const btn = [...document.querySelectorAll("button")].find(el => el.textContent?.trim() === "Take photo");
+      return Boolean(btn && !btn.hasAttribute("disabled"));
+    });
+    await takePhoto.click();
+    await preview.waitFor();
+    await dialog.getByRole("button", { name: copy("en", "cancel"), exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    const afterCancel = await readStats();
+    assert.equal(afterCancel.toDataURL, 0);
+    assert.equal(afterCancel.toBlob, 3);
+    assert.deepEqual(afterCancel.revoked, afterCancel.created);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("grouped timeline note close and Escape restore focus to the originating group trigger even for timestamp-only entries after rerender", async () => {
+  const { context, page, errors } = await harness("case=viewer-grouped-video", { width: 390, height: 740 });
+  try {
+    const groupTrigger = page.locator("button[data-pin-group]").first();
+    await groupTrigger.waitFor();
+    await groupTrigger.focus();
+    await page.keyboard.press("Enter");
+
+    // Pick timestamp-only entry (no x/y overlay PinMarker) via keyboard.
+    const timeOnlyBtn = page.getByRole("button", { name: /Timestamp-only grouped note/ });
+    await timeOnlyBtn.waitFor();
+    await timeOnlyBtn.focus();
+    await page.keyboard.press("Enter");
+
+    const details = page.locator("[data-note-details]");
+    await details.getByText("Timestamp-only grouped note", { exact: true }).waitFor();
+    assert.equal(await page.locator('button[data-pin-id="grp-time-only"]').count(), 0);
+    await page.waitForFunction(() => Boolean(document.activeElement?.closest("[data-note-details]")));
+
+    // Force a parent rerender with cloned annotations before closing with Escape.
+    await page.evaluate(() => (window as unknown as { __bumpMediaHarness?: () => void }).__bumpMediaHarness?.());
+    await page.locator("#harness-revision").filter({ hasText: "1" }).waitFor();
+    await page.keyboard.press("Escape");
+    await details.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.hasAttribute("data-pin-group") === true);
+
+    // Repeat with pinned grouped note and explicit Close note button after another rerender.
+    await page.keyboard.press("Enter");
+    const pinnedBtn = page.getByRole("button", { name: /Pinned video note/ });
+    await pinnedBtn.waitFor();
+    await pinnedBtn.click();
+    await details.getByText("Pinned video note", { exact: true }).waitFor();
+    await page.evaluate(() => (window as unknown as { __bumpMediaHarness?: () => void }).__bumpMediaHarness?.());
+    await page.locator("#harness-revision").filter({ hasText: "2" }).waitFor();
+    await details.getByRole("button", { name: copy("en", "closeNote"), exact: true }).click();
+    await details.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.hasAttribute("data-pin-group") === true);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("offscreen thumbnails are inert and excluded from keyboard while visible thumbnails and main next/prev stay accessible", async () => {
+  const { context, page, errors } = await harness("case=viewer-thumbnails", { width: 320, height: 640 });
+  try {
+    // Wait for Embla IntersectionObserver to mark offscreen slides inert.
+    await page.waitForFunction(() => {
+      const thumbButtons = [...document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Media "]')];
+      return thumbButtons.length === 8 && thumbButtons.some(btn => btn.closest("[inert]")) && thumbButtons.some(btn => !btn.closest("[inert]"));
+    });
+
+    const thumb1 = page.getByRole("button", { name: copy("en", "mediaNumber", { number: 1 }), exact: true });
+    const thumb8 = page.locator(`button[aria-label="${copy("en", "mediaNumber", { number: 8 })}"]`);
+    assert.equal(await thumb1.evaluate(el => Boolean(el.closest("[inert]"))), false);
+    assert.equal(await thumb8.evaluate(el => Boolean(el.closest("[inert]"))), true);
+    assert.equal(await thumb8.evaluate(el => el.closest('[aria-roledescription="slide"]')?.getAttribute("aria-hidden")), "true");
+
+    // Visible thumbnail accepts keyboard focus; offscreen thumbnail refuses focus because it is inert.
+    await thumb1.focus();
+    assert.equal(await thumb1.evaluate(el => document.activeElement === el), true);
+    assert.equal(await thumb8.evaluate(el => { (el as HTMLButtonElement).focus(); return document.activeElement === el; }), false);
+
+    // Main carousel Next control remains accessible and advances through slides to reveal offscreen thumbnails.
+    const next = page.getByRole("button", { name: copy("en", "nextSlide"), exact: true });
+    assert.equal(await next.evaluate(el => Boolean(el.closest("[inert]"))), false);
+    await next.focus();
+    assert.equal(await next.evaluate(el => document.activeElement === el), true);
+    for (let step = 0; step < 7; step++) {
+      await next.click();
+    }
+    await page.getByText("8 / 8", { exact: true }).waitFor();
+    await page.waitForFunction((label8) => {
+      const el = document.querySelector<HTMLButtonElement>(`button[aria-label="${label8}"]`);
+      return Boolean(el && !el.closest("[inert]"));
+    }, copy("en", "mediaNumber", { number: 8 }));
+    assert.equal(await thumb8.evaluate(el => { (el as HTMLButtonElement).focus(); return document.activeElement === el; }), true);
+    assert.equal(await page.locator(`button[aria-label="${copy("en", "mediaNumber", { number: 1 })}"]`).evaluate(el => Boolean(el.closest("[inert]"))), true);
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("corner pin overlays stay unclipped inside carousel bounds at 320 px and 200% zoom", async () => {
+  const { context, page, errors } = await harness("case=viewer-corner-pins", { width: 320, height: 568 });
+  try {
+    await page.locator('button[data-pin-id="corner-br"]').waitFor();
+    async function assertCornerPinsUnclipped(label: string) {
+      const check = await page.evaluate(() => {
+        const clip = document.querySelector('[aria-roledescription="carousel"] > div')!.getBoundingClientRect();
+        const pins = [...document.querySelectorAll<HTMLElement>("button[data-pin-id]")].map(el => {
+          const r = el.getBoundingClientRect();
+          return { id: el.dataset.pinId, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+        });
+        return {
+          clip: { left: clip.left, right: clip.right, top: clip.top, bottom: clip.bottom },
+          pins,
+          scrollWidth: document.documentElement.scrollWidth,
+          innerWidth: window.innerWidth,
+        };
+      });
+      assert.ok(check.scrollWidth <= check.innerWidth, `${label}: horizontal overflow ${check.scrollWidth} > ${check.innerWidth}`);
+      assert.equal(check.pins.length, 4);
+      for (const pin of check.pins) {
+        assert.ok(pin.left >= check.clip.left - 0.5, `${label} ${pin.id}: left ${pin.left} < ${check.clip.left}`);
+        assert.ok(pin.right <= check.clip.right + 0.5, `${label} ${pin.id}: right ${pin.right} > ${check.clip.right}`);
+        assert.ok(pin.top >= check.clip.top - 0.5, `${label} ${pin.id}: top ${pin.top} < ${check.clip.top}`);
+        assert.ok(pin.bottom <= check.clip.bottom + 0.5, `${label} ${pin.id}: bottom ${pin.bottom} > ${check.clip.bottom}`);
+      }
+    }
+
+    await assertCornerPinsUnclipped("320px default");
+    await page.locator('button[data-pin-id="corner-tl"]').click();
+    await page.locator("[data-note-details]").getByText("Top-left corner note", { exact: true }).waitFor();
+    await assertCornerPinsUnclipped("320px top-left highlighted");
+    const detailOverflow = await page.locator("[data-note-details] button").evaluateAll(buttons =>
+      buttons.some(btn => btn.getBoundingClientRect().right > window.innerWidth + 0.5),
+    );
+    assert.equal(detailOverflow, false, "PinDetails buttons stay inside 320 px viewport");
+
+    await page.locator('button[data-pin-id="corner-br"]').click();
+    await page.locator("[data-note-details]").getByText("Bottom-right corner note", { exact: true }).waitFor();
+    await assertCornerPinsUnclipped("320px bottom-right highlighted");
+
+    const session = await context.newCDPSession(page);
+    await session.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+    await assertCornerPinsUnclipped("320px 200% zoom");
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("delayed note save prevents duplicate submissions and preserves draft text for inline retry after failure", async () => {
+  const { context, page, errors } = await harness("case=viewer-delayed-save");
+  try {
+    await page.getByRole("button", { name: copy("en", "addPin"), exact: true }).click();
+    await page.locator("img[data-pin-surface]").click({ position: { x: 40, y: 40 } });
+    const textarea = page.getByPlaceholder(copy("en", "describeIssue"));
+    await textarea.fill("Delayed note survives failure");
+
+    const saveBtn = page.getByRole("button", { name: copy("en", "savePin"), exact: true });
+    await saveBtn.click();
+    // Attempt a rapid second click while in-flight; button must be disabled and only 1 call dispatched.
+    assert.equal(await saveBtn.isDisabled(), true);
+    await saveBtn.evaluate(el => (el as HTMLButtonElement).click());
+    await page.locator("#save-calls").filter({ hasText: "1" }).waitFor();
+
+    // Fail the first attempt: error renders inline and draft text remains intact.
+    await page.evaluate(() => (window as unknown as { __mediaSaveControl?: { rejectNext: (m: string) => void } }).__mediaSaveControl?.rejectNext("Temporary save failure"));
+    await page.getByRole("alert").filter({ hasText: copy("en", "genericError") }).waitFor();
+    assert.equal(await textarea.inputValue(), "Delayed note survives failure");
+    assert.equal(await saveBtn.isDisabled(), false);
+
+    // Retry succeeds and creates the pin.
+    await saveBtn.click();
+    await page.locator("#save-calls").filter({ hasText: "2" }).waitFor();
+    await page.evaluate(() => (window as unknown as { __mediaSaveControl?: { resolveNext: () => void } }).__mediaSaveControl?.resolveNext());
+    await textarea.waitFor({ state: "hidden" });
+    await page.locator('button[data-pin-id="saved-1"]').waitFor();
+    assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });

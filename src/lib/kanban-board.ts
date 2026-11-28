@@ -98,3 +98,46 @@ export function reconcileColumns<T extends BoardTicket>(projectId: string, rows:
 export function statusChangeFromDrag(input: { activeContainer: string; overContainer: string }): TicketStatus | null {
   return input.activeContainer !== input.overContainer && isBoardStatus(input.overContainer) ? input.overContainer : null;
 }
+
+export type LaneSort = "newest" | "urgency";
+
+/** Urgency order within loaded rows: highest score first, unscored last, then lower Ticket number. */
+export function sortLane<T extends BoardTicket & { urgencyScore?: number }>(rows: T[], sort: LaneSort): T[] {
+  if (sort === "newest") return rows;
+  return [...rows].sort((a, b) => (b.urgencyScore ?? -1) - (a.urgencyScore ?? -1) || a.ticketNumber - b.ticketNumber);
+}
+
+/** The four non-Done lanes and Done, from the same lane totals. */
+export function openAndDone(totals: Partial<Record<TicketStatus, number>>) {
+  const done = totals.done ?? 0;
+  const open = BOARD_COLUMNS.reduce((sum, status) => status === "done" ? sum : sum + (totals[status] ?? 0), 0);
+  return { open, done };
+}
+
+/** Mirrors the 30-day archive retention rule; a purge claim, not this date, ends restoration. */
+export const ARCHIVE_PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+export function purgeEligibility(archivedAt: number | undefined, now: number):
+  { state: "unknown" } | { state: "eligible" } | { state: "future"; from: number } {
+  if (archivedAt === undefined || !Number.isFinite(archivedAt)) return { state: "unknown" };
+  const from = archivedAt + ARCHIVE_PURGE_AFTER_MS;
+  return from <= now ? { state: "eligible" } : { state: "future", from };
+}
+
+/** Arrivals seen this session per Project: opened ones lose their marker; each is announced once. */
+const openedArrivals = new Map<string, Set<string>>();
+const announcedArrivals = new Map<string, Set<string>>();
+function projectSet(map: Map<string, Set<string>>, projectId: string) {
+  let set = map.get(projectId);
+  if (!set) map.set(projectId, set = new Set());
+  return set;
+}
+export function markArrivalOpened(projectId: string, id: string) { projectSet(openedArrivals, projectId).add(id); }
+export function isArrivalOpened(projectId: string, id: string) { return openedArrivals.get(projectId)?.has(id) ?? false; }
+/** Returns how many arrivals in `ids` have not been announced before, and records them. */
+export function takeUnannouncedArrivals(projectId: string, ids: readonly string[]) {
+  const seen = projectSet(announcedArrivals, projectId);
+  let count = 0;
+  for (const id of ids) if (!seen.has(id)) { seen.add(id); count++; }
+  return count;
+}
+export function resetArrivalTracking() { openedArrivals.clear(); announcedArrivals.clear(); }

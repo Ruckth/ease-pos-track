@@ -1,5 +1,6 @@
 // Ticket creation, draft lifecycle, and attachment editing.
 import { markupLabels } from "../../src/lib/markup-labels";
+import { mediaUxCopy } from "../../src/lib/media-ux-copy";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { after } from "node:test";
@@ -780,7 +781,21 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       await camera.getByRole("button", { name: copy(language, "takePhoto"), exact: true }).waitFor({ state: "visible" });
       await page.waitForFunction(() => window.draftStats.streams.length > 0);
       if (language === "en") {
-        await camera.getByRole("button", { name: copy(language, "takePhoto"), exact: true }).click();
+        const labels = mediaUxCopy(language);
+        const capture = camera.getByRole("button", { name: copy(language, "takePhoto"), exact: true });
+        const sheetPreview = camera.getByRole("img", { name: labels.capturedPreview, exact: true });
+        const draftFilesBeforeCapture = (await stats(page)).created.length;
+        await capture.click();
+        await sheetPreview.waitFor();
+        assert.equal(await page.locator('[data-slot="sortable-item"]').count(), 0, "review alone does not add a draft file");
+        assert.equal((await stats(page)).created.length, draftFilesBeforeCapture + 1, "review preview reuses one blob URL");
+        await camera.getByRole("button", { name: labels.retakePhoto, exact: true }).click();
+        await sheetPreview.waitFor({ state: "hidden" });
+        await page.waitForFunction(before => window.draftStats.revoked.length === before + 1, draftFilesBeforeCapture);
+        await capture.click();
+        await sheetPreview.waitFor();
+        await camera.getByRole("button", { name: labels.usePhoto, exact: true }).click();
+        await page.waitForFunction(before => window.draftStats.created.length === before + 3 && window.draftStats.revoked.length === before + 2, draftFilesBeforeCapture);
       } else {
         await camera.getByRole("button", { name: copy(language, "cancel"), exact: true }).click();
         await files(page);
@@ -793,7 +808,7 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       // The document stays loaded so instrumentation observes React teardown.
       // Server-side sign-out: the session watcher clears the local session.
       await convex.mutation(api.auth.signOut, { refreshToken });
-      await page.waitForFunction(() => window.draftStats.revoked.length === 2 && window.draftStats.stops.length === 2);
+      await page.waitForFunction(() => window.draftStats.revoked.length === window.draftStats.created.length && window.draftStats.revoked.length >= 2 && window.draftStats.stops.length === 2);
       await (role === "staff" ? page.getByRole("button", { name: copy(language, "continueWithGoogle"), exact: true }) : page.locator("#customer-password")).waitFor({ state: "visible" });
       const observed = await stats(page);
       assert.deepEqual(observed.revoked, observed.created);
@@ -813,6 +828,8 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
       assert.equal(await composer.getByRole("button", { name: copy(language, "next"), exact: true }).count(), 0);
       await title.fill(name);
       await composer.getByRole("button", { name: copy(language, "submitTicket"), exact: true }).click();
+      await composer.getByRole("heading", { name: /POS-\d+/ }).waitFor();
+      await composer.getByRole("button", { name: language === "th" ? "ดู Ticket" : "View Ticket", exact: true }).click();
       await composer.waitFor({ state: "hidden" });
       await page.waitForFunction(() => new URL(location.href).searchParams.has("ticket"));
       const id = new URL(page.url()).searchParams.get("ticket") as Id<"tickets">;
@@ -843,10 +860,12 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     await title.fill(name);
     await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     await chooseProject(page, "APP");
-    await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
+    await page.getByRole("button", { name: "Continue draft", exact: true }).first().click();
     assert.equal(await title.inputValue(), name);
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
     await page.getByRole("button", { name: copy("en", "submitTicket"), exact: true }).click();
+    await page.getByRole("heading", { name: /POS-\d+/ }).waitFor();
+    await page.getByRole("button", { name: "View Ticket", exact: true }).click();
     await page.getByRole("dialog", { name: copy("en", "newTicket"), exact: true }).waitFor({ state: "hidden" });
     const matches = await convex.query(api.tickets.searchTickets, { token: seed.sessions[role === "staff" ? 0 : 1], projectId: seed.projects.find(p => p.key === "POS")!.id, search: name, lifecycle: "active" });
     const created = matches.matches.find(item => item.title === name);
@@ -861,11 +880,12 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     await page.waitForURL(url => url.searchParams.get("ticket") === created._id);
     const detail = page.getByRole("region", { name, exact: true });
     await detail.waitFor();
+    if (role === "staff") assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), name);
     await page.reload();
     await detail.waitFor();
     assert.equal(new URL(page.url()).searchParams.get("project"), "POS");
     assert.equal(new URL(page.url()).searchParams.get("ticket"), created._id);
-    if (role === "staff") assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), name);
+    if (role === "staff") assert.equal(await page.getByPlaceholder("Search", { exact: true }).inputValue(), "");
     await page.goBack();
     await detail.waitFor({ state: "hidden" });
     assert.equal(new URL(page.url()).searchParams.has("ticket"), false);
@@ -887,7 +907,13 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: copy("en", "versionConflict") }).waitFor();
     assert.equal((await convex.query(api.tickets.getTicket, { token: seed.sessions[0], id: created._id }))?.title, `${name} externally`);
-    await page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
+    await Promise.all([
+      page.waitForEvent("dialog").then(async dialog => {
+        assert.equal(dialog.message(), "Discard unsaved changes to this Ticket?");
+        await dialog.accept();
+      }),
+      page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click(),
+    ]);
     await page.getByRole("heading", { name: `${name} externally`, exact: true }).waitFor({ state: "hidden" });
     await page.locator(`button[data-ticket-id="${created._id}"]`).click();
     await page.getByRole("heading", { name: `${name} externally`, exact: true }).waitFor();
@@ -899,7 +925,7 @@ for (const role of ["staff", "customer"] as const) test(`${role}: Project switch
 });
 
 for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
-  test(`${role} ${language}: real Cancel preserves content and receipt after create; retry creates once; Discard releases previews`, async () => {
+  test(`${role} ${language}: saving suppresses Cancel; an uncertain response can be retried once; Discard releases previews`, async () => {
     let release!: () => void;
     let arrived!: () => void;
     const held = new Promise<void>(resolve => { arrived = resolve; });
@@ -978,15 +1004,20 @@ for (const role of ["staff", "customer"] as const) for (const language of ["en",
         assert.equal(await page.locator('[data-slot="ticket-draft-files"]').isDisabled(), true);
         assert.equal(await page.getByRole("button", { name: copy(language, "openMedia", { name: attachmentName }), exact: true }).isDisabled(), true);
       }
-      await page.getByRole("button", { name: copy(language, "cancelUpload"), exact: true }).click();
+      assert.equal(await page.getByRole("button", { name: copy(language, "cancelUpload"), exact: true }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).isDisabled(), true);
+      await page.getByRole("status").filter({ hasText: language === "th" ? "กำลังบันทึก Ticket" : "Saving Ticket" }).waitFor();
       assert.equal((await stats(page)).revoked.length, releasedBeforeSubmit);
       release();
-      await submit.waitFor({ state: "visible" });
+      const retry = page.getByRole("button", { name: language === "th" ? "ลองส่งอีกครั้ง" : "Retry submission", exact: true });
+      await retry.waitFor();
       loseResponses = false;
       await page.getByText(copy(language, "pinSummary", { count: 1 }), { exact: true }).waitFor();
       assert.equal(await title.inputValue(), name);
       assert.equal(await description.inputValue(), "Keep this description");
-      await submit.click();
+      await retry.click();
+      await page.getByRole("heading", { name: /POS-\d+/ }).waitFor();
+      await page.getByRole("button", { name: language === "th" ? "ดู Ticket" : "View Ticket", exact: true }).click();
       await page.getByRole("dialog", { name: copy(language, "newTicket"), exact: true }).waitFor({ state: "hidden" });
       if (role === "staff") await page.getByRole("dialog").getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       assert.equal(requests.length, 3);
@@ -1039,7 +1070,7 @@ test("losing captured Project access leaves the customer draft discardable", asy
     await page.locator("header").getByText("Customer App (APP)", { exact: true }).waitFor();
     await page.waitForURL(url => url.searchParams.get("project") === "APP");
     assert.equal(await projectSwitcher(page).count(), 0);
-    await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
+    await page.getByRole("button", { name: "Continue draft", exact: true }).first().click();
     assert.equal(await title.inputValue(), "Captured POS draft");
     await page.getByRole("dialog").getByText("Point of Sale (POS)", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Discard draft", exact: true }).click();
@@ -1054,4 +1085,55 @@ test("losing captured Project access leaves the customer draft discardable", asy
     await convex.mutation(api.identity.joinWithInvitation, { token: seed.sessions[1], invitation: invitation.secret });
     await context.close();
   }
+});
+
+test("optional customer guide focuses steps, resumes Review and edits the description directly", async () => {
+  const { context, page, title } = await open("customer", "en");
+  try {
+    await page.getByRole("button", { name: "Use step-by-step guide" }).click();
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    assert.equal(await title.evaluate(el => el === document.activeElement), true);
+    const validation = await title.getAttribute("aria-describedby");
+    assert.equal(await page.locator(`#${validation}`).innerText(), "A topic is required.");
+    await title.fill("Guided ticket");
+    const description = page.locator("#customer-ticket-description");
+    await description.fill("The description stays in this draft");
+    const guidance = await description.getAttribute("aria-describedby");
+    assert.equal(await page.locator(`#${guidance}`).innerText(), copy("en", "descriptionPlaceholder"));
+    await page.getByRole("button", { name: "Next", exact: true }).press("Enter");
+    const media = page.getByRole("heading", { name: "Step 2 of 3 · Photos & videos" });
+    assert.equal(await media.evaluate(el => el === document.activeElement), true);
+    await files(page);
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    const review = page.getByRole("heading", { name: "Step 3 of 3 · Review and submit" });
+    assert.equal(await review.evaluate(el => el === document.activeElement), true);
+    await page.getByRole("button", { name: /draft.png.*Photo 1/ }).waitFor();
+    await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+    await page.getByRole("button", { name: copy("en", "resumeTicket"), exact: true }).first().click();
+    await review.waitFor();
+    await page.waitForFunction(() => document.activeElement?.matches("[data-composer-step-heading]"));
+    await page.getByRole("button", { name: "Edit description", exact: true }).click();
+    assert.equal(await description.evaluate(el => el === document.activeElement), true);
+    assert.equal(await description.inputValue(), "The description stays in this draft");
+  } finally { await context.close(); }
+});
+
+test("staff attachment preview fills a 375 px phone viewport and keeps Close visible", async () => {
+  const { context, page } = await openWith(await browsers.get(), "staff", "en", undefined, {
+    viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true,
+  });
+  try {
+    await files(page);
+    await page.getByRole("button", { name: copy("en", "openMedia", { name: "draft.png" }), exact: true }).tap();
+    const viewer = page.getByRole("dialog", { name: "draft.png", exact: true });
+    await viewer.waitFor();
+    const popup = await viewer.elementHandle();
+    assert.ok(popup);
+    await page.waitForFunction(element => {
+      const box = element.getBoundingClientRect();
+      return Math.abs(box.height - (window.visualViewport?.height ?? window.innerHeight)) < 2;
+    }, popup);
+    const close = await viewer.getByRole("button", { name: copy("en", "closeDialog"), exact: true }).boundingBox();
+    assert.ok(close && close.y >= 0 && close.y + close.height <= 812);
+  } finally { await context.close(); }
 });
