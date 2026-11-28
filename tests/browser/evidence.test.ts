@@ -51,6 +51,9 @@ for (const [role, language, width] of [["customer", "en", 1280], ["customer", "t
             height: el.getBoundingClientRect().height,
             overflow: document.documentElement.scrollWidth - innerWidth,
             firstTicketY: firstTicket?.getBoundingClientRect().top,
+            firstTicketBottom: firstTicket?.getBoundingClientRect().bottom,
+            firstTicketText: firstTicket?.textContent?.trim(),
+            lanes: document.querySelectorAll('[data-slot="kanban-column"]').length,
             controls: Array.from(el.querySelectorAll("button, summary"))
               .filter(button => button.getClientRects().length && !button.closest('[role="menu"]')).map(button => {
                 const { x, width, height } = button.getBoundingClientRect();
@@ -58,6 +61,7 @@ for (const [role, language, width] of [["customer", "en", 1280], ["customer", "t
               }),
           };
         }));
+        if (measuredWidth === 320 && role === "staff") await shot(page, `staff-${language}-320-queue`);
       }
       writeFileSync(path.join(dir, `toolbar-${role}-${language}-${width}.json`), JSON.stringify(metrics, null, 2));
       await page.setViewportSize({ width, height: width < 640 ? 844 : 900 });
@@ -65,6 +69,10 @@ for (const [role, language, width] of [["customer", "en", 1280], ["customer", "t
       await page.getByText(copy(language, "signOut"), { exact: true }).waitFor();
       await shot(page, `${role}-${language}-${width}-menu`);
       await page.keyboard.press("Escape");
+      const legacyMenu = page.locator("details[open] > summary").filter({
+        hasText: copy(language, role === "staff" ? "queueMore" : "customerQueueMore"),
+      });
+      if (await legacyMenu.count()) await legacyMenu.click();
       const switcher = page.getByRole("button", { name: new RegExp(`^${copy(language, "chooseProject")}`) });
       if (await switcher.count()) {
         await switcher.click();
@@ -77,15 +85,6 @@ for (const [role, language, width] of [["customer", "en", 1280], ["customer", "t
       await page.waitForURL(url => url.searchParams.has("ticket"));
       await page.getByRole("heading", { level: 2 }).first().waitFor();
       await shot(page, `${role}-${language}-${width}-detail`);
-      if (role === "staff") {
-        await page.getByRole("button", { name: copy(language, "detailBack"), exact: true }).click().catch(() => page.keyboard.press("Escape"));
-        const acknowledge = page.getByRole("button", { name: new RegExp(`^${copy(language, "queueAcknowledge")} ·`) }).first();
-        if (await acknowledge.count()) {
-          await acknowledge.click();
-          await page.locator("[data-sonner-toast]").first().waitFor();
-          await shot(page, `${role}-${language}-${width}-toast`);
-        }
-      }
     } finally { await context.close(); }
   });
 }
