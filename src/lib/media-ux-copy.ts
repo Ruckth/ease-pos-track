@@ -26,6 +26,7 @@ export type MediaCopy = {
   capturedPreview: string;
   retakePhoto: string;
   usePhoto: string;
+  draftModeStatus: string;
   imageModeStatus: string;
   videoModeStatus: string;
   moveModeStatus: string;
@@ -76,6 +77,7 @@ const copyByLanguage: Record<Language, MediaCopy> = {
     capturedPreview: "Captured photo preview",
     retakePhoto: "Retake",
     usePhoto: "Use photo",
+    draftModeStatus: "Editing note",
     imageModeStatus: "Note placement mode · Tap the image or use arrow keys to place a pin.",
     videoModeStatus: "Note placement mode · Scrub to a frame, then tap the video or use arrow keys to place a pin.",
     moveModeStatus: "Moving note · Tap a new spot on this file or use arrow keys.",
@@ -128,6 +130,7 @@ const copyByLanguage: Record<Language, MediaCopy> = {
     capturedPreview: "ตัวอย่างรูปที่ถ่าย",
     retakePhoto: "ถ่ายใหม่",
     usePhoto: "ใช้รูปนี้",
+    draftModeStatus: "กำลังแก้ไขหมายเหตุ",
     imageModeStatus: "โหมดเพิ่มหมายเหตุ · แตะบนรูปหรือใช้ปุ่มลูกศรเพื่อวางหมุด",
     videoModeStatus: "โหมดเพิ่มหมายเหตุ · เลื่อนเลือกช่วงเวลา แล้วแตะบนวิดีโอหรือใช้ปุ่มลูกศรเพื่อวางหมุด",
     moveModeStatus: "กำลังย้ายหมายเหตุ · แตะตำแหน่งใหม่บนไฟล์นี้หรือใช้ปุ่มลูกศร",

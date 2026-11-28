@@ -3,9 +3,12 @@ import { markupLabels } from "../../src/lib/markup-labels";
 import { mediaUxCopy } from "../../src/lib/media-ux-copy";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 import { after } from "node:test";
 import type { BrowserContext, Locator, Page } from "playwright";
 import { api } from "../../convex/_generated/api";
+import { EVIDENCE_DIR } from "../../scripts/browser-evidence";
 import type { Id } from "../../convex/_generated/dataModel";
 import { chooseProject, convex, copy, files, projectSwitcher, suiteBrowser, workflowTest as test, open as openWith, seed, stats, type Language } from "./harness";
 
@@ -490,7 +493,7 @@ for (const [language, viewport] of [
     const t = (key: Parameters<typeof copy>[1], values?: Parameters<typeof copy>[2]) => copy(language, key, values);
     const labels = markupLabels(language);
     const control = (name: string) => page.getByRole("button", { name, exact: true }).last();
-    async function tapHere(name: string) {
+    async function tapHere(name: string, beforeTap?: () => Promise<void>) {
       const button = control(name);
       await button.waitFor();
       await page.waitForFunction(label => {
@@ -501,6 +504,7 @@ for (const [language, viewport] of [
         return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight &&
           button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }, name);
+      await beforeTap?.();
       await button.tap();
     }
     const place = (selector: string, x: number, y: number) => placeOnSurface(page.locator(selector).last(), x, y);
@@ -535,7 +539,22 @@ for (const [language, viewport] of [
 
       // Exercise the layout with the space a software keyboard would leave.
       await page.setViewportSize({ width: viewport.width, height: 320 });
-      await tapHere(t("savePin"));
+      await tapHere(t("savePin"), async () => {
+        for (const action of [t("repositionPin"), t("cancel"), t("savePin")]) {
+          const visible = await photo.getByRole("button", { name: action, exact: true }).evaluate(element => {
+            const box = element.getBoundingClientRect();
+            const viewport = window.visualViewport!;
+            const point = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+            return box.left >= viewport.offsetLeft && box.top >= viewport.offsetTop
+              && box.right <= viewport.offsetLeft + viewport.width && box.bottom <= viewport.offsetTop + viewport.height
+              && element.contains(point);
+          });
+          assert.ok(visible, `${language} ${viewport.width}×320: ${action} remains fully visible and touchable`);
+        }
+        const screenshots = path.join(EVIDENCE_DIR, "public", "screenshots");
+        mkdirSync(screenshots, { recursive: true });
+        await page.screenshot({ path: path.join(screenshots, `workflows-photo-note-keyboard-${language}-${viewport.width}.png`) });
+      });
       await page.setViewportSize(viewport);
       await place("img[data-pin-surface]", .45, .4);
       await draftNote.fill("Same spot on the edited photo");

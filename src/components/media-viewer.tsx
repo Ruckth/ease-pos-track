@@ -508,11 +508,9 @@ export const MediaViewer = forwardRef<
     );
   }
 
-  const modeStatusText = movingId
-    ? copy.moveModeStatus
-    : activeIsVideo
-      ? copy.videoModeStatus
-      : copy.imageModeStatus;
+  const editingDraft = Boolean(draft && !repositioning);
+  const placementStatus = activeIsVideo ? copy.videoModeStatus : copy.imageModeStatus;
+  const modeStatusText = movingId ? copy.moveModeStatus : editingDraft ? copy.draftModeStatus : placementStatus;
 
   const draftTargetCaption = draft
     ? draft.time !== undefined
