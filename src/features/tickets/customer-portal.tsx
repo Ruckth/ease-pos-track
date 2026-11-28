@@ -143,7 +143,7 @@ export function CustomerPortal({ viewer, onLogout }: {
         ? <DraftStrip owner={composer.owner} project={composer.project} foreign={foreignDraft} busy={composer.busy}
             onDiscard={discardDraft} onStartCurrent={composer.startCurrentProject} /> : null}
       <div className={cn("grid items-start gap-4", ticket && "lg:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]")}>
-        <ProjectTicketsBoundary key={project?._id ?? "none"}>
+        <ProjectTicketsBoundary key={project?.key ?? requestedProject ?? "none"}>
           <CustomerTickets project={project} email={viewer.email} composerLabel={composerLabel} onNewTicket={composer.show} onSelect={openTicket}
             ticketOpen={Boolean(ticket)} selectedId={selectedId} filter={navigation.filter} query={navigation.query}
             onFilter={navigation.setFilter} onQuery={navigation.setQuery} onVisibleIds={setVisibleIds} />

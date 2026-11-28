@@ -220,10 +220,14 @@ for (const language of ["en", "th"] as const) test(`customer ${language}: phone 
     const resolved = filters.getByRole("button", { name: copy(language, "resolvedTickets"), exact: true });
     const active = filters.getByRole("button", { name: copy(language, "customerQueueAllActive"), exact: true });
     assert.equal(await waiting.getAttribute("aria-pressed"), "true");
-    assert.equal(await filters.getByRole("button").count(), 4);
-    for (const button of await filters.getByRole("button").all()) {
-      const bounds = await button.boundingBox();
-      assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 320 && bounds.height >= 44);
+    await projectSwitcher(page, language).getByText("POS", { exact: true }).waitFor();
+    const targets = await filters.getByRole("button").evaluateAll(buttons => buttons.map(button => {
+      const { left, right, width, height } = button.getBoundingClientRect();
+      return { label: button.textContent, left, right, width, height };
+    }));
+    assert.equal(targets.length, 4);
+    for (const target of targets) {
+      assert.ok(target.left >= 0 && target.right <= 320 && target.width >= 44 && target.height >= 44, JSON.stringify(target));
     }
     await resolved.press("Enter");
     await page.waitForURL(url => url.searchParams.get("filter") === "done");
