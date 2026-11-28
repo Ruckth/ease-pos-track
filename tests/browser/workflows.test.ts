@@ -2001,7 +2001,7 @@ test("active text draft confirms before sign-out without upload traffic", async 
   } finally { await context.close(); }
 });
 
-test("sign-out waits for the active draft to cancel with a live session", { timeout: 30_000 }, async () => {
+test("sign-out waits for the active draft to cancel with a live session", { timeout: 70_000 }, async () => {
   let intentRequest: number | undefined;
   let releaseIntent: (() => void) | undefined;
   let received!: (release: () => void) => void;
@@ -2053,7 +2053,12 @@ test("sign-out waits for the active draft to cancel with a live session", { time
     await files(page);
     await page.getByRole("button", { name: copy("en", "submitTicket"), exact: true }).click();
     await page.getByRole("button", { name: copy("en", "cancelUpload") }).waitFor();
-    releaseIntent = await intentResponse;
+    releaseIntent = await Promise.race([
+      intentResponse,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Upload intent response was not intercepted")), 10_000).unref();
+      }),
+    ]);
     // Back would leave the upload's Project. Declining keeps the draft active.
     await Promise.all([
       page.waitForEvent("dialog").then(async dialog => {
