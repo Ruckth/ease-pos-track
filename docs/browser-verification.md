@@ -181,8 +181,8 @@ at step 5 (`preview-release: 2 live preview URLs for 1 files`) and
 `EXPLORE_REPLAY` of its JSON reproduces the same step and message.
 
 Before proposing a fix for a discovery, reproduce it as a deterministic test in
-`workflows.test.ts` and have a person review it. Exploration is not part of
-`pnpm test:browser` or CI and stays non-required.
+`tests/browser/workflows-composer.test.ts` and have a person review it.
+Exploration stays outside `pnpm test:browser` and CI.
 
 Bombadil was not adopted for this pilot: it is a separate experimental binary
 outside the pnpm lockfile, its replay is documented as experimental, and the
@@ -203,6 +203,9 @@ covers the rest of the workflow checks and runs the advisory visual pilot.
 `browser-workflows` passes when both jobs pass. Each shard publishes its own
 sanitized failure evidence. To reproduce either shard, run
 `pnpm test:browser --suite composer` or `pnpm test:browser --suite workspace`.
+The aggregate check logs the matrix result and fails when either shard
+fails or is cancelled. Track runs superseded by a newer PR push separately
+when collecting rehearsal results.
 
 | Phase | Gate | Owner |
 | --- | --- | --- |

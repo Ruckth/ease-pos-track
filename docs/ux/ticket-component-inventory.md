@@ -15,7 +15,8 @@ lines. The glass recipe survives only as the unused `.surface-glass` class and
 the annotation marker/popover, for a later explicit appearance choice.
 
 Check keys: **C** `tests/browser/components.test.ts` (mounted harness,
-`tests/browser/components.html`), **W** `tests/browser/workflows.test.ts`,
+`tests/browser/components.html`), **W** `tests/browser/workflows.test.ts` or
+`tests/browser/workflows-composer.test.ts`,
 **A** `tests/browser/accessibility.test.ts`, **R** `tests/browser/routing.test.ts`,
 **X** `tests/browser/explorer-check.mjs`, **E** `pnpm test:explore`,
 **V** `pnpm test:visual`, **S** before/after screenshots

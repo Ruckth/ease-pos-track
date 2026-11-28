@@ -87,7 +87,9 @@ jobs:
     if: ${{ always() }}
     timeout-minutes: 2
     steps:
-      - name: Both browser shards passed
-        run: test "$BROWSER_RESULT" = success
+      - name: Check the browser shard result
+        run: |
+          printf 'Browser shard result: %s\n' "$BROWSER_RESULT"
+          test "$BROWSER_RESULT" = success
         env:
           BROWSER_RESULT: ${{ needs.browser-shard.result }}
