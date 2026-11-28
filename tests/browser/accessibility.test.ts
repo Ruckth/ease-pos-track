@@ -213,6 +213,8 @@ for (const language of ["en", "th"] as const) {
       await health.locator("summary").filter({ hasText: copy(language, "healthConfiguration") }).waitFor();
       await expectAccessible(page, `staff ${language} operations health`);
       await page.setViewportSize({ width: 360, height: 740 });
+      await health.locator("summary").filter({ hasText: copy(language, "healthConfiguration") }).press("Enter");
+      await health.locator("summary").filter({ hasText: copy(language, "healthCounts") }).press("Enter");
       await expectAccessible(page, `staff ${language} operations health mobile`);
       await health.getByRole("group", { name: copy(language, "healthDiagnosticView") })
         .getByRole("button", { name: copy(language, "healthExpired"), exact: true }).press("Enter");

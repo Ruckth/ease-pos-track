@@ -125,6 +125,45 @@ if (label === "after") for (const role of ["staff", "customer"] as const) {
   });
 }
 
+if (label === "after") for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
+  test(`${role} ${language} compact phone workspace`, async () => {
+    const { page, context } = await openWith(await browsers.get(), role, language, undefined, {
+      hasTouch: true, isMobile: true, viewport: { width: 360, height: 780 },
+    });
+    try {
+      await page.getByRole("dialog").getByRole("button", { name: copy(language, "closeDialog"), exact: true }).tap();
+      const header = page.locator("main header").first();
+      const firstTicket = page.locator("button[data-ticket-id]:visible").first();
+      await firstTicket.waitFor();
+      if (role === "staff") {
+        assert.equal(await page.getByRole("button", { name: copy(language, "queueLabel"), exact: true }).getAttribute("aria-pressed"), "true");
+      }
+      const metrics = [];
+      for (const width of [360, 390, 430]) {
+        await page.setViewportSize({ width, height: Math.round(width * 19.5 / 9) });
+        await settle(page);
+        const bounds = (await header.boundingBox())!;
+        assert.ok(bounds.height >= 44 && bounds.height <= 48, `${width}px header height is ${bounds.height}px`);
+        const minTarget = await header.getByRole("button").evaluateAll(buttons => Math.min(...buttons.flatMap(button => {
+          const { height, width } = button.getBoundingClientRect();
+          return [height, width];
+        })));
+        assert.ok(minTarget >= 44, `${width}px header target is ${minTarget}px`);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        if (role === "customer") {
+          const filters = page.getByRole("group", { name: copy(language, "filterTickets") }).getByRole("button");
+          assert.equal(await filters.count(), 4);
+          assert.equal(await filters.evaluateAll(buttons => new Set(buttons.map(button => button.getBoundingClientRect().top)).size), 1);
+        }
+        const row = (await firstTicket.boundingBox())!;
+        metrics.push({ width, headerHeight: bounds.height, minTarget, firstTicketY: row.y, firstTicketBottom: row.y + row.height });
+        await shot(page, `${role}-${language}-${width}-compact-queue`);
+      }
+      writeFileSync(path.join(dir, `compact-phone-${role}-${language}.json`), JSON.stringify(metrics, null, 2));
+    } finally { await context.close(); }
+  });
+}
+
 test("customer th 390 notification settings", async () => {
   const { page, context } = await openWith(await browsers.get(), "customer", "th");
   try {

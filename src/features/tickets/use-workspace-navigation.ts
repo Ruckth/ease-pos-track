@@ -24,7 +24,7 @@ function workspaceSearch(role: "staff" | "customer", search: Record<string, unkn
   return role === "staff" ? staffWorkspaceSearch(search) : customerWorkspaceSearch(search);
 }
 
-export function useWorkspaceNavigation(role: "staff" | "customer") {
+export function useWorkspaceNavigation(role: "staff" | "customer", defaultView: ListView = "queue") {
   const router = useRouter();
   const location = useRouterState({ select: state => state.location });
   const search = workspaceSearch(role, location.search);
@@ -36,11 +36,10 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
     return saved?.project === project ? saved?.query ?? "" : "";
   };
   const query = search.q ?? (role === "staff" ? readPrivateQuery(search.project, location.state.workspaceStaffQueryId) : "");
-  // Staff without an explicit view start on the Board; a URL view always wins.
   // Preserve a nonempty invalid address long enough for the Project chooser to
   // explain its fallback. Only validated Projects can select a backend scope.
   const requestedProject = search.project ?? new URLSearchParams(location.searchStr).get("project")?.trim().slice(0, 64);
-  const view = search.view ?? (role === "staff" ? "board" : "queue");
+  const view = search.view ?? defaultView;
   const listView: ListView = view === "focus" ? location.state.workspaceFocusOrigin ?? "queue" : view;
   const ticket = search.ticket ?? null;
   const defaultFilter = role === "staff" && listView === "board" ? "all" : "active";

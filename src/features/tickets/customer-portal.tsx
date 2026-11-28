@@ -105,7 +105,7 @@ export function CustomerPortal({ viewer, onLogout }: {
       heading.focus();
     }} className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-background focus:p-3 focus:ring-2 focus:ring-ring">{t("skipToTickets")}</a>
     {/* Phones get one flat, full-bleed 44px bar: Project key, labeled create, inbox and account. */}
-    <header className="aurora-toolbar sticky top-0 z-30 mx-auto max-w-6xl max-sm:-mx-3 max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:shadow-none">
+    <header className="aurora-toolbar sticky top-0 z-30 mx-auto max-w-6xl max-sm:-mx-3 max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:shadow-none max-sm:[&_button:focus-visible]:ring-inset">
       <div className="flex min-h-11 min-w-0 items-center gap-1 px-1 sm:flex-wrap sm:gap-3 sm:px-4 sm:py-1">
         <div className="min-w-[4.25rem] flex-1 sm:min-w-0">
           {projects && project ? <ProjectSwitcher compact projects={projects} current={project} onSelect={selectProject} />

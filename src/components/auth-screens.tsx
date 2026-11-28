@@ -57,9 +57,9 @@ function AuthLayout({
     if (!document.activeElement?.closest('[role="alert"], [role="status"], button[autofocus]')) heading.current?.focus({ preventScroll: true });
   }, []);
   return (
-    <main className="aurora-canvas grid min-h-screen place-items-center px-4 py-8 sm:py-12">
+    <main className="aurora-canvas grid min-h-screen place-items-center px-3 py-4 sm:px-4 sm:py-12">
       <div className="aurora-panel w-full max-w-md overflow-hidden text-card-foreground">
-        <CardHeader className="space-y-5 bg-muted/30 p-5 sm:p-6">
+        <CardHeader className="space-y-3 p-4 pb-2 sm:space-y-5 sm:bg-muted/30 sm:p-6">
           <div className="flex items-center justify-between gap-3">
             <ProductWordmark />
             <LanguageSelector language={language} onChange={setLanguage} />
@@ -69,9 +69,9 @@ function AuthLayout({
             {description ? <CardDescription className="mt-1.5 leading-5">{description}</CardDescription> : null}
           </div>
         </CardHeader>
-        <CardContent className="space-y-4 p-5 sm:p-6">
-          <PrivacyNoticeLink />
+        <CardContent className="space-y-3 p-4 sm:space-y-4 sm:p-6">
           {children}
+          <PrivacyNoticeLink />
         </CardContent>
       </div>
     </main>

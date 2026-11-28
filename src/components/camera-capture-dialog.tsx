@@ -182,13 +182,13 @@ export function CameraCaptureDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={t("camera")} description={t("cameraDescription")}>
-      <div className="space-y-4">
-        <div className="relative grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-lg bg-black text-white">
+    <Dialog open={open} onOpenChange={onOpenChange} title={t("camera")} description={t("cameraDescription")} mobileWorkspace>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 sm:block sm:space-y-4">
+        <div className="relative grid min-h-32 w-full flex-1 place-items-center overflow-hidden rounded-lg bg-black text-white sm:aspect-[4/3]">
           {!errorKey ? (
             <video
               ref={videoRef}
-              className={captured ? "hidden h-full w-full object-contain" : "h-full w-full object-contain"}
+              className={captured ? "hidden" : "absolute inset-0 h-full w-full object-contain"}
               aria-label={t("cameraPreview")}
               autoPlay
               muted
@@ -200,7 +200,7 @@ export function CameraCaptureDialog({
             <img
               src={captured.previewUrl}
               alt={copy.capturedPreview}
-              className="h-full w-full object-contain"
+              className="absolute inset-0 h-full w-full object-contain"
             />
           ) : null}
           {!ready && !errorKey && !captured ? (
@@ -229,7 +229,7 @@ export function CameraCaptureDialog({
         ) : null}
 
         {errorKey ? (
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2 [&>button]:min-h-11 [&>button]:px-3">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>
@@ -243,7 +243,7 @@ export function CameraCaptureDialog({
             </Button>
           </div>
         ) : captured ? (
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2 [&>button]:min-h-11 [&>button]:px-3">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>
@@ -257,7 +257,7 @@ export function CameraCaptureDialog({
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2 [&>button]:min-h-11 [&>button]:px-3">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>

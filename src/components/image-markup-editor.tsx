@@ -396,8 +396,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
             onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
             onWheelEnd={() => endGroup("wheel")}
             below={
-              // Keep the size control in the same place while it is in use.
-              <div className={cn("flex shrink-0 flex-col justify-center", circle ? "min-h-[4.25rem]" : "min-h-5 sm:min-h-[4.25rem]")}>
+              // Selecting or moving a mark must preserve the fitted image during the gesture.
+              <div className={cn("flex shrink-0 flex-col justify-center", tool === "select" ? "min-h-[4.25rem]" : "min-h-5 sm:min-h-[4.25rem]")}>
                 {circle ? <CircleSize sizing={circle} labels={labels} /> : <p className="text-sm leading-5 text-muted-foreground">{corner ? labels.hintSecondCorner : hints[tool]}</p>}
               </div>
             }

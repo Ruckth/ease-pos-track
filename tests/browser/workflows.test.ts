@@ -743,8 +743,7 @@ test("staff history uses native disclosure, dates, edit excerpts and independent
     assert.equal(await stamps.count(), 31);
 
     const detail = staff.page.getByRole("dialog");
-    await detail.getByRole("button", { name: copy("en", "detailActions"), exact: true }).click();
-    const editUrgency = detail.getByRole("button", { name: copy("en", "detailUrgency"), exact: true });
+    const editUrgency = detail.getByRole("button", { name: /^Edit urgency/ });
     await editUrgency.click();
     const score = detail.getByRole("spinbutton", { name: copy("en", "urgencyScore"), exact: true });
     const save = detail.getByRole("button", { name: copy("en", "saveUrgency"), exact: true });
@@ -763,6 +762,44 @@ test("staff history uses native disclosure, dates, edit excerpts and independent
   } finally {
     await staff.context.close();
   }
+});
+
+test("phone staff search closes before a private commit and reopens for a different query restored by Back", async () => {
+  const { page, context } = await open("staff");
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${baseURL}/staff?project=POS&view=board`);
+    const search = page.getByRole("textbox", { name: "Search POS Tickets", exact: true });
+    await page.getByRole("button", { name: "Search Tickets", exact: true }).click();
+    await search.fill("Printer");
+    await page.waitForFunction(() => Boolean(history.state?.workspaceStaffQueryId));
+    const firstQueryId = await page.evaluate(() => history.state.workspaceStaffQueryId);
+    await search.press("Escape");
+
+    await openHeaderMenu(page, copy("en", "queueMore"));
+    await page.getByRole("menuitemradio", { name: "Archive", exact: true }).click();
+    await page.waitForURL(url => url.searchParams.get("filter") === "archive");
+    await page.getByRole("button", { name: "Search Tickets, current search “Printer”", exact: true }).click();
+    await page.waitForFunction(input => document.activeElement === input, await search.elementHandle());
+    // Type and dismiss in the same browser task, before the debounced route commit.
+    await search.evaluate(input => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setValue?.call(input, "Alice");
+      input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+    });
+    const toggle = page.getByRole("button", { name: "Search Tickets, current search “Alice”", exact: true });
+    await page.waitForFunction(id => history.state?.workspaceStaffQueryId && history.state.workspaceStaffQueryId !== id, firstQueryId);
+    await toggle.waitFor();
+    await page.waitForFunction(button => document.activeElement === button, await toggle.elementHandle());
+    assert.equal(await toggle.evaluate(button => !!document.getElementById(button.getAttribute("aria-controls") ?? "")), true);
+    assert.equal(new URL(page.url()).searchParams.has("q"), false);
+    assert.equal(await page.evaluate(() => JSON.stringify(history.state).includes("Alice")), false);
+
+    await page.goBack();
+    await search.waitFor();
+    assert.equal(await search.inputValue(), "Printer");
+  } finally { await context.close(); }
 });
 
 test("older note history reaches event 31 without advancing the Ticket history cursor", async () => {
@@ -804,14 +841,6 @@ test("older note history reaches event 31 without advancing the Ticket history c
     await search.waitFor();
     await staff.page.waitForFunction(input => document.activeElement === input, await search.elementHandle());
     await search.fill(name);
-    await staff.page.waitForURL(url => url.searchParams.get("q") === name);
-    await search.press("Escape");
-    const editSearch = staff.page.getByRole("button", { name: `Search Tickets, current search “${name}”`, exact: true });
-    await editSearch.waitFor();
-    await staff.page.waitForFunction(button => document.activeElement === button, await editSearch.elementHandle());
-    assert.equal(await search.count(), 0);
-    assert.equal(new URL(staff.page.url()).searchParams.get("q"), name);
-
     const openTicket = staff.page.locator(`button[data-ticket-id="${id}"]`);
     const card = staff.page.locator("article").filter({ has: openTicket });
     await card.getByText("1 note", { exact: true }).waitFor();

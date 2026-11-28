@@ -65,7 +65,9 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const copy = useExplorerCopy();
   const staffCopy = useStaffCopy();
   const { copy: routingCopy } = useRoutingCopy();
-  const nav = useWorkspaceNavigation("staff");
+  // Initial viewport chooses the default. Rotating a phone keeps the staff member in the same view.
+  const [defaultView] = useState<ListView>(() => window.matchMedia("(max-width: 639px)").matches ? "queue" : "board");
+  const nav = useWorkspaceNavigation("staff", defaultView);
   const { projects, current: project, select: selectProject } = useCurrentProject(nav.project, nav.selectProject);
   // Saved searches never outlive the signed-in session that made them.
   const composer = useComposer(project, async () => { clearSavedSearches(); await onLogout(); });
@@ -99,27 +101,36 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const projectViews = useRef(new Map<string, ListView>());
   const chooseProject = (key: string) => {
     if (project) projectViews.current.set(project.key, nav.listView);
-    selectProject(key, projectViews.current.get(key) ?? "board");
+    selectProject(key, projectViews.current.get(key) ?? defaultView);
   };
   const focusSource = useRef<HTMLElement | null>(null);
   const returnPoint = useRef<{ project: string; id: TicketId; scroll: number } | null>(null);
   const exactProject = project && nav.project === project.key;
   const scopedQuery = exactProject ? nav.query : "";
   const [searchInput, setSearchInput] = useState(scopedQuery);
+  const [searchRestore, setSearchRestore] = useState(0);
+  const searchInputValue = useRef(scopedQuery);
+  const updateSearchInput = useCallback((value: string) => {
+    searchInputValue.current = value;
+    setSearchInput(value);
+  }, []);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useLayoutEffect(() => {
-    setSearchInput(scopedQuery);
+    // A route can restore a different query. A local debounce committing the
+    // current input should leave a phone search the user closed collapsed.
+    if (scopedQuery.trim() && scopedQuery !== searchInputValue.current) setSearchRestore(version => version + 1);
+    updateSearchInput(scopedQuery);
     return () => clearTimeout(searchTimer.current);
-  }, [nav.locationKey, scopedQuery, project?._id]);
+  }, [nav.locationKey, scopedQuery, project?._id, updateSearchInput]);
   const commitSearch = nav.setQuery;
   const typeSearch = (value: string) => {
-    setSearchInput(value);
+    updateSearchInput(value);
     clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => commitSearch(value, nav.locationKey), 300);
   };
   const clearSearch = () => {
     clearTimeout(searchTimer.current);
-    setSearchInput("");
+    updateSearchInput("");
     if (scopedQuery) commitSearch("");
   };
   const withSearch = (action: () => void) => {
@@ -255,11 +266,11 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
           <TicketSearchInput className="min-w-0 flex-1" label={staffCopy.searchLabel(project.key)} value={searchInput} onChange={typeSearch} onClear={clearSearch} />
           <SavedSearchMenu key={project._id} staffId={viewer.staffId} projectId={project._id} projectKey={project.key} query={searchInput} archived={showArchived} onRestore={saved => {
             clearTimeout(searchTimer.current);
-            setSearchInput(saved.query);
+            updateSearchInput(saved.query);
             nav.withQuery(saved.query, () => { if (saved.archived !== showArchived) void nav.setFilter(saved.archived ? "archive" : undefined); }, true);
           }} />
         </div>}
-        searchQuery={searchInput}
+        searchQuery={searchInput} searchRestore={searchRestore}
         newTicket={(project || composer.owner) && <>
           <Button type="button" className="min-h-11 min-w-11 px-2.5 sm:px-3" aria-describedby={composer.hasDraft && !composer.open ? "staff-draft-project" : undefined} aria-expanded={composer.open}
             aria-label={composerLabel} title={composerLabel} onClick={composer.show}>

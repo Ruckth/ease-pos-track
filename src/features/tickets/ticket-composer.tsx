@@ -213,7 +213,12 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
       </h3>}
       {(!guided || currentStep === 1) && <div className="space-y-3 sm:space-y-4">
         <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span aria-hidden="true" className="text-muted-foreground">{t("composerRequired")}</span></label>
+          <div className="flex flex-wrap items-center justify-between gap-x-2">
+            <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span aria-hidden="true" className="text-muted-foreground">{t("composerRequired")}</span></label>
+            {role === "customer" && !guided && !busy && <Button type="button" variant="ghost" className="min-h-11 px-2 text-sm text-primary" onClick={() => goTo(1)}>
+              {local("Use step-by-step guide", "ใช้ตัวช่วยแบบทีละขั้นตอน")}
+            </Button>}
+          </div>
           <Input disabled={editsDisabled} id={titleId} value={title} required aria-invalid={titleInvalid || undefined}
             aria-describedby={[titleInvalid && `${titleId}-error`, titleCounter && `${titleId}-length`].filter(Boolean).join(" ") || undefined} maxLength={TITLE_MAX_LENGTH}
             placeholder={t("topicPlaceholder")} onChange={event => {
@@ -293,9 +298,6 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
           </>}
         </section>
       </div>}
-      {role === "customer" && !guided && !busy && <Button type="button" variant="ghost" className="min-h-11 px-2 text-sm text-primary" onClick={() => goTo(1)}>
-        {local("Use step-by-step guide", "ใช้ตัวช่วยแบบทีละขั้นตอน")}
-      </Button>}
       {owner.hasContent() && <p className="text-xs text-muted-foreground">{t("draftSessionHint")}</p>}
       {failed && <div ref={errorSummary} tabIndex={-1} role="group" aria-labelledby={`${titleId}-submit-result`}
         className="rounded-md bg-destructive/10 px-3 py-2 text-sm">
