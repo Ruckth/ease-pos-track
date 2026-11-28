@@ -52,8 +52,8 @@ Fresh GPT-6.2 Sol reviewers assessed the integrated application, original audit,
 | Category | UX reviewer | Engineering reviewer |
 | --- | ---: | ---: |
 | Coverage and component detail | 9.2 | 9.5 |
-| Clicks, steps and scrolling | 8.3 | 8.5 |
-| Contextual controls and error recovery | 8.7 | 9.0 |
+| Clicks, steps and scrolling | 8.7 | 8.5 |
+| Contextual controls and error recovery | 8.8 | 9.0 |
 | Visual design and responsive usability | 8.7 | 9.0 |
 | Recommendation quality and technical feasibility | 8.6 | 9.0 |
 | Before-and-after comparisons | 8.9 | 8.5 |
