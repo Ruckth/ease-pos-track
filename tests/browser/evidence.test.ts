@@ -138,3 +138,16 @@ test("customer th 390 notification settings", async () => {
     await shot(page, "customer-th-390-settings");
   } finally { await context.close(); }
 });
+
+test("staff th 390 Operations health settings", async () => {
+  const { page, context } = await openWith(await browsers.get(), "staff", "th");
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("dialog").getByRole("button", { name: copy("th", "closeDialog") }).click();
+    await openMenu(page, copy("th", "queueMore"));
+    await page.getByRole("menuitem", { name: copy("th", "healthTitle"), exact: true }).click();
+    const health = page.getByRole("dialog", { name: copy("th", "healthTitle"), exact: true });
+    await health.getByText(/ข้อมูลรับรองพื้นที่จัดเก็บ/).first().waitFor();
+    await shot(page, "staff-th-390-health");
+  } finally { await context.close(); }
+});

@@ -206,8 +206,11 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
     setError("");
     try {
       if (archived) {
-        if (props.onRestore && await props.onRestore(ticket._id) === false) return;
-        else await operations.restore(ticket);
+        if (props.onRestore) {
+          if (await props.onRestore(ticket._id) === false) return;
+        } else {
+          await operations.restore(ticket);
+        }
       } else await props.onArchive(ticket._id);
       if (!props.inline) onClose();
     } catch (err) { setError(localizeError(err, t)); }
