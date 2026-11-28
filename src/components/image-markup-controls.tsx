@@ -41,7 +41,7 @@ export function ImageMarkupToolbar({ tool, labels, onTool, disabled }: {
           key={value} type="button" size="touch" variant="outline" disabled={disabled}
           aria-label={label} aria-pressed={tool === value}
           className={cn(
-            "min-w-0 sm:px-3 max-sm:h-14 max-sm:flex-col max-sm:gap-0.5 max-sm:px-0.5 max-sm:text-[11px] max-sm:font-normal max-sm:leading-tight max-sm:[&_svg]:size-5 max-sm:aria-pressed:font-semibold [@media(pointer:coarse)]:min-w-0",
+            "min-w-0 sm:px-3 max-sm:h-11 max-sm:border-transparent max-sm:bg-none max-sm:shadow-none max-sm:flex-col max-sm:gap-0.5 max-sm:px-0.5 max-sm:text-[11px] max-sm:font-normal max-sm:leading-tight max-sm:[&_svg]:size-5 max-sm:aria-pressed:font-semibold [@media(pointer:coarse)]:min-w-0",
             PRESSED,
           )}
           onClick={() => onTool(value)}

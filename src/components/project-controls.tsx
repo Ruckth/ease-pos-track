@@ -69,19 +69,24 @@ export function ProjectSwitcher({
   onSelect,
   onCreate,
   compact = false,
+  tools,
 }: {
   projects: ProjectSummary[];
   current: ProjectSummary;
   onSelect: (key: string) => void;
   onCreate?: () => void;
   compact?: boolean;
+  /** Project-scoped actions grouped under this menu; `run` defers each action until the menu closes and returns focus. */
+  tools?: (run: (action: () => void) => void) => ReactNode;
 }) {
   const { t } = useI18n();
+  const s = useStaffCopy();
   const menu = useMenuAction();
   const wideHeader = useMediaQuery("(min-width: 480px)");
   const visibleName = compact && !wideHeader ? current.key : projectLabel(current);
   const visibleLabel = <span className="truncate">{visibleName}</span>;
-  if (projects.length === 1) {
+  const single = projects.length === 1;
+  if (single && !tools) {
     return (
       <span className={cn("inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium", compact && "max-[479px]:px-2")} title={projectLabel(current)}>
         <FolderKanban className={cn("size-4 shrink-0 text-muted-foreground", compact && "max-[479px]:hidden")} aria-hidden="true" />
@@ -92,19 +97,23 @@ export function ProjectSwitcher({
   return (
     <DropdownMenu {...menu.root}>
       <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className={cn("h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left", compact && "max-[479px]:gap-1 max-[479px]:px-2")} />}
-        aria-label={`${t("chooseProject")}: ${visibleName}`} title={projectLabel(current)}>
+        aria-label={`${single ? s.manageProject : t("chooseProject")}: ${visibleName}`} title={projectLabel(current)}>
         <FolderKanban className={cn("text-muted-foreground", compact && "max-[479px]:hidden")} aria-hidden="true" />
         {visibleLabel}
         <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56 min-w-0 max-w-[var(--available-width)]">
-        <DropdownMenuRadioGroup value={current.key} onValueChange={value => onSelect(String(value))}>
+        {single ? null : <DropdownMenuRadioGroup value={current.key} onValueChange={value => onSelect(String(value))}>
           {projects.map(project => (
             <DropdownMenuRadioItem key={project._id} value={project.key} closeOnClick className="whitespace-normal break-words">
               {projectLabel(project)}
             </DropdownMenuRadioItem>
           ))}
-        </DropdownMenuRadioGroup>
+        </DropdownMenuRadioGroup>}
+        {tools ? <>
+          {single ? null : <DropdownMenuSeparator />}
+          {tools(menu.run)}
+        </> : null}
         {onCreate ? <>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => menu.run(onCreate)}><Plus aria-hidden="true" />{t("newProject")}…</DropdownMenuItem>

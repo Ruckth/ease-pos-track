@@ -267,10 +267,10 @@ export function MediaUploadField({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1 sm:gap-2">
         <Button
           type="button"
-          className="h-11 min-w-[8.5rem] flex-1 rounded-xl"
+          className="h-11 min-w-[7rem] flex-1 gap-1.5 px-2 sm:min-w-[8.5rem] sm:px-4"
           variant="outline"
           disabled={disabled}
           onClick={openCamera}
@@ -280,7 +280,7 @@ export function MediaUploadField({
         </Button>
         <Button
           type="button"
-          className="h-11 min-w-[8.5rem] flex-1 rounded-xl"
+          className="h-11 min-w-[7rem] flex-1 gap-1.5 px-2 sm:min-w-[8.5rem] sm:px-4"
           variant="outline"
           disabled={disabled}
           data-slot="choose-draft-files"
@@ -292,13 +292,14 @@ export function MediaUploadField({
         {supportsClipboardRead ? (
           <Button
             type="button"
-            className="h-11 shrink-0 rounded-xl"
-            variant="outline"
+            className="h-11 min-w-11 shrink-0 px-0 sm:px-4"
+            variant="ghost"
             disabled={disabled}
+            title={copy.pasteFromClipboard}
             onClick={() => void handleClipboardPasteAction()}
           >
             <ClipboardPaste aria-hidden="true" />
-            {copy.pasteFromClipboard}
+            <span className="max-sm:sr-only">{copy.pasteFromClipboard}</span>
           </Button>
         ) : null}
       </div>
@@ -539,7 +540,7 @@ export function MediaUploadField({
                       disabled={disabled}
                       onClick={() => removeItem(item.id)}
                       aria-label={t("removeFile", { name: attachmentName(item) })}
-                      className="absolute right-1 top-1 z-10 flex size-10 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="absolute right-1 top-1 z-10 flex size-11 items-center justify-center rounded-full border bg-background/90 shadow-sm hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <X className="size-4" aria-hidden="true" />
                     </button>

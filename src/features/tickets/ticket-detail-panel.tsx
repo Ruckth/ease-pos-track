@@ -265,9 +265,10 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
+      {staff && <TicketAssignment ticket={ticket} />}
       {staff && <TicketConversation ticket={ticket} role="staff" onOpenMedia={openThreadMedia} onOpenEvidence={openThreadEvidence} evidenceRequest={evidenceRequest} />}
     </>}
-    {staff && <TicketAssignment ticket={ticket} />}
+    {staff && archived && <TicketAssignment ticket={ticket} />}
     <div className="aurora-inset rounded-xl px-3 [&>section+section]:border-t [&>section+section]:border-border/60">
       {ticket.media.length > 0 && <section>
         <Button ref={mediaButton} type="button" variant="ghost" aria-expanded={mediaOpen} aria-controls={mediaId}

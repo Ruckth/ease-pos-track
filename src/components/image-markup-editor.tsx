@@ -396,8 +396,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
             onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
             onWheelEnd={() => endGroup("wheel")}
             below={
-              // One fixed slot under the photo: the tool's hint, or the size control once a circle is selected.
-              <div className="flex min-h-[4.25rem] shrink-0 flex-col justify-center">
+              // Keep the size control in the same place while it is in use.
+              <div className={cn("flex shrink-0 flex-col justify-center", circle ? "min-h-[4.25rem]" : "min-h-5 sm:min-h-[4.25rem]")}>
                 {circle ? <CircleSize sizing={circle} labels={labels} /> : <p className="text-sm leading-5 text-muted-foreground">{corner ? labels.hintSecondCorner : hints[tool]}</p>}
               </div>
             }
@@ -425,7 +425,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
         )}
       </div>
       {error && <p role="alert" className="shrink-0 text-sm text-destructive">{error}</p>}
-      <div className="flex shrink-0 items-center gap-2 border-t pt-2 sm:pt-3">
+      <div className="flex shrink-0 items-center gap-2 border-t pt-1.5 sm:pt-3">
         <Button
           type="button" size="touch" variant="outline" className={cn("px-3", EXPANDED)} disabled={busy || !canTune}
           aria-expanded={tuneOpen} aria-controls={tuneOpen ? "image-markup-precise" : undefined}

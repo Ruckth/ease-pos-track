@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { localizeError, useI18n } from "@/lib/i18n";
 import type { Ticket } from "@/lib/types";
@@ -68,7 +69,10 @@ function AssignmentEditor({ ticket, assignment, settings }: {
       </p>
     </div>
     {assignment.needsReview && <p role="status" className="text-sm font-medium text-destructive">{copy.needsReview}</p>}
-    {ticket.lifecycle === "active" && <>
+    {ticket.lifecycle === "active" && <details className="group/assignment space-y-2">
+      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+        {copy.editAssignment}<ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground group-open/assignment:rotate-180" />
+      </summary>
       <form className="grid gap-2 sm:grid-cols-2" onSubmit={save}>
         <label className="grid gap-1 text-sm">{copy.area}
           <select className={routingSelect} value={area} disabled={busy} onChange={event => update({ area: event.target.value, assignee: "" })}>
@@ -117,7 +121,7 @@ function AssignmentEditor({ ticket, assignment, settings }: {
             </div>
           </form>
       </details>
-    </>}
+    </details>}
     {message && <p role="status" className="text-sm">{message}</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {assignment.events.length > 0 && <details className="text-sm">

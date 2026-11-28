@@ -34,26 +34,27 @@ for (const language of ["en", "th"] as const) {
       await openHeaderMenu(f.page, copy(language, "queueMore"));
       await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
-      await dialog.getByText(language === "en" ? "Storage credential" : "ข้อมูลรับรองพื้นที่จัดเก็บ", { exact: true }).waitFor();
-      assert.equal(await dialog.getByRole("table", { name: copy(language, "healthCounts") }).count(), 1);
+      const configuration = dialog.locator("summary").filter({ hasText: copy(language, "healthConfiguration") });
+      const storage = dialog.getByText(language === "en" ? "Storage credential" : "ข้อมูลรับรองพื้นที่จัดเก็บ", { exact: true });
+      assert.equal(await storage.isVisible(), false);
+      await configuration.click();
+      await storage.waitFor();
+      await configuration.click();
+      const counts = dialog.getByRole("table", { name: copy(language, "healthCounts") });
+      assert.equal(await counts.count(), 0);
+      await dialog.locator("summary").filter({ hasText: copy(language, "healthCounts") }).click();
+      await counts.waitFor();
       await f.page.setViewportSize({ width: 360, height: 740 });
-      const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
-      for (const key of ["healthFailed", "healthPending", "healthExpired"] as const) {
-        await trigger.click();
-        const choice = filterPanel(f.page).getByRole("radio", { name: new RegExp(`^${copy(language, key)}(?: \\(\\d+\\))?$`) });
-        await choice.click();
-        assert.equal(await choice.isChecked(), true);
-        await closeFilters(f.page);
-        assert.equal(await trigger.evaluate(el => document.activeElement === el), true);
-        await dialog.getByRole("heading", { name: new RegExp(`^${copy(language, key)}(?: \\(\\d+\\))?$`) }).waitFor();
-        assert.equal(await trigger.getAttribute("aria-label"), key === "healthFailed" ? copy(language, "ticketFilters") : copy(language, "ticketFiltersApplied", { count: 1 }));
+      const views = dialog.getByRole("group", { name: copy(language, "healthDiagnosticView"), exact: true });
+      for (const key of ["healthPending", "healthExpired", "healthFailed"] as const) {
+        const name = new RegExp("^" + copy(language, key) + "(?: \\(\\d+\\))?$");
+        const choice = views.getByRole("button", { name });
+        await choice.press("Enter");
+        assert.equal(await choice.getAttribute("aria-pressed"), "true");
+        assert.equal(await choice.evaluate(el => document.activeElement === el), true);
+        await dialog.getByRole("heading", { name }).waitFor();
         await dialog.getByText(copy(language, "healthPageHint"), { exact: true }).waitFor();
       }
-      await trigger.click();
-      await filterPanel(f.page).getByRole("button", { name: copy(language, "ticketFiltersClear") }).click();
-      await closeFilters(f.page);
-      await dialog.getByRole("heading", { name: new RegExp(`^${copy(language, "healthFailed")} \\(\\d+\\)$`) }).waitFor();
-      assert.equal(await trigger.getAttribute("aria-label"), copy(language, "ticketFilters"));
       assert.doesNotMatch(await dialog.innerText(), /local-only-callback-fixture|https?:|UPLOADTHING_TOKEN|UPLOAD_CALLBACK_SECRET/);
       assert.deepEqual(f.errors, []);
       assert.equal(f.uploads(), 0);
@@ -803,6 +804,13 @@ test("older note history reaches event 31 without advancing the Ticket history c
     await search.waitFor();
     await staff.page.waitForFunction(input => document.activeElement === input, await search.elementHandle());
     await search.fill(name);
+    await staff.page.waitForURL(url => url.searchParams.get("q") === name);
+    await search.press("Escape");
+    const editSearch = staff.page.getByRole("button", { name: `Search Tickets, current search “${name}”`, exact: true });
+    await editSearch.waitFor();
+    await staff.page.waitForFunction(button => document.activeElement === button, await editSearch.elementHandle());
+    assert.equal(await search.count(), 0);
+    assert.equal(new URL(staff.page.url()).searchParams.get("q"), name);
 
     const openTicket = staff.page.locator(`button[data-ticket-id="${id}"]`);
     const card = staff.page.locator("article").filter({ has: openTicket });
@@ -917,6 +925,7 @@ for (const language of ["en", "th"] as const) {
       await f.page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const dialog = f.page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
       const table = dialog.getByRole("table", { name: copy(language, "healthCounts") });
+      await dialog.locator("summary").filter({ hasText: copy(language, "healthCounts") }).click();
       await table.waitFor();
 
       for (const viewport of [
@@ -955,16 +964,16 @@ for (const language of ["en", "th"] as const) {
         assert.equal(layout.cells, 25);
       }
 
-      // Phone compactness: on a 390x844 phone, the Diagnostics heading and filter stay above the fold.
+      // All diagnostic views fit above the fold with full phone targets.
       await f.page.setViewportSize({ width: 390, height: 844 });
-      const failedHeading = dialog.getByRole("heading", { name: new RegExp(`^${copy(language, "healthFailed")} \\(\\d+\\)$`) });
-      const trigger = dialog.locator('[data-slot="ticket-filter-trigger"]');
-      const headingBox = (await failedHeading.boundingBox())!;
-      const triggerBox = (await trigger.boundingBox())!;
-      assert.ok(headingBox.y + headingBox.height <= 844, `${language} 390x844: diagnostics heading sits above the fold`);
-      assert.ok(triggerBox.y + triggerBox.height <= 844 && triggerBox.height >= 44 && triggerBox.width >= 44, `${language} 390x844: filter button is touch-sized above the fold`);
+      const views = dialog.getByRole("group", { name: copy(language, "healthDiagnosticView"), exact: true });
+      for (const choice of await views.getByRole("button").all()) {
+        const box = (await choice.boundingBox())!;
+        assert.ok(box.y + box.height <= 844);
+        assert.ok(box.height >= 44 && box.width >= 44);
+      }
 
-      // Narrow phone failed card: Requeue stacks below full-width text without crushing metadata/warnings.
+      // Narrow phone: Requeue stacks below the full-width metadata and warnings.
       await f.page.setViewportSize({ width: 320, height: 568 });
       const blockedItem = dialog.locator("ul > li").nth(1);
       await blockedItem.scrollIntoViewIfNeeded();
@@ -981,23 +990,14 @@ for (const language of ["en", "th"] as const) {
       assert.equal(cardMetrics.buttonBelowText, true, `${language} 320px: Requeue stacks below text`);
       assert.ok(cardMetrics.buttonHeight >= 44, `${language} 320px: Requeue keeps 44px touch height`);
 
-      // Filter popover fits within 320px and switches to populated Pending and Expired views; paging fires loadMore(25).
+      // Paging still uses 25 jobs, and the direct controls switch the diagnostic view.
       const loadMore = dialog.getByRole("button", { name: copy(language, "loadOlder"), exact: true });
       await loadMore.scrollIntoViewIfNeeded();
       assert.ok((await loadMore.boundingBox())!.height >= 44);
       await loadMore.click();
-      await trigger.scrollIntoViewIfNeeded();
-      await trigger.click();
-      const panel = filterPanel(f.page);
-      await panel.waitFor();
-      const panelBox = (await panel.boundingBox())!;
-      assert.ok(panelBox.x >= 0 && panelBox.x + panelBox.width <= 320.5, `${language} 320px: filter popover fits viewport`);
-      await panel.getByRole("radio", { name: new RegExp(`^${copy(language, "healthPending")} \\(\\d+\\)$`) }).click();
-      await closeFilters(f.page);
+      await views.getByRole("button", { name: new RegExp("^" + copy(language, "healthPending") + " \\(\\d+\\)$") }).click();
       await dialog.getByText(copy(language, "healthRetry"), { exact: true }).waitFor();
-      await trigger.click();
-      await panel.getByRole("radio", { name: copy(language, "healthExpired"), exact: true }).click();
-      await closeFilters(f.page);
+      await views.getByRole("button", { name: copy(language, "healthExpired"), exact: true }).click();
       await dialog.getByRole("heading", { name: copy(language, "healthExpired"), exact: true }).waitFor();
       const loadCalls = await f.page.evaluate(() => (window as unknown as { healthLoadMore: unknown[] }).healthLoadMore);
       assert.deepEqual(loadCalls, [{ view: "failed", count: 25 }]);

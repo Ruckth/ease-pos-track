@@ -14,6 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { useStaffCopy } from "@/lib/staff-copy";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { TicketPurgeEligibility } from "./ticket-purge-eligibility";
+import { cn } from "@/lib/utils";
 
 export type OpenTicket = (id: Id<"tickets">, section?: "media") => void;
 
@@ -33,9 +34,21 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
   const s = useStaffCopy();
   const reference = formatTicketNumber(item.ticketNumber, item.projectKey);
   const archived = item.lifecycle === "archived";
+  const files = <>
+    {item.mediaCount > 0 && <span className="inline-flex items-center gap-1 px-1 text-xs tabular-nums text-muted-foreground">
+      <Images aria-hidden className="size-3.5" /><span aria-hidden>{item.mediaCount}</span><span className="sr-only">{s.files(item.mediaCount)}</span>
+    </span>}
+    {item.annotationCount > 0 && <span className="inline-flex items-center gap-1 px-1 text-xs tabular-nums text-muted-foreground">
+      <StickyNote aria-hidden className="size-3.5" />{s.notes(item.annotationCount)}
+    </span>}
+    <TicketRowAction item={item} busy={busy} onMove={onMove} onRestore={onRestore} />
+  </>;
 
   return (
-    <article className={`ticket-surface min-w-0 p-3 ${inLane ? "" : "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3"} ${selected ? "ticket-surface-selected" : ""}`}>
+    <article className={cn("ticket-surface min-w-0 p-3", selected && "ticket-surface-selected",
+      // Queue and table rows on phones are flat and divided by a hairline; Board cards keep their frame.
+      !inLane && "sm:flex sm:flex-wrap sm:items-center sm:gap-x-3 max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:border-b-border/70 max-sm:bg-none max-sm:px-1 max-sm:py-2 max-sm:shadow-none",
+      !inLane && (selected ? "max-sm:bg-primary/10" : "max-sm:bg-transparent"))}>
       {inLane && <div className="mb-1 flex min-w-0 items-start justify-between gap-1.5">
         {item.tags?.length ? <TicketTagList tags={item.tags} plain /> : <span className="font-mono text-xs text-muted-foreground">{reference}</span>}
         {handle}
@@ -65,17 +78,13 @@ export function TicketCard({ item, onSelect, onMove, onRestore, handle, inLane =
           {s.updated(formatRelativeTime(item.updatedAt, Date.now(), language))}
         </time>
         <TicketCustomerReply item={item} />
+        {/* Queue rows keep files, notes and the next move on the same line as the time. */}
+        {!inLane && files}
       </div>
-      <div className={inLane ? "mt-3 flex flex-wrap items-center gap-1 border-t border-border/50 pt-2" : "mt-1 flex flex-wrap items-center gap-1"}>
-        {inLane && item.tags?.length > 0 && <span className="font-mono text-[0.7rem] text-muted-foreground">{reference}</span>}
-        {item.mediaCount > 0 && <span className="inline-flex items-center gap-1 px-1 text-xs tabular-nums text-muted-foreground">
-          <Images aria-hidden className="size-3.5" /><span aria-hidden>{item.mediaCount}</span><span className="sr-only">{s.files(item.mediaCount)}</span>
-        </span>}
-        {item.annotationCount > 0 && <span className="inline-flex items-center gap-1 px-1 text-xs tabular-nums text-muted-foreground">
-          <StickyNote aria-hidden className="size-3.5" />{s.notes(item.annotationCount)}
-        </span>}
-        <TicketRowAction item={item} busy={busy} onMove={onMove} onRestore={onRestore} />
-      </div>
+      {inLane && <div className="mt-3 flex flex-wrap items-center gap-1 border-t border-border/50 pt-2">
+        {item.tags?.length > 0 && <span className="font-mono text-[0.7rem] text-muted-foreground">{reference}</span>}
+        {files}
+      </div>}
     </article>
   );
 }

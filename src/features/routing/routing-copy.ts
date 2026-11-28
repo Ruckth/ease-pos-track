@@ -3,7 +3,7 @@ import { useI18n } from "@/lib/i18n";
 const en = {
   routing: "Ticket routing", assignment: "Assignment", all: "All assignments", mine: "Mine", unassigned: "Unassigned",
   area: "Responsibility area", noArea: "No area", assignee: "Assignee", hold: "Hold routing", held: "Routing held",
-  needsReview: "The assignee is unavailable. Review this assignment.", saveAssignment: "Save assignment", history: "Assignment history",
+  needsReview: "The assignee is unavailable. Review this assignment.", editAssignment: "Edit assignment", saveAssignment: "Save assignment", history: "Assignment history",
   product: "Product", symptom: "Symptom", unknown: "Unknown", restricted: "Require manual assignment", reviewClassification: "Review routing classification",
   classificationDetails: "Product and symptom (optional)",
   saveClassification: "Save classification",
@@ -24,7 +24,7 @@ const en = {
 const th: typeof en = {
   routing: "การจัดเส้นทาง Ticket", assignment: "การมอบหมาย", all: "การมอบหมายทั้งหมด", mine: "ของฉัน", unassigned: "ยังไม่มอบหมาย",
   area: "ขอบเขตความรับผิดชอบ", noArea: "ไม่ระบุขอบเขต", assignee: "ผู้รับผิดชอบ", hold: "พักการจัดเส้นทาง", held: "พักการจัดเส้นทางแล้ว",
-  needsReview: "ผู้รับผิดชอบไม่พร้อม โปรดตรวจสอบการมอบหมายนี้", saveAssignment: "บันทึกการมอบหมาย", history: "ประวัติการมอบหมาย",
+  needsReview: "ผู้รับผิดชอบไม่พร้อม โปรดตรวจสอบการมอบหมายนี้", editAssignment: "แก้ไขการมอบหมาย", saveAssignment: "บันทึกการมอบหมาย", history: "ประวัติการมอบหมาย",
   product: "ผลิตภัณฑ์", symptom: "อาการ", unknown: "ไม่ทราบ", restricted: "ให้เจ้าหน้าที่เลือกผู้รับผิดชอบเอง", reviewClassification: "ตรวจสอบการจัดประเภท",
   classificationDetails: "ผลิตภัณฑ์และอาการ (ไม่บังคับ)",
   saveClassification: "บันทึกการจัดประเภท",
