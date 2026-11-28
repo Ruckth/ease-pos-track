@@ -1,8 +1,9 @@
+import { Popover } from "@base-ui/react/popover";
 import { Button } from "@/components/ui/button";
 import type { MarkupMark } from "@/lib/image-markup";
 import type { MarkupLabels } from "@/lib/markup-labels";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Crop, Eraser, Hand, Minus, MousePointer2, MoveHorizontal, Plus, Redo2, Shrink, Square, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Crop, Eraser, Hand, Minus, MousePointer2, MoveHorizontal, Plus, Redo2, Shrink, Square, Undo2, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { MarkupTool, MarkupZoom } from "./image-markup-canvas";
 import { useWheelResize } from "./image-markup-wheel";
@@ -67,7 +68,9 @@ export function HistoryControls({ labels, canUndo, canRedo, onUndo, onRedo }: {
 }
 
 /** Zoom out / level / zoom in, fit width and fit image (named on wider screens), then optional actions such as Undo/Redo. */
-export function ZoomControls({ zoom, labels, actions }: { zoom: MarkupZoom; labels: MarkupLabels; actions?: ReactNode }) {
+export function ZoomControls({ zoom, labels, actions, onFit }: {
+  zoom: MarkupZoom; labels: MarkupLabels; actions?: ReactNode; onFit?: () => void;
+}) {
   const fits: Array<["width" | "fit", string, ReactNode, () => void]> = [
     ["width", labels.fitWidth, <MoveHorizontal aria-hidden="true" />, zoom.fitWidth],
     ["fit", labels.fitImage, <Shrink aria-hidden="true" />, zoom.fit],
@@ -83,12 +86,42 @@ export function ZoomControls({ zoom, labels, actions }: { zoom: MarkupZoom; labe
         {fits.map(([view, label, icon, onClick]) => (
           <Button
             key={view} type="button" size="touch" variant="outline" aria-pressed={zoom.view === view} title={label}
-            className={cn("px-0 sm:px-3", PRESSED)} onClick={onClick}
+            className={cn("px-0 sm:px-3", PRESSED)} onClick={() => { onClick(); onFit?.(); }}
           >
             {icon}<span className="max-sm:sr-only">{label}</span>
           </Button>
         ))}
       </div>
+      {actions}
+    </div>
+  );
+}
+
+/** Keep the fitted image stationary while the phone's zoom choices are open. */
+export function CompactViewBar({ zoom, labels, actions, children, disabled }: {
+  zoom: MarkupZoom; labels: MarkupLabels; actions: ReactNode; children: ReactNode; disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex min-h-11 items-center gap-1">
+      <div className="min-w-0 flex-1 text-xs leading-4 text-muted-foreground">{children}</div>
+      <Popover.Root modal open={open && !disabled} onOpenChange={setOpen}>
+        <Popover.Trigger
+          render={<Button type="button" size="touch" variant="outline" className={cn("min-w-11 shrink-0 px-1.5 tabular-nums", EXPANDED)} />}
+          data-markup-view-trigger="" disabled={disabled} aria-label={`${labels.zoomLevel} ${zoom.percent}%`} title={labels.zoomLevel}
+        >{zoom.percent}%</Popover.Trigger>
+        <Popover.Portal className="relative z-[60]">
+          <Popover.Positioner side="top" sideOffset={6} collisionPadding={12} className="z-[60]">
+            <Popover.Popup data-markup-view-popup="" aria-label={labels.view}
+              className="flex max-w-[var(--available-width)] flex-wrap items-center justify-end gap-1 rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg">
+              <ZoomControls zoom={zoom} labels={labels} onFit={() => setOpen(false)} />
+              <Popover.Close render={<Button type="button" variant="ghost" size="icon-touch" />} aria-label={labels.closeZoom}>
+                <X aria-hidden="true" />
+              </Popover.Close>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
       {actions}
     </div>
   );
@@ -172,10 +205,19 @@ export type CircleSizing = {
   onEnd: (group: "wheel" | "slider") => void;
 };
 
+export function CircleSizeHint({ labels }: { labels: MarkupLabels }) {
+  return (
+    <>
+      <span className="[@media(pointer:coarse)]:hidden">{labels.hintResizeCircle}</span>
+      <span className="hidden [@media(pointer:coarse)]:inline">{labels.hintTouchSize}</span>
+    </>
+  );
+}
+
 /**
  * Visible proportional size control. Wheel over it, drag or key the slider, or tap Smaller/Larger.
  */
-export function CircleSize({ sizing, labels }: { sizing: CircleSizing; labels: MarkupLabels }) {
+export function CircleSize({ sizing, labels, header = true }: { sizing: CircleSizing; labels: MarkupLabels; header?: boolean }) {
   const slider = useRef<HTMLInputElement>(null);
   useWheelResize(slider, { owns: () => true, active: () => true, step: (n) => sizing.onStep(n, "wheel"), end: () => sizing.onEnd("wheel") });
   const keys: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 3, PageDown: -3 };
@@ -189,13 +231,12 @@ export function CircleSize({ sizing, labels }: { sizing: CircleSizing; labels: M
   const end = () => sizing.onEnd("slider");
   return (
     <div className="grid min-w-0 gap-1">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-        <label htmlFor="image-markup-circle-size" className="text-sm font-medium">{labels.circleSize}</label>
-        <span className="text-xs text-muted-foreground">
-          <span className="[@media(pointer:coarse)]:hidden">{labels.hintResizeCircle}</span>
-          <span className="hidden [@media(pointer:coarse)]:inline">{labels.hintTouchSize}</span>
-        </span>
-      </div>
+      {header ? (
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <label htmlFor="image-markup-circle-size" className="text-sm font-medium">{labels.circleSize}</label>
+          <span className="text-xs text-muted-foreground"><CircleSizeHint labels={labels} /></span>
+        </div>
+      ) : <label htmlFor="image-markup-circle-size" className="sr-only">{labels.circleSize}</label>}
       <div className="flex min-w-0 items-center gap-2">
         <Button type="button" size="icon-touch" variant="outline" aria-label={labels.smaller} title={labels.smaller} disabled={sizing.value <= sizing.min} onClick={() => sizing.onStep(-2, null)}><Minus aria-hidden="true" /></Button>
         <input

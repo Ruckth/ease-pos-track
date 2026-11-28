@@ -4,11 +4,12 @@ import { exportMarkupImage, imageMarkupErrorCode, loadMarkupImage, type MarkupMa
 import { markupLabels, type ImageMarkupErrorCode } from "@/lib/markup-labels";
 import { nextSizeStep, scaleLimits, scaleRect, SIZE_STEP, stepLimits } from "@/lib/markup-geometry";
 import type { PendingMedia } from "@/lib/types";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, ArrowLeft, Check, Loader2, Maximize2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { adjustRect, clamp, ImageMarkupCanvas, ImageMarkupPreview, type MarkupPin, type MarkupPoint, type MarkupTool } from "./image-markup-canvas";
-import { CircleSize, EXPANDED, HistoryControls, ImageMarkupFineTune, ImageMarkupToolbar, type CircleSizing, type MarkupField, type StrokeChoice } from "./image-markup-controls";
+import { CircleSize, CircleSizeHint, CompactViewBar, EXPANDED, HistoryControls, ImageMarkupFineTune, ImageMarkupToolbar, type CircleSizing, type MarkupField, type StrokeChoice } from "./image-markup-controls";
 
 type Reviewed = { source: File; file: File; url: string; crop: MarkupRect; width: number; height: number; failed: boolean; marks: readonly MarkupMark[] };
 type Phase = "edit" | "exporting" | "review" | "applying";
@@ -39,6 +40,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
 }) {
   const { language } = useI18n();
   const labels = markupLabels(language);
+  /** Phones fold the view row into the hint row under the photo. */
+  const phone = useMediaQuery("(max-width: 639px)");
   const [image, setImage] = useState<ImageBitmap | null>(null);
   const [loadError, setLoadError] = useState<ImageMarkupErrorCode | null>(null);
   const [history, setHistory] = useState<MarkHistory>({ stack: [[]], pos: 0 });
@@ -370,6 +373,8 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
     onEnd: endGroup,
   } : null;
   const hints: Record<MarkupTool, string> = { select: labels.hintSelect, pan: labels.hintPan, circle: labels.hintCircle, crop: labels.hintCrop, mask: labels.hintMask, erase: labels.hintErase };
+  const hint = corner ? labels.hintSecondCorner : hints[tool];
+  const historyControls = <HistoryControls labels={labels} canUndo={history.pos > 0} canRedo={history.pos < history.stack.length - 1} onUndo={() => travel(-1)} onRedo={() => travel(1)} />;
   const busy = phase === "exporting";
   const needsAction = notice === labels.areaTooSmall || notice === labels.finishSelection;
   const showStroke = tool === "circle" || !!circleSelected;
@@ -389,18 +394,30 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
         <div className={cn("flex min-h-[min(24rem,55dvh)] min-w-0 flex-1 flex-col gap-2 sm:gap-3", tuneOpen && "lg:min-h-0 lg:overflow-y-auto")}>
           <ImageMarkupCanvas
             image={image} marks={marks} selectedId={selectedId} tool={tool} pins={placedPins} corner={corner} minSize={minSize} labels={labels}
-            actions={<HistoryControls labels={labels} canUndo={history.pos > 0} canRedo={history.pos < history.stack.length - 1} onUndo={() => travel(-1)} onRedo={() => travel(1)} />}
+            actions={historyControls} compact={phone}
             onSelect={select} onCommit={commit} onPlace={place} onRect={addRect} onErase={erase}
             onMoveSelected={(dx, dy) => adjustSelected("move", dx, dy)}
             onEscape={() => { setCorner(null); setNotice(""); }}
             onWheelResize={(steps) => resizeCircle("wheel", (g) => nextSizeStep(g.origin, g.exponent, steps))}
             onWheelEnd={() => endGroup("wheel")}
-            below={
-              // Selecting or moving a mark must preserve the fitted image during the gesture.
-              <div className={cn("flex shrink-0 flex-col justify-center", tool === "select" ? "min-h-[4.25rem]" : "min-h-10 sm:min-h-[4.25rem]")}>
-                {circle ? <CircleSize sizing={circle} labels={labels} /> : <p className="text-sm leading-5 text-muted-foreground">{corner ? labels.hintSecondCorner : hints[tool]}</p>}
+            below={(zoom) => phone ? (
+              // Selecting or moving a mark must preserve the fitted image during the gesture: Select reserves the slider row.
+              <div className={cn("flex shrink-0 flex-col gap-1", tool === "select" && "min-h-24")}>
+                <CompactViewBar zoom={zoom} labels={labels} actions={historyControls} disabled={busy}>
+                  {circle
+                    ? <><span className="font-medium text-foreground">{labels.circleSize}</span>{" "}<CircleSizeHint labels={labels} /></>
+                    : corner ? <div className="grid">
+                      <span aria-hidden="true" className="invisible col-start-1 row-start-1">{hints[tool]}</span>
+                      <span className="col-start-1 row-start-1">{hint}</span>
+                    </div> : hint}
+                </CompactViewBar>
+                {circle && <CircleSize sizing={circle} labels={labels} header={false} />}
               </div>
-            }
+            ) : (
+              <div className={cn("flex shrink-0 flex-col justify-center", tool === "select" ? "min-h-[4.25rem]" : "min-h-10 sm:min-h-[4.25rem]")}>
+                {circle ? <CircleSize sizing={circle} labels={labels} /> : <p className="text-sm leading-5 text-muted-foreground">{hint}</p>}
+              </div>
+            )}
           />
           <p className={needsAction ? "shrink-0 text-sm" : "sr-only"} role="status">{notice}</p>
           {excluded.length > 0 && (
