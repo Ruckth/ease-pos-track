@@ -224,6 +224,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       : <p className="text-sm text-muted-foreground">{t("noDescription")}</p>}
   </>;
 
+  const urgencyText = ticket.urgencyScore === undefined ? t("urgencyUnscored") : t("urgencyScoreValue", { score: ticket.urgencyScore });
   const StatusIcon = meta.icon;
   const statusLabel = t(!staff && ticket.status === "waiting" ? "customerQueueWaiting" : meta.labelKey);
   const statusBadge = <Badge variant="outline" className={cn("min-h-8 gap-1.5 rounded-full px-2.5 text-sm font-medium", meta.tone)}>
@@ -265,9 +266,17 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
+      {staff && <>
+        <Button type="button" ref={urgencyButton} variant="outline" aria-label={`${t("detailUrgency")} · ${urgencyText}`}
+          onClick={() => setEdit("urgency")}>
+          <Pencil aria-hidden />{urgencyText}
+        </Button>
+        {edit === "urgency" && <TicketUrgencyEdit item={ticket} operations={operations} onClose={finishEdit} />}
+        <TicketAssignment ticket={ticket} />
+      </>}
       {staff && <TicketConversation ticket={ticket} role="staff" onOpenMedia={openThreadMedia} onOpenEvidence={openThreadEvidence} evidenceRequest={evidenceRequest} />}
     </>}
-    {staff && <TicketAssignment ticket={ticket} />}
+    {staff && archived && <TicketAssignment ticket={ticket} />}
     <div className="aurora-inset rounded-xl px-3 [&>section+section]:border-t [&>section+section]:border-border/60">
       {ticket.media.length > 0 && <section>
         <Button ref={mediaButton} type="button" variant="ghost" aria-expanded={mediaOpen} aria-controls={mediaId}
@@ -299,14 +308,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       <TicketHistory key={ticket._id} id={ticket._id} staff={staff} />
       {!archived && <Disclosure title={t("detailActions")}>
         <div className="space-y-4">
-          {props.role === "staff" && <>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span>{ticket.urgencyScore === undefined ? t("urgencyUnscored") : t("urgencyScoreValue", { score: ticket.urgencyScore })}</span>
-              <Button type="button" ref={urgencyButton} variant="outline" onClick={() => setEdit("urgency")}>{t("detailUrgency")}</Button>
-            </div>
-            {edit === "urgency" && <TicketUrgencyEdit item={ticket} operations={operations} onClose={finishEdit} />}
-            <Disclosure title={t("ticketTags")}><TicketTagEditor item={ticket} /></Disclosure>
-          </>}
+          {props.role === "staff" && <Disclosure title={t("ticketTags")}><TicketTagEditor item={ticket} /></Disclosure>}
           <Button type="button" variant="outline" disabled={busy || (!staff && edit === "content")} className="text-destructive" onClick={() => {
             if (props.role === "staff") setConfirming(true);
             else {

@@ -92,6 +92,7 @@ test("named staff use rules, review, Mine and manual holds while the customer se
       await staff.page.waitForURL(url => url.searchParams.get("ticket") === ticket);
       const assignment = staff.page.getByRole("region", { name: "Assignment" });
       await assignment.getByText("Unassigned", { exact: true }).first().waitFor();
+      await assignment.locator("summary").filter({ hasText: "Edit assignment" }).click();
       await assignment.getByText("Review routing classification", { exact: true }).click();
       assert.equal(await assignment.getByRole("combobox", { name: "Product", exact: true }).inputValue(), "printer");
       await assignment.getByRole("button", { name: "Save classification" }).click();

@@ -26,6 +26,8 @@ const replyNoReceiptErrors = new Set([
   "COMMENT_NOT_FOUND", "INVALID_INPUT", "MEDIA_UNAVAILABLE", "PAGE_UNAVAILABLE", "TICKET_RESOLVED", "VERSION_CONFLICT",
 ]);
 
+const replyAction = "max-sm:size-11 max-sm:min-w-11 max-sm:p-0";
+
 export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send, needsAnswer, currentAnswer }: {
   needsAnswer: boolean; currentAnswer?: TicketAnswer; draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
   textarea: RefObject<HTMLTextAreaElement | null>; send: ReturnType<typeof useConversation>["send"];
@@ -130,14 +132,14 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
     setPickingEvidence(false);
     owner.setError(null);
     textarea.current?.focus();
-  }} className="aurora-inset min-w-0 space-y-2 rounded-xl border border-border/70 p-3">
+  }} className="aurora-inset min-w-0 space-y-2 border-t border-border/60 pt-2 max-sm:bg-none max-sm:shadow-none sm:rounded-xl sm:border sm:p-3">
     <label htmlFor={messageId} className="block text-sm font-medium">{t("replyLabel")}</label>
     {quoteLabel && <div className="flex min-w-0 items-center gap-2 rounded-md border-l-2 border-primary/50 bg-muted/60 px-2">
       <p className="line-clamp-2 flex-1 text-xs">{t("threadQuoting", { quote: quoteLabel })}</p>
       <Button type="button" variant="ghost" size="icon" disabled={!canEdit} onClick={() => draft.update({ replyTo: undefined })} aria-label={t("threadRemoveQuote")}><X aria-hidden /></Button>
     </div>}
     {evidence && <ComposerEvidenceQuote ticket={ticket} evidence={evidence} canEdit={canEdit} onRemove={() => setEvidence(undefined)} />}
-    <Textarea id={messageId} ref={textarea} className="min-h-16 resize-y" maxLength={2000} placeholder={t("threadWriteReply")} readOnly={!canEdit}
+    <Textarea id={messageId} ref={textarea} className="min-h-14 resize-y sm:min-h-16" maxLength={2000} placeholder={t("threadWriteReply")} readOnly={!canEdit}
       value={state.description} onChange={event => { owner.setDescription(event.target.value); setSent(undefined); }}
       onPaste={event => {
         if (!canEdit) return;
@@ -242,22 +244,22 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
     <div className="flex flex-wrap items-center gap-1">
       {mediaEnabled && <><input ref={fileInput} data-slot="ticket-reply-files" type="file" accept="image/*,video/*" hidden multiple
         onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = ""; }} />
-        <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => fileInput.current?.click()}>
-          <Paperclip aria-hidden />{t("threadAddMedia")}
+        <Button type="button" size="sm" variant="ghost" className={replyAction} disabled={!canEdit} title={t("threadAddMedia")} onClick={() => fileInput.current?.click()}>
+          <Paperclip aria-hidden /><span className="max-sm:sr-only">{t("threadAddMedia")}</span>
         </Button></>}
       {linkField === undefined && !pickingPage && !pickingEvidence && <>
-        {mediaEnabled && ticket.media.length > 0 && <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => setPickingEvidence(true)}>
-          <MapPin aria-hidden />{t("threadCiteEvidence")}
+        {mediaEnabled && ticket.media.length > 0 && <Button type="button" size="sm" variant="ghost" className={replyAction} disabled={!canEdit} title={t("threadCiteEvidence")} onClick={() => setPickingEvidence(true)}>
+          <MapPin aria-hidden /><span className="max-sm:sr-only">{t("threadCiteEvidence")}</span>
         </Button>}
-        <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => setLinkField(link?.kind === "external" ? link.url : "")}>
-          <Link2 aria-hidden />{t("threadLink")}
+        <Button type="button" size="sm" variant="ghost" className={replyAction} disabled={!canEdit} title={t("threadLink")} onClick={() => setLinkField(link?.kind === "external" ? link.url : "")}>
+          <Link2 aria-hidden /><span className="max-sm:sr-only">{t("threadLink")}</span>
         </Button>
-        {role === "staff" && mediaEnabled && <Button type="button" size="sm" variant="ghost" disabled={!canEdit} onClick={() => setPickingPage(true)}>
-          <FileCode2 aria-hidden />{t("threadAttachPage")}
+        {role === "staff" && mediaEnabled && <Button type="button" size="sm" variant="ghost" className={replyAction} disabled={!canEdit} title={t("threadAttachPage")} onClick={() => setPickingPage(true)}>
+          <FileCode2 aria-hidden /><span className="max-sm:sr-only">{t("threadAttachPage")}</span>
         </Button>}
       </>}
-      <Button type="submit" size="sm" className="ml-auto" disabled={!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence}>
-        <Send aria-hidden />{t(requestReply ? "sendQuestion" : "sendReply")}
+      <Button type="submit" size="sm" className="ml-auto max-sm:min-h-11 max-sm:px-2" disabled={!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence}>
+        <Send aria-hidden className="max-sm:hidden" />{t(requestReply ? "sendQuestion" : "sendReply")}
       </Button>
       {state.stage === "upload" && <Button type="button" variant="ghost" size="sm" onClick={owner.cancel}>{t("cancelUpload")}</Button>}
     </div>

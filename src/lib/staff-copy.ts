@@ -4,6 +4,7 @@ import { useI18n } from "./i18n";
 const en = {
   // Header and list heading
   searchOpen: "Search Tickets", searchClose: "Close search",
+  searchOpenWith: (query: string) => `Search Tickets, current search “${query}”`,
   searchLabel: (project: string) => `Search ${project} Tickets`,
   savedSearches: "Saved searches", saveSearch: "Save this search…", saveSearchTitle: "Save search", saveName: "Name",
   saveConfirm: "Save", savedNone: "No saved searches in this tab yet.", savedArchive: "Archive",
@@ -88,6 +89,7 @@ const en = {
 
 const th: typeof en = {
   searchOpen: "ค้นหา Ticket", searchClose: "ปิดการค้นหา",
+  searchOpenWith: query => `ค้นหา Ticket คำค้นปัจจุบัน “${query}”`,
   searchLabel: project => `ค้นหา Ticket ใน ${project}`,
   savedSearches: "การค้นหาที่บันทึกไว้", saveSearch: "บันทึกการค้นหานี้…", saveSearchTitle: "บันทึกการค้นหา", saveName: "ชื่อ",
   saveConfirm: "บันทึก", savedNone: "ยังไม่มีการค้นหาที่บันทึกในแท็บนี้", savedArchive: "คลัง",

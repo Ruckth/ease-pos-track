@@ -9,7 +9,10 @@ import type { TicketStatus } from "@/lib/types";
 import { formatTicketNumber } from "../../shared/ticket-numbers";
 import type { TicketSummary } from "../../shared/ticket-contracts";
 
-/** The named next move plus Move to for every other status. Both share the caller's versioned move and Undo. */
+/**
+ * The named next move plus Move to for every other status. Both share the caller's versioned move and Undo.
+ * Phones show only the verb; the destination stays in the accessible name and the row's status line.
+ */
 export function TicketRowAction({ item, busy, onMove, onRestore }: {
   item: TicketSummary;
   busy?: boolean;
@@ -40,7 +43,7 @@ export function TicketRowAction({ item, busy, onMove, onRestore }: {
     <span className={advance ? "inline-grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto]" : "inline-flex"}>
       {advance && <Button type="button" variant="outline" size="sm" className="h-auto min-h-11 min-w-0 rounded-e-none whitespace-normal px-2 py-1.5 text-xs md:min-h-8" disabled={busy}
         aria-label={`${label} · ${reference} (${destination})`} onClick={() => onMove?.(item._id, advance.status)}>
-        <span className="[overflow-wrap:anywhere]">{label}</span><ArrowRight aria-hidden className="size-3 shrink-0" /><span className="font-normal text-muted-foreground [overflow-wrap:anywhere]">{destination}</span>
+        <span className="[overflow-wrap:anywhere]">{label}</span><ArrowRight aria-hidden className="size-3 shrink-0" /><span className="font-normal text-muted-foreground [overflow-wrap:anywhere] max-sm:hidden">{destination}</span>
       </Button>}
       <DropdownMenu>
         <DropdownMenuTrigger disabled={busy} render={<Button type="button" variant="outline" size={advance ? "icon" : "sm"} className={advance

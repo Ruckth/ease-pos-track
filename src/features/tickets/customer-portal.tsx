@@ -97,26 +97,27 @@ export function CustomerPortal({ viewer, onLogout }: {
     requestAnimationFrame(() => document.getElementById("customer-new-ticket")?.focus());
   }
 
-  return <main className="aurora-canvas min-h-screen px-3 pt-1 sm:px-5 sm:pt-3">
+  return <main className="aurora-canvas min-h-screen px-3 sm:px-5 sm:pt-3">
     <a href={ticket ? "#customer-ticket-detail" : "#customer-results-heading"} onClick={event => {
       const heading = document.querySelector<HTMLElement>(event.currentTarget.hash) ?? document.getElementById("customer-tickets-heading");
       if (!heading) return;
       event.preventDefault();
       heading.focus();
     }} className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-background focus:p-3 focus:ring-2 focus:ring-ring">{t("skipToTickets")}</a>
-    <header className="aurora-toolbar sticky top-0 z-30 mx-auto max-w-6xl">
-      <div className="flex min-w-0 items-center gap-1 px-1.5 py-1 sm:flex-wrap sm:gap-3 sm:px-4">
+    {/* Phones get one flat, full-bleed 44px bar: Project key, labeled create, inbox and account. */}
+    <header className="aurora-toolbar sticky top-0 z-30 mx-auto max-w-6xl max-sm:-mx-3 max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:shadow-none max-sm:[&_button:focus-visible]:ring-inset">
+      <div className="flex min-h-11 min-w-0 items-center gap-1 px-1 sm:flex-wrap sm:gap-3 sm:px-4 sm:py-1">
         <div className="min-w-[4.25rem] flex-1 sm:min-w-0">
           {projects && project ? <ProjectSwitcher compact projects={projects} current={project} onSelect={selectProject} />
             : <p className="truncate px-2 text-sm font-medium">{viewer.displayName}</p>}
         </div>
-        {(project || composer.owner) && <Button className="glass-action h-auto min-h-11 min-w-11 max-w-full gap-1 rounded-lg whitespace-normal px-2 text-sm leading-tight font-semibold max-[359px]:[&_svg]:hidden sm:px-4" type="button" id="customer-new-ticket"
+        {(project || composer.owner) && <Button className="glass-action h-auto min-h-11 min-w-11 max-w-full shrink gap-1 rounded-lg whitespace-normal px-2.5 text-sm leading-tight font-semibold max-[359px]:[&_svg]:hidden sm:px-4" type="button" id="customer-new-ticket"
           aria-describedby={draftStrip ? "customer-draft-project" : undefined} aria-expanded={composer.open} onClick={composer.show}>
           {composer.hasDraft ? <PenLine aria-hidden="true" /> : <Plus aria-hidden="true" />}{composerLabel}
         </Button>}
         {project && <TicketInbox role="customer" compact key={project._id} projectId={project._id} projectKey={project.key} openTicket={openTicket} />}
         <DropdownMenu {...toolsMenu.root}>
-          <DropdownMenuTrigger ref={toolsMenu.triggerRef} render={<Button type="button" variant="outline" className="min-h-11 min-w-11 gap-1.5 rounded-lg px-2" />}
+          <DropdownMenuTrigger ref={toolsMenu.triggerRef} render={<Button type="button" variant="outline" className="min-h-11 min-w-11 shrink-0 gap-1.5 rounded-lg px-2" />}
             aria-label={t("customerQueueMore")} title={t("customerQueueMore")}>
             <UserRound aria-hidden="true" /><span className="hidden sm:inline">{t("accountTitle")}</span><ChevronDown className="hidden text-muted-foreground sm:block" aria-hidden="true" />
           </DropdownMenuTrigger>
@@ -136,9 +137,9 @@ export function CustomerPortal({ viewer, onLogout }: {
         <CustomerAccount clerkManaged={viewer.clerkManaged} hasRecoveryCode={!viewer.needsRecoveryCode} />
       </Suspense>
     </Dialog>
-    <div className={cn("mx-auto py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:py-5", ticket ? "max-w-6xl" : "max-w-3xl")}>
+    <div className={cn("mx-auto py-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:py-5", ticket ? "max-w-6xl" : "max-w-3xl")}>
       {viewer.needsRecoveryCode && !ticket && <RecoveryReminder onOpen={() => setAccountOpen(true)} />}
-      <h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className={cn("mb-3 scroll-mt-20 text-2xl font-semibold tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-3xl", ticket && "hidden lg:block")}>{t("yourTickets")}</h1>
+      <h1 id="customer-tickets-heading" data-dialog-return-focus tabIndex={-1} className={cn("mb-2 scroll-mt-20 text-xl font-semibold sm:mb-3 tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-3xl", ticket && "hidden lg:block")}>{t("yourTickets")}</h1>
       {draftStrip && composer.owner && composer.project
         ? <DraftStrip owner={composer.owner} project={composer.project} foreign={foreignDraft} busy={composer.busy}
             onDiscard={discardDraft} onStartCurrent={composer.startCurrentProject} /> : null}
@@ -184,14 +185,14 @@ class ProjectTicketsBoundary extends Component<{ children: ReactNode }, { denied
 
 function RecoveryReminder({ onOpen, className }: { onOpen: () => void; className?: string }) {
   const { t } = useI18n();
-  return <div role="status" className={cn("aurora-inset mb-4 rounded-xl px-3 pb-2", className)}>
+  return <div role="status" className={cn("aurora-inset mb-3 rounded-xl px-3 sm:mb-4 sm:pb-2", className)}>
     <button type="button" onClick={onOpen} aria-describedby="customer-recovery-hint"
       className="flex min-h-11 w-full items-center gap-3 rounded-xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <KeyRound aria-hidden className="size-5 shrink-0 text-amber-800 dark:text-amber-200" />
       <span className="min-w-0 flex-1 text-sm font-semibold">{t("recoveryCodeCreate")}</span>
       <ChevronRight aria-hidden className="size-4 shrink-0" />
     </button>
-    <p id="customer-recovery-hint" className="pl-8 text-xs leading-5 text-muted-foreground">{t("recoveryCodeNeeded")}</p>
+    <p id="customer-recovery-hint" className="pl-8 text-xs leading-5 text-muted-foreground max-sm:sr-only">{t("recoveryCodeNeeded")}</p>
   </div>;
 }
 
@@ -253,11 +254,12 @@ function CustomerTickets({ project, email, composerLabel, onNewTicket, onSelect,
     onVisibleIds(pending ? undefined : visibleTickets.map(item => item._id));
   }, [pending, visibleTickets, onVisibleIds]);
 
+  // Phones show a short visible word inside the full accessible name, so all four fit one row.
   const options = [
-    { value: "active", label: t("customerQueueAllActive") },
-    { value: "waiting", label: t("customerQueueWaiting") },
-    { value: "done", label: t("resolvedTickets") },
-    { value: "all", label: t("allTickets") },
+    { value: "active", label: t("customerQueueAllActive"), short: t("customerQueueActiveShort") },
+    { value: "waiting", label: t("customerQueueWaiting"), short: t("customerQueueWaitingShort") },
+    { value: "done", label: t("resolvedTickets"), short: t("resolvedTickets") },
+    { value: "all", label: t("allTickets"), short: t("allTickets") },
   ] as const;
   const countLabel = searching
     ? t(search?.hasMore ? "searchLoaded" : "searchMatches", { count: visibleTickets.length })
@@ -283,19 +285,21 @@ function CustomerTickets({ project, email, composerLabel, onNewTicket, onSelect,
   </div> : undefined} />;
 
   return <section className={cn("min-w-0", ticketOpen && "hidden lg:block")} aria-labelledby="customer-results-heading">
-    <div className="aurora-toolbar mb-3 space-y-2 p-2.5 sm:p-3.5">
+    {/* Flat on phones: the search field and one row of status chips sit directly on the page. */}
+    <div className="aurora-toolbar mb-2 space-y-2 max-sm:border-0 max-sm:bg-transparent max-sm:bg-none max-sm:p-0 max-sm:shadow-none max-sm:backdrop-blur-none sm:mb-3 sm:p-3.5">
       <TicketSearchInput className="min-w-0 space-y-1 text-sm font-medium text-foreground"
-        value={query} onChange={onQuery} onClear={() => onQuery("")} showLabel />
-      <div role="group" aria-label={t("filterTickets")} aria-describedby="customer-filter-count-label" className="grid grid-cols-2 gap-1.5 min-[550px]:grid-cols-4">
+        value={query} onChange={onQuery} onClear={() => onQuery("")} label={t("customerQueueSearch")} />
+      <div role="group" aria-label={t("filterTickets")} aria-describedby="customer-filter-count-label" className="grid grid-cols-4 gap-1.5">
         {options.map(item => {
           const active = statusScope === item.value;
           const count = active && !pending ? visibleTickets.length : counts[item.value];
           const showCount = !pending && !searching && (active || all.status !== "LoadingFirstPage");
           return <button key={item.value} type="button" aria-pressed={active} onClick={() => selectFilter(item.value)}
-            className={cn("flex min-h-11 min-w-0 items-center justify-between gap-1 rounded-lg border px-2 py-1.5 text-left text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [overflow-wrap:anywhere]",
+            className={cn("flex min-h-11 min-w-11 flex-auto items-center justify-center gap-1 rounded-full border px-1 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [overflow-wrap:anywhere] sm:justify-between sm:rounded-lg sm:px-2 sm:text-left",
               active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card/85 text-foreground hover:border-primary/45")}>
-            <span>{item.label}</span>
-            {!searching && <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums", active ? "bg-primary-foreground text-primary" : "bg-muted text-muted-foreground")}>
+            <span aria-hidden="true" className="sm:hidden">{item.short}</span><span className="max-sm:sr-only">{item.label}</span>
+            {/* Loaded-item counts need the wider layout to read as counts, not totals; phones keep the status line below. */}
+            {!searching && <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums max-sm:hidden", active ? "bg-primary-foreground text-primary" : "bg-muted text-muted-foreground")}>
               {showCount ? count : <span className="block h-2 w-2" aria-hidden="true" />}
             </span>}
           </button>;
@@ -303,17 +307,19 @@ function CustomerTickets({ project, email, composerLabel, onNewTicket, onSelect,
       </div>
       <p id="customer-filter-count-label" className="sr-only">{language === "th" ? "จำนวน Ticket ที่โหลดแล้วตามสถานะ" : "Counts reflect loaded Tickets by status"}</p>
     </div>
-    <h2 id="customer-results-heading" ref={results} tabIndex={-1} className="scroll-mt-20 px-1 pb-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      {options.find(item => item.value === statusScope)?.label}
-    </h2>
-    <p role="status" aria-live="polite" className="px-1 pb-2 text-xs text-muted-foreground">
-      {invalidSearch ? "" : pending ? t("syncingTickets") : page.status === "LoadingMore" && !searching ? loadingOlder : countLabel}
-    </p>
+    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 px-1 pb-1.5 sm:block sm:pb-0">
+      <h2 id="customer-results-heading" ref={results} tabIndex={-1} className="scroll-mt-20 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pb-1">
+        {options.find(item => item.value === statusScope)?.label}
+      </h2>
+      <p role="status" aria-live="polite" className="text-xs text-muted-foreground sm:pb-2">
+        {invalidSearch ? "" : pending ? t("syncingTickets") : page.status === "LoadingMore" && !searching ? loadingOlder : countLabel}
+      </p>
+    </div>
     {invalidSearch ? <p role="alert" className="ticket-surface p-5 text-sm text-destructive">{t("searchLimit")}</p>
       : pending ? <div className="ticket-surface grid min-h-24 place-items-center" aria-hidden="true"><Loader2 className="size-5 animate-spin text-primary" /></div>
       : !searching && all.status === "Exhausted" && all.results.length === 0
         ? <div className="aurora-panel space-y-3 p-6"><h3 className="font-semibold text-foreground">{t("myTicketsEmpty")}</h3><p className="text-sm text-muted-foreground">{t("myTicketsEmptyHint")}</p><Button variant="outline" className="min-h-11 rounded-lg" onClick={onNewTicket}><Plus aria-hidden />{composerLabel}</Button></div>
-      : visibleTickets.length ? <ul className="space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
+      : visibleTickets.length ? <ul className="max-sm:border-t max-sm:border-border/70 sm:space-y-2">{visibleTickets.map(ticket => <li key={ticket._id}><CustomerTicketRow item={ticket} selected={ticket._id === selectedId} onSelect={onSelect} /></li>)}</ul>
       : <div className="ticket-surface space-y-3 p-5 text-sm"><p className="text-foreground">{t(searching ? "customerQueueSearchEmpty" : "customerQueueEmpty")}</p>{statusScope !== "all" && <Button variant="outline" className="min-h-11 rounded-lg" onClick={() => selectFilter("all")}>{t(searching ? "customerQueueSearchAllStatuses" : "showAllTickets")}</Button>}</div>}
     {!searching && loaded && (page.status !== "Exhausted" || page.results.length > 20) ? <Button className="mt-4 min-h-11 rounded-lg"
       aria-disabled={page.status !== "CanLoadMore"} onClick={() => { if (page.status === "CanLoadMore") page.loadMore(20); }}>

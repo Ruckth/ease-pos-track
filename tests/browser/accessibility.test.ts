@@ -210,14 +210,15 @@ for (const language of ["en", "th"] as const) {
       await openHeaderMenu(page, copy(language, "queueMore"));
       await page.getByRole("menuitem", { name: copy(language, "healthTitle"), exact: true }).click();
       const health = page.getByRole("dialog", { name: copy(language, "healthTitle"), exact: true });
-      await health.getByText(language === "en" ? "Storage credential" : "ข้อมูลรับรองพื้นที่จัดเก็บ", { exact: true }).waitFor();
+      await health.locator("summary").filter({ hasText: copy(language, "healthConfiguration") }).waitFor();
       await expectAccessible(page, `staff ${language} operations health`);
       await page.setViewportSize({ width: 360, height: 740 });
+      await health.locator("summary").filter({ hasText: copy(language, "healthConfiguration") }).press("Enter");
+      await health.locator("summary").filter({ hasText: copy(language, "healthCounts") }).press("Enter");
       await expectAccessible(page, `staff ${language} operations health mobile`);
-      await health.getByRole("button", { name: copy(language, "ticketFilters"), exact: true }).press("Enter");
-      await page.getByRole("dialog", { name: copy(language, "ticketFilters"), exact: true }).waitFor();
-      await expectAccessible(page, `staff ${language} diagnostic filters`);
-      await page.keyboard.press("Escape");
+      await health.getByRole("group", { name: copy(language, "healthDiagnosticView") })
+        .getByRole("button", { name: copy(language, "healthExpired"), exact: true }).press("Enter");
+      await expectAccessible(page, "Staff expired diagnostics " + language);
       await health.waitFor();
       assert.deepEqual(errors, []);
     } finally { await context.close(); }

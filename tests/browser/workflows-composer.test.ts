@@ -461,8 +461,9 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
   });
   try {
     const labels = markupLabels("en");
-    await files(page);
-    await page.getByRole("button", { name: copy("en", "editImageNamed", { name: "draft.png" }), exact: true }).tap();
+    const name = "portrait-receipt.png";
+    await attachLongReceipt(page, name);
+    await page.getByRole("button", { name: copy("en", "editImageNamed", { name }), exact: true }).tap();
     const dialog = page.getByRole("dialog", { name: copy("en", "editDraftImage"), exact: true });
     const control = (label: string) => dialog.getByRole("button", { name: label, exact: true });
     const surface = dialog.getByRole("application", { name: labels.canvasLabel });
@@ -495,6 +496,19 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     assert.equal(await control(labels.fineTune).getAttribute("aria-expanded"), "false");
     await assertNoOverflow("selected circle at 320px");
     await dialog.getByText(labels.hintTouchSize, { exact: true }).waitFor();
+    await placeOnSurface(surface, 0.5, 0.15);
+    await slider.waitFor({ state: "hidden" });
+    const circle = surface.locator("ellipse").first();
+    const fitted = (await surface.boundingBox())!;
+    const center = (await circle.boundingBox())!;
+    const sourceCenter = [await circle.getAttribute("cx"), await circle.getAttribute("cy")];
+    await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2);
+    await page.mouse.down();
+    await slider.waitFor();
+    await surface.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.deepEqual(await surface.boundingBox(), fitted, "The fitted portrait stays fixed while selecting a circle");
+    await page.mouse.up();
+    assert.deepEqual([await circle.getAttribute("cx"), await circle.getAttribute("cy")], sourceCenter, "Selecting a circle does not move it");
 
     for (const label of [labels.smaller, labels.larger]) {
       const box = await control(label).boundingBox();
@@ -534,8 +548,8 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     });
     await control(labels.fineTune).tap();
     await control(labels.eraser).tap();
-    const boxNow = (await surface.boundingBox())!;
-    await surface.tap({ position: { x: boxNow.width * 0.5, y: boxNow.height * 0.5 } });
+    const mark = (await circle.boundingBox())!;
+    await page.touchscreen.tap(mark.x + mark.width / 2, mark.y + mark.height / 2);
     assert.equal(await surface.locator("ellipse").count(), 0);
     await control(labels.undo).tap();
     assert.equal(await surface.locator("ellipse").count(), 2);

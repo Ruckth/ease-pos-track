@@ -97,7 +97,7 @@ if (label === "after") for (const role of ["staff", "customer"] as const) {
     try {
       await page.getByRole("dialog").getByRole("button", { name: copy("en", "closeDialog"), exact: true }).click();
       const toolbar = page.locator("main header").first();
-      for (const width of [320, 390, 1100, 1279, 1280]) {
+      for (const width of [320, 360, 390, 430, 1100, 1279, 1280]) {
         await page.setViewportSize({ width, height: 844 });
         const laneCount = width >= 1280 ? 5 : 1;
         if (role === "staff") await page.waitForFunction(expected => document.querySelectorAll('[data-slot="kanban-column"]').length === expected, laneCount);
@@ -112,14 +112,59 @@ if (label === "after") for (const role of ["staff", "customer"] as const) {
         }));
         assert.ok(geometry.overflow <= 1, `${role} ${width}px overflow ${geometry.overflow}`);
         assert.equal(await toolbar.getByText(copy("en", "appName"), { exact: true }).count(), 0);
-        if (width === 390) {
-          assert.ok(geometry.height >= 48 && geometry.height <= 56, `${role} toolbar height ${geometry.height}px`);
+        if (width >= 360 && width <= 430) {
+          // One flat 44 px row plus its hairline divider.
+          assert.ok(geometry.height >= 44 && geometry.height <= 48, `${role} toolbar height ${geometry.height}px`);
           for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, JSON.stringify(control));
         }
         metrics.push({ role, width, ...geometry, ...(role === "staff" ? { lanes: laneCount } : {}) });
-        if (width === 390 || width === 1100) await shot(page, `${role}-en-${width}-workspace`);
+        if ((width >= 360 && width <= 430) || width === 1100) await shot(page, `${role}-en-${width}-workspace`);
       }
       writeFileSync(path.join(dir, `toolbar-${role}.json`), JSON.stringify(metrics, null, 2));
+    } finally { await context.close(); }
+  });
+}
+
+if (label === "after") for (const role of ["staff", "customer"] as const) for (const language of ["en", "th"] as const) {
+  test(`${role} ${language} compact phone workspace`, async () => {
+    const { page, context } = await openWith(await browsers.get(), role, language, undefined, {
+      hasTouch: true, isMobile: true, viewport: { width: 360, height: 780 },
+    });
+    try {
+      await page.getByRole("dialog").getByRole("button", { name: copy(language, "closeDialog"), exact: true }).tap();
+      const header = page.locator("main header").first();
+      const firstTicket = page.locator("button[data-ticket-id]:visible").first();
+      await firstTicket.waitFor();
+      if (role === "staff") {
+        assert.equal(await page.getByRole("button", { name: copy(language, "queueLabel"), exact: true }).getAttribute("aria-pressed"), "true");
+      }
+      const metrics = [];
+      for (const width of [360, 390, 430]) {
+        await page.setViewportSize({ width, height: Math.round(width * 19.5 / 9) });
+        await settle(page);
+        const bounds = (await header.boundingBox())!;
+        assert.ok(bounds.height >= 44 && bounds.height <= 48, `${width}px header height is ${bounds.height}px`);
+        const minTarget = await header.getByRole("button").evaluateAll(buttons => Math.min(...buttons.flatMap(button => {
+          const { height, width } = button.getBoundingClientRect();
+          return [height, width];
+        })));
+        assert.ok(minTarget >= 44, `${width}px header target is ${minTarget}px`);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        if (role === "customer") {
+          const filters = page.getByRole("group", { name: copy(language, "filterTickets") }).getByRole("button");
+          assert.equal(await filters.count(), 4);
+          assert.equal(await filters.evaluateAll(buttons => new Set(buttons.map(button => button.getBoundingClientRect().top)).size), 1);
+          for (const filter of await filters.all()) {
+            const visibleLabel = await filter.locator("[aria-hidden='true']").first().innerText();
+            assert.equal(await filter.and(page.getByRole("button", { name: visibleLabel })).count(), 1, `Accessible name contains ${visibleLabel}`);
+          }
+        }
+        const row = (await firstTicket.boundingBox())!;
+        assert.ok(row.y + row.height <= page.viewportSize()!.height, "The first Ticket is fully visible");
+        metrics.push({ width, headerHeight: bounds.height, minTarget, firstTicketY: row.y, firstTicketBottom: row.y + row.height });
+        await shot(page, `${role}-${language}-${width}-compact-queue`);
+      }
+      writeFileSync(path.join(dir, `compact-phone-${role}-${language}.json`), JSON.stringify(metrics, null, 2));
     } finally { await context.close(); }
   });
 }
@@ -148,7 +193,8 @@ test("staff th 390 Operations health settings", async () => {
     await openMenu(page, copy("th", "queueMore"));
     await page.getByRole("menuitem", { name: copy("th", "healthTitle"), exact: true }).click();
     const health = page.getByRole("dialog", { name: copy("th", "healthTitle"), exact: true });
-    await health.getByText(/ข้อมูลรับรองพื้นที่จัดเก็บ/).first().waitFor();
+    if (label === "before") await health.getByText(/ข้อมูลรับรองพื้นที่จัดเก็บ/).first().waitFor();
+    else await health.locator("summary").filter({ hasText: copy("th", "healthConfiguration") }).waitFor();
     await shot(page, "staff-th-390-health");
   } finally { await context.close(); }
 });

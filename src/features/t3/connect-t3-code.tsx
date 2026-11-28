@@ -218,7 +218,7 @@ export function ConnectT3Code({ requestProof }: { requestProof: RequestT3Proof }
         </div>
       </form>}
     </Dialog>
-    <Dialog open={Boolean(bearer)} onOpenChange={open => { if (!open) setBearer(""); }} title={copy.secret} description={copy.secretHint}>
+    <Dialog open={Boolean(bearer)} onOpenChange={() => {}} dismissible={false} title={copy.secret} description={copy.secretHint}>
       <output className="mb-4 block break-all rounded-md border border-transparent bg-muted/40 p-3 font-mono text-sm" onCopy={event => event.preventDefault()}>{bearer}</output>
       <Button type="button" onClick={() => setBearer("")}>{copy.done}</Button>
     </Dialog>

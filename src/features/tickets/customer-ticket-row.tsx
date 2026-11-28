@@ -62,8 +62,10 @@ export function CustomerTicketRow({ item, selected, onSelect }: {
     data-ticket-id={item._id}
     className={cn(
       "ticket-surface group flex w-full flex-col gap-1 px-3.5 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4",
-      needsReply && !selected && "border-l-[3px] border-l-violet-600 dark:border-l-violet-400",
-      selected && "ticket-surface-selected",
+      // Phones list flat rows divided by a hairline; the card returns from 640px.
+      "max-sm:rounded-none max-sm:border-r-0 max-sm:border-t-0 max-sm:border-b-border/70 max-sm:bg-none max-sm:px-1 max-sm:py-2.5 max-sm:shadow-none",
+      needsReply && !selected ? "border-l-[3px] border-l-violet-600 dark:border-l-violet-400 max-sm:pl-2" : "max-sm:border-l-0",
+      selected ? "ticket-surface-selected max-sm:bg-primary/10" : "max-sm:bg-transparent",
     )}
     aria-label={[t("viewTicket", { ticket: label }), item.title, status].join(", ")}
     aria-describedby={description}

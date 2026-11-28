@@ -207,13 +207,18 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
   </section>;
 
   return <>
-    <form className="space-y-4" onSubmit={submit} noValidate>
+    <form className="space-y-3 sm:space-y-4" onSubmit={submit} noValidate>
       {guided && <h3 id={stepHeadingId} tabIndex={-1} data-composer-step-heading className="text-lg font-semibold">
         {local(`Step ${stepNumber} of ${stepTotal}`, `ขั้นที่ ${stepNumber} จาก ${stepTotal}`)} · {t(currentStep === 1 ? "stepDetails" : currentStep === 2 ? "stepMedia" : "stepReview")}
       </h3>}
-      {(!guided || currentStep === 1) && <div className="space-y-4">
+      {(!guided || currentStep === 1) && <div className="space-y-3 sm:space-y-4">
         <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span aria-hidden="true" className="text-muted-foreground">{t("composerRequired")}</span></label>
+          <div className="flex flex-wrap items-center justify-between gap-x-2">
+            <label className="text-sm font-medium" htmlFor={titleId}>{t("topic")} <span aria-hidden="true" className="text-muted-foreground">{t("composerRequired")}</span></label>
+            {role === "customer" && !guided && !busy && <Button type="button" variant="ghost" className="min-h-11 px-2 text-sm text-primary" onClick={() => goTo(1)}>
+              {local("Use step-by-step guide", "ใช้ตัวช่วยแบบทีละขั้นตอน")}
+            </Button>}
+          </div>
           <Input disabled={editsDisabled} id={titleId} value={title} required aria-invalid={titleInvalid || undefined}
             aria-describedby={[titleInvalid && `${titleId}-error`, titleCounter && `${titleId}-length`].filter(Boolean).join(" ") || undefined} maxLength={TITLE_MAX_LENGTH}
             placeholder={t("topicPlaceholder")} onChange={event => {
@@ -225,8 +230,8 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
         </div>
         <div className="space-y-2">
           <label className="text-sm font-medium" htmlFor={descriptionId}>{t("description")}</label>
-          <p id={`${descriptionId}-guidance`} className="text-sm text-muted-foreground">{t("descriptionPlaceholder")}</p>
-          <Textarea disabled={editsDisabled} id={descriptionId} rows={4} maxLength={DESCRIPTION_MAX_LENGTH} value={description}
+          <p id={`${descriptionId}-guidance`} className="sr-only sm:not-sr-only sm:text-sm sm:text-muted-foreground">{t("descriptionPlaceholder")}</p>
+          <Textarea disabled={editsDisabled} id={descriptionId} rows={3} maxLength={DESCRIPTION_MAX_LENGTH} value={description}
             aria-invalid={descriptionInvalid || undefined}
             aria-describedby={[`${descriptionId}-guidance`, descriptionCounter && `${descriptionId}-length`, descriptionInvalid && `${descriptionId}-error`].filter(Boolean).join(" ")}
             onChange={event => { setDescription(event.target.value); if (descriptionInvalid) setIssue(null); }} />
@@ -243,7 +248,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
           annotationCounts={annotationCounts} disabled={!active || editsDisabled} /></Suspense>
         {items.length ? <p className="text-sm leading-5 text-muted-foreground">{annotations.length ? t("pinSummary", { count: annotations.length }) : t("pinHint")}</p> : null}
       </div>}
-      {(!guided || currentStep === 3) && <div className={guided ? "space-y-3" : "rounded-md border border-border/60"}>
+      {(!guided || currentStep === 3) && <div className={guided ? "space-y-3" : "border-t border-border/60 sm:rounded-md sm:border"}>
         {!guided && <Button type="button" className="group h-auto min-h-11 w-full justify-between gap-2 whitespace-normal px-3 py-2 text-left" variant="ghost"
           disabled={busy} aria-expanded={preview} aria-controls={`${titleId}-preview`} onClick={() => setPreview(value => !value)}>
           {t(preview ? "composerHidePreview" : "composerPreview")}
@@ -303,7 +308,7 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
             : local("Your draft is still here. You can try again.", "ฉบับร่างยังอยู่ คุณลองอีกครั้งได้")}</p>
         </div>
       </div>}
-      <div className="aurora-composer-footer aurora-dialog-edge sticky bottom-0 z-10 -mx-4 flex flex-wrap gap-2 border-t border-border/60 px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
+      <div className="aurora-composer-footer aurora-dialog-edge sticky bottom-0 z-10 -mx-4 flex flex-wrap gap-2 border-t border-border/60 px-4 py-1.5 sm:static sm:mx-0 sm:mb-0 sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0">
         {busy && <p role="status" className="basis-full text-sm font-medium">
           {stage === "upload" ? local("Uploading attachments…", "กำลังอัปโหลดไฟล์แนบ…")
             : stage === "canceling" ? local("Canceling upload. The draft stays here while cancellation settles.", "กำลังยกเลิกอัปโหลด ฉบับร่างจะยังอยู่ระหว่างรอผล")
@@ -320,9 +325,6 @@ export function TicketComposer({ draftOwner, active, role, onSubmitted }: {
           {busy ? t("submitting") : guided && currentStep !== 3 ? t("next") : failed ? local("Retry submission", "ลองส่งอีกครั้ง") : t("submitTicket")}
         </Button>
         {stage === "upload" && <Button type="button" variant="outline" className="min-h-11" onClick={owner.cancel}>{t("cancelUpload")}</Button>}
-        {role === "customer" && !guided && !busy && <Button type="button" variant="outline" className="min-h-11" onClick={() => goTo(1)}>
-          {local("Use step-by-step guide", "ใช้ตัวช่วยแบบทีละขั้นตอน")}
-        </Button>}
       </div>
     </form>
     {mediaEnabled && <><Dialog open={active && selectedMediaId !== null} onOpenChange={open => { if (!open) requestCloseViewer(); }}

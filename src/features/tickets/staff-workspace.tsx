@@ -65,7 +65,9 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const copy = useExplorerCopy();
   const staffCopy = useStaffCopy();
   const { copy: routingCopy } = useRoutingCopy();
-  const nav = useWorkspaceNavigation("staff");
+  // Initial viewport chooses the default. Rotating a phone keeps the staff member in the same view.
+  const [defaultView] = useState<ListView>(() => window.matchMedia("(max-width: 639px)").matches ? "queue" : "board");
+  const nav = useWorkspaceNavigation("staff", defaultView);
   const { projects, current: project, select: selectProject } = useCurrentProject(nav.project, nav.selectProject);
   // Saved searches never outlive the signed-in session that made them.
   const composer = useComposer(project, async () => { clearSavedSearches(); await onLogout(); });
@@ -99,27 +101,36 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
   const projectViews = useRef(new Map<string, ListView>());
   const chooseProject = (key: string) => {
     if (project) projectViews.current.set(project.key, nav.listView);
-    selectProject(key, projectViews.current.get(key) ?? "board");
+    selectProject(key, projectViews.current.get(key) ?? defaultView);
   };
   const focusSource = useRef<HTMLElement | null>(null);
   const returnPoint = useRef<{ project: string; id: TicketId; scroll: number } | null>(null);
   const exactProject = project && nav.project === project.key;
   const scopedQuery = exactProject ? nav.query : "";
   const [searchInput, setSearchInput] = useState(scopedQuery);
+  const [searchRestore, setSearchRestore] = useState(0);
+  const searchInputValue = useRef(scopedQuery);
+  const updateSearchInput = useCallback((value: string) => {
+    searchInputValue.current = value;
+    setSearchInput(value);
+  }, []);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useLayoutEffect(() => {
-    setSearchInput(scopedQuery);
+    // A route can restore a different query. A local debounce committing the
+    // current input should leave a phone search the user closed collapsed.
+    if (scopedQuery.trim() && scopedQuery !== searchInputValue.current) setSearchRestore(version => version + 1);
+    updateSearchInput(scopedQuery);
     return () => clearTimeout(searchTimer.current);
-  }, [nav.locationKey, scopedQuery, project?._id]);
+  }, [nav.locationKey, scopedQuery, project?._id, updateSearchInput]);
   const commitSearch = nav.setQuery;
   const typeSearch = (value: string) => {
-    setSearchInput(value);
+    updateSearchInput(value);
     clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => commitSearch(value, nav.locationKey), 300);
   };
   const clearSearch = () => {
     clearTimeout(searchTimer.current);
-    setSearchInput("");
+    updateSearchInput("");
     if (scopedQuery) commitSearch("");
   };
   const withSearch = (action: () => void) => {
@@ -225,7 +236,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     composer.complete();
     if (draftProject && draftProject.key !== project?.key) {
       if (project) projectViews.current.set(project.key, nav.listView);
-      if (id) nav.openTicket(id, undefined, { key: draftProject.key, view: projectViews.current.get(draftProject.key) ?? "board" });
+      if (id) nav.openTicket(id, undefined, { key: draftProject.key, view: projectViews.current.get(draftProject.key) ?? defaultView });
       else chooseProject(draftProject.key);
     } else if (id) onSelect(id);
   };
@@ -248,18 +259,18 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
       const target = document.getElementById(skipTarget);
       (target?.querySelector<HTMLElement>("h2") ?? target)?.focus();
     }}>{t("queueSkip")}</a>
-    <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 pt-3 sm:px-5 xl:px-7"}>
+    <div className={single ? "mx-auto max-w-4xl" : "mx-auto max-w-[100rem] px-3 sm:px-5 lg:pt-3 xl:px-7"}>
       <div className={single ? "hidden" : "contents"}>
       <StaffWorkspaceNavigation inbox={project && <TicketInbox compact key={project._id} role="staff" projectId={project._id} projectKey={project.key} openTicket={onSelect} />} projects={projects} current={project} archived={showArchived} hideOnPhone={split}
         search={exactProject && <div className="flex min-w-0 items-center gap-1">
-          <TicketSearchInput className="min-w-0 flex-1" showLabel={!desktop} label={staffCopy.searchLabel(project.key)} value={searchInput} onChange={typeSearch} onClear={clearSearch} />
+          <TicketSearchInput className="min-w-0 flex-1" label={staffCopy.searchLabel(project.key)} value={searchInput} onChange={typeSearch} onClear={clearSearch} />
           <SavedSearchMenu key={project._id} staffId={viewer.staffId} projectId={project._id} projectKey={project.key} query={searchInput} archived={showArchived} onRestore={saved => {
             clearTimeout(searchTimer.current);
-            setSearchInput(saved.query);
+            updateSearchInput(saved.query);
             nav.withQuery(saved.query, () => { if (saved.archived !== showArchived) void nav.setFilter(saved.archived ? "archive" : undefined); }, true);
           }} />
         </div>}
-        searchActive={Boolean(searchInput)}
+        searchQuery={searchInput} searchRestore={searchRestore}
         newTicket={(project || composer.owner) && <>
           <Button type="button" className="min-h-11 min-w-11 px-2.5 sm:px-3" aria-describedby={composer.hasDraft && !composer.open ? "staff-draft-project" : undefined} aria-expanded={composer.open}
             aria-label={composerLabel} title={composerLabel} onClick={composer.show}>
@@ -281,16 +292,17 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
         {!ticket && moves.recovery}
         {project === null ? <NoProjects headingId="staff-ticket-results" action={owner && legacyToolsEnabled ? <Button onClick={() => setTool("project")}>{t("newProject")}</Button> : undefined} /> :
           project === undefined ? <div id="staff-ticket-results" tabIndex={-1} role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : <>
-            <div className={`mb-3 flex-wrap items-center gap-x-3 gap-y-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
-              <div className="min-w-0">
+            <div className={`mb-2 flex-wrap items-center gap-x-3 gap-y-1 sm:mb-3 sm:gap-y-2 ${single ? "hidden" : split ? "hidden lg:flex" : "flex"}`}>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 sm:block">
                 <h1 id="staff-results-heading" tabIndex={-1} className="text-lg font-semibold leading-tight tracking-tight sm:text-2xl">{showArchived ? t("archive") : nav.listView === "queue" ? t("queueTitle") : copy.results}</h1>
                 {!showArchived && totals && <p className="text-xs tabular-nums text-muted-foreground sm:text-sm">
                   <span className="sr-only">{copy.results}: </span>{staffCopy.totals(totals.open, totals.done)}
                 </p>}
               </div>
-              <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5">
+              <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1 lg:gap-1.5">
+                {/* Phones reach Archive from More › Show; the h1 names the open list. */}
                 <Button type="button" variant="ghost" aria-pressed={showArchived}
-                  className={`min-h-11 min-w-11 gap-1.5 px-2.5 md:min-h-9 ${showArchived ? "bg-primary/15 text-primary hover:bg-primary/15" : "text-muted-foreground"}`}
+                  className={`min-h-11 min-w-11 gap-1.5 px-2.5 max-lg:hidden md:min-h-9 ${showArchived ? "bg-primary/15 text-primary hover:bg-primary/15" : "text-muted-foreground"}`}
                   onClick={() => withSearch(() => { void nav.setFilter(showArchived ? undefined : "archive"); })}>
                   <Archive aria-hidden /><span className="max-sm:sr-only">{staffCopy.showArchived}</span>
                 </Button>
