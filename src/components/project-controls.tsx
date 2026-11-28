@@ -69,14 +69,12 @@ export function ProjectSwitcher({
   onSelect,
   onCreate,
   compact = false,
-  customerToolbar = false,
 }: {
   projects: ProjectSummary[];
   current: ProjectSummary;
   onSelect: (key: string) => void;
   onCreate?: () => void;
   compact?: boolean;
-  customerToolbar?: boolean;
 }) {
   const { t } = useI18n();
   const menu = useMenuAction();
@@ -85,17 +83,17 @@ export function ProjectSwitcher({
   const visibleLabel = <span className="truncate">{visibleName}</span>;
   if (projects.length === 1) {
     return (
-      <span className={cn("inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium", customerToolbar && "max-[479px]:px-2")} title={projectLabel(current)}>
-        <FolderKanban className={cn("size-4 shrink-0 text-muted-foreground", customerToolbar && "max-[479px]:hidden")} aria-hidden="true" />
+      <span className={cn("inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium", compact && "max-[479px]:px-2")} title={projectLabel(current)}>
+        <FolderKanban className={cn("size-4 shrink-0 text-muted-foreground", compact && "max-[479px]:hidden")} aria-hidden="true" />
         {visibleLabel}
       </span>
     );
   }
   return (
     <DropdownMenu {...menu.root}>
-      <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className={cn("h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left", customerToolbar && "max-[479px]:gap-1 max-[479px]:px-2")} />}
+      <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className={cn("h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left", compact && "max-[479px]:gap-1 max-[479px]:px-2")} />}
         aria-label={`${t("chooseProject")}: ${visibleName}`} title={projectLabel(current)}>
-        <FolderKanban className={cn("text-muted-foreground", customerToolbar && "max-[479px]:hidden")} aria-hidden="true" />
+        <FolderKanban className={cn("text-muted-foreground", compact && "max-[479px]:hidden")} aria-hidden="true" />
         {visibleLabel}
         <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>

@@ -34,17 +34,17 @@ export function TicketRowAction({ item, busy, onMove, onRestore }: {
   const advance = item.status === "done" ? null : staffTicketActions[item.status];
   const label = advance ? t(advance.label) : "";
   const destination = advance ? t(statusMeta(advance.status).labelKey) : "";
-  return <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1">
+  return <span className="ml-auto inline-flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1">
     {pending}
     {!advance && <span className="text-xs text-muted-foreground">{t(statusMeta(item.status).labelKey)}</span>}
-    <span className="inline-flex">
-      {advance && <Button type="button" variant="outline" size="sm" className="min-h-11 rounded-e-none px-2.5 text-xs md:h-8 md:min-h-8" disabled={busy}
+    <span className={advance ? "inline-grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto]" : "inline-flex"}>
+      {advance && <Button type="button" variant="outline" size="sm" className="h-auto min-h-11 min-w-0 rounded-e-none whitespace-normal px-2 py-1.5 text-xs md:min-h-8" disabled={busy}
         aria-label={`${label} · ${reference} (${destination})`} onClick={() => onMove?.(item._id, advance.status)}>
-        {label}<ArrowRight aria-hidden className="size-3" /><span className="font-normal text-muted-foreground">{destination}</span>
+        <span className="[overflow-wrap:anywhere]">{label}</span><ArrowRight aria-hidden className="size-3 shrink-0" /><span className="font-normal text-muted-foreground [overflow-wrap:anywhere]">{destination}</span>
       </Button>}
       <DropdownMenu>
         <DropdownMenuTrigger disabled={busy} render={<Button type="button" variant="outline" size={advance ? "icon" : "sm"} className={advance
-          ? "-ms-px min-h-11 min-w-11 rounded-s-none md:size-8 md:min-h-8 md:min-w-8" : "min-h-11 gap-1 px-2.5 text-xs md:h-8 md:min-h-8"} />}
+          ? "-ms-px h-auto min-h-11 min-w-11 self-stretch rounded-s-none md:min-h-8 md:min-w-8" : "min-h-11 gap-1 px-2.5 text-xs md:h-8 md:min-h-8"} />}
           aria-label={s.moveToLabel(reference)} title={s.moveTo}>
           {!advance && s.moveTo}<ChevronDown aria-hidden />
         </DropdownMenuTrigger>

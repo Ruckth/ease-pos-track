@@ -107,7 +107,7 @@ export function CustomerPortal({ viewer, onLogout }: {
     <header className="aurora-toolbar sticky top-0 z-30 mx-auto max-w-6xl">
       <div className="flex min-w-0 flex-wrap items-center gap-1 px-1.5 py-1 sm:gap-3 sm:px-4">
         <div className="min-w-0 flex-1 basis-[4.125rem]">
-          {projects && project ? <ProjectSwitcher compact customerToolbar projects={projects} current={project} onSelect={selectProject} />
+          {projects && project ? <ProjectSwitcher compact projects={projects} current={project} onSelect={selectProject} />
             : <p className="truncate px-2 text-sm font-medium">{viewer.displayName}</p>}
         </div>
         {(project || composer.owner) && <Button className="glass-action h-auto min-h-11 max-w-full gap-1 rounded-lg whitespace-normal px-2 text-sm font-semibold sm:px-4" type="button" id="customer-new-ticket"

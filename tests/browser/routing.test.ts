@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { Page } from "playwright";
 import { api } from "../../convex/_generated/api";
-import { baseURL, convex, copy, open, openHeaderMenu, seed, suiteBrowser } from "./harness";
+import { baseURL, convex, copy, open, seed, suiteBrowser } from "./harness";
 import { capture } from "../../scripts/browser-evidence";
 
 const browser = suiteBrowser();
 after(browser.close);
 
 async function routingDialog(page: Page) {
-  await openHeaderMenu(page, copy("en", "queueMore"));
+  await page.getByRole("button", { name: "Manage Project", exact: true }).click();
   await page.getByRole("menuitem", { name: "Ticket routing", exact: true }).click();
   return page.getByRole("dialog", { name: "Ticket routing" });
 }

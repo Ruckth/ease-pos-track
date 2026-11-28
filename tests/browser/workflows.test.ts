@@ -708,6 +708,24 @@ test("staff history uses native disclosure, dates, edit excerpts and independent
     await older.click();
     await details.getByText(copy("en", "actionCreated"), { exact: true }).waitFor();
     assert.equal(await stamps.count(), 31);
+
+    const detail = staff.page.getByRole("dialog");
+    await detail.getByRole("button", { name: copy("en", "detailActions"), exact: true }).click();
+    const editUrgency = detail.getByRole("button", { name: copy("en", "detailUrgency"), exact: true });
+    await editUrgency.click();
+    const score = detail.getByRole("spinbutton", { name: copy("en", "urgencyScore"), exact: true });
+    const save = detail.getByRole("button", { name: copy("en", "saveUrgency"), exact: true });
+    assert.equal(await save.isDisabled(), true, "unchanged urgency cannot be saved");
+    await score.fill("101");
+    assert.equal(await score.getAttribute("aria-invalid"), "true");
+    assert.equal(await save.isDisabled(), true, "out of range urgency cannot be saved");
+    await score.fill("76");
+    await detail.getByText("Band: Critical", { exact: true }).waitFor();
+    assert.equal(await save.isEnabled(), true);
+    await save.click();
+    await score.waitFor({ state: "detached" });
+    assert.equal((await convex.query(api.tickets.getTicket, { token: staff.token, id: ticket._id }))?.urgencyScore, 76);
+    await staff.page.waitForFunction(button => document.activeElement === button, await editUrgency.elementHandle());
     assert.deepEqual(staff.errors, []);
   } finally {
     await staff.context.close();
@@ -743,7 +761,28 @@ test("older note history reaches event 31 without advancing the Ticket history c
         token: staff.token, id, expectedVersion, annotationId: note.annotationId, text: `Note change ${index}`,
       }));
     }
-    await staff.page.goto(`${baseURL}/staff?project=POS&view=table&ticket=${id}`);
+    await staff.page.setViewportSize({ width: 390, height: 844 });
+    await staff.page.goto(`${baseURL}/staff?project=POS&view=board`);
+    const search = staff.page.getByRole("textbox", { name: "Search POS Tickets", exact: true });
+    const searchToggle = staff.page.getByRole("button", { name: "Search Tickets", exact: true });
+    await searchToggle.waitFor();
+    assert.equal(await search.count(), 0, "compact staff search is collapsed on arrival");
+    await searchToggle.click();
+    await search.waitFor();
+    await staff.page.waitForFunction(input => document.activeElement === input, await search.elementHandle());
+    await search.fill(name);
+
+    const openTicket = staff.page.locator(`button[data-ticket-id="${id}"]`);
+    const card = staff.page.locator("article").filter({ has: openTicket });
+    await card.getByText("1 note", { exact: true }).waitFor();
+    assert.equal(await card.getByText("1 file", { exact: true }).count(), 1);
+    const reference = formatTicketNumber(ticket.ticketNumber, ticket.projectKey);
+    assert.equal(await card.getByRole("button", { name: new RegExp(`^${copy("en", "viewTicket", { ticket: reference })}`) }).count(), 1);
+    assert.equal(await card.getByRole("button", { name: /file|media/i }).count(), 0);
+    await openTicket.click();
+    const media = staff.page.getByRole("button", { name: copy("en", "detailMedia", { count: 1 }), exact: true });
+    await media.click();
+    await staff.page.getByText("Note change 30", { exact: true }).first().waitFor();
     const summary = staff.page.locator("summary").filter({ hasText: copy("en", "detailHistory") });
     await summary.click();
     const history = summary.locator("..");
@@ -1295,7 +1334,7 @@ test("a status check finishing in another Project is shown once on return", asyn
     await page.getByPlaceholder(copy("en", "search"), { exact: true }).fill(title);
     await Promise.all([
       page.waitForRequest(req => req.url().endsWith("/api/query") && req.postDataJSON()?.path === "tickets:getWorkspaceTicket"),
-      page.getByRole("button", { name: new RegExp(`^Acknowledge · ${number} ` ) }).click(),
+      page.getByRole("button", { name: `Acknowledge · ${number} (Acknowledged)`, exact: true }).click(),
     ]);
     await chooseProject(page, "APP");
     const finished = page.waitForEvent("requestfinished", req => req.url().endsWith("/api/query"));
@@ -1363,9 +1402,10 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     // Staff archive goes through the real confirmation. Cancel and Escape both
     // dismiss it without a write; focus returns to the Archive trigger.
     const archiveTrigger = dialog.getByRole("button", { name: copy("en", "archive"), exact: true });
-    const confirm = f.page.getByRole("alertdialog", { name: /^Archive POS-\d+\?$/ });
+    const reference = formatTicketNumber(created.ticket.ticketNumber, created.ticket.projectKey);
+    const confirm = f.page.getByRole("alertdialog", { name: `Archive ${reference}?`, exact: true });
     await archiveTrigger.click();
-    await confirm.getByText(/30/).waitFor();
+    await confirm.getByText("Archive this Ticket? It can be restored for 30 days.", { exact: true }).waitFor();
     await confirm.getByRole("button", { name: copy("en", "cancel"), exact: true }).click();
     await confirm.waitFor({ state: "hidden" });
     await archiveTrigger.focus();
@@ -1386,7 +1426,9 @@ test("staff explorer keeps table and filters across indexed search, tag assignme
     assert.equal(archivedTicket?.lifecycle, "archived");
     assert.ok(archivedTicket?.archivedAt);
     assert.deepEqual(archivedTicket?.tagIds, assigned?.tagIds);
-    await f.page.getByRole("button", { name: copy("en", "archive"), exact: true }).click();
+    const showArchived = f.page.getByRole("button", { name: "Show archived", exact: true });
+    await showArchived.click();
+    assert.equal(await showArchived.getAttribute("aria-pressed"), "true");
     await f.page.getByRole("button", { name: new RegExp(`Open Ticket .*${name}`) }).click();
     const archived = f.page.getByRole("dialog").last();
     assert.equal(await archived.getByRole("button", { name: copy("en", "edit"), exact: true }).count(), 0);

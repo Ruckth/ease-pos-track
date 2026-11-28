@@ -67,6 +67,7 @@ export function StaffWorkspaceNavigation({ inbox, search, searchActive = false, 
   const { copy: routingCopy } = useRoutingCopy();
   const copy = useExplorerCopy();
   const menu = useMenuAction();
+  const showProjectMenuButton = useMediaQuery("(min-width: 360px)");
   const desktop = useMediaQuery("(min-width: 1024px)");
   const [phoneSearch, setPhoneSearch] = useState(false);
   const searchRow = useId();
@@ -86,25 +87,26 @@ export function StaffWorkspaceNavigation({ inbox, search, searchActive = false, 
   const pageButtons = [ { archived: false, label: copy.results, Icon: Tickets }, { archived: true, label: t("archive"), Icon: Archive } ];
   const projectTools = current || (owner && legacyToolsEnabled);
   const adminTools = owner || legacyToolsEnabled || t3Available;
+  const projectMenuItems = (selectTool: (tool: ProjectTool) => void) => <DropdownMenuGroup>
+            <DropdownMenuLabel>{current ? `${s.manageProject} · ${current.key}` : s.manageProject}</DropdownMenuLabel>
+            {current && <DropdownMenuItem onClick={() => selectTool("members")}><Users aria-hidden />{t("projectMembers")}</DropdownMenuItem>}
+            {current && <DropdownMenuItem onClick={() => selectTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}
+            {current && lineEnabled && <DropdownMenuItem onClick={() => selectTool("line")}><Plug aria-hidden />LINE</DropdownMenuItem>}
+            {owner && legacyToolsEnabled && <DropdownMenuItem onClick={() => selectTool("project")}><FolderPlus aria-hidden />{t("newProject")}</DropdownMenuItem>}
+          </DropdownMenuGroup>;
   return <header className={cn("aurora-toolbar relative z-30 min-w-0",
     hideOnPhone && "hidden lg:block")}>
     <div className="flex min-h-[52px] min-w-0 flex-wrap items-center gap-1.5 px-2 py-1 sm:px-3">
-      {projects && current && <div className="min-w-0 flex-1 lg:max-w-xs lg:flex-none">
+      {projects && current && <div className="min-w-[66px] flex-1 lg:max-w-xs lg:flex-none">
         <ProjectSwitcher compact projects={projects} current={current} onSelect={onSelectProject} onCreate={owner && legacyToolsEnabled ? () => onTool("project") : undefined} />
       </div>}
-      {projectTools && <DropdownMenu {...manage.root}>
+      {projectTools && showProjectMenuButton && <DropdownMenu {...manage.root}>
         <DropdownMenuTrigger ref={manage.triggerRef} render={<Button type="button" variant="ghost" className="min-h-11 min-w-11 shrink-0 gap-1.5 px-2" />}
           aria-label={s.manageProject} title={s.manageProject}>
           <Settings2 aria-hidden className="!size-5" /><span className="hidden xl:inline">{s.manageProject}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{current ? `${s.manageProject} · ${current.key}` : s.manageProject}</DropdownMenuLabel>
-            {current && <DropdownMenuItem onClick={() => manageTool("members")}><Users aria-hidden />{t("projectMembers")}</DropdownMenuItem>}
-            {current && <DropdownMenuItem onClick={() => manageTool("routing")}><Route aria-hidden />{routingCopy.routing}</DropdownMenuItem>}
-            {current && lineEnabled && <DropdownMenuItem onClick={() => manageTool("line")}><Plug aria-hidden />LINE</DropdownMenuItem>}
-            {owner && legacyToolsEnabled && <DropdownMenuItem onClick={() => manageTool("project")}><FolderPlus aria-hidden />{t("newProject")}</DropdownMenuItem>}
-          </DropdownMenuGroup>
+          {projectMenuItems(manageTool)}
         </DropdownMenuContent>
       </DropdownMenu>}
       {desktop && search && <div className="min-w-0 max-w-xl flex-1">{search}</div>}
@@ -135,6 +137,7 @@ export function StaffWorkspaceNavigation({ inbox, search, searchActive = false, 
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
             </>}
+            {projectTools && !showProjectMenuButton && <>{projectMenuItems(openTool)}<DropdownMenuSeparator /></>}
             {adminTools && <>
               <DropdownMenuGroup>
                 <DropdownMenuLabel>{s.menuAdmin}</DropdownMenuLabel>

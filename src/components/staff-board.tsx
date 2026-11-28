@@ -79,7 +79,6 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
-  const enableDrag = useMediaQuery("(min-width: 1024px)");
   const standardShortcuts = useMediaQuery("(min-width: 768px)");
   const c = useExplorerCopy();
   const s = useStaffCopy();
@@ -92,6 +91,7 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
   const viewportRef = useRef<HTMLDivElement>(null);
   // Below 1280px only the chosen lane renders, full width; the others leave the tab order.
   const wide = useMediaQuery("(min-width: 1280px)");
+  const enableDrag = wide && visibleStatuses.length > 1;
   const chooser = !wide && visibleStatuses.length > 1;
   const preferredStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
   const [currentStatus, setCurrentStatus] = useState(preferredStatus);

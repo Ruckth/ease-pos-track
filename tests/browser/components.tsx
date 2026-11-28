@@ -158,7 +158,8 @@ function GroupedVideoHarness() {
   const [notes, setNotes] = useState<Annotation[]>([
     { id: "grp-pinned", label: 1, mediaIndex: 0, kind: "time", x: 0.3, y: 0.3, time: 0.2, text: "Pinned video note", createdAt: 1 },
     { id: "grp-time-only", label: 2, mediaIndex: 0, kind: "time", time: 0.22, text: "Timestamp-only grouped note", createdAt: 2 },
-    { id: "solo-note", label: 3, mediaIndex: 0, kind: "time", x: 0.7, y: 0.7, time: 0.9, text: "Separate video note", createdAt: 3 },
+    { id: "grp-third", label: 3, mediaIndex: 0, kind: "time", time: 0.22, text: "Third grouped note", createdAt: 3 },
+    { id: "solo-note", label: 4, mediaIndex: 0, kind: "time", x: 0.7, y: 0.7, time: 0.9, text: "Separate video note", createdAt: 4 },
   ]);
   const media = useMemo(
     () => [{ key: "vid-1", name: "pin-video.webm", size: 774, type: "video/webm", url: "/tests/browser/pin-video.webm" }],
