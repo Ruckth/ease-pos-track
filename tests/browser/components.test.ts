@@ -615,6 +615,8 @@ test("corner pin overlays stay unclipped inside carousel bounds at 320 px and 20
         }
         await close.press("Enter");
         await details.waitFor({ state: "hidden" });
+        // Closing a note returns focus on the next frame. Let that finish before activating another pin.
+        await page.waitForFunction(button => document.activeElement === button, await marker.elementHandle());
       }
     }
     assert.deepEqual(errors, []);

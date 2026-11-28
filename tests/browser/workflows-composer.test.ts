@@ -585,10 +585,17 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     });
     await control(labels.fineTune).tap();
     await control(labels.eraser).tap();
-    const mark = (await circle.boundingBox())!;
-    await page.touchscreen.tap(mark.x + mark.width / 2, mark.y + mark.height / 2);
+    // Use source coordinates so the point stays on the circle as the photo refits without the size controls.
+    const centerInPhoto = await circle.evaluate(element => {
+      const mark = element as SVGEllipseElement;
+      const { width, height } = mark.ownerSVGElement!.viewBox.baseVal;
+      return { x: mark.cx.baseVal.value / width, y: mark.cy.baseVal.value / height };
+    });
+    await placeOnSurface(surface, centerInPhoto.x, centerInPhoto.y);
+    await circle.waitFor({ state: "detached" });
     assert.equal(await surface.locator("ellipse").count(), 0);
     await control(labels.undo).tap();
+    await circle.waitFor();
     assert.equal(await surface.locator("ellipse").count(), 2);
     assert.equal(uploads(), 0);
     assert.deepEqual(errors, []);
