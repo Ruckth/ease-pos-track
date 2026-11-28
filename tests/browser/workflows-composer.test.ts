@@ -66,7 +66,9 @@ test("mobile screenshot markup pans a long receipt and reviews the mask at its s
     const button = (name: string) => editor.getByRole("button", { name, exact: true });
     const surface = editor.getByRole("application");
     const viewport = surface.locator("../..");
-    await button(labels.fitWidth).tap();
+    // Phones open the zoom and fit controls from the zoom level beside Undo/Redo.
+    await editor.getByRole("button", { name: new RegExp(`^${labels.zoomLevel} \\d+%$`) }).tap();
+    await page.locator("[data-markup-view-popup]").getByRole("button", { name: labels.fitWidth, exact: true }).tap();
     await button(labels.pan).tap();
     await viewport.scrollIntoViewIfNeeded();
     const available = (await viewport.boundingBox())!;
@@ -478,10 +480,40 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
 
     await surface.waitFor();
     await assertNoOverflow("initial 320px editor");
-    for (const label of [labels.select, labels.pan, labels.circle, labels.crop, labels.mask, labels.eraser, labels.zoomIn, labels.zoomOut, labels.fitWidth, labels.fitImage, labels.undo, labels.redo]) {
+    // No standalone view row: the photo starts right under the tools; zoom level and Undo/Redo share the row under it.
+    const tools = (await dialog.getByRole("group", { name: labels.tools, exact: true }).boundingBox())!;
+    const frame = (await surface.locator("../..").boundingBox())!;
+    assert.ok(frame.y - (tools.y + tools.height) <= 16, `photo follows the tools (gap ${frame.y - tools.y - tools.height})`);
+    const viewToggle = dialog.getByRole("button", { name: new RegExp(`^${labels.zoomLevel} \\d+%$`) });
+    const toggleBox = (await viewToggle.boundingBox())!, undoBox = (await control(labels.undo).boundingBox())!;
+    assert.ok(toggleBox.y >= frame.y + frame.height && Math.abs(undoBox.y - toggleBox.y) <= 1, "zoom level and Undo sit together under the photo");
+    assert.equal(await viewToggle.getAttribute("aria-expanded"), "false");
+    for (const label of [labels.select, labels.pan, labels.circle, labels.crop, labels.mask, labels.eraser, labels.undo, labels.redo]) {
       const box = await control(label).boundingBox();
       assert.ok(box && box.width >= 44 && box.height >= 44, `${label} has a 44 × 44 px touch target`);
     }
+    assert.ok(toggleBox.width >= 44 && toggleBox.height >= 44, "zoom level has a 44 × 44 px touch target");
+    await control(labels.mask).tap();
+    await placeOnSurface(surface, 0.5, 0.35);
+    const secondCorner = dialog.getByText(labels.hintSecondCorner, { exact: true });
+    await secondCorner.waitFor();
+    const imageWithCorner = await surface.boundingBox();
+    await viewToggle.tap();
+    assert.equal(await viewToggle.getAttribute("aria-expanded"), "true");
+    const zoom = page.locator("[data-markup-view-popup]");
+    await zoom.waitFor();
+    await assertNoOverflow("open zoom controls at 320px");
+    assert.deepEqual(await surface.boundingBox(), imageWithCorner, "Opening Zoom leaves the fitted photo in place");
+    for (const label of [labels.zoomIn, labels.zoomOut, labels.fitWidth, labels.fitImage]) {
+      const box = await zoom.getByRole("button", { name: label, exact: true }).boundingBox();
+      assert.ok(box && box.width >= 44 && box.height >= 44, `${label} has a 44 × 44 px touch target`);
+    }
+    await page.keyboard.press("Escape");
+    await zoom.waitFor({ state: "hidden" });
+    assert.equal(await viewToggle.getAttribute("aria-expanded"), "false");
+    assert.ok(await secondCorner.isVisible(), "Escape closes Zoom before canceling the pending corner");
+    await page.waitForFunction(button => document.activeElement === button, await viewToggle.elementHandle());
+    await control(labels.circle).tap();
     const circleBoxBefore = (await control(labels.circle).boundingBox())!;
     await control(labels.pan).tap();
     const circleBoxAfterPan = (await control(labels.circle).boundingBox())!;

@@ -203,7 +203,7 @@ type Gesture =
   | { kind: "pan"; origin: MarkupPoint; scroll: MarkupPoint; pinch?: { distance: number; scale: number; point: MarkupPoint } };
 
 export function ImageMarkupCanvas({
-  image, marks, selectedId, tool, pins, corner, minSize, labels, actions, below,
+  image, marks, selectedId, tool, pins, corner, minSize, labels, actions, below, compact,
   onSelect, onCommit, onPlace, onRect, onErase, onMoveSelected, onEscape, onWheelResize, onWheelEnd,
 }: {
   image: ImageBitmap;
@@ -216,8 +216,10 @@ export function ImageMarkupCanvas({
   labels: MarkupLabels;
   /** Shown at the end of the view row, e.g. Undo and Redo. */
   actions?: ReactNode;
-  /** Kept directly under the photo, e.g. the tool hint or size control. */
-  below?: ReactNode;
+  /** Kept directly under the photo, e.g. the tool hint or size control; receives the zoom for compact layouts. */
+  below?: (zoom: MarkupZoom) => ReactNode;
+  /** Leaves out the view row: `below` then carries the zoom and history controls (phones). */
+  compact?: boolean;
   onSelect: (id: number | null) => void;
   /** A finished move/resize drag: one undo step. */
   onCommit: (mark: MarkupMark) => void;
@@ -294,6 +296,8 @@ export function ImageMarkupCanvas({
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Let the nested Zoom popover dismiss before canceling an in-progress mark.
+      if (document.querySelector("[data-markup-view-popup][data-open]")) return;
       const { corner: c, cursor: k, onEscape: escape } = pending.current;
       if (!c && !k && !gesture.current) return;
       event.preventDefault();
@@ -495,7 +499,7 @@ export function ImageMarkupCanvas({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <ZoomControls zoom={zoom} labels={labels} actions={actions} />
+      {!compact && <ZoomControls zoom={zoom} labels={labels} actions={actions} />}
       <div ref={zoom.stage} className={STAGE}>
         <div
           ref={viewport}
@@ -576,7 +580,7 @@ export function ImageMarkupCanvas({
             </svg>
           </div>
         </div>
-        {below}
+        {below?.(zoom)}
       </div>
     </div>
   );
