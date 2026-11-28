@@ -397,7 +397,7 @@ export function ImageMarkupEditor({ item, pins, onApply, onCancel, onDirtyChange
             onWheelEnd={() => endGroup("wheel")}
             below={
               // Selecting or moving a mark must preserve the fitted image during the gesture.
-              <div className={cn("flex shrink-0 flex-col justify-center", tool === "select" ? "min-h-[4.25rem]" : "min-h-5 sm:min-h-[4.25rem]")}>
+              <div className={cn("flex shrink-0 flex-col justify-center", tool === "select" ? "min-h-[4.25rem]" : "min-h-10 sm:min-h-[4.25rem]")}>
                 {circle ? <CircleSize sizing={circle} labels={labels} /> : <p className="text-sm leading-5 text-muted-foreground">{corner ? labels.hintSecondCorner : hints[tool]}</p>}
               </div>
             }

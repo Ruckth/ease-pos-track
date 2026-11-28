@@ -256,8 +256,8 @@ function CustomerTickets({ project, email, composerLabel, onNewTicket, onSelect,
 
   // Phones show a short visible word inside the full accessible name, so all four fit one row.
   const options = [
-    { value: "active", label: t("customerQueueAllActive"), short: language === "th" ? "ยังดำเนินการ" : "Active" },
-    { value: "waiting", label: t("customerQueueWaiting"), short: t("customerQueueWaiting") },
+    { value: "active", label: t("customerQueueAllActive"), short: t("customerQueueActiveShort") },
+    { value: "waiting", label: t("customerQueueWaiting"), short: t("customerQueueWaitingShort") },
     { value: "done", label: t("resolvedTickets"), short: t("resolvedTickets") },
     { value: "all", label: t("allTickets"), short: t("allTickets") },
   ] as const;
@@ -289,13 +289,13 @@ function CustomerTickets({ project, email, composerLabel, onNewTicket, onSelect,
     <div className="aurora-toolbar mb-2 space-y-2 max-sm:border-0 max-sm:bg-transparent max-sm:bg-none max-sm:p-0 max-sm:shadow-none max-sm:backdrop-blur-none sm:mb-3 sm:p-3.5">
       <TicketSearchInput className="min-w-0 space-y-1 text-sm font-medium text-foreground"
         value={query} onChange={onQuery} onClear={() => onQuery("")} label={t("customerQueueSearch")} />
-      <div role="group" aria-label={t("filterTickets")} aria-describedby="customer-filter-count-label" className="flex flex-wrap gap-1.5 sm:grid sm:grid-cols-4">
+      <div role="group" aria-label={t("filterTickets")} aria-describedby="customer-filter-count-label" className="grid grid-cols-4 gap-1.5">
         {options.map(item => {
           const active = statusScope === item.value;
           const count = active && !pending ? visibleTickets.length : counts[item.value];
           const showCount = !pending && !searching && (active || all.status !== "LoadingFirstPage");
           return <button key={item.value} type="button" aria-pressed={active} onClick={() => selectFilter(item.value)}
-            className={cn("flex min-h-11 min-w-11 flex-auto items-center justify-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [overflow-wrap:anywhere] sm:justify-between sm:rounded-lg sm:px-2 sm:text-left",
+            className={cn("flex min-h-11 min-w-11 flex-auto items-center justify-center gap-1 rounded-full border px-1 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [overflow-wrap:anywhere] sm:justify-between sm:rounded-lg sm:px-2 sm:text-left",
               active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card/85 text-foreground hover:border-primary/45")}>
             <span aria-hidden="true" className="sm:hidden">{item.short}</span><span className="max-sm:sr-only">{item.label}</span>
             {/* Loaded-item counts need the wider layout to read as counts, not totals; phones keep the status line below. */}

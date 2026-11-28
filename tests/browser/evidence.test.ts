@@ -156,6 +156,7 @@ if (label === "after") for (const role of ["staff", "customer"] as const) for (c
           assert.equal(await filters.evaluateAll(buttons => new Set(buttons.map(button => button.getBoundingClientRect().top)).size), 1);
         }
         const row = (await firstTicket.boundingBox())!;
+        assert.ok(row.y + row.height <= page.viewportSize()!.height, "The first Ticket is fully visible");
         metrics.push({ width, headerHeight: bounds.height, minTarget, firstTicketY: row.y, firstTicketBottom: row.y + row.height });
         await shot(page, `${role}-${language}-${width}-compact-queue`);
       }

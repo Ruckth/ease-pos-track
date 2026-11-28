@@ -548,8 +548,8 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     });
     await control(labels.fineTune).tap();
     await control(labels.eraser).tap();
-    const boxNow = (await surface.boundingBox())!;
-    await surface.tap({ position: { x: boxNow.width * 0.5, y: boxNow.height * 0.5 } });
+    const mark = (await circle.boundingBox())!;
+    await page.touchscreen.tap(mark.x + mark.width / 2, mark.y + mark.height / 2);
     assert.equal(await surface.locator("ellipse").count(), 0);
     await control(labels.undo).tap();
     assert.equal(await surface.locator("ellipse").count(), 2);
