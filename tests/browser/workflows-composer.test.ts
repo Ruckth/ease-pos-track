@@ -484,7 +484,7 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     const tools = (await dialog.getByRole("group", { name: labels.tools, exact: true }).boundingBox())!;
     const frame = (await surface.locator("../..").boundingBox())!;
     assert.ok(frame.y - (tools.y + tools.height) <= 16, `photo follows the tools (gap ${frame.y - tools.y - tools.height})`);
-    const viewToggle = dialog.getByRole("button", { name: new RegExp(`^${labels.zoomLevel} \\d+%$`) });
+    const viewToggle = page.locator("[data-markup-view-trigger]");
     const toggleBox = (await viewToggle.boundingBox())!, undoBox = (await control(labels.undo).boundingBox())!;
     assert.ok(toggleBox.y >= frame.y + frame.height && Math.abs(undoBox.y - toggleBox.y) <= 1, "zoom level and Undo sit together under the photo");
     assert.equal(await viewToggle.getAttribute("aria-expanded"), "false");
@@ -495,16 +495,16 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     assert.ok(toggleBox.width >= 44 && toggleBox.height >= 44, "zoom level has a 44 × 44 px touch target");
     await control(labels.mask).tap();
     await placeOnSurface(surface, 0.5, 0.35);
-    const secondCorner = dialog.getByText(labels.hintSecondCorner, { exact: true });
+    const secondCorner = dialog.getByText(labels.hintSecondCorner, { exact: true }).and(dialog.locator("span"));
     await secondCorner.waitFor();
-    const imageWithCorner = await surface.boundingBox();
+    const imageWithCorner = (await surface.boundingBox())!;
     await viewToggle.tap();
     assert.equal(await viewToggle.getAttribute("aria-expanded"), "true");
     const zoom = page.locator("[data-markup-view-popup]");
     await zoom.waitFor();
-    await assertNoOverflow("open zoom controls at 320px");
-    assert.deepEqual(await surface.boundingBox(), imageWithCorner, "Opening Zoom leaves the fitted photo in place");
-    for (const label of [labels.zoomIn, labels.zoomOut, labels.fitWidth, labels.fitImage]) {
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Zoom does not overflow at 320px");
+    assert.deepEqual(await page.locator('svg[role="application"]').boundingBox(), imageWithCorner, "Opening Zoom leaves the fitted photo in place");
+    for (const label of [labels.zoomIn, labels.zoomOut, labels.fitWidth, labels.fitImage, labels.closeZoom]) {
       const box = await zoom.getByRole("button", { name: label, exact: true }).boundingBox();
       assert.ok(box && box.width >= 44 && box.height >= 44, `${label} has a 44 × 44 px touch target`);
     }
@@ -513,6 +513,11 @@ test("narrow touch screenshot markup keeps primary tools, Circle size slider and
     assert.equal(await viewToggle.getAttribute("aria-expanded"), "false");
     assert.ok(await secondCorner.isVisible(), "Escape closes Zoom before canceling the pending corner");
     await page.waitForFunction(button => document.activeElement === button, await viewToggle.elementHandle());
+    await viewToggle.tap();
+    await zoom.waitFor();
+    await page.touchscreen.tap(imageWithCorner.x + imageWithCorner.width / 2, imageWithCorner.y + imageWithCorner.height / 3);
+    await zoom.waitFor({ state: "hidden" });
+    assert.ok(await secondCorner.isVisible(), "Tapping the image to dismiss Zoom does not complete the mask");
     await control(labels.circle).tap();
     const circleBoxBefore = (await control(labels.circle).boundingBox())!;
     await control(labels.pan).tap();

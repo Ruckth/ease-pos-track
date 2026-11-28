@@ -16,7 +16,7 @@ export type MarkupLabels = {
   tools: string; select: string; pan: string; hintPan: string;
   /** Phone toolbar labels; the full tool name stays the accessible name. */
   panShort: string; maskShort: string;
-  view: string; zoomIn: string; zoomOut: string; zoomLevel: string; fitImage: string; fitWidth: string; previewRegion: string;
+  view: string; closeZoom: string; zoomIn: string; zoomOut: string; zoomLevel: string; fitImage: string; fitWidth: string; previewRegion: string;
   fineSteps: string; position: string; left: string; top: string; circle: string; crop: string; mask: string; eraser: string;
   hintSelect: string; hintResizeCircle: string; hintTouchSize: string; hintCircle: string; hintCrop: string; hintMask: string; hintErase: string; hintSecondCorner: string;
   canvasLabel: string; keyboardHint: string;
@@ -50,7 +50,7 @@ const en: MarkupLabels = {
   tools: "Editing tools", select: "Select", pan: "Pan", circle: "Circle", crop: "Crop", mask: "Hide details", eraser: "Eraser",
   panShort: "Pan", maskShort: "Hide",
   hintPan: "Drag to move the view. Two fingers move it with any tool.",
-  view: "View", zoomIn: "Zoom in", zoomOut: "Zoom out", zoomLevel: "Zoom level", fitImage: "Fit image", fitWidth: "Fit width",
+  view: "View", closeZoom: "Close zoom controls", zoomIn: "Zoom in", zoomOut: "Zoom out", zoomLevel: "Zoom level", fitImage: "Fit image", fitWidth: "Fit width",
   previewRegion: "Attachment preview. Swipe, scroll or use the arrow keys to move around.",
   fineSteps: "1 px steps", position: "Position", left: "Left", top: "Top",
   hintSelect: "Tap a mark to select it. Drag a handle to resize it.",
@@ -98,7 +98,7 @@ const th: MarkupLabels = {
   tools: "เครื่องมือแก้ไข", select: "เลือก", pan: "เลื่อนมุมมอง", circle: "วงกลม", crop: "ครอบตัด", mask: "ปิดบังข้อมูล", eraser: "ยางลบ",
   panShort: "เลื่อน", maskShort: "ปิดบัง",
   hintPan: "ลากเพื่อเลื่อนมุมมอง ใช้สองนิ้วได้กับทุกเครื่องมือ",
-  view: "มุมมอง", zoomIn: "ซูมเข้า", zoomOut: "ซูมออก", zoomLevel: "ระดับการซูม", fitImage: "พอดีกรอบ", fitWidth: "พอดีความกว้าง",
+  view: "มุมมอง", closeZoom: "ปิดตัวควบคุมการซูม", zoomIn: "ซูมเข้า", zoomOut: "ซูมออก", zoomLevel: "ระดับการซูม", fitImage: "พอดีกรอบ", fitWidth: "พอดีความกว้าง",
   previewRegion: "ตัวอย่างไฟล์แนบ ปัด เลื่อน หรือใช้ปุ่มลูกศรเพื่อดูส่วนอื่นของรูป",
   fineSteps: "ทีละ 1 พิกเซล", position: "ตำแหน่ง", left: "ซ้าย", top: "บน",
   hintSelect: "แตะเครื่องหมายเพื่อเลือก ลากจุดจับเพื่อปรับขนาด",

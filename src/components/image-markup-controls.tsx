@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import type { MarkupMark } from "@/lib/image-markup";
 import type { MarkupLabels } from "@/lib/markup-labels";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Crop, Eraser, Hand, Minus, MousePointer2, MoveHorizontal, Plus, Redo2, Shrink, Square, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Crop, Eraser, Hand, Minus, MousePointer2, MoveHorizontal, Plus, Redo2, Shrink, Square, Undo2, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { MarkupTool, MarkupZoom } from "./image-markup-canvas";
 import { useWheelResize } from "./image-markup-wheel";
@@ -105,16 +105,19 @@ export function CompactViewBar({ zoom, labels, actions, children, disabled }: {
   return (
     <div className="flex min-h-11 items-center gap-1">
       <div className="min-w-0 flex-1 text-xs leading-4 text-muted-foreground">{children}</div>
-      <Popover.Root open={open && !disabled} onOpenChange={setOpen}>
+      <Popover.Root modal open={open && !disabled} onOpenChange={setOpen}>
         <Popover.Trigger
           render={<Button type="button" size="touch" variant="outline" className={cn("min-w-11 shrink-0 px-1.5 tabular-nums", EXPANDED)} />}
           data-markup-view-trigger="" disabled={disabled} aria-label={`${labels.zoomLevel} ${zoom.percent}%`} title={labels.zoomLevel}
         >{zoom.percent}%</Popover.Trigger>
-        <Popover.Portal>
+        <Popover.Portal className="relative z-[60]">
           <Popover.Positioner side="top" sideOffset={6} collisionPadding={12} className="z-[60]">
             <Popover.Popup data-markup-view-popup="" aria-label={labels.view}
-              className="max-w-[var(--available-width)] rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg">
+              className="flex max-w-[var(--available-width)] flex-wrap items-center justify-end gap-1 rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg">
               <ZoomControls zoom={zoom} labels={labels} onFit={() => setOpen(false)} />
+              <Popover.Close render={<Button type="button" variant="ghost" size="icon-touch" />} aria-label={labels.closeZoom}>
+                <X aria-hidden="true" />
+              </Popover.Close>
             </Popover.Popup>
           </Popover.Positioner>
         </Popover.Portal>
