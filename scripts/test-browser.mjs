@@ -11,13 +11,13 @@ import { localDeploymentName } from "./dev-reset-target.mjs";
 import { localAppOrigins } from "./worktree-ports.mjs";
 import { EVIDENCE_DIR, log, readManifest, reset, sanitize, updateManifest } from "./browser-evidence.ts";
 
-const SUITES = ["workflows", "explore"];
+const SUITES = ["workflows", "composer", "workspace", "explore"];
 const argv = process.argv.slice(2);
 const suiteIndex = argv.indexOf("--suite");
 const suite = suiteIndex >= 0 ? argv[suiteIndex + 1] : "workflows";
 if (!SUITES.includes(suite)) { console.error(`Unknown --suite ${suite}; expected ${SUITES.join(" or ")}.`); process.exit(2); }
 if (argv.includes("--help")) {
-  console.log(`Usage: pnpm test:browser [--suite workflows|explore] [--grep <test name pattern>]
+  console.log(`Usage: pnpm test:browser [--suite workflows|composer|workspace|explore] [--grep <test name pattern>]
   --grep skips the Explorer check and runs only matching workflow/accessibility tests.
 Environment: BROWSER_EVIDENCE_DIR (default test-results/browser), BROWSER_TRACE=on|off (default on locally, off in CI).
 Exploration: EXPLORE_SEEDS, EXPLORE_ACTIONS, EXPLORE_BUDGET_MS, EXPLORE_REPLAY=<sequence.json>, EXPLORE_PROBE=leak. See docs/browser-verification.md.`);

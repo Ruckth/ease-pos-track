@@ -14,6 +14,7 @@
     "pilot:verify": "tsx scripts/pilot-verify.ts",
     "dev:convex": "node scripts/convex-local.mjs dev",
     "build": "tsc -b && vite build",
+    "build:vercel": "vite build && tsc -b",
     "preview": "vite preview",
     "preview:local": "node scripts/preview/control.mjs",
     "identity:restore": "tsx scripts/identity-restore.ts",

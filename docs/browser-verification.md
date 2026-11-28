@@ -9,7 +9,7 @@ cleared provider credentials and blocked non-loopback traffic.
 
 | Command | What it runs | Typical time (macOS, warm) |
 | --- | --- | --- |
-| `pnpm test:browser` | Bootstrap stages, 40 workflow and accessibility checks, then the Ticket Explorer harness check | ~2.5 min |
+| `pnpm test:browser` | Bootstrap stages, all workflow and accessibility checks, then the Ticket Explorer harness check | Varies with suite size |
 | `pnpm test:browser --grep "<pattern>"` | Bootstrap, then only matching workflow/accessibility tests (Explorer skipped) | ~1 min + tests |
 | `pnpm test:explore` | Bootstrap, then the seeded draft exploration (default seeds 1,2,3) | ~1 min |
 | `pnpm test:visual --repeat 3` | Builds and serves the synthetic Explorer harness, then compares three states across three captures | ~30 s |
@@ -80,7 +80,8 @@ Clean up with `pnpm browser:evidence clean`.
 ## Verification map
 
 Each check's invariant, the durable state it confirms, and its evidence.
-Workflow checks live in `tests/browser/workflows.test.ts`, accessibility checks
+Workflow checks live in `tests/browser/workflows.test.ts` and
+`tests/browser/workflows-composer.test.ts`. Accessibility checks live
 in `tests/browser/accessibility.test.ts`.
 
 | Journey | Selectors | Invariant | Durable state checked | Scope |
@@ -180,8 +181,8 @@ at step 5 (`preview-release: 2 live preview URLs for 1 files`) and
 `EXPLORE_REPLAY` of its JSON reproduces the same step and message.
 
 Before proposing a fix for a discovery, reproduce it as a deterministic test in
-`workflows.test.ts` and have a person review it. Exploration is not part of
-`pnpm test:browser` or CI and stays non-required.
+`tests/browser/workflows-composer.test.ts` and have a person review it.
+Exploration stays outside `pnpm test:browser` and CI.
 
 Bombadil was not adopted for this pilot: it is a separate experimental binary
 outside the pnpm lockfile, its replay is documented as experimental, and the
@@ -195,6 +196,16 @@ Playwright exploration finds that its fixed action set misses real defects.
 pull request, pushes to `main` and manual dispatch, on `ubuntu-24.04`, Node 24
 and the lockfile's pnpm and Playwright. It has read-only `contents` permission,
 no secrets, and `persist-credentials: false`.
+
+Two jobs each seed a disposable backend. The composer job covers the composer,
+accessibility, routing, components, encoders and Explorer. The workspace job
+covers the rest of the workflow checks and runs the advisory visual pilot.
+`browser-workflows` passes when both jobs pass. Each shard publishes its own
+sanitized failure evidence. To reproduce either shard, run
+`pnpm test:browser --suite composer` or `pnpm test:browser --suite workspace`.
+The aggregate check logs the matrix result and fails when either shard
+fails or is cancelled. Track runs superseded by a newer PR push separately
+when collecting rehearsal results.
 
 | Phase | Gate | Owner |
 | --- | --- | --- |

@@ -55,13 +55,25 @@ async function main() {
     finally { updateManifest(manifest => { manifest.stages.push({ name: "servers-ready", exitCode: readiness, durationMs: Date.now() - started }); }); }
     if (suite === "explore") process.exitCode = await run("explore", ["tsx", "--tsconfig", "tsconfig.test.json", "tests/browser/explore-draft.ts"]);
     else {
-      // Both entry points always run so one failure does not hide the other.
       const grep = process.env.BROWSER_GREP;
-      const workflows = await run("workflows", ["tsx", "--tsconfig", "tsconfig.test.json", "--test", "--test-concurrency=1",
-        ...(grep ? [`--test-name-pattern=${grep}`] : []), "tests/browser/workflows.test.ts", "tests/browser/accessibility.test.ts", "tests/browser/routing.test.ts", "tests/browser/components.test.ts", "tests/browser/encoders.test.ts",
+      // Composer tests take roughly as long as the remaining workflows once the
+      // smaller suites and Explorer are included with the composer.
+      const files = [
+        ...(suite !== "workspace" ? [
+          "tests/browser/workflows-composer.test.ts",
+          "tests/browser/accessibility.test.ts",
+          "tests/browser/routing.test.ts",
+          "tests/browser/components.test.ts",
+          "tests/browser/encoders.test.ts",
+        ] : []),
+        ...(suite !== "composer" ? ["tests/browser/workflows.test.ts"] : []),
         // Before/after screenshots of real routes run only when a label is given.
-        ...(process.env.EVIDENCE_LABEL ? ["tests/browser/evidence.test.ts"] : [])]);
-      const explorer = grep ? 0 : await run("explorer", ["tsx", "tests/browser/explorer-check.mjs"]);
+        ...(suite !== "workspace" && process.env.EVIDENCE_LABEL ? ["tests/browser/evidence.test.ts"] : []),
+      ];
+      const workflows = await run("workflows", ["tsx", "--tsconfig", "tsconfig.test.json", "--test", "--test-concurrency=1",
+        ...(grep ? [`--test-name-pattern=${grep}`] : []), ...files]);
+      // Run Explorer even if the workflow tests failed so both produce evidence.
+      const explorer = grep || suite === "workspace" ? 0 : await run("explorer", ["tsx", "tests/browser/explorer-check.mjs"]);
       process.exitCode = workflows || explorer;
     }
   } finally {

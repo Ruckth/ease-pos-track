@@ -27,7 +27,7 @@ The existing 12 guard checks passed, including forbidden imports through aliases
 
 The pins are ESLint 9.39.5, TypeScript ESLint parser 8.73.0 and React Hooks plugin 7.1.1. ESLint checks `rules-of-hooks` and `exhaustive-deps` as errors on application TypeScript. The scope skips declarations and imported component bases in `src/components/ui` and `src/components/reui`. [Config](../eslint.config.js) · [React rules](https://react.dev/reference/eslint-plugin-react-hooks)
 
-The initial lint run identified camera preview teardown and the composer's StrictMode generation check. Camera cleanup releases the node that received the stream. Composer cleanup compares setup generations through a captured lifetime object and reads its current draft after the replay microtask. The browser suite checks both camera teardown and draft preservation. [Browser workflows](../tests/browser/workflows.test.ts)
+The initial lint run identified camera preview teardown and the composer's StrictMode generation check. Camera cleanup releases the node that received the stream. Composer cleanup compares setup generations through a captured lifetime object and reads its current draft after the replay microtask. The browser suite checks both camera teardown and draft preservation. [Browser workflows](../tests/browser/workflows-composer.test.ts)
 
 Repeat the deliberate lint failures from the repository root. Each input exits 1 and identifies its rule.
 
