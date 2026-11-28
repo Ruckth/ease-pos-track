@@ -46,8 +46,8 @@ export function AttachmentFilename({ item, ticketTitle, position, onRename, disa
 
   return (
     <Popover.Root open={draft !== null && !disabled} onOpenChange={setOpen}>
-      <div className="flex min-w-0 items-center gap-0.5 pl-0.5">
-        <span className="truncate text-xs font-medium" title={name}>{name}</span>
+      <div className="flex min-w-0 items-start gap-0.5 pl-0.5 pt-1">
+        <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-xs font-medium leading-4" title={name}>{name}</span>
         <Popover.Trigger
           render={<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-primary [&_svg]:size-3.5" />}
           aria-label={renameLabel}

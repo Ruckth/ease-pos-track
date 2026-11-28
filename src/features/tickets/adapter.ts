@@ -1,11 +1,11 @@
 import type { TicketAssignmentFilter } from "../../../shared/ticket-routing";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { mergeQueueLanes } from "@/lib/staff-ticket-queue";
 import { BOARD_COLUMNS } from "@/lib/kanban-board";
 import { useStaffLanes } from "./lane-adapter";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useConvex, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { customerSearchScope, type CustomerQueueFilter } from "./customer-queue";
 import { isTicketSearchWithinLimits } from "../../../shared/ticket-contracts";
 
@@ -33,14 +33,23 @@ export function useTicketCapabilities() {
 }
 
 export function useDraftAdapter() {
+  const client = useConvex();
   return {
     createTicket: useMutation(api.tickets.createTicket),
     createUploadIntent: useMutation(api.uploads.createUploadIntent),
+    readTicket: (id: Id<"tickets">) => client.query(api.tickets.getTicket, { id }),
   };
 }
 
 export function useWorkspaceTicket(ticket: string | null, projectId: Id<"projects"> | undefined) {
   return useQuery(api.tickets.getWorkspaceTicket, ticket && projectId ? { ticket, projectId } : "skip");
+}
+
+export function useCustomerArchiveAdapter() {
+  const convex = useConvex();
+  const archive = useMutation(api.tickets.archiveTicket);
+  return { archive, read: (id: Id<"tickets">, projectId: Id<"projects">) =>
+    convex.query(api.tickets.customerArchiveState, { id, projectId }) };
 }
 
 export function useSelectedTicket(id: Id<"tickets"> | null) {
@@ -50,14 +59,25 @@ export function useSelectedTicket(id: Id<"tickets"> | null) {
 export function useTicketActivity(id: Id<"tickets"> | null) {
   const args = id ? { id } : "skip";
   const mediaEnabled = useTicketCapabilities()?.mediaEnabled === true;
-  return {
-    activity: useQuery(api.annotations.listAnnotationActivity, mediaEnabled ? args : "skip") ?? (mediaEnabled ? undefined : []),
-    ticketActivity: useQuery(api.tickets.listTicketActivity, args),
-  };
+  const annotationActivity = usePaginatedQuery(api.annotations.pageAnnotationActivity, mediaEnabled ? args : "skip", { initialNumItems: 30 });
+  const ticketActivity = usePaginatedQuery(api.tickets.pageTicketActivity, args, { initialNumItems: 30 });
+  return { ticketActivity, annotationActivity, mediaEnabled };
 }
 
-export function useCustomerTickets(projectId: Id<"projects"> | undefined) {
-  return usePaginatedQuery(api.tickets.pageTickets, projectId ? { projectId, lifecycle: "active" } : "skip", { initialNumItems: 20 });
+export function useCustomerTickets(projectId: Id<"projects"> | undefined, filter: CustomerQueueFilter, enabled = true) {
+  const ready = useQuery(api.tickets.customerQueueIndexReady, projectId && enabled && filter !== "all" ? { projectId } : "skip");
+  const page = usePaginatedQuery(api.tickets.pageTickets, projectId && enabled && (filter === "all" || ready !== undefined) ? {
+    projectId, lifecycle: "active", ...(filter === "all" ? {} : { customerGroup: filter, legacyCustomerGroup: ready === false || undefined }),
+  } : "skip", { initialNumItems: 20 });
+  // A bounded read can cross only nonmatching legacy rows. Continue until the
+  // first match or actual exhaustion, so an incomplete scan never looks empty.
+  const scanning = ready === false && page.results.length === 0
+    && (page.status === "CanLoadMore" || page.status === "LoadingMore");
+  const { loadMore, status } = page;
+  useEffect(() => {
+    if (scanning && status === "CanLoadMore") loadMore(20);
+  }, [scanning, status, loadMore]);
+  return { ...page, scanning };
 }
 
 export function useCustomerTicketSearch(projectId: Id<"projects"> | undefined, query: string, filter: CustomerQueueFilter) {

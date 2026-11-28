@@ -7,6 +7,7 @@ import { TicketCustomerReply } from "./ticket-customer-reply";
 import { TicketCard, type OpenTicket } from "./ticket-card";
 import { TicketUrgency } from "./ticket-urgency";
 import { TicketRowAction } from "./ticket-row-action";
+import { TicketPurgeEligibility } from "./ticket-purge-eligibility";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import type { TicketStatus } from "@/lib/types";
@@ -62,7 +63,8 @@ export function TicketTable({ items, sort, onSort, page, onPage, pageSize, onPag
         </TableHead>)}<TableHead scope="col" className="h-9 text-xs">{c.action}</TableHead></TableRow></TableHeader>
         <TableBody className="[&_td]:py-1">{result.rows.map((item) => <TableRow key={item._id} className="hover:bg-primary/5">
           <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatTicketNumber(item.ticketNumber, item.projectKey)}</TableCell>
-          <TableCell><button type="button" data-ticket-id={item._id} className="min-h-9 min-w-28 max-w-xs break-words rounded text-left font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}</TableCell>
+          <TableCell><button type="button" data-ticket-id={item._id} className="min-h-9 min-w-28 max-w-xs break-words rounded text-left font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSelect(item._id)} aria-label={`${c.open} ${formatTicketNumber(item.ticketNumber, item.projectKey)}: ${item.title}`}>{item.title}</button>{item.archivedAt !== undefined && <Badge className="ml-2">{c.archived}</Badge>}
+            {item.lifecycle === "archived" && <TicketPurgeEligibility archivedAt={item.archivedAt} blocked={"purgeBlocked" in item && item.purgeBlocked === true} />}</TableCell>
           <TableCell className="hidden xl:table-cell"><div className="min-w-24"><TicketTagList tags={item.tags ?? []} /></div></TableCell>
           <TableCell><Badge className={`${statusMeta(item.status).tone} whitespace-nowrap`}>{t(statusMeta(item.status).labelKey)}</Badge><TicketCustomerReply item={item} /></TableCell>
           <TableCell><TicketUrgency score={item.urgencyScore} /></TableCell>

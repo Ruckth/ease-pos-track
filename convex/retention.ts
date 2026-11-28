@@ -9,7 +9,7 @@ import { MAX_MEDIA_FILES } from "../shared/media-policy";
 import { reserveIntentAssets, requireOwnedUploadIntent } from "./domain/media";
 import { tombstoneTicketRequests } from "./domain/requests";
 import { retireTicketPages } from "./domain/pages";
-import { hasLegacyAccess, mediaCleanupEnabled, requireLegacyAccess } from "./pilot_access";
+import { hasLegacyAccess, mediaCleanupEnabled, activeDeploymentProject, requireLegacyAccess } from "./pilot_access";
 
 const fenceArgs = { jobId: v.id("mediaJobs"), attempt: v.number(), leaseId: v.string() };
 
@@ -298,12 +298,19 @@ export const diagnostics = staffQuery({
     const result = await (args.view === "expired"
       ? ctx.db.query("mediaJobs").withIndex("by_lease", q => q.eq("state", "running").lte("leaseExpiresAt", now))
       : ctx.db.query("mediaJobs").withIndex("by_state_created", q => q.eq("state", args.view === "failed" ? "failed" : "pending"))).paginate(pagination);
-    return { ...result, observedAt: now, page: await Promise.all(result.page.map(async job => ({
-      jobId: job._id, kind: job.kind, state: job.state, phase: job.phase, attempt: job.attempt, maxAttempts: job.maxAttempts,
-      exhausted: job.state === "failed" && job.attempt >= job.maxAttempts,
-      lastOutcome: job.lastOutcome ?? null, createdAt: job.createdAt, availableAt: job.availableAt,
-      leaseExpiresAt: job.leaseExpiresAt ?? null,
-      purgeBlocked: job.ticketId ? (await ctx.db.get(job.ticketId))?.purgeBlocked === true : false,
-    }))) };
+    return { ...result, observedAt: now, page: await Promise.all(result.page.map(async job => {
+      const ticket = job.ticketId ? await ctx.db.get(job.ticketId) : null;
+      // Only a Ticket-linked purge with a readable Ticket in this deployment gets a reference.
+      const readable = job.kind === "ticket_purge" && ticket && ticket.lifecycle !== "purging"
+        && await activeDeploymentProject(ctx, ticket.projectId);
+      return {
+        jobId: job._id, kind: job.kind, state: job.state, phase: job.phase, attempt: job.attempt, maxAttempts: job.maxAttempts,
+        exhausted: job.state === "failed" && job.attempt >= job.maxAttempts,
+        lastOutcome: job.lastOutcome ?? null, createdAt: job.createdAt, availableAt: job.availableAt,
+        leaseExpiresAt: job.leaseExpiresAt ?? null,
+        purgeBlocked: ticket?.purgeBlocked === true,
+        ticket: readable && ticket ? { id: ticket._id, projectKey: ticket.projectKey, ticketNumber: ticket.ticketNumber, archived: ticket.lifecycle === "archived" } : null,
+      };
+    })) };
   },
 });

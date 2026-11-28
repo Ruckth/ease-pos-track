@@ -32,3 +32,7 @@ export function requireCurrentVersion(doc: { version: number }, expectedVersion:
   }
   return currentVersion;
 }
+
+export function ticketCustomerQueueGroup(status: "new" | "acknowledged" | "in_progress" | "waiting" | "done") {
+  return status === "waiting" || status === "done" ? status : "active";
+}

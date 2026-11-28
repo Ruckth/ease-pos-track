@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import type { Announcements, UniqueIdentifier } from "@dnd-kit/core";
 import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { useSelectedTicket } from "@/features/tickets/adapter";
@@ -15,6 +16,7 @@ import {
 } from "@/components/reui/kanban";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useExplorerCopy } from "@/lib/explorer-copy";
+import { useStaffCopy } from "@/lib/staff-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TicketCard, type OpenTicket } from "@/components/ticket-card";
@@ -30,7 +32,12 @@ import {
   pendingMoveCount,
   highestTicketNumber,
   isNewArrival,
+  isArrivalOpened,
+  markArrivalOpened,
+  takeUnannouncedArrivals,
+  sortLane,
   statusChangeFromDrag,
+  type LaneSort,
   type PendingMoves,
 } from "@/lib/kanban-board";
 import type { TicketStatus } from "@/lib/types";
@@ -72,63 +79,26 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
   const [initialHighest] = useState(() => highestTicketNumber(items));
   const [pending, setPending] = useState<PendingMoves<TicketSummary>>({});
   const columns = useMemo(() => reconcileColumns(projectId, items, constrained ? {} : pending), [projectId, items, pending, constrained]);
-  const enableDrag = useMediaQuery("(min-width: 1024px)");
   const standardShortcuts = useMediaQuery("(min-width: 768px)");
   const c = useExplorerCopy();
+  const s = useStaffCopy();
   const boardId = useId();
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [laneSort, setLaneSort] = useState<LaneSort>("newest");
+  const [dragFrom, setDragFrom] = useState<TicketStatus | null>(null);
+  const [, setOpenedRevision] = useState(0);
+  const [arrivalNotice, setArrivalNotice] = useState("");
   const viewportRef = useRef<HTMLDivElement>(null);
-  const [hasOverflow, setHasOverflow] = useState(false);
+  // Below 1280px only the chosen lane renders, full width; the others leave the tab order.
+  const wide = useMediaQuery("(min-width: 1280px)");
+  const enableDrag = wide && visibleStatuses.length > 1;
+  const chooser = !wide && visibleStatuses.length > 1;
   const preferredStatus = visibleStatuses.includes(chosenStatus) ? chosenStatus : visibleStatuses[0];
   const [currentStatus, setCurrentStatus] = useState(preferredStatus);
-  const scrollTarget = useRef<number | null>(null);
-
-  const scrollToStatus = useCallback((status: TicketStatus) => {
-    const viewport = viewportRef.current;
-    const lane = document.getElementById(`${boardId}-${status}`);
-    if (!viewport || !lane) return;
-    setCurrentStatus(status);
-    const start = viewport.getBoundingClientRect().left;
-    const laneStart = lane.getBoundingClientRect().left - start + viewport.scrollLeft;
-    const target = Math.max(0, Math.min(laneStart, viewport.scrollWidth - viewport.clientWidth));
-    scrollTarget.current = target;
-    viewport.scrollTo({ left: target, behavior: "instant" });
-  }, [boardId]);
-
-  function syncStatusFromScroll(viewport: HTMLDivElement) {
-    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
-    if (maxScroll <= 1 || (scrollTarget.current !== null && Math.abs(viewport.scrollLeft - scrollTarget.current) <= 1)) return;
-    scrollTarget.current = null;
-    if (maxScroll - viewport.scrollLeft <= 1) {
-      setCurrentStatus(visibleStatuses[visibleStatuses.length - 1]);
-      return;
-    }
-    const start = viewport.getBoundingClientRect().left;
-    let nearest = visibleStatuses[0];
-    let closest = Infinity;
-    for (const status of visibleStatuses) {
-      const lane = document.getElementById(`${boardId}-${status}`);
-      if (!lane) continue;
-      const distance = Math.abs(lane.getBoundingClientRect().left - start);
-      if (distance >= closest) continue;
-      closest = distance;
-      nearest = status;
-    }
-    setCurrentStatus(nearest);
-  }
-
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const updateOverflow = () => setHasOverflow(viewport.scrollWidth - viewport.clientWidth > 1);
-    updateOverflow();
-    const observer = new ResizeObserver(updateOverflow);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [visibleStatuses]);
-
-  useLayoutEffect(() => {
-    if (hasOverflow) scrollToStatus(preferredStatus);
-  }, [hasOverflow, preferredStatus, scrollToStatus, visibleStatuses]);
+  useEffect(() => { setCurrentStatus(preferredStatus); }, [preferredStatus]);
+  const shownStatuses = chooser ? [visibleStatuses.includes(currentStatus) ? currentStatus : preferredStatus] : visibleStatuses;
+  const laneCount = (status: TicketStatus) => shownByLane?.[status] ?? totals[status] ?? columns[status].length;
+  const swipe = useRef<{ x: number; y: number } | null>(null);
 
   const draggedRef = useRef<TicketSummary | null>(null);
   const pendingRef = useRef(pending);
@@ -136,6 +106,61 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
   useEffect(() => {
     setPending(current => settlePendingMoves(projectId, items, current));
   }, [items, projectId, pending]);
+
+  // Announce each newly observed arrival once per Project session; opened arrivals lose their marker.
+  // Opening an arrival re-renders (setOpenedRevision) so its marker clears from the session-scoped set.
+  const arrivals = items.filter(item => isNewArrival(item, initialHighest) && !isArrivalOpened(projectId, item._id)).map(item => item._id);
+  const arrivalKey = arrivals.join(",");
+  useEffect(() => {
+    const count = takeUnannouncedArrivals(projectId, arrivalKey ? arrivalKey.split(",") : []);
+    if (count > 0) setArrivalNotice(s.arrivals(count));
+  }, [arrivalKey, projectId, s]);
+  const openTicket: OpenTicket = (id, section) => {
+    if (arrivals.includes(id)) { markArrivalOpened(projectId, id); setOpenedRevision(value => value + 1); }
+    onSelect(id, section);
+  };
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  const statusOf = (id: UniqueIdentifier | undefined): TicketStatus | null => {
+    if (id === undefined) return null;
+    const key = String(id);
+    if ((BOARD_COLUMNS as string[]).includes(key)) return key as TicketStatus;
+    return BOARD_COLUMNS.find(status => columnsRef.current[status].some(row => row._id === key)) ?? null;
+  };
+  const referenceOf = (id: UniqueIdentifier) => {
+    const row = BOARD_COLUMNS.flatMap(status => columnsRef.current[status]).find(item => item._id === String(id));
+    return row ? formatTicketNumber(row.ticketNumber, row.projectKey) : t("ticket");
+  };
+  const statusName = (status: TicketStatus | null) => status ? t(statusMeta(status).labelKey) : "";
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => s.dragStart(referenceOf(active.id), statusName(statusOf(active.id))),
+    onDragOver: ({ active, over }) => { const status = statusOf(over?.id); return status ? s.dragOver(referenceOf(active.id), statusName(status)) : s.dragOutside(referenceOf(active.id)); },
+    onDragEnd: ({ active, over }) => { const status = statusOf(over?.id); return status ? s.dragEnd(referenceOf(active.id), statusName(status)) : s.dragCancel(referenceOf(active.id)); },
+    onDragCancel: ({ active }) => s.dragCancel(referenceOf(active.id)),
+  };
+
+  const chooseStatus = (status: TicketStatus, focus = false) => {
+    setCurrentStatus(status);
+    onChooseStatus(status);
+    if (focus) tabsRef.current?.querySelector<HTMLElement>(`[data-status="${status}"]`)?.focus();
+    // Keep the chosen lane's heading visible beneath the pinned chooser.
+    const tabs = tabsRef.current;
+    const region = viewportRef.current;
+    if (tabs && region) {
+      const offset = tabs.getBoundingClientRect().height;
+      const top = region.getBoundingClientRect().top;
+      if (top < offset) window.scrollTo({ top: window.scrollY + top - offset - 8, behavior: "instant" });
+    }
+  };
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const index = visibleStatuses.indexOf(currentStatus);
+    const target = event.key === "Home" ? 0 : event.key === "End" ? visibleStatuses.length - 1
+      : event.key === "ArrowRight" ? (index + 1) % visibleStatuses.length
+      : event.key === "ArrowLeft" ? (index - 1 + visibleStatuses.length) % visibleStatuses.length : -1;
+    if (target < 0) return;
+    event.preventDefault();
+    chooseStatus(visibleStatuses[target], true);
+  };
 
   const observe = useCallback((operationId: string, row: TicketSummary | null) => {
     setPending(current => {
@@ -174,55 +199,80 @@ export function StaffBoard({ items, projectId, totals, pages, onSelect, onMoveCa
       value={columns}
       onValueChange={() => undefined}
       getItemValue={(item) => item._id}
-      onDragStart={(event) => { draggedRef.current = Object.values(columns).flat().find(row => row._id === event.active.id) ?? null; }}
-      onDragCancel={() => { draggedRef.current = null; }}
+      accessibility={{ announcements, screenReaderInstructions: { draggable: s.dragInstructions } }}
+      onDragStart={(event) => {
+        draggedRef.current = Object.values(columns).flat().find(row => row._id === event.active.id) ?? null;
+        setDragFrom(draggedRef.current?.status ?? null);
+      }}
+      onDragCancel={() => { draggedRef.current = null; setDragFrom(null); }}
+      onDragEnd={() => setDragFrom(null)}
       onMove={(meta) => {
         const status = statusChangeFromDrag(meta);
         const item = draggedRef.current;
         draggedRef.current = null;
+        setDragFrom(null);
         if (item && status) void move(item, status);
       }}
     >
+      <p role="status" aria-live="polite" className="sr-only">{arrivalNotice}</p>
       {Object.values(pending).map(entry => <MoveObservation key={entry.operationId} entry={entry} onObserve={observe} />)}
-      {hasOverflow && <div className="mb-3 flex flex-wrap gap-0.5 md:gap-1.5" role="group" aria-label={t("boardStatusTabs")}>
+      <div className={cn("mb-3 flex flex-wrap items-center gap-2", chooser && "sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/80")} ref={tabsRef}>
+      {chooser && <div className="flex min-w-0 flex-[1_1_100%] flex-wrap gap-0.5 md:flex-[1_1_auto] md:gap-1.5" role="group" aria-label={t("boardStatusTabs")} onKeyDown={onTabKey}>
         {visibleStatuses.map(status => {
           const meta = statusMeta(status);
           const Icon = meta.icon;
           const label = t(meta.labelKey);
           const visibleLabel = (!standardShortcuts && compactStatusLabels[status]?.[language]) || label;
           const accessibleLabel = label === visibleLabel || label.startsWith(`${visibleLabel} `) ? label : `${visibleLabel} (${label})`;
+          const count = laneCount(status);
           return <Button key={status} type="button" variant={status === currentStatus ? "secondary" : "outline"} size="sm"
             className="h-auto min-h-11 min-w-11 flex-[1_1_0] flex-col gap-0.5 whitespace-normal px-px py-1.5 text-center text-[0.6875rem] leading-tight md:flex-none md:flex-row md:gap-2 md:whitespace-nowrap md:px-3 md:text-xs"
-            aria-label={accessibleLabel}
+            aria-label={`${accessibleLabel}, ${t("boardColumnCards", { count, status: label })}`}
             aria-pressed={status === currentStatus}
-            aria-controls={`${boardId}-${status}`}
+            aria-controls={`${boardId}-lanes`}
+            data-status={status}
+            tabIndex={status === currentStatus ? 0 : -1}
             title={label}
-            onClick={() => {
-              scrollToStatus(status);
-              onChooseStatus(status);
-            }}>
+            onClick={() => chooseStatus(status)}>
             <Icon aria-hidden="true" />
             <span className="[overflow-wrap:anywhere]">{visibleLabel}</span>
+            <span className="tabular-nums font-semibold">{count}</span>
           </Button>;
         })}
       </div>}
-      <div ref={viewportRef} className="min-w-0 max-w-full snap-x snap-proximity overflow-x-auto rounded-xl pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        role="region" aria-label={c.board} tabIndex={hasOverflow ? 0 : undefined}
-        onScroll={event => syncStatusFromScroll(event.currentTarget)}>
+      <label className="ml-auto flex items-center gap-1.5 text-xs font-medium text-muted-foreground">{s.sort}
+        <select className="aurora-control min-h-11 rounded-lg px-2 text-sm text-foreground md:min-h-8" value={laneSort} onChange={event => setLaneSort(event.target.value === "urgency" ? "urgency" : "newest")}>
+          <option value="newest">{s.sortNewest}</option><option value="urgency">{s.sortUrgency}</option>
+        </select>
+      </label>
+      </div>
+      <div ref={viewportRef} id={`${boardId}-lanes`} className="min-w-0 max-w-full rounded-xl pb-3"
+        role="region" aria-label={c.board}
+        // A horizontal swipe still moves between lanes while one lane is shown.
+        onTouchStart={chooser ? event => { const touch = event.touches[0]; swipe.current = { x: touch.clientX, y: touch.clientY }; } : undefined}
+        onTouchEnd={chooser ? event => {
+          const start = swipe.current; swipe.current = null;
+          const touch = event.changedTouches[0];
+          if (!start || !touch) return;
+          const dx = touch.clientX - start.x;
+          if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(touch.clientY - start.y) * 1.5) return;
+          const index = visibleStatuses.indexOf(currentStatus) + (dx < 0 ? 1 : -1);
+          if (index >= 0 && index < visibleStatuses.length) chooseStatus(visibleStatuses[index]);
+        } : undefined}>
         <KanbanBoard
-          className={cn("items-start gap-3", visibleStatuses.length === 1
-            ? "grid-cols-1 sm:grid-cols-1"
-            : "grid-cols-[repeat(var(--lane-count),minmax(85%,1fr))] sm:grid-cols-[repeat(var(--lane-count),minmax(min(85%,13rem),1fr))]")}
-          style={{ "--lane-count": visibleStatuses.length } as CSSProperties}
+          className="items-start gap-3 grid-cols-[repeat(var(--lane-count),minmax(0,1fr))]"
+          style={{ "--lane-count": shownStatuses.length } as CSSProperties}
         >
-          {visibleStatuses.map(status => (
+          {shownStatuses.map(status => (
             <BoardColumn
               key={status}
               id={`${boardId}-${status}`}
               status={status}
-              items={columns[status]}
-              initialHighest={initialHighest}
-              onSelect={onSelect}
+              items={sortLane(columns[status], laneSort)}
+              arrivals={arrivals}
+              dropTarget={dragFrom !== null && dragFrom !== status}
+              saving={id => Boolean(pending[id] && pending[id].resultVersion === undefined)}
+              onSelect={openTicket}
               onMoveCard={move}
               total={totals[status]}
               shown={shownByLane?.[status]}
@@ -262,7 +312,9 @@ function BoardColumn({
   loaded,
   busy,
   page,
-  initialHighest,
+  arrivals,
+  dropTarget,
+  saving,
 }: {
   id: string;
   status: TicketStatus;
@@ -276,7 +328,9 @@ function BoardColumn({
   loaded?: number;
   busy?: ReadonlySet<string>;
   page?: LanePage;
-  initialHighest: number;
+  arrivals: readonly string[];
+  dropTarget: boolean;
+  saving: (id: string) => boolean;
 }) {
   const { t } = useI18n();
   const meta = statusMeta(status);
@@ -284,6 +338,8 @@ function BoardColumn({
   const label = t(meta.labelKey);
   const count = shown ?? total ?? items.length;
   const c = useExplorerCopy();
+  const s = useStaffCopy();
+  const loadingMore = page?.status === "LoadingMore";
 
   return (
     <KanbanColumn id={id} value={status} draggable={false} className="ticket-lane relative min-w-0 snap-start overflow-hidden">
@@ -301,18 +357,21 @@ function BoardColumn({
           {c.matching(shown, loaded)}{total !== undefined && ` · ${c.laneTotal(total)}`}
         </p>}
         {items.length === 0 ? (
-          <div className="grid min-h-32 place-items-center rounded-xl border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
-            {shown === undefined ? t("empty") : c.loadedEmpty}
+          <div className={cn("grid min-h-32 place-items-center rounded-xl border border-dashed px-3 py-4 text-center text-sm text-muted-foreground",
+            draggable && dropTarget && "border-primary bg-primary/5 font-medium text-primary")}>
+            {draggable && dropTarget ? s.dropHere(label) : shown === undefined ? s.emptyLane(label) : c.loadedEmpty}
           </div>
         ) : (
-          items.map((item) => (
-            <KanbanItem key={item._id} value={item._id}>
-              {isNewArrival(item, initialHighest) ? <p className="mb-1 text-xs text-muted-foreground">{t("liveArrival")}</p> : null}
+          items.map((item) => {
+            const itemBusy = Boolean(busy?.has(item._id) || saving(item._id));
+            return <KanbanItem key={item._id} value={item._id} disabled={itemBusy}>
+              {arrivals.includes(item._id) ? <p className="mb-1 text-xs text-muted-foreground">{t("liveArrival")}</p> : null}
               <TicketCard
                 item={item}
                 inLane
+                showUnscored
                 onSelect={onSelect}
-                busy={busy?.has(item._id)}
+                busy={itemBusy}
                 onMove={(_id, next) => void onMoveCard(item, next)}
                 handle={
                   draggable ? (
@@ -323,7 +382,8 @@ function BoardColumn({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="-mr-2 -mt-2 size-11 shrink-0 cursor-grab touch-none text-muted-foreground hover:bg-transparent hover:text-foreground active:cursor-grabbing"
+                          aria-disabled={itemBusy || undefined}
+                          className="-mr-2 -mt-2 size-11 shrink-0 cursor-grab touch-none text-muted-foreground hover:bg-transparent hover:text-foreground active:cursor-grabbing aria-disabled:cursor-progress"
                           aria-label={t("dragTicket", { ticket: formatTicketNumber(item.ticketNumber, item.projectKey) })}
                         >
                           <GripVertical />
@@ -333,10 +393,13 @@ function BoardColumn({
                   ) : undefined
                 }
               />
-            </KanbanItem>
-          ))
+            </KanbanItem>;
+          })
         )}
-        {page && (page.status === "CanLoadMore" || page.status === "LoadingMore") ? <Button type="button" variant="outline" className="min-h-11 w-full" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(20)}>{t("loadOlder")}</Button> : null}
+        {page && (page.status === "CanLoadMore" || loadingMore) ? <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" className="min-h-11 flex-1" disabled={loadingMore} aria-busy={loadingMore || undefined} onClick={() => page.loadMore(20)}>{loadingMore ? s.loadingOlder : t("loadOlder")}</Button>
+          {total !== undefined && <span className="text-xs tabular-nums text-muted-foreground">{s.laneLoaded(items.length, total)}</span>}
+        </div> : null}
       </KanbanColumnContent>
     </KanbanColumn>
   );

@@ -325,3 +325,67 @@ test("customer reads omit internal urgency from summaries, details, search and a
   const visibleAfterInternalChanges = await t.query(api.tickets.listTicketActivity, { token: alice, id });
   expect(visibleAfterInternalChanges.map(event => event.action)).toEqual(["status_changed", "created"]);
 });
+
+test("Ticket activity pages reach the 31st visible event and keep role provenance staff-only", async () => {
+  const { t, seed, staff, alice, bob } = await fixture();
+  const id = seed.tickets[1];
+  let expectedVersion = 0;
+  for (let index = 0; index < 30; index++) {
+    const change = await t.mutation(api.tickets.editTicket, {
+      token: index % 2 ? staff : alice, id, expectedVersion, title: `Title ${index}`, description: "Line 1\nLine 2",
+    });
+    expectedVersion = change.version;
+  }
+  const score = await t.mutation(api.tickets.updateUrgencyScore, { token: staff, id, expectedVersion, urgencyScore: 88 });
+  const first = (token: string) => t.query(api.tickets.pageTicketActivity, { token, id, paginationOpts: { numItems: 30, cursor: null } });
+  const staffPage = await first(staff);
+  expect(staffPage.page[0]).toMatchObject({ _id: score.eventId, actorRole: "staff" });
+  expect(staffPage.page.find(row => row.actorRole === "customer")?.action).toBe("edited");
+  expect(JSON.stringify(staffPage.page)).not.toMatch(/sessionId|actorStaffId|actorCustomerId/);
+
+  const page = await first(alice);
+  expect(page.page).toHaveLength(30);
+  expect(page.isDone).toBe(false);
+  expect(page.page[0].after).toMatchObject({ title: "Title 29", description: "Line 1\nLine 2" });
+  expect(JSON.stringify(page.page)).not.toMatch(/actorRole|sessionId|actorStaffId|actorCustomerId|urgencyScore/);
+  const older = await t.query(api.tickets.pageTicketActivity, {
+    token: alice, id, paginationOpts: { numItems: 30, cursor: page.continueCursor },
+  });
+  expect(older.page.map(row => row.action)).toEqual(["created"]);
+  expect(older.isDone).toBe(true);
+  const denied = await t.query(api.tickets.pageTicketActivity, {
+    token: bob, id, paginationOpts: { numItems: 30, cursor: page.continueCursor },
+  });
+  expect(denied).toMatchObject({ page: [], isDone: true });
+});
+
+test("note and Ticket cursors are independent and paired writes preserve a durable correlation", async () => {
+  const { t, seed, staff, alice } = await fixture();
+  const id = seed.tickets[1];
+  await t.run(ctx => ctx.db.patch(id, { media: [{ key: "fake", name: "receipt.png", type: "image/png", size: 1, url: "https://fixture.invalid/receipt.png" }] }));
+  const note = await t.mutation(api.annotations.addAnnotation, {
+    token: alice, id, expectedVersion: 0, mediaIndex: 0, kind: "point", x: .2, y: .4, text: "First note",
+  });
+  let expectedVersion = note.version;
+  for (let index = 0; index < 30; index++) {
+    const change = await t.mutation(api.annotations.updateAnnotation, {
+      token: staff, id, expectedVersion, annotationId: note.annotationId, text: `Note change ${index}`,
+    });
+    expectedVersion = change.version;
+  }
+  await t.mutation(api.tickets.editTicket, { token: staff, id, expectedVersion, title: "Unpaired Ticket edit", description: "" });
+  const scope = { token: staff, id, paginationOpts: { numItems: 30, cursor: null } };
+  const notes = await t.query(api.annotations.pageAnnotationActivity, scope);
+  const ticket = await t.query(api.tickets.pageTicketActivity, scope);
+  expect(notes.page).toHaveLength(30);
+  expect(notes.page[0]).toMatchObject({ actorRole: "staff", ticketEventId: ticket.page[1]._id });
+  expect(ticket.page[0].action).toBe("edited");
+  expect(ticket.page.some(row => row._id === notes.page[29].ticketEventId)).toBe(false);
+  expect(notes.isDone).toBe(false);
+  const older = await t.query(api.annotations.pageAnnotationActivity, {
+    ...scope, paginationOpts: { ...scope.paginationOpts, cursor: notes.continueCursor },
+  });
+  expect(older.page).toHaveLength(1);
+  expect(older.page[0]).toMatchObject({ action: "created", actorRole: "customer", after: { text: "First note" } });
+  expect(JSON.stringify(older.page)).not.toMatch(/sessionId|actorStaffId|actorCustomerId/);
+});

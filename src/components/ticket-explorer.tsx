@@ -8,6 +8,7 @@ import { createFilterQuery, createFilterRule } from "@/components/reui/filters/f
 import type { FilterQuery } from "@/components/reui/filters/filters-types";
 import { countCommittedRules, filterTickets, sortTickets, type ExplorerSort, type ExplorerTag } from "@/lib/ticket-explorer";
 import { useExplorerCopy } from "@/lib/explorer-copy";
+import { useStaffCopy } from "@/lib/staff-copy";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { BOARD_COLUMNS } from "@/lib/kanban-board";
@@ -96,6 +97,7 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
 }) {
   const { language, t } = useI18n();
   const c = useExplorerCopy();
+  const staffCopy = useStaffCopy();
   const [localView, setLocalView] = useState<"board" | "table">("board");
   const view = workspace?.view ?? localView;
   const ownRules = useTicketFilterRules(projectId);
@@ -147,7 +149,10 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
   const loadingMore = workspace?.loadingMore ?? legacyPages.some(page => page.status === "LoadingMore");
   const loadMore = workspace?.loadMore ?? (() => legacyPages.forEach(page => { if (page.status === "CanLoadMore") page.loadMore(20); }));
   const partial = capped || morePages;
-  const emptyText = partial ? c.loadedEmpty : filtering || search ? c.noResults : c.emptyView;
+  // An open staff archive names its own empty states; the section and heading stay visible.
+  const emptyText = partial ? c.loadedEmpty
+    : workspace && showArchived ? (filtering || search ? staffCopy.archiveSearchEmpty : staffCopy.archiveEmpty)
+    : filtering || search ? c.noResults : c.emptyView;
   const resultSummary = capped ? c.cappedMatches(combined.length, loaded)
     : filtering ? c.matching(combined.length, loaded)
     : search ? t("searchMatches", { count: combined.length })
@@ -175,6 +180,11 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
       {workspace && view === "queue" && !search && !showArchived && <Button size="sm" variant="ghost" className="min-h-11 md:min-h-8" onClick={() => setRevision(current => current + 1)}><RotateCw />{t("queueRefresh")}</Button>}
     </div>
     {!loading && resultSummary && <p role="status" className="text-sm text-muted-foreground">{resultSummary}</p>}
+    {/* Counts come first; the rules stay folded unless the search found nothing. */}
+    {workspace && search && !loading && <details key={String(combined.length === 0)} open={combined.length === 0} className="text-sm text-muted-foreground">
+      <summary className="min-h-11 w-fit cursor-pointer content-center font-medium text-foreground md:min-h-8">{staffCopy.searchTips}</summary>
+      <ul className="mt-1 list-disc space-y-0.5 ps-5">{staffCopy.searchRules.map(rule => <li key={rule}>{rule}</li>)}</ul>
+    </details>}
     <Suspense fallback={fallback}>
     {loading ? <div role="status" aria-label={t("syncing")} className="grid min-h-32 place-items-center"><Loader2 aria-hidden className="size-6 animate-spin text-muted-foreground" /></div>
       : view === "table" ? <TicketTable items={ordered} sort={sort} onSort={setSort} page={page} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} onSelect={onSelect}

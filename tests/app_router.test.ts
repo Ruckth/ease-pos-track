@@ -35,7 +35,7 @@ test("the code-based tree keeps main's URL paths and their guards", async () => 
     assert.deepEqual(await land(path, out), { href: path, matches: ["__root__", path] });
   }
   assert.equal((await land("/staff?project=POS", out)).href, "/staff/login?redirect=%2Fstaff%3Fproject%3DPOS");
-  assert.equal((await land("/customer/anything", out)).href, "/customer/login");
+  assert.deepEqual(await land("/customer/anything", out), { href: "/customer/anything", matches: ["__root__", "/$"] });
   assert.equal((await land("/nowhere", customer)).href, "/customer");
   assert.equal((await land("/customer/login?redirect=%2Fstaff", staff)).href, "/staff");
 });

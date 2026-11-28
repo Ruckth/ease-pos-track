@@ -2,6 +2,7 @@ import { patchMediaJob } from "./media_jobs";
 import { queryOperation, mutationOperation } from "./operation";
 import { ticketDetail, resolveTicketTags } from "./reads";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { annotationCreateInputValidator, ticketStatus, mediaItemValidator } from "../schema";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
@@ -70,12 +71,19 @@ async function readableTicketInput(
   return readableTicket(ctx, actor, ticketId);
 }
 
-function publicAnnotationEvent(event: Doc<"annotationEvents">) {
+function historyRole(event: { actorRole?: string }, role: Actor<Id<"customers">>["role"]): { actorRole?: "staff" | "customer" } {
+  return role === "staff" && (event.actorRole === "staff" || event.actorRole === "customer")
+    ? { actorRole: event.actorRole } : {};
+}
+
+function publicAnnotationEvent(event: Doc<"annotationEvents">, role: Actor<Id<"customers">>["role"]) {
   return {
     _id: event._id,
     _creationTime: event._creationTime,
     ticketId: event.ticketId,
     annotationId: event.annotationId,
+    ticketEventId: event.ticketEventId,
+    ...historyRole(event, role),
     action: event.action,
     before: event.before,
     after: event.after,
@@ -95,6 +103,7 @@ function publicTicketEvent(event: Doc<"ticketEvents">, mediaEnabled: boolean, ro
     _creationTime: event._creationTime,
     ticketId: event.ticketId,
     action: event.action,
+    ...historyRole(event, role),
     before: state(event.before),
     after: state(event.after),
     sourceEventId: event.sourceEventId,
@@ -170,7 +179,7 @@ export const listAnnotationActivity = queryOperation({
       .withIndex("by_ticket", (q) => q.eq("ticketId", ticket._id))
       .order("desc")
       .take(30);
-    return events.map(publicAnnotationEvent);
+    return events.map(event => publicAnnotationEvent(event, actor.role));
   },
 });
 
@@ -193,6 +202,43 @@ export const listTicketActivity = queryOperation({
         && (actor.role === "staff" || (event.action !== "urgency_changed" && event.action !== "urgency_undone")))
       .slice(0, visibleLimit)
       .map(event => publicTicketEvent(event, mediaEnabled, actor.role));
+  },
+});
+
+const historyPageArgs = { id: v.string(), paginationOpts: paginationOptsValidator };
+const emptyHistoryPage = { page: [], isDone: true, continueCursor: "" };
+function historyPageOptions(opts: typeof paginationOptsValidator.type) {
+  if (!Number.isInteger(opts.numItems) || opts.numItems < 1 || opts.numItems > 30) throw new Error("INVALID_INPUT");
+  return { ...opts, maximumRowsRead: 128, maximumBytesRead: 4 * 1024 * 1024 };
+}
+
+export const pageTicketActivity = queryOperation({
+  args: historyPageArgs,
+  handler: async (ctx, args) => {
+    const ticket = await readableTicketInput(ctx, ctx.actor, args.id);
+    if (!ticket) return emptyHistoryPage;
+    const { role } = ctx.actor;
+    const mediaEnabled = legacyMediaEnabled();
+    const result = await ctx.db.query("ticketEvents")
+      .withIndex("by_ticket", q => q.eq("ticketId", ticket._id)).order("desc")
+      .filter(q => q.and(
+        mediaEnabled ? true : q.and(q.neq(q.field("action"), "media_attached"), q.neq(q.field("action"), "annotation_changed")),
+        role === "staff" ? true : q.and(q.neq(q.field("action"), "urgency_changed"), q.neq(q.field("action"), "urgency_undone")),
+      ))
+      .paginate(historyPageOptions(args.paginationOpts));
+    return { ...result, page: result.page.map(event => publicTicketEvent(event, mediaEnabled, role)) };
+  },
+});
+
+export const pageAnnotationActivity = queryOperation({
+  args: historyPageArgs,
+  handler: async (ctx, args) => {
+    const ticket = await readableTicketInput(ctx, ctx.actor, args.id);
+    if (!ticket || !legacyMediaEnabled()) return emptyHistoryPage;
+    const result = await ctx.db.query("annotationEvents")
+      .withIndex("by_ticket", q => q.eq("ticketId", ticket._id)).order("desc")
+      .paginate(historyPageOptions(args.paginationOpts));
+    return { ...result, page: result.page.map(event => publicAnnotationEvent(event, ctx.actor.role)) };
   },
 });
 
@@ -507,6 +553,22 @@ export const editTicket = mutationOperation({
   },
 });
 
+/** An owning customer may reconcile archive outcomes without reading archived content. */
+export const customerArchiveState = queryOperation({
+  args: { id: v.id("tickets"), projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { actor } = ctx;
+    if (actor.role !== "customer") return null;
+    const row = await ctx.db.get(args.id);
+    if (!row || row.projectId !== args.projectId || row.lifecycle === "purging" || !canReadTicket(actor, row)) return null;
+    const project = await ctx.db.get(row.projectId);
+    if (!project || project.archivedAt !== undefined || !await projectInDeployment(ctx, row.projectId)
+      || !await isMember(ctx, row.projectId, actor)) return null;
+    if (row.lifecycle === "archived") return { lifecycle: row.lifecycle, version: row.version };
+    return { lifecycle: row.lifecycle, version: row.version, title: row.title, status: row.status, updatedAt: row.updatedAt };
+  },
+});
+
 export const archiveTicket = mutationOperation({
   args: { id: v.id("tickets"), expectedVersion: v.number() },
   handler: async (ctx, args) => {
@@ -574,12 +636,13 @@ export const addAnnotation = mutationOperation({
     const now = Date.now();
     const annotation = createAnnotationRecord(doc.media, args, label, crypto.randomUUID(), now);
 
-    const { version } = await applyTicketChange(ctx, {
+    const { version, eventId: ticketEventId } = await applyTicketChange(ctx, {
       doc, expectedVersion: args.expectedVersion, changes: { annotations: [...annotations, annotation] },
       action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
 
     await recordAnnotationEvent(ctx, {
+      ticketEventId,
       ticketId: args.id,
       annotationId: annotation.id,
       action: "created",
@@ -617,11 +680,12 @@ export const updateAnnotation = mutationOperation({
     const after = updateAnnotationRecord(before, args, now);
     annotations[index] = after;
 
-    const { version } = await applyTicketChange(ctx, {
+    const { version, eventId: ticketEventId } = await applyTicketChange(ctx, {
       doc, expectedVersion: args.expectedVersion, changes: { annotations },
       action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
     const eventId = await recordAnnotationEvent(ctx, {
+      ticketEventId,
       ticketId: args.id,
       annotationId: args.annotationId,
       action: "updated",
@@ -657,11 +721,12 @@ export const undoAnnotationUpdate = mutationOperation({
     const before = annotations[index];
     const after = { ...event.before, updatedAt: now };
     annotations[index] = after;
-    await applyTicketChange(ctx, {
+    const { eventId: ticketEventId } = await applyTicketChange(ctx, {
       doc, expectedVersion: args.expectedVersion, changes: { annotations },
       action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
     await recordAnnotationEvent(ctx, {
+      ticketEventId,
       ticketId: doc._id,
       annotationId: event.annotationId,
       action: "update_undone",
@@ -693,11 +758,12 @@ export const removeAnnotation = mutationOperation({
     const now = Date.now();
     const after = softDeleteAnnotationRecord(before, now);
     annotations[index] = after;
-    const { version } = await applyTicketChange(ctx, {
+    const { version, eventId: ticketEventId } = await applyTicketChange(ctx, {
       doc, expectedVersion: args.expectedVersion, changes: { annotations },
       action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
     await recordAnnotationEvent(ctx, {
+      ticketEventId,
       ticketId: args.id,
       annotationId: args.annotationId,
       action: "deleted",
@@ -731,11 +797,12 @@ export const restoreAnnotation = mutationOperation({
     const after = restoreAnnotationRecord(before, now);
     annotations[index] = after;
 
-    const { version } = await applyTicketChange(ctx, {
+    const { version, eventId: ticketEventId } = await applyTicketChange(ctx, {
       doc, expectedVersion: args.expectedVersion, changes: { annotations },
       action: "annotation_changed", author: { sessionId: session._id, ...actorFields(actor) }, now,
     });
     await recordAnnotationEvent(ctx, {
+      ticketEventId,
       ticketId: args.id,
       annotationId: args.annotationId,
       action: "restored",

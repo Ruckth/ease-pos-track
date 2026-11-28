@@ -23,8 +23,8 @@ export function StaffEntry() {
         <StaffWorkspace viewer={viewer} onLogout={onLogout} t3Settings={t3Settings}
           lineSettings={lineSettings?.search}
           onLineSettings={(open, bot) => {
-            if (open) void navigate({ to: APP_PATHS.staffLineSettings, search: previous => ({ ...previous, bot }), resetScroll: false });
-            else void navigate({ to: APP_PATHS.staffHome, search: true, resetScroll: false });
+            if (open) void navigate({ to: APP_PATHS.staffLineSettings, search: previous => ({ ...previous, bot }), state: true, resetScroll: false });
+            else void navigate({ to: APP_PATHS.staffHome, search: true, state: true, resetScroll: false });
           }}
           onT3Settings={open => void navigate({ to: open ? APP_PATHS.staffT3Settings : APP_PATHS.staffHome, search: true, state: true, resetScroll: false })} />
       </TicketReplyDraftProvider>

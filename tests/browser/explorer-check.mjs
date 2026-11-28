@@ -9,6 +9,7 @@ const shot = name => path.join(EVIDENCE_DIR, "public", "screenshots", `explorer-
 let page;
 const errors=[];
 const button = name => page.getByRole("button", { name, exact: true });
+const advance = (action, reference, destination) => button(`${action} · ${reference} (${destination})`);
 const countRows = async n => { await page.waitForFunction(n => document.querySelectorAll('tbody tr').length === n,n); };
 const summary = async text => { await page.getByText(text,{exact:true}).waitFor(); };
 const filterTrigger = () => page.locator('[data-slot="ticket-filter-trigger"]');
@@ -42,10 +43,11 @@ async function add(field, operator) {
 }
 try { await capture("explorer", "Ticket Explorer harness", async () => {
   const context = await newContext(browser, { viewport: { width: 1440, height: 1000 } });
+  await context.addInitScript(() => localStorage.setItem("ease-pos-tracking-language", "en"));
   page = await context.newPage();
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(`${process.env.BROWSER_BASE_URL ?? "http://127.0.0.1:5193"}/tests/browser/explorer.html`);
-  await button("Language").click(); await button("Table").click(); await countRows(10);
+  await button("Table").click(); await countRows(10);
   await button("Next page").click(); await summary("Page 2 of 6 · 54 Tickets");
   await page.getByRole("combobox",{name:"Rows per page"}).selectOption("25"); await countRows(25); await summary("Page 1 of 3 · 54 Tickets");
   await button("Last page").click(); await countRows(4);
@@ -94,21 +96,23 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await button("Language").click();
   await page.getByRole("combobox", { name: "Sort", exact: true }).selectOption("ticketNumber:asc");
   assert.equal(await page.getByRole("table").count(), 0, "only the compact Table is mounted");
-  await button("Acknowledge · POS-0002").click();
-  await button("Start work · POS-0002").waitFor();
+  await advance("Acknowledge", "POS-0002", "Acknowledged").click();
+  await advance("Start work", "POS-0002", "In progress").waitFor();
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.getByRole("table").waitFor();
-  await button("Start work · POS-0002").waitFor();
+  await advance("Start work", "POS-0002", "In progress").waitFor();
 
   const board = page.getByRole("region", { name: "Board", exact: true });
   const lane = status => board.locator(`[data-slot="kanban-column"][data-value="${status}"]`);
   const shortcuts = page.getByRole("group", { name: "Show tickets by status" });
-  const shortcut = name => shortcuts.getByRole("button", { name, exact: true });
+  const shortcut = status => shortcuts.locator(`button[data-status="${status}"]`);
   async function expectPhoneShortcuts(group, labels) {
     assert.equal(await group.getByRole("button").count(), labels.length);
     const boxes = await Promise.all(labels.map(async ([name, visibleLabel = name]) => {
-      const control = group.getByRole("button", { name, exact: true });
-      assert.equal(await control.innerText(), visibleLabel);
+      const control = group.getByRole("button", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}, .*\\d+`) });
+      const [label, count] = (await control.innerText()).split("\n");
+      assert.equal(label, visibleLabel);
+      assert.match(count, /^\d+$/);
       return control.boundingBox();
     }));
     const strip = await group.boundingBox();
@@ -124,6 +128,16 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 5);
   assert.equal(await board.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
   assert.equal(await shortcuts.count(), 0);
+  const tightLane = lane("new");
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  const firstAction = tightLane.getByRole("button", { name: /^Acknowledge ·/ }).first();
+  const firstMoveTo = tightLane.getByRole("button", { name: /^Move POS-\d+ to another status$/ }).first();
+  const laneBox = await tightLane.boundingBox();
+  for (const action of [firstAction, firstMoveTo]) {
+    const box = await action.boundingBox();
+    assert.ok(laneBox && box && box.x >= laneBox.x && box.x + box.width <= laneBox.x + laneBox.width, "the full status control fits in a five-column Board");
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   const drag = lane("new").getByRole("button", { name: "Drag ticket POS-0005", exact: true });
   const source = await drag.boundingBox();
   const destination = await lane("waiting").boundingBox();
@@ -135,22 +149,29 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await lane("waiting").locator("button[data-ticket-id='4']").waitFor();
   assert.equal(await lane("new").locator("button[data-ticket-id='4']").count(), 0);
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await shortcut("New").click();
   const englishShortcuts = [["New"], ["Ack. (Acknowledged)", "Ack."], ["In progress"], ["Waiting for customer", "Waiting"], ["Resolved"]];
+  for (const width of [1279, 1100, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await shortcut("new").click();
+    assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 1);
+    assert.equal(await lane("acknowledged").count(), 0, "unselected lanes are outside the DOM and tab order");
+    assert.equal(await board.getByRole("button", { name: /Drag ticket/ }).count(), 0, "single-lane mode has no unreachable drag destinations");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
   await expectPhoneShortcuts(shortcuts, englishShortcuts);
-  assert.equal(await board.locator('[data-slot="kanban-column"]').count(), 5);
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await board.getByRole("button", { name: /Drag ticket/ }).count(), 0);
-  const viewport = await board.boundingBox();
-  const adjacent = await lane("acknowledged").boundingBox();
-  assert.ok(viewport && adjacent && adjacent.x < viewport.x + viewport.width && adjacent.x + adjacent.width > viewport.x + viewport.width);
-  await shortcut("Waiting for customer").focus();
-  await page.keyboard.press("Enter");
-  await shortcut("Waiting for customer").and(page.locator('[aria-pressed="true"]')).waitFor();
-  assert.equal(await lane("waiting").evaluate(el => Math.abs(el.getBoundingClientRect().left - el.closest('[role="region"]').getBoundingClientRect().left) < 2), true);
-  await board.evaluate(el => { el.scrollLeft = 0; });
-  await shortcut("New").and(page.locator('[aria-pressed="true"]')).waitFor();
+  await shortcut("new").press("ArrowRight");
+  await shortcut("acknowledged").and(page.locator('[aria-pressed="true"]')).waitFor();
+  assert.equal(await shortcut("acknowledged").evaluate(element => element === document.activeElement), true);
+  await shortcut("waiting").click();
+  await shortcut("waiting").and(page.locator('[aria-pressed="true"]')).waitFor();
+  assert.equal(await lane("waiting").evaluate(el => {
+    const box = el.getBoundingClientRect();
+    const viewport = el.closest('[role="region"]').getBoundingClientRect();
+    return Math.abs(box.left - viewport.left) < 2 && Math.abs(box.width - viewport.width) < 2;
+  }), true);
+  await shortcut("waiting").press("Home");
+  await shortcut("new").and(page.locator('[aria-pressed="true"]')).waitFor();
   await page.screenshot({ path: shot("board-mobile"), fullPage: true });
   await page.setViewportSize({ width: 320, height: 720 });
   await expectPhoneShortcuts(shortcuts, englishShortcuts);
@@ -176,8 +197,8 @@ try { await capture("explorer", "Ticket Explorer harness", async () => {
   await summary("50 shown from the first 50 matches · Refine search");
   await search.fill("POS-0002");
   await button("Board").click();
-  await lane("new").getByRole("button", { name: "Acknowledge · POS-0002", exact: true }).click();
-  await shortcut("Ack. (Acknowledged)").click();
-  await lane("acknowledged").getByRole("button", { name: "Start work · POS-0002", exact: true }).waitFor();
+  await lane("new").getByRole("button", { name: "Acknowledge · POS-0002 (Acknowledged)", exact: true }).click();
+  await shortcut("acknowledged").click();
+  await lane("acknowledged").getByRole("button", { name: "Start work · POS-0002 (In progress)", exact: true }).waitFor();
   assert.deepEqual(errors,[]); console.log("Explorer browser checks passed: table, board, filters, dates, urgency, pagination, archives, details, Thai and mobile.");
 }); } catch (error) { console.error(error); process.exitCode = 1; } finally { await browser.close(); }

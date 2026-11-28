@@ -903,6 +903,15 @@ test("staff diagnostics show ownership_unverified and purgeBlocked while requeue
   expect(JSON.stringify(details)).not.toMatch(/Purge fixture|Fixture|https?:|fake-\d-\d/);
   expect(await f.t.mutation(api.retention.requeueFailed, { token: f.staff, jobId: purge.jobId })).toBe(false);
   expect(await f.t.run(ctx => ctx.db.get(blocked.ticketId))).toMatchObject({ lifecycle: "archived", purgeBlocked: true });
+  // UX-046: only the Ticket-linked purge carries a reference; unrelated jobs carry none.
+  const ticket = (await f.t.run(ctx => ctx.db.get(blocked.ticketId)))!;
+  expect(purge.ticket).toEqual({ id: blocked.ticketId, projectKey: ticket.projectKey, ticketNumber: ticket.ticketNumber, archived: true });
+  expect(details.page.find(job => job.jobId === jobId)?.ticket).toBeNull();
+  // UX-022: staff archive rows expose the blocked state; customers never see it.
+  const archive = (token: string) => f.t.query(api.tickets.pageTickets, { token, projectId: f.seed.projects[0].id, lifecycle: "archived", paginationOpts: { numItems: 50, cursor: null } });
+  expect((await archive(f.staff)).page.find(row => row._id === blocked.ticketId)).toMatchObject({ purgeBlocked: true });
+  const own = (await archive(f.alice).catch(() => ({ page: [] as { _id: string }[] }))).page.find(row => row._id === blocked.ticketId);
+  expect(own && "purgeBlocked" in own).toBeFalsy();
 });
 
 

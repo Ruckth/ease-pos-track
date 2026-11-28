@@ -51,3 +51,8 @@ export function suggestProjectKey(name: string) {
   const candidate = words.length > 1 ? words.map((word) => word[0]).join("") : (words[0] ?? "");
   return candidate.slice(0, 4);
 }
+
+/** The first Ticket reference a key would produce, or null when the normalized key is invalid. */
+export function projectKeyExample(value: string) {
+  try { return formatTicketNumber(1, normalizeProjectKey(value)); } catch { return null; }
+}

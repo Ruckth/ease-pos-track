@@ -8,8 +8,8 @@ type Translate = ReturnType<typeof useI18n>["t"];
 /** Success notices with an Undo bound to the exact change that produced them. */
 export function operationNotices(t: Translate): Parameters<typeof ticketOperations>[1] {
   return {
-    success: (message, undo) => toast.success(t(message), undo ? {
-      action: { label: t("undo"), onClick: () => { void undo().catch(error => toast.error(localizeError(error, t))); } },
+    success: (message, reference, undo) => toast.success(`${reference} · ${t(message)}`, undo ? {
+      action: { label: t("undo"), onClick: () => { void undo().catch(error => toast.error(`${reference} · ${localizeError(error, t)}`)); } },
     } : undefined),
   };
 }

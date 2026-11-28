@@ -40,13 +40,22 @@ export function useComposer(project: ProjectSummary | null | undefined, logout: 
   return {
     owner: entry?.owner, project: entry?.project, open,
     busy, hasDraft, signOut,
+    foreignDraft: Boolean(hasDraft && entry && project && entry.project._id !== project._id),
+    startCurrentProject() {
+      if (!project || busy) return;
+      replace({ project, owner: new DisposableTicketDraft(project._id) });
+      setOpen(true);
+    },
     show() {
       if (project && (!entry || (!hasDraft && !busy && entry.project._id !== project._id))) {
         replace({ project, owner: new DisposableTicketDraft(project._id) });
       }
       if (entry || project) setOpen(true);
     },
-    setOpen(next: boolean) { if (next || !busy) setOpen(next); },
+    setOpen(next: boolean) {
+      if (!next && entry?.owner.lastSubmittedId) complete();
+      else if (next || !busy) setOpen(next);
+    },
     discard() { if (!busy) complete(); },
     complete,
   };
@@ -67,10 +76,9 @@ export function useTicketDraft(owner: DisposableTicketDraft) {
     counts[annotation.mediaId] = (counts[annotation.mediaId] ?? 0) + 1;
     return counts;
   }, {}), [annotations]);
-  return { ...state, owner, mediaEnabled, viewerMedia, viewerAnnotations, annotationCounts,
+  return { ...state, owner, mediaEnabled, readTicket: adapter.readTicket, viewerMedia, viewerAnnotations, annotationCounts,
     error: state.error ? localizeError(state.error, t) : "",
     setTitle: owner.setTitle, setDescription: owner.setDescription, setItems: owner.reorder,
-    setError: owner.setError,
     createPendingAnnotation: async (input: Parameters<typeof owner.addAnnotation>[0]) => {
       if (await owner.addAnnotation(input)) toast.success(t("pinAdded"));
     },

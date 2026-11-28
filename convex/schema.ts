@@ -11,6 +11,7 @@ import { assignment, classification, routingTables } from "./routing_schema";
 
 export const tagColor = v.union(v.literal("slate"), v.literal("red"), v.literal("orange"), v.literal("green"), v.literal("blue"), v.literal("violet"));
 
+export const customerQueueGroup = v.union(v.literal("active"), v.literal("waiting"), v.literal("done"));
 export const ticketStatus = v.union(
   v.literal("new"),
   v.literal("acknowledged"),
@@ -213,6 +214,7 @@ export default defineSchema({
     description: v.string(),
     searchText: v.string(),
     status: ticketStatus,
+    customerQueueGroup: v.optional(customerQueueGroup),
     urgencyScore: v.optional(v.number()),
     assignment: v.optional(assignment),
     assigneeStaffId: v.optional(v.string()),
@@ -244,6 +246,7 @@ export default defineSchema({
     .index("by_project_assignee", ["projectId", "lifecycle", "assigneeStaffId", "ticketNumber"])
     .index("by_project_number", ["projectId", "ticketNumber"])
     .index("by_project_lane", ["projectId", "lifecycle", "status", "ticketNumber"])
+    .index("by_owner_project_group", ["ownerCustomerId", "projectId", "lifecycle", "customerQueueGroup", "ticketNumber"])
     .index("by_owner_project", ["ownerCustomerId", "projectId", "lifecycle", "ticketNumber"])
     .index("by_project_ticket", ["projectKey", "ticketNumber"])
     .index("by_project_lifecycle", ["projectId", "lifecycle", "ticketNumber"])
@@ -435,6 +438,8 @@ export default defineSchema({
     inReplyTo: v.optional(v.id("ticketMessages")),
     // Thread additions; absent on legacy rows. `requestReply` is set only on staff messages.
     requestReply: v.optional(v.boolean()),
+    answerVersion: v.optional(v.number()),
+    answerRequest: v.optional(v.union(v.id("ticketMessages"), v.null())),
     link: v.optional(messageLinkValidator),
     evidence: v.optional(messageEvidenceValidator),
     // Keys into the Ticket's own `media` ledger, hydrated on read.
@@ -459,6 +464,7 @@ export default defineSchema({
     .index("by_ticket", ["ticketId", "createdAt"]),
   annotationEvents: defineTable({
     ticketId: v.id("tickets"),
+    ticketEventId: v.optional(v.id("ticketEvents")),
     annotationId: v.string(),
     action: annotationEventAction,
     before: v.optional(annotationValidator),

@@ -30,11 +30,10 @@ test("asking is atomic and replayable; the thread stays open to both sides witho
   await expect(t.mutation(api.conversations.send, { ...question, token: alice })).rejects.toThrow("REQUEST_ID_CONFLICT");
   const waiting = await t.query(api.tickets.getTicket, { token: alice, id });
   expect(waiting).toMatchObject({ status: "waiting", version: 1 });
-  // Legacy customer clients still send a version and the latest question; a stale version is harmless for a plain post.
-  const reply = { token: alice, id, expectedVersion: 0, body: "During checkout", requestId: "reply-1", inReplyTo };
+  const reply = { token: alice, id, expectedVersion: 1, body: "During checkout", requestId: "reply-1", inReplyTo, answeringRequest: true, answerRequest: inReplyTo };
   const replyId = await t.mutation(api.conversations.send, reply);
   expect(await t.mutation(api.conversations.send, reply)).toBe(replyId);
-  const followUp = await t.mutation(api.conversations.send, { token: alice, id, expectedVersion: 1, body: "Also on refunds", requestId: "reply-2" });
+  const followUp = await t.mutation(api.conversations.send, { token: alice, id, expectedVersion: 0, body: "Also on refunds", requestId: "reply-2" });
   const staffNote = await t.mutation(api.conversations.send, { token: staff, id, expectedVersion: 1, body: "Thanks", requestId: "note-1", requestReply: false, inReplyTo: replyId });
   const rows = (await page(staff)).page;
   expect(rows.map(row => row.body)).toEqual(["Thanks", "Also on refunds", reply.body, question.body]);
@@ -78,7 +77,7 @@ test("the outstanding question and its answer survive later staff updates", asyn
   expect((await page(alice)).page.every(row => row._id !== request)).toBe(true);
   expect(await t.query(api.conversations.openRequest, { token: alice, id })).toEqual({ _id: request, body: question.body });
   expect(await t.query(api.conversations.openRequest, { token: bob, id })).toBeNull();
-  await t.mutation(api.conversations.send, { ...question, token: alice, body: "At checkout", requestId: "answer", inReplyTo: request });
+  await t.mutation(api.conversations.send, { ...question, token: alice, body: "At checkout", requestId: "answer", inReplyTo: request, expectedVersion: 1, answeringRequest: true, answerRequest: request });
   await t.mutation(api.conversations.send, { ...question, body: "Thanks", requestId: "thanks", requestReply: false });
   expect(await t.query(api.conversations.openRequest, { token: alice, id })).toBeNull();
   expect(await t.query(api.tickets.getTicket, { token: alice, id })).toMatchObject({

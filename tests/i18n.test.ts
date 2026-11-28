@@ -55,6 +55,8 @@ test("Thai is the default persisted language and English is retained", () => {
   assert.equal(resolveLanguage(null), "th");
   assert.equal(resolveLanguage("unexpected"), "th");
   assert.equal(resolveLanguage("en"), "en");
+  assert.equal(resolveLanguage(null, ["fr", "en-US", "th"]), "en");
+  assert.equal(resolveLanguage("th", ["en-US"]), "th");
 });
 
 test("translations interpolate in Thai and English", () => {

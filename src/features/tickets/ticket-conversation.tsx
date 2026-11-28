@@ -1,5 +1,5 @@
 import { ExternalLink, FileCode2, Link2, MessageCircle, Paperclip, PlayCircle } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import type { Id } from "@convex/_generated/dataModel";
@@ -30,7 +30,8 @@ export function TicketConversation(props: Props) {
 
 function ConversationDisclosure(props: Extract<Props, { role: "staff" }>) {
   const { t } = useI18n();
-  const customerReplied = props.ticket.status !== "done" && props.ticket.latestReply?.role === "customer";
+  const customerReplied = props.ticket.status !== "done" && (props.ticket.latestReply?.role === "customer"
+    || props.ticket.status === "waiting" && props.ticket.latestReply?.answeredCustomerRequest === true);
   const [open, setOpen] = useState(props.ticket.status === "waiting" || customerReplied);
   const [visited, setVisited] = useState(open);
   const id = useId();
@@ -46,7 +47,7 @@ function ConversationDisclosure(props: Extract<Props, { role: "staff" }>) {
       {customerReplied && !open && <span className="ml-auto text-xs text-primary">{t("threadCustomerReplied")}</span>}
     </Button>
     <div id={id} hidden={!open} className="pb-3">
-      {visited && <ConversationThread {...props} />}
+      {visited && <ConversationThread {...props} evidenceRequest={open ? props.evidenceRequest : null} />}
     </div>
   </section>;
 }
@@ -63,25 +64,25 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
   const draft = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const loading = messages.status === "LoadingFirstPage";
   const writable = ticket.status !== "done";
-  const canQuote = writable && draft.progress === null && !draft.retryLocked;
+  const canQuote = writable && replyDraft.canQuote();
   const mediaFromReplies = new Set(ticket.replyMediaKeys ?? []);
   const openingMedia = role === "customer" ? ticket.media.filter(file => !mediaFromReplies.has(file.key)) : [];
   const visibleIds = new Set(messages.results.map(message => message._id));
-  const needsReply = role === "customer" && ticket.status === "waiting" && ticket.latestReply?.awaitingCustomer === true;
-  const questionInPage = needsReply ? messages.results.find(message => message.role === "staff" && message.requestReply) : undefined;
-  const needsLookup = needsReply && !loading && !questionInPage;
-  const openRequest = useOpenReplyRequest(ticket._id, needsLookup);
-  const question = questionInPage ?? openRequest;
+  const needsReply = role === "customer" && ticket.status === "waiting"
+    && (ticket.latestReply?.awaitingCustomer === true || !ticket.latestReply?.answeredCustomerRequest);
+  const hasQuestion = needsReply && ticket.latestReply?.awaitingCustomer === true;
+  const question = useOpenReplyRequest(ticket._id, hasQuestion);
+  const currentAnswer = needsReply && (question || !hasQuestion)
+    ? { version: ticket.version, request: question?._id ?? null }
+    : undefined;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (loading || !evidenceRequest || evidenceRequest.nonce === handledEvidence.current) return;
     handledEvidence.current = evidenceRequest.nonce;
     if (!canQuote) return;
     replyDraft.update({ evidence: evidenceRequest.item });
-    requestAnimationFrame(() => {
-      textarea.current?.scrollIntoView({ block: "nearest" });
-      textarea.current?.focus();
-    });
+    textarea.current?.focus({ preventScroll: true });
+    textarea.current?.scrollIntoView({ block: "nearest" });
   }, [evidenceRequest, canQuote, loading, replyDraft]);
 
   function focusReply(message: QuotedTicketMessage) {
@@ -95,16 +96,6 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
   }
 
   return <div className="min-w-0 space-y-4">
-    {needsReply && <aside aria-label={t("feedNeedsReply")} className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4">
-      <div className="min-w-0 flex-1 basis-52 space-y-1">
-        <p className="text-sm font-semibold">{t("feedNeedsReply")}</p>
-        {question?.body && <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">{question.body}</p>}
-      </div>
-      <Button type="button" className="min-h-11" disabled={loading || !canQuote || (needsLookup && openRequest === undefined)} onClick={() => {
-        if (question) focusReply(question);
-        else textarea.current?.focus();
-      }}>{t("threadAnswerQuestion")}</Button>
-    </aside>}
     {role === "customer" && <article className="aurora-inset min-w-0 space-y-3 rounded-xl p-3 sm:p-4">
       <PostAuthor label={t(ticket.origin === "staff" ? "threadTeam" : "threadYou")} role={ticket.origin} time={formatDate(ticket.createdAt)} />
       {children}
@@ -113,6 +104,19 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
         <Paperclip aria-hidden />{t("detailMedia", { count: openingMedia.length })}
       </Button>}
     </article>}
+    {needsReply && <aside aria-label={t("feedNeedsReply")} className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4">
+      <div className="min-w-0 flex-1 basis-52 space-y-1">
+        <p className="text-sm font-semibold">{t("feedNeedsReply")}</p>
+        {question?.body && <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">{question.body}</p>}
+      </div>
+      <Button type="button" className="min-h-11" disabled={loading || !canQuote || !currentAnswer} onClick={() => {
+        replyDraft.update({ answer: currentAnswer });
+        if (question) focusReply(question);
+        else textarea.current?.focus();
+      }}>{t(hasQuestion ? "threadAnswerQuestion" : "threadReply")}</Button>
+    </aside>}
+    {role === "customer" && ticket.status === "waiting" && ticket.latestReply?.answeredCustomerRequest && !needsReply &&
+      <p className="text-sm font-medium text-muted-foreground">{t("customerQueueYouReplied")}</p>}
     <section aria-labelledby={id} className="space-y-2">
       <h3 id={id} className="text-sm font-semibold">{t("threadReplies")}</h3>
       {loading ? <p className="text-sm text-muted-foreground" role="status">{t("syncing")}</p> : <>
@@ -129,7 +133,7 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
           : <p className="text-sm text-muted-foreground">{t("noTicketMessages")}</p>}
       </>}
       {!loading && <TicketReplyForm draft={replyDraft} state={draft} ticket={ticket} role={role} writable={writable}
-        textarea={textarea} send={send} />}
+        textarea={textarea} send={send} needsAnswer={needsReply} currentAnswer={currentAnswer} />}
     </section>
   </div>;
 }

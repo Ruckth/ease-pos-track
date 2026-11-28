@@ -6,8 +6,8 @@ export type Ticket = TicketDetail;
 export type TicketStatus = Ticket["status"];
 export type MediaItem = Ticket["media"][number];
 export type Annotation = NonNullable<Ticket["annotations"]>[number];
-export type AnnotationEvent = Omit<Doc<"annotationEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
-export type TicketEvent = Omit<Doc<"ticketEvents">, "sessionId" | "actorRole" | "actorCustomerId">;
+export type AnnotationEvent = Omit<Doc<"annotationEvents">, "sessionId" | "actorRole" | "actorCustomerId" | "actorStaffId"> & { actorRole?: "staff" | "customer" };
+export type TicketEvent = Omit<Doc<"ticketEvents">, "sessionId" | "actorRole" | "actorCustomerId" | "actorStaffId"> & { actorRole?: "staff" | "customer" };
 
 export type ProjectSummary = { _id: Id<"projects">; name: string; key: string };
 export type PendingMedia = { id: string; file: File; previewUrl: string; isVideo: boolean; name?: string };

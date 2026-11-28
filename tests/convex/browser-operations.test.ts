@@ -24,7 +24,7 @@ test("both browser roles share edit, annotation and undo intent through register
   await t.run(ctx => ctx.db.patch(id, { media: [{ key: "fake", url: "https://fixture.invalid/image", name: "fixture.png", size: 1, type: "image/png" }] }));
   for (const token of [seed.sessions[0], seed.sessions[1]]) {
     let undo: (() => Promise<unknown>) | undefined;
-    const operations = ticketOperations(adapterFor(token), { success: (_message, callback) => { undo = callback; } });
+    const operations = ticketOperations(adapterFor(token), { success: (_message, _reference, callback) => { undo = callback; } });
     const read = async () => (await t.query(api.tickets.getTicket, { token, id }))!;
     const item = await read();
     await operations.edit(item, "Edited", "New description");
@@ -46,11 +46,26 @@ test("both browser roles share edit, annotation and undo intent through register
   await staff.status(await readStaff(), "acknowledged");
   await staff.urgency(await readStaff(), 75);
   let staleUndo: (() => Promise<unknown>) | undefined;
-  const editing = ticketOperations(adapterFor(seed.sessions[0]), { success: (_message, callback) => { staleUndo = callback; } });
+  const editing = ticketOperations(adapterFor(seed.sessions[0]), { success: (_message, _reference, callback) => { staleUndo = callback; } });
   await editing.edit(await readStaff(), "Edit before intervening write", "");
   await staff.edit(await readStaff(), "Intervening write", "");
   await expect(staleUndo!()).rejects.toMatchObject({ data: { code: "VERSION_CONFLICT" }, disposition: "conflict" });
   expect((await readStaff()).title).toBe("Intervening write");
+  const otherId = seed.tickets[0];
+  const first = await readStaff();
+  const second = (await t.query(api.tickets.getTicket, { token: seed.sessions[0], id: otherId }))!;
+  const notices = new Map<string, () => Promise<unknown>>();
+  const editingBoth = ticketOperations(adapterFor(seed.sessions[0]), {
+    success: (_message, reference, undo) => { if (undo) notices.set(reference, undo); },
+  });
+  await editingBoth.edit(first, "First independent edit", first.description);
+  await editingBoth.edit(second, "Second independent edit", second.description);
+  expect([...notices.keys()]).toEqual(["POS-0002", "POS-0001"]);
+  await notices.get("POS-0001")!();
+  expect((await t.query(api.tickets.getTicket, { token: seed.sessions[0], id: otherId }))?.title).toBe(second.title);
+  expect((await readStaff()).title).toBe("First independent edit");
+  await notices.get("POS-0002")!();
+  expect((await readStaff()).title).toBe(first.title);
   const customer = ticketOperations(adapterFor(seed.sessions[1]), { success: () => {} });
   await expect(customer.status(await readStaff(), "done")).rejects.toMatchObject({ data: { code: "STAFF_ONLY" }, disposition: "rejected" });
   await customer.archive(await readStaff(), true);

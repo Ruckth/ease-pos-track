@@ -26,9 +26,13 @@ export function useAuthState(): "loading" | AuthState {
  * Revoke the session, then reload: a full navigation drops every live
  * subscription, cached Ticket data and draft before another account signs in.
  */
+let leavingIntentionally = false;
+export const userIsSigningOut = () => leavingIntentionally;
+
 export function useLeave() {
   const { signOut } = useSessionActions();
   return useCallback(async (path: string) => {
+    leavingIntentionally = true;
     toast.dismiss();
     try { await signOut(); } finally { window.location.replace(path); }
   }, [signOut]);
@@ -40,7 +44,7 @@ export function useSessionExpiry(loginPath: string) {
   const { signOut } = useSessionActions();
   return useCallback(() => {
     toast.dismiss();
-    void signOut().catch(() => window.location.replace(loginPath));
+    void signOut().catch(() => window.location.replace(loginPath + "?expired=1"));
   }, [signOut, loginPath]);
 }
 

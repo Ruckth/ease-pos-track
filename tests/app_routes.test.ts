@@ -23,12 +23,12 @@ test("signed-out visitors reach role-specific authentication pages", () => {
   assert.deepEqual(resolveAppRoute("/customer/login/", "signed-out"), { page: "customer-login" });
 });
 
-test("protected and unknown URLs redirect to the matching sign-in path", () => {
+test("protected URLs redirect while unknown signed-out URLs explain the missing page", () => {
   assert.deepEqual(resolveAppRoute("/", "signed-out"), { page: "redirect", to: "/staff/login" });
   assert.deepEqual(resolveAppRoute("/staff", "signed-out"), { page: "redirect", to: "/staff/login" });
   assert.deepEqual(resolveAppRoute("/customer", "signed-out"), { page: "redirect", to: "/customer/login" });
-  assert.deepEqual(resolveAppRoute("/customer/missing", "signed-out"), { page: "redirect", to: "/customer/login" });
-  assert.deepEqual(resolveAppRoute("/missing", "signed-out"), { page: "redirect", to: "/staff/login" });
+  assert.deepEqual(resolveAppRoute("/customer/missing", "signed-out"), { page: "unavailable" });
+  assert.deepEqual(resolveAppRoute("/missing", "signed-out"), { page: "unavailable" });
 });
 
 test("authenticated sessions can only render their own workspace", () => {

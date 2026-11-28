@@ -78,28 +78,31 @@ test("Cancel after create starts keeps all draft content and the request key for
   assert.deepEqual(revoked, ["blob:fixture.png"]);
 });
 
-test("busy drafts reject input and a Cancel remains retryable even when the held create later succeeds", async () => {
+test("busy drafts reject input and a late Cancel preserves the confirmed Ticket", async () => {
   const { draft, deps, revoked, file } = fixture();
   const before = draft.getSnapshot();
   let started!: () => void;
   let release!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
-  const pending = draft.submit({ ...deps, createTicket: async () => { started(); await held; } });
+  const id = "created-ticket" as Id<"tickets">;
+  const pending = draft.submit({ ...deps, createTicket: async () => { started(); await held; return id; } });
   await ready;
   draft.setTitle("Dropped title");
   draft.setDescription("Dropped description");
   draft.addFiles([file]);
   draft.remove(before.items[0]);
   assert.equal(await draft.addAnnotation({ mediaIndex: 0, kind: "point", x: 0.2, y: 0.4, text: "Dropped pin" }), false);
+  assert.equal(draft.getSnapshot().stage, "saving");
   draft.cancel();
+  assert.equal(draft.getSnapshot().stage, "saving");
   release();
-  assert.equal(await pending, false);
-  const after = draft.getSnapshot();
-  for (const key of ["title", "description", "items", "annotations", "idempotencyKey"] as const) assert.deepEqual(after[key], before[key]);
-  assert.equal(after.progress, null);
-  assert.deepEqual(revoked, []);
-  assert.equal(await draft.submit(deps), true);
+  assert.equal(await pending, true);
+  assert.equal(draft.lastSubmittedId, id);
+  assert.equal(draft.getSnapshot().stage, "confirmed");
+  assert.equal(draft.getSnapshot().progress, null);
+  assert.equal(draft.getSnapshot().items.length, 0);
+  assert.equal(await draft.submit(deps), false);
   assert.deepEqual(revoked, ["blob:fixture.png"]);
   draft.dispose();
 });
@@ -145,14 +148,20 @@ test("cancelAndSettle waits for guarded cleanup before releasing the session", a
   };
   try {
     const submit = draft.submit(deps);
+    assert.equal(draft.getSnapshot().stage, "upload");
     let settled = false;
     const cancellation = draft.cancelAndSettle().then(() => { settled = true; });
     await cleanupStarted;
     assert.equal(settled, false);
+    assert.equal(draft.getSnapshot().stage, "canceling");
+    draft.cancel();
+    assert.equal(draft.getSnapshot().stage, "canceling");
     release();
     await cancellation;
     assert.equal(await submit, false);
     assert.equal(draft.getSnapshot().progress, null);
+    assert.equal(draft.getSnapshot().canceled, true);
+    assert.equal(draft.getSnapshot().error, null);
   } finally {
     release();
     globalThis.fetch = originalFetch;
@@ -190,7 +199,7 @@ test("text-only composer refuses a retained file and submits plain text without 
         requestId: "key-0", title: "Ticket", description: "",
         media: [], annotations: [], routingClassification: classification, projectId: "original-project",
       });
-      return "new-text-id";
+      return "new-text-id" as Id<"tickets">;
     },
   };
   assert.equal(await draft.submit(textOnly), false);
@@ -358,7 +367,7 @@ test("an uncertain partial upload retries frozen files, annotations and cover or
       assert.equal(args.description, before.description);
       assert.deepEqual(args.media.map(file => stored.get(file.key)), ["reviewed", "A", "B"]);
       assert.deepEqual(args.annotations.map(({ mediaIndex, text }) => [mediaIndex, text]), [[0, "Original pin"]]);
-      return "recorded-ticket";
+      return "recorded-ticket" as Id<"tickets">;
     },
   };
 
@@ -399,7 +408,7 @@ for (const mediaEnabled of [true, false]) {
     const submit = {
       ...deps,
       mediaEnabled,
-      createTicket: async () => { if (failure) throw failure; return "created-ticket"; },
+      createTicket: async () => { if (failure) throw failure; return "created-ticket" as Id<"tickets">; },
     };
     try {
       assert.equal(await draft.submit(submit), false);

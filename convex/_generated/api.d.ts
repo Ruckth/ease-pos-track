@@ -20,6 +20,7 @@ import type * as authz from "../authz.js";
 import type * as clerk_profile from "../clerk_profile.js";
 import type * as conversations from "../conversations.js";
 import type * as crons from "../crons.js";
+import type * as customer_queue_migration from "../customer_queue_migration.js";
 import type * as domain_conversation from "../domain/conversation.js";
 import type * as domain_identity from "../domain/identity.js";
 import type * as domain_inbox from "../domain/inbox.js";
@@ -121,6 +122,7 @@ declare const fullApi: ApiFromModules<{
   clerk_profile: typeof clerk_profile;
   conversations: typeof conversations;
   crons: typeof crons;
+  customer_queue_migration: typeof customer_queue_migration;
   "domain/conversation": typeof domain_conversation;
   "domain/identity": typeof domain_identity;
   "domain/inbox": typeof domain_inbox;

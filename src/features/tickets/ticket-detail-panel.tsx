@@ -24,12 +24,15 @@ import { DetailEdit } from "./ticket-detail-edit";
 import { useTicketReplyDraft } from "./reply-drafts";
 import { TicketHistory } from "./ticket-history";
 import { useTicketOperations } from "./use-ticket-operations";
+import { TicketReferenceCopy } from "./ticket-reference-copy";
+import { TicketUrgencyEdit } from "./ticket-urgency-edit";
+import { useStaffCopy } from "@/lib/staff-copy";
 
 const MediaViewer = lazy(() => import("@/components/media-viewer").then(module => ({ default: module.MediaViewer })));
 const TicketPages = lazy(() => import("./ticket-pages").then(module => ({ default: module.TicketPages })));
 const customerProgress = {
   new: "statusNextNew", acknowledged: "statusNextAcknowledged", in_progress: "statusNextInProgress",
-  waiting: "detailCustomerWaiting", done: "statusNextDone",
+  waiting: "statusNextWaiting", done: "statusNextDone",
 } as const;
 
 export type DetailNavigation = {
@@ -47,9 +50,10 @@ export type StaffDetailActions = {
   statusRecovery?: ReactNode;
   onMove: (id: Id<"tickets">, status: TicketStatus) => void;
   onArchive: (id: Id<"tickets">) => Promise<void>;
-  onRestore?: (id: Id<"tickets">) => Promise<void>;
+  /** Resolves false when the restore outcome is unconfirmed; the Ticket then stays open. */
+  onRestore?: (id: Id<"tickets">) => Promise<boolean | void>;
 };
-type RoleActions = ({ role: "staff" } & StaffDetailActions) | { role: "customer" };
+type RoleActions = ({ role: "staff" } & StaffDetailActions) | { role: "customer"; onArchiveRequest: (ticket: Ticket) => void };
 type PanelProps = DetailNavigation & RoleActions & {
   ticket: Ticket | null | undefined; ticketId: string | null;
 };
@@ -87,7 +91,7 @@ export function TicketDetailPanel(props: PanelProps) {
     {ticket ? <DetailContent key={ticket._id} {...props} ticket={ticket} viewer={viewer} heading={heading} />
       : <p className="py-6 text-sm text-muted-foreground" role={ticket === undefined ? "status" : "alert"}>{t(ticket === undefined ? "syncing" : "ticketMissing")}</p>}
   </>;
-  if (inline) return <section tabIndex={-1} ref={panel} onKeyDown={event => {
+  if (inline) return <section id={props.role === "customer" ? "customer-ticket-detail" : "staff-ticket-detail"} tabIndex={-1} ref={panel} onKeyDown={event => {
     if (event.key === "Escape" && !event.defaultPrevented && !(event.target as Element).closest("[role=dialog], [role=alertdialog]")) {
       event.stopPropagation();
       close();
@@ -123,6 +127,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   const { t, formatDate } = useI18n();
   const { ticket, initialSection, onClose, viewer } = props;
   const operations = useTicketOperations();
+  const staffCopy = useStaffCopy();
   const staff = props.role === "staff";
   const archived = ticket.lifecycle === "archived";
   const number = formatTicketNumber(ticket.ticketNumber, ticket.projectKey);
@@ -196,16 +201,18 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   }
 
   async function changeLifecycle() {
-    if (busy) return;
+    if (props.role !== "staff" || busy) return;
     setBusy(true);
     setError("");
     try {
-      if (archived && props.role === "staff") {
-        if (props.onRestore) await props.onRestore(ticket._id);
-        else await operations.restore(ticket);
-      } else if (props.role === "staff") await props.onArchive(ticket._id);
-      else await operations.archive(ticket, true);
-      if (!props.inline || props.role === "customer") onClose();
+      if (archived) {
+        if (props.onRestore) {
+          if (await props.onRestore(ticket._id) === false) return;
+        } else {
+          await operations.restore(ticket);
+        }
+      } else await props.onArchive(ticket._id);
+      if (!props.inline) onClose();
     } catch (err) { setError(localizeError(err, t)); }
     finally { setBusy(false); }
   }
@@ -226,29 +233,35 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
   return <div className="min-w-0 space-y-3 [overflow-wrap:anywhere] [&_button:not(.absolute)]:min-h-11">
     <header className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <button type="button" className="-ms-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 font-mono text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${t("copy")} ${number}`} onClick={async () => {
+        {staff ? <TicketReferenceCopy reference={number} /> : <button type="button" className="-ms-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 font-mono text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${t("copy")} ${number}`} onClick={async () => {
           try { await navigator.clipboard.writeText(number); toast.success(t("ticketCopied")); }
           catch { toast.error(t("ticketCopyFailed")); }
-        }}>{number}<Copy className="size-3.5" /></button>
+        }}>{number}<Copy className="size-3.5" /></button>}
         {props.role === "staff" && !archived
           ? <StatusMenu status={ticket.status} busy={props.statusBusy} number={number} onSelect={status => props.onMove(ticket._id, status)} />
           : statusBadge}
       </div>
-      <h2 id={props.heading} className="text-xl font-semibold leading-tight tracking-tight">{ticket.title}</h2>
+      <h2 id={props.heading} tabIndex={-1} className="text-xl font-semibold leading-tight tracking-tight">{ticket.title}</h2>
       {!staff && !archived && <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-muted-foreground">
-        <p className="text-sm">{t(customerProgress[ticket.status])}</p>
+        <p className="text-sm">{t(ticket.status === "waiting" && ticket.latestReply?.answeredCustomerRequest && !ticket.latestReply.awaitingCustomer
+          ? "detailCustomerWaiting" : customerProgress[ticket.status])}</p>
         <span className="inline-flex items-center gap-1 text-xs"><LockKeyhole className="size-3" aria-hidden />{t("threadPrivate")}</span>
       </div>}
       {staff && description}
     </header>
     {!staff && <TicketConversation ticket={ticket} role="customer" onOpenMedia={openThreadMedia} onOpenEvidence={openThreadEvidence} evidenceRequest={evidenceRequest}>{description}</TicketConversation>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {archived ? staff && <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{t("restore")}</Button> : <>
+    {error && !staff && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {archived ? staff && <div className="space-y-1">
+      <Button disabled={busy} onClick={changeLifecycle}><RotateCcw />{busy ? staffCopy.restoring : t("restore")}</Button>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    </div> : <>
       <div className="flex flex-wrap items-center gap-2">
         {props.role === "staff" && <Button aria-disabled={props.statusBusy || undefined} className={busyControl} aria-label={t(primary.label) + " · " + number} onClick={() => {
           if (!props.statusBusy) props.onMove(ticket._id, primary.status);
         }}>{t(primary.label)}<ArrowRight /></Button>}
-        <Button type="button" variant="outline" ref={editButton} onClick={() => setEdit("content")}><Pencil />{t(staff ? "edit" : "editTicket")}</Button>
+        {edit === "content" && !staff
+          ? <h3 className="text-sm font-semibold">{t("editTicket")}</h3>
+          : <Button type="button" variant="outline" ref={editButton} onClick={() => setEdit("content")}><Pencil />{t(staff ? "edit" : "editTicket")}</Button>}
       </div>
       {props.role === "staff" && props.statusRecovery}
       {edit === "content" && <DetailEdit item={ticket} mode={edit} staff={staff} operations={operations} onClose={finishEdit} />}
@@ -283,7 +296,7 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
       <Disclosure title={t("pagesTitle")}><Suspense fallback={<p role="status">{t("syncing")}</p>}>
         <TicketPages ticket={ticket} staff={staff} />
       </Suspense></Disclosure>
-      <Disclosure title={t("detailHistory")}><TicketHistory id={ticket._id} staff={staff} /></Disclosure>
+      <TicketHistory key={ticket._id} id={ticket._id} staff={staff} />
       {!archived && <Disclosure title={t("detailActions")}>
         <div className="space-y-4">
           {props.role === "staff" && <>
@@ -291,22 +304,31 @@ function DetailContent(props: PanelProps & { ticket: Ticket; heading: string; vi
               <span>{ticket.urgencyScore === undefined ? t("urgencyUnscored") : t("urgencyScoreValue", { score: ticket.urgencyScore })}</span>
               <Button type="button" ref={urgencyButton} variant="outline" onClick={() => setEdit("urgency")}>{t("detailUrgency")}</Button>
             </div>
-            {edit === "urgency" && <DetailEdit item={ticket} mode={edit} staff operations={operations} onClose={finishEdit} />}
+            {edit === "urgency" && <TicketUrgencyEdit item={ticket} operations={operations} onClose={finishEdit} />}
             <Disclosure title={t("ticketTags")}><TicketTagEditor item={ticket} /></Disclosure>
           </>}
-          <Button type="button" variant="outline" disabled={busy} className="text-destructive" onClick={() => setConfirming(true)}>{t(staff ? "archive" : "deleteTicket")}</Button>
+          <Button type="button" variant="outline" disabled={busy || (!staff && edit === "content")} className="text-destructive" onClick={() => {
+            if (props.role === "staff") setConfirming(true);
+            else {
+              const request = () => props.onArchiveRequest(ticket);
+              if (viewer.current) viewer.current.requestClose(request);
+              else request();
+            }
+          }}>{t("archive")}</Button>
+          {staff && error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
       </Disclosure>}
     </div>
     <footer className="px-1 text-xs leading-5 text-muted-foreground">
+      {staff && <>{staffCopy.origin[ticket.origin]}{ticket.createdVia ? ` ${staffCopy.via[ticket.createdVia]}` : ""} · </>}
       {t("createdAt", { date: formatDate(ticket.createdAt) })} · {t("updatedOn", { date: formatDate(ticket.updatedAt) })}
     </footer>
-    <AlertDialog open={confirming} onOpenChange={setConfirming} title={t(staff ? "archive" : "deleteTicket")}
-      description={t(staff ? "archiveConfirm" : "deleteTicketConfirm")} confirmLabel={t(staff ? "archive" : "deleteTicket")}
+    {staff && <AlertDialog open={confirming} onOpenChange={setConfirming} title={staffCopy.archiveTitle(number)}
+      description={t("archiveConfirm")} confirmLabel={t("archive")}
       onConfirm={() => {
         if (viewer.current) viewer.current.requestClose(() => { void changeLifecycle(); });
         else void changeLifecycle();
-      }} />
+      }} />}
   </div>;
 }
 

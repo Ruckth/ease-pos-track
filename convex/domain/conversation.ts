@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { actorFields } from "../authz";
 import { hasLegacyAccess, requireLegacyMedia } from "../pilot_access";
 import { mediaItemValidator, messageEvidenceValidator, messageLinkValidator } from "../schema";
@@ -135,6 +135,14 @@ export const pageMessages = queryOperation({
   },
 });
 
+async function latestStaffRequest(ctx: QueryCtx | MutationCtx, id: Id<"tickets">) {
+  // Older staff requests omit requestReply. Both index lookups read at most one message.
+  const [explicit, legacy] = await Promise.all([true, undefined].map(value =>
+    ctx.db.query("ticketMessages").withIndex("by_ticket_role_request_reply", q =>
+      q.eq("ticketId", id).eq("role", "staff").eq("requestReply", value)).order("desc").first()));
+  return legacy && (!explicit || legacy._creationTime > explicit._creationTime) ? legacy : explicit;
+}
+
 export const openReplyRequest = queryOperation({
   args: { id: v.id("tickets") },
   handler: async (ctx, { id }) => {
@@ -142,11 +150,7 @@ export const openReplyRequest = queryOperation({
     if (!ticket?.ownerCustomerId || ticket.lifecycle !== "active" || ticket.status !== "waiting" || !ticket.latestReply?.awaitingCustomer) return null;
     const project = await ctx.db.get(ticket.projectId);
     if (!project || project.archivedAt !== undefined) return null;
-    // Older staff asks may omit requestReply. Both index lookups read at most one message.
-    const [explicit, legacy] = await Promise.all([true, undefined].map(value =>
-      ctx.db.query("ticketMessages").withIndex("by_ticket_role_request_reply", q =>
-        q.eq("ticketId", id).eq("role", "staff").eq("requestReply", value)).order("desc").first()));
-    const row = legacy && (!explicit || legacy._creationTime > explicit._creationTime) ? legacy : explicit;
+    const row = await latestStaffRequest(ctx, id);
     if (!row) return null;
     const link = row.link && await hydrateLink(ctx, id, row.link, await hasLegacyAccess(ctx));
     return { _id: row._id, body: row.body, ...(link ? { link } : {}) };
@@ -156,8 +160,10 @@ export const openReplyRequest = queryOperation({
 export const sendMessage = mutationOperation({
   args: {
     id: v.id("tickets"), body: v.string(), requestId: v.string(),
-    expectedVersion: v.number(), inReplyTo: v.optional(v.id("ticketMessages")),
+    expectedVersion: v.optional(v.number()), inReplyTo: v.optional(v.id("ticketMessages")),
     requestReply: v.optional(v.boolean()),
+    answeringRequest: v.optional(v.boolean()),
+    answerRequest: v.optional(v.union(v.id("ticketMessages"), v.null())),
     link: v.optional(messageLinkValidator),
     evidence: v.optional(messageEvidenceValidator),
     media: v.optional(v.array(mediaItemValidator)),
@@ -175,6 +181,9 @@ export const sendMessage = mutationOperation({
     const media = args.media ?? [];
     const hasMedia = media.length > 0 || args.uploadIntentId !== undefined || args.uploadIntentSecret !== undefined;
     if (actor.role === "customer" && (args.requestReply === true || args.link?.kind === "page")) throw new Error("STAFF_ONLY");
+    if ((args.answeringRequest && actor.role !== "customer") || (!args.answeringRequest && args.answerRequest !== undefined)) throw new Error("INVALID_INPUT");
+    if (args.answeringRequest && args.expectedVersion === undefined) throw new Error("VERSION_CONFLICT");
+    const answerVersion = args.answeringRequest ? args.expectedVersion : undefined;
     const requestReply = actor.role === "staff" ? args.requestReply ?? true : undefined;
     const link = normalizeLink(args.link);
     const evidence = normalizeMessageEvidence(args.evidence);
@@ -198,7 +207,7 @@ export const sendMessage = mutationOperation({
         || previous.body !== body || previous.inReplyTo !== args.inReplyTo || effectiveRequestReply(previous) !== requestReply
         || linkKey(previous.link) !== linkKey(link) || messageEvidenceKey(previous.evidence) !== messageEvidenceKey(evidence)
         || !sameKeys(previous.mediaKeys, mediaKeys)
-        || previous.uploadIntentId !== args.uploadIntentId) throw new Error("REQUEST_ID_CONFLICT");
+        || previous.answerVersion !== answerVersion || previous.answerRequest !== args.answerRequest || previous.uploadIntentId !== args.uploadIntentId) throw new Error("REQUEST_ID_CONFLICT");
       if (hasMedia) {
         requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId!), actor, args.uploadIntentSecret!);
         await verifyAssetReceipts(ctx, args.uploadIntentId!, media, ticket._id);
@@ -207,9 +216,23 @@ export const sendMessage = mutationOperation({
     }
 
     if (ticket.status === "done") throw new Error("TICKET_RESOLVED");
-    if (args.inReplyTo) {
-      const target = await ctx.db.get(args.inReplyTo);
-      if (!target || target.ticketId !== ticket._id) throw new Error("INVALID_INPUT");
+    const replyTarget = args.inReplyTo && await ctx.db.get(args.inReplyTo);
+    if (args.inReplyTo && (!replyTarget || replyTarget.ticketId !== ticket._id)) throw new Error("INVALID_INPUT");
+    const expectsAnswer = actor.role === "customer" && ticket.status === "waiting"
+      && (ticket.latestReply?.awaitingCustomer || !ticket.latestReply?.answeredCustomerRequest);
+    if (args.answeringRequest !== undefined && args.answeringRequest !== Boolean(expectsAnswer)) throw new Error("VERSION_CONFLICT");
+    if (expectsAnswer) {
+      // Older clients submit the Ticket version and may quote a question.
+      // New clients bind to the question independently of any conversation quote.
+      if (args.expectedVersion === undefined) throw new Error("VERSION_CONFLICT");
+      requireCurrentVersion(ticket, args.expectedVersion);
+      const request = ticket.latestReply?.awaitingCustomer ? await latestStaffRequest(ctx, args.id) : null;
+      if (args.answeringRequest) {
+        if (args.answerRequest === undefined || args.answerRequest !== (request?._id ?? null)
+          || (ticket.latestReply?.awaitingCustomer && !request)) throw new Error("VERSION_CONFLICT");
+      } else if (request && replyTarget && effectiveRequestReply(replyTarget) && replyTarget._id !== request._id) {
+        throw new Error("VERSION_CONFLICT");
+      }
     }
     if (link?.kind === "page") {
       if (!await hasLegacyAccess(ctx)) throw new Error("PAGE_UNAVAILABLE");
@@ -223,7 +246,10 @@ export const sendMessage = mutationOperation({
       if (!note || !ticket.media[note.mediaIndex]) throw new Error("COMMENT_NOT_FOUND");
     }
     // Ticket state changes keep the optimistic version guard; plain thread posts do not.
-    if (requestReply || hasMedia) requireCurrentVersion(ticket, args.expectedVersion);
+    if (requestReply || hasMedia) {
+      if (args.expectedVersion === undefined) throw new Error("VERSION_CONFLICT");
+      requireCurrentVersion(ticket, args.expectedVersion);
+    }
     const intent = hasMedia ? requireOwnedUploadIntent(await ctx.db.get(args.uploadIntentId!), actor, args.uploadIntentSecret!) : null;
     if (intent) {
       validateMediaItems([...ticket.media, ...media]);
@@ -246,7 +272,7 @@ export const sendMessage = mutationOperation({
     }
     const answeredCustomerRequest = ticket.status === "waiting" && !requestReply
       && (ticket.latestReply?.answeredCustomerRequest === true
-        || (actor.role === "customer" && ticket.latestReply?.awaitingCustomer === true));
+        || expectsAnswer);
     // Thread activity has its own timestamp and leaves the Ticket version alone.
     await ctx.db.patch(ticket._id, {
       ...(intent ? { replyMediaKeys: [...(ticket.replyMediaKeys ?? []), ...mediaKeys] } : {}),
@@ -263,6 +289,8 @@ export const sendMessage = mutationOperation({
       ticketId: args.id, role: actor.role, authorSessionId: ctx.session._id, customerId: actor.customerId, staffId: actor.staffId,
       body, requestId, inReplyTo: args.inReplyTo,
       ...(requestReply === undefined ? {} : { requestReply }),
+      ...(answerVersion === undefined ? {} : { answerVersion }),
+      ...(args.answerRequest === undefined ? {} : { answerRequest: args.answerRequest }),
       ...(link ? { link } : {}),
       ...(evidence ? { evidence } : {}),
       ...(intent ? { mediaKeys, uploadIntentId: intent._id } : {}),

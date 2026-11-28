@@ -33,8 +33,8 @@ test("signed-out deep links keep their path and query for after sign-in", () => 
 test("root, retired and unknown paths keep main's redirects", () => {
   assert.equal(guardRedirect("/", "", "signed-out"), "/staff/login");
   assert.equal(guardRedirect("/customer/register", "", "signed-out"), "/customer/login");
-  assert.equal(guardRedirect("/missing", "?x=1", "signed-out"), "/staff/login");
-  assert.equal(guardRedirect("/customer/missing", "", "signed-out"), "/customer/login");
+  assert.equal(guardRedirect("/missing", "?x=1", "signed-out"), null);
+  assert.equal(guardRedirect("/customer/missing", "", "signed-out"), null);
   assert.equal(guardRedirect("/", "", "customer"), "/customer");
   assert.equal(guardRedirect("/missing", "", "staff"), "/staff");
   // Within the role's namespace, main's shell kept the query.

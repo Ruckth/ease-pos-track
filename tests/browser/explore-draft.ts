@@ -103,7 +103,10 @@ async function apply(page: Page, model: Model, action: Action) {
       await composer.getByRole("button", { name: copy(language, "closeDialog"), exact: true }).click();
       await composer.waitFor({ state: "hidden" }); model.open = false; return;
     case "resume":
-      await page.getByRole("button", { name: copy(language, "resumeTicket"), exact: true }).first().click();
+      // A draft started in POS keeps that Project even when APP is active.
+      // The toolbar distinguishes that action from resuming a draft in place.
+      const expectedLabel = model.project === "POS" ? copy(language, "resumeTicket") : "Continue draft";
+      await page.locator("#customer-new-ticket").and(button(expectedLabel)).click();
       await composer.waitFor();
       // The dialog can open before its lazy media field has rendered.
       if (model.files.length) {

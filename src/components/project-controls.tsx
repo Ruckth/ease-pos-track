@@ -1,9 +1,11 @@
-import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useProjects, useCreateProject, useProjectMembers } from "@/app/adapter";
 import { toast } from "sonner";
 import { ChevronDown, FolderKanban, Loader2, Plus, Trash2 } from "lucide-react";
 import type { Id } from "../../convex/_generated/dataModel";
-import { suggestProjectKey } from "../../shared/ticket-numbers";
+import { projectKeyExample, suggestProjectKey } from "../../shared/ticket-numbers";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useStaffCopy } from "@/lib/staff-copy";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
@@ -13,6 +15,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { pickProject } from "@/lib/projects";
+import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 import type { ListView } from "@/app/workspace-search";
 
@@ -27,13 +30,25 @@ export function useCurrentProject(
   navigateProject: (key: string, replace: boolean, view?: ListView) => void,
 ) {
   const projects = useProjects();
+  const { t } = useI18n();
+  const lastNotice = useRef<string | null>(null);
   const current = projects ? pickProject(projects, requestedKey ?? null) : undefined;
   // An Undo closure belongs to the Project and session that produced it.
   useEffect(() => () => { toast.dismiss(); }, [current?.key]);
 
   useEffect(() => {
+    if (!projects) return;
+    const requested = requestedKey?.trim().toUpperCase();
+    if (requested && requested !== current?.key) {
+      if (lastNotice.current !== requested) {
+        lastNotice.current = requested;
+        toast.info(current ? t("fallbackProject", { project: current.name }) : t("fallbackProjectEmpty"));
+      }
+    } else {
+      lastNotice.current = null;
+    }
     if (current && requestedKey !== current.key) navigateProject(current.key, true);
-  }, [current, requestedKey, navigateProject]);
+  }, [current, projects, requestedKey, navigateProject, t]);
 
   const select = useCallback((key: string, view?: ListView) => {
     if (key !== current?.key) navigateProject(key, false, view);
@@ -68,17 +83,17 @@ export function ProjectSwitcher({
   const visibleLabel = <span className="truncate">{visibleName}</span>;
   if (projects.length === 1) {
     return (
-      <span className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium" title={projectLabel(current)}>
-        <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className={cn("inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-lg bg-field px-3 text-sm font-medium", compact && "max-[479px]:px-2")} title={projectLabel(current)}>
+        <FolderKanban className={cn("size-4 shrink-0 text-muted-foreground", compact && "max-[479px]:hidden")} aria-hidden="true" />
         {visibleLabel}
       </span>
     );
   }
   return (
     <DropdownMenu {...menu.root}>
-      <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left" />}
+      <DropdownMenuTrigger ref={menu.triggerRef} render={<Button type="button" variant="outline" className={cn("h-auto min-h-11 min-w-0 max-w-full justify-start gap-2 rounded-lg px-3 text-left", compact && "max-[479px]:gap-1 max-[479px]:px-2")} />}
         aria-label={`${t("chooseProject")}: ${visibleName}`} title={projectLabel(current)}>
-        <FolderKanban className="text-muted-foreground" aria-hidden="true" />
+        <FolderKanban className={cn("text-muted-foreground", compact && "max-[479px]:hidden")} aria-hidden="true" />
         {visibleLabel}
         <ChevronDown className="ml-auto text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
@@ -99,15 +114,15 @@ export function ProjectSwitcher({
   );
 }
 
-export function NoProjects({ action }: { action?: ReactNode }) {
+export function NoProjects({ action, account, headingId }: { action?: ReactNode; account?: ReactNode; headingId?: string }) {
   const { t } = useI18n();
   return (
     <div className="aurora-panel grid min-h-72 place-items-center p-8 text-center">
       <div className="max-w-sm">
         <FolderKanban className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden="true" />
-        <h2 className="text-base font-semibold">{t("noProjectsTitle")}</h2>
+        <h2 id={headingId} tabIndex={headingId ? -1 : undefined} className="text-base font-semibold">{t("noProjectsTitle")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{action ? t("noProjectsStaff") : t("noProjectsCustomer")}</p>
-        {action ? <div className="mt-4">{action}</div> : null}
+        {action || account ? <div className="mt-4">{action ?? account}</div> : null}
       </div>
     </div>
   );
@@ -123,17 +138,21 @@ export function NewProjectDialog({
   onCreated: (key: string) => void;
 }) {
   const { t } = useI18n();
+  const s = useStaffCopy();
   const createProject = useCreateProject();
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [keyError, setKeyError] = useState("");
+  const example = projectKeyExample(key);
 
   useEffect(() => {
     if (open) return;
     setName("");
     setKey("");
     setKeyEdited(false);
+    setKeyError("");
   }, [open]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -145,7 +164,8 @@ export function NewProjectDialog({
       onCreated(project.key);
       onOpenChange(false);
     } catch (error) {
-      toast.error(localizeError(error, t));
+      // Key errors, including a duplicate key, stay beside the field being corrected.
+      setKeyError(localizeError(error, t));
     } finally {
       setBusy(false);
     }
@@ -162,6 +182,7 @@ export function NewProjectDialog({
             autoFocus
             onChange={(event) => {
               setName(event.target.value);
+              setKeyError("");
               if (!keyEdited) setKey(suggestProjectKey(event.target.value));
             }}
           />
@@ -172,16 +193,23 @@ export function NewProjectDialog({
             className="font-mono uppercase"
             value={key}
             maxLength={10}
+            aria-invalid={Boolean(keyError) || undefined}
+            aria-describedby="project-key-preview project-key-rule project-key-error"
             onChange={(event) => {
               setKey(event.target.value.toUpperCase());
               setKeyEdited(true);
+              setKeyError("");
             }}
           />
-          <span className="block text-xs text-muted-foreground">{t("projectKeyHint")}</span>
+          <span id="project-key-preview" aria-live="polite" className="block text-sm font-medium">
+            {example ? s.keyPreview(example) : s.keyInvalid}
+          </span>
+          <span id="project-key-rule" className="block text-xs text-muted-foreground">{s.keyRule}</span>
+          <span id="project-key-error" role={keyError ? "alert" : undefined} className="block text-sm text-destructive">{keyError}</span>
         </label>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>{t("cancel")}</Button>
-          <Button type="submit" disabled={busy || !name.trim() || !key.trim()}>
+          <Button type="submit" disabled={busy || !name.trim() || !example}>
             {busy ? <Loader2 className="animate-spin" /> : <Plus />}
             {busy ? t("creatingProject") : t("createProject")}
           </Button>
@@ -203,7 +231,10 @@ export function ProjectMembersDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
+  const s = useStaffCopy();
   const { members, invitations, createInvitation, revokeInvitation, removeMember, setAccess } = useProjectMembers(project._id, open, owner);
+  const [removing, setRemoving] = useState<{ customerId: Id<"customers">; displayName: string } | null>(null);
+  const [removeResult, setRemoveResult] = useState<{ customerId: Id<"customers">; message: string; failed: boolean } | null>(null);
   const [eligible, setEligible] = useState(false);
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
@@ -218,10 +249,17 @@ export function ProjectMembersDialog({
     setEligible(false);
     setLink(`${window.location.origin}/customer/join#invite=${encodeURIComponent(created.secret)}`);
   });
-  const onRemove = (member: { customerId: Id<"customers">; displayName: string }) => run(async () => {
-    await removeMember({ projectId: project._id, customerId: member.customerId });
-    toast.success(t("memberRemoved", { name: member.displayName }));
-  });
+  // Confirmed removal reports beside the member row; a failure keeps that row and its selection.
+  const onRemove = async (member: { customerId: Id<"customers">; displayName: string }) => {
+    setBusy(true);
+    setRemoveResult(null);
+    try {
+      await removeMember({ projectId: project._id, customerId: member.customerId });
+      toast.success(t("memberRemoved", { name: member.displayName }));
+    } catch (error) {
+      setRemoveResult({ customerId: member.customerId, message: localizeError(error, t), failed: true });
+    } finally { setBusy(false); }
+  };
 
   return (
     <Dialog
@@ -259,7 +297,7 @@ export function ProjectMembersDialog({
         ) : (
           <ul className="divide-y divide-border/60 overflow-hidden rounded-lg bg-muted/40">
             {members.map((member) => (
-              <li key={member.customerId} className="flex items-center justify-between gap-3 px-3 py-2">
+              <li key={member.customerId} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
                 <span className="min-w-0 truncate text-sm">
                   {member.displayName} <span className="text-muted-foreground">{member.username}</span>
                   {member.status === "disabled" ? <span className="ml-2 text-xs">{t("statusDisabled")}</span> : null}
@@ -274,15 +312,20 @@ export function ProjectMembersDialog({
                   </Button>
                   <Button type="button" variant="ghost" size="icon" className="min-h-11 min-w-11" disabled={busy}
                     aria-label={t("removeMember", { name: member.displayName })}
-                    onClick={() => void onRemove(member)}>
+                    onClick={() => setRemoving(member)}>
                     <Trash2 />
                   </Button>
                 </span> : null}
+                {removeResult?.customerId === member.customerId ? <p role="alert" className="basis-full text-sm text-destructive">{removeResult.message}</p> : null}
               </li>
             ))}
           </ul>
         )}
       </div>
+      <AlertDialog open={removing !== null} onOpenChange={next => { if (!next) setRemoving(null); }}
+        title={removing ? s.removeTitle(removing.displayName, `${project.name} (${project.key})`) : s.removeConfirm}
+        description={s.removeBody} confirmLabel={s.removeConfirm}
+        onConfirm={() => { const member = removing; setRemoving(null); if (member) void onRemove(member); }} />
     </Dialog>
   );
 }

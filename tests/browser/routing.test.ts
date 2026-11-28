@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { Page } from "playwright";
 import { api } from "../../convex/_generated/api";
-import { baseURL, convex, copy, open, openHeaderMenu, seed, suiteBrowser } from "./harness";
+import { baseURL, convex, copy, open, seed, suiteBrowser } from "./harness";
 import { capture } from "../../scripts/browser-evidence";
 
 const browser = suiteBrowser();
 after(browser.close);
 
 async function routingDialog(page: Page) {
-  await openHeaderMenu(page, copy("en", "queueMore"));
+  await page.getByRole("button", { name: "Manage Project", exact: true }).click();
   await page.getByRole("menuitem", { name: "Ticket routing", exact: true }).click();
   return page.getByRole("dialog", { name: "Ticket routing" });
 }
@@ -79,6 +79,7 @@ test("named staff use rules, review, Mine and manual holds while the customer se
       await classification.getByText("เครื่องพิมพ์ · ใบเสร็จว่าง", { exact: true }).waitFor();
       assert.equal(await product.isVisible(), false);
       await customer.page.getByRole("button", { name: copy("th", "submitTicket"), exact: true }).click();
+      await customer.page.getByRole("button", { name: "ดู Ticket", exact: true }).click();
       await customer.page.waitForURL(/ticket=/);
       await customer.page.getByRole("heading", { name: title }).waitFor();
       const ticket = new URL(customer.page.url()).searchParams.get("ticket");

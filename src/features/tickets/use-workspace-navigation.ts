@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import type { HistoryState } from "@tanstack/react-router";
 import type { Id } from "@convex/_generated/dataModel";
@@ -14,6 +14,7 @@ declare module "@tanstack/react-router" {
   interface HistoryState {
     workspaceFocusOrigin?: ListView;
     workspaceTicketFromList?: string;
+    workspaceStaffQueryId?: string;
   }
 }
 
@@ -27,7 +28,18 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
   const router = useRouter();
   const location = useRouterState({ select: state => state.location });
   const search = workspaceSearch(role, location.search);
+  // History retains only a key. The mounted staff workspace owns the query text,
+  // so reload, sign-out or a different principal cannot recover private searches.
+  const privateSearches = useRef(new Map<string, { project: string; query: string }>());
+  const readPrivateQuery = (project: string | undefined, id: string | undefined) => {
+    const saved = id ? privateSearches.current.get(id) : undefined;
+    return saved?.project === project ? saved?.query ?? "" : "";
+  };
+  const query = search.q ?? (role === "staff" ? readPrivateQuery(search.project, location.state.workspaceStaffQueryId) : "");
   // Staff without an explicit view start on the Board; a URL view always wins.
+  // Preserve a nonempty invalid address long enough for the Project chooser to
+  // explain its fallback. Only validated Projects can select a backend scope.
+  const requestedProject = search.project ?? new URLSearchParams(location.searchStr).get("project")?.trim().slice(0, 64);
   const view = search.view ?? (role === "staff" ? "board" : "queue");
   const listView: ListView = view === "focus" ? location.state.workspaceFocusOrigin ?? "queue" : view;
   const ticket = search.ticket ?? null;
@@ -38,6 +50,7 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
     replace?: boolean;
     focusOrigin?: ListView;
     openedFromList?: boolean;
+    privateQuery?: string;
   }) => {
     const current = router.state.location;
     const to = role === "customer" ? APP_PATHS.customerHome :
@@ -45,9 +58,18 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
       current.pathname === APP_PATHS.staffT3Settings ? APP_PATHS.staffT3Settings : APP_PATHS.staffHome;
     const previous = workspaceSearch(role, current.search);
     const next = change(previous);
-    if (next === previous) return;
+    if (next === previous && options?.privateQuery === undefined) return;
+    let privateQueryId = role === "staff" && previous.project === next.project ? current.state.workspaceStaffQueryId : undefined;
+    if (role === "staff" && options?.privateQuery !== undefined) {
+      privateQueryId = undefined;
+      if (next.project && options.privateQuery) {
+        privateQueryId = crypto.randomUUID();
+        privateSearches.current.set(privateQueryId, { project: next.project, query: options.privateQuery });
+      }
+    }
     const state = (previous: HistoryState) => ({
       ...previous,
+      workspaceStaffQueryId: privateQueryId,
       workspaceFocusOrigin: next.view === "focus" ? options?.focusOrigin ?? previous.workspaceFocusOrigin : undefined,
       workspaceTicketFromList: next.ticket ? options?.openedFromList ? to :
         options?.replace ? previous.workspaceTicketFromList : undefined : undefined,
@@ -58,30 +80,36 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
 
   const selectProject = useCallback((key: string, replace: boolean, nextView?: ListView) => {
     update(search => {
-      if (replace && !search.project) return { ...search, project: key };
+      if (replace && !search.project && !new URLSearchParams(router.state.location.searchStr).get("project")?.trim()) {
+        if (role === "staff" && search.q) return projectWorkspaceSearch(search, key, nextView);
+        return { ...search, project: key };
+      }
       return projectWorkspaceSearch(search, key, nextView);
     }, { replace });
-  }, [update]);
+  }, [role, router, update]);
 
   const setQuery = useCallback((next: string, fromHistoryKey?: string) => {
     if (fromHistoryKey && fromHistoryKey !== router.history.location.state.__TSR_key) return;
-    update(search => search.q === (next || undefined) ? search : {
+    if (role === "staff") return update(search => ({
+      ...search, ...closedTicket, q: undefined, lane: undefined,
+    }), { replace: true, privateQuery: next });
+    return update(search => search.q === (next || undefined) ? search : {
       ...search, ...closedTicket, q: next || undefined, lane: undefined,
     }, { replace: true });
-  }, [router, update]);
+  }, [role, router, update]);
 
-  const withQuery = (value: string, action: () => void) => {
-    if (value === (search.q ?? "")) {
+  const withQuery = (value: string, action: () => void, makePrivate = false) => {
+    if (value === query && !(makePrivate && search.q)) {
       action();
       return;
     }
     const { pathname, state } = router.history.location;
     const project = search.project;
-    // Replace the current result URL before a control pushes its destination.
-    // Retain any open Ticket so assignment, lane and selection can decide what to do with it.
-    const commit = update(search => search.q === (value || undefined) ? search : {
-      ...search, q: value || undefined, lane: undefined,
-    }, { replace: true });
+    // Commit pending input before a control pushes its destination. Keep the
+    // current Ticket so assignment, lane and selection can decide how to handle it.
+    const commit = role === "staff"
+      ? update(search => ({ ...search, q: undefined, lane: undefined }), { replace: true, privateQuery: value })
+      : update(search => ({ ...search, q: value || undefined, lane: undefined }), { replace: true });
     if (!commit) {
       action();
       return;
@@ -90,12 +118,13 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
       const current = router.history.location;
       const currentSearch = new URLSearchParams(current.search);
       if (current.pathname === pathname && current.state.__TSR_index === state.__TSR_index &&
-          (currentSearch.get("project") ?? undefined) === project && (currentSearch.get("q") ?? "") === value) action();
+          (currentSearch.get("project") ?? undefined) === project &&
+          (role === "staff" ? readPrivateQuery(project, current.state.workspaceStaffQueryId) : (currentSearch.get("q") ?? "")) === value) action();
     });
   };
 
   return {
-    withQuery, locationKey: location.state.__TSR_key, project: search.project, selectProject, view, listView, filter, query: search.q ?? "", ticket,
+    withQuery, locationKey: location.state.__TSR_key, project: requestedProject, selectProject, view, listView, filter, query, ticket,
     section: ticket ? search.section ?? null : null,
     assignment: search.assignment, lane: search.lane, health: search.panel === "health",
     setHealth: (open: boolean) => update(search => ({ ...search, panel: open ? "health" : undefined }), { replace: !open }),
@@ -103,7 +132,7 @@ export function useWorkspaceNavigation(role: "staff" | "customer") {
     setFilter: (next: string | undefined, clearQuery = false) => update(search => workspaceSearch(role, {
       ...search, ...closedTicket, archived: undefined, filter: next,
       ...(clearQuery ? { q: undefined } : {}),
-    })),
+    }), role === "staff" && clearQuery ? { privateQuery: "" } : undefined),
     setQuery,
     defaultFilter,
     resetFilters: () => update(search => resetWorkspaceFilters(search, defaultFilter)),

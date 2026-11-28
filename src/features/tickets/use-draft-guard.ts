@@ -5,7 +5,7 @@ import { APP_PATHS, normalizePathname } from "@/lib/app-routes";
 
 function workspacePath(path: string) {
   const normalized = normalizePathname(path);
-  return normalized === APP_PATHS.staffT3Settings ? APP_PATHS.staffHome : normalized;
+  return normalized === APP_PATHS.staffT3Settings || normalized === APP_PATHS.staffLineSettings ? APP_PATHS.staffHome : normalized;
 }
 
 /** The composer survives search and Project changes. Only leaving the workspace
