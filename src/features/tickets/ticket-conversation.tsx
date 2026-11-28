@@ -1,5 +1,5 @@
 import { ExternalLink, FileCode2, Link2, MessageCircle, Paperclip, PlayCircle } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import type { Id } from "@convex/_generated/dataModel";
@@ -47,7 +47,7 @@ function ConversationDisclosure(props: Extract<Props, { role: "staff" }>) {
       {customerReplied && !open && <span className="ml-auto text-xs text-primary">{t("threadCustomerReplied")}</span>}
     </Button>
     <div id={id} hidden={!open} className="pb-3">
-      {visited && <ConversationThread {...props} />}
+      {visited && <ConversationThread {...props} evidenceRequest={open ? props.evidenceRequest : null} />}
     </div>
   </section>;
 }
@@ -76,15 +76,13 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
     ? { version: ticket.version, request: question?._id ?? null }
     : undefined;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (loading || !evidenceRequest || evidenceRequest.nonce === handledEvidence.current) return;
     handledEvidence.current = evidenceRequest.nonce;
     if (!canQuote) return;
     replyDraft.update({ evidence: evidenceRequest.item });
-    requestAnimationFrame(() => {
-      textarea.current?.scrollIntoView({ block: "nearest" });
-      textarea.current?.focus();
-    });
+    textarea.current?.focus({ preventScroll: true });
+    textarea.current?.scrollIntoView({ block: "nearest" });
   }, [evidenceRequest, canQuote, loading, replyDraft]);
 
   function focusReply(message: QuotedTicketMessage) {

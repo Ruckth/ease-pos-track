@@ -92,7 +92,7 @@ for (const language of ["en", "th"] as const) test(`customer ${language}: Ticket
       assert.ok(toolbar && toolbar.height <= 56, `Header height at ${width}px: ${toolbar?.height}`);
       for (const control of [project, create, inbox, account]) {
         const box = await control.boundingBox();
-        assert.ok(box && box.height >= 44 && box.x >= 0 && box.x + box.width <= width);
+        assert.ok(box && box.height >= 44 && box.width >= 44 && box.x >= 0 && box.x + box.width <= width);
         assert.ok(Math.abs(box.y + box.height / 2 - (toolbar.y + toolbar.height / 2)) <= 1);
       }
     }
@@ -613,12 +613,12 @@ test("customer thread quotes exact files, notes and saved video moments via keyb
     await selector.waitFor();
     await selector.press("Escape");
     await selector.waitFor({ state: "hidden" });
-    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.and(customer.page.locator(":focus")).waitFor();
 
     await citeButton.click();
     await selector.selectOption(`annotation:${pointNote.id}`);
     await customer.page.getByText(copy("en", "threadAboutNote", { file: photo.name, label: pointNote.label }), { exact: true }).waitFor();
-    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.and(customer.page.locator(":focus")).waitFor();
     await replyBox.fill("Look at the duplicate discount line here.");
     await customer.page.getByRole("button", { name: copy("en", "detailBack"), exact: true }).click();
     await customer.page.locator(`button[data-ticket-id="${id}"]`).click();
@@ -639,7 +639,7 @@ test("customer thread quotes exact files, notes and saved video moments via keyb
     // 2. Quote a saved video moment directly from the annotation list, send, and jump back to it.
     await customer.page.getByRole("button", { name: copy("en", "threadQuoteMoment", { time: "0:04" }), exact: true }).first().click();
     await customer.page.getByText(copy("en", "threadAboutMoment", { file: video.name, time: "0:04" }), { exact: true }).waitFor();
-    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.and(customer.page.locator(":focus")).waitFor();
     await replyBox.fill("The pause happens right at four seconds.");
     await sendButton.click();
     await customer.page.getByText("The pause happens right at four seconds.", { exact: true }).waitFor();
@@ -656,7 +656,7 @@ test("customer thread quotes exact files, notes and saved video moments via keyb
 
     // 3. Quote the exact file from MediaViewer toolbar and verify sent file quote focuses it.
     await customer.page.getByRole("button", { name: copy("en", "threadQuoteFile"), exact: true }).click();
-    assert.equal(await replyBox.evaluate(el => el === document.activeElement), true);
+    await replyBox.and(customer.page.locator(":focus")).waitFor();
     await replyBox.fill("Sharing this video file directly.");
     await sendButton.click();
     const fileQuoteButton = customer.page.locator("[data-message-id]")

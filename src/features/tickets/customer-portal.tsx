@@ -105,12 +105,12 @@ export function CustomerPortal({ viewer, onLogout }: {
       heading.focus();
     }} className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-background focus:p-3 focus:ring-2 focus:ring-ring">{t("skipToTickets")}</a>
     <header className="aurora-toolbar sticky top-0 z-30 mx-auto max-w-6xl">
-      <div className="flex min-w-0 flex-wrap items-center gap-1 px-1.5 py-1 sm:gap-3 sm:px-4">
-        <div className="min-w-0 flex-1 basis-[4.125rem]">
+      <div className="flex min-w-0 items-center gap-1 px-1.5 py-1 sm:flex-wrap sm:gap-3 sm:px-4">
+        <div className="min-w-[4.25rem] flex-1 sm:min-w-0">
           {projects && project ? <ProjectSwitcher compact projects={projects} current={project} onSelect={selectProject} />
             : <p className="truncate px-2 text-sm font-medium">{viewer.displayName}</p>}
         </div>
-        {(project || composer.owner) && <Button className="glass-action h-auto min-h-11 max-w-full gap-1 rounded-lg whitespace-normal px-2 text-sm font-semibold sm:px-4" type="button" id="customer-new-ticket"
+        {(project || composer.owner) && <Button className="glass-action h-auto min-h-11 min-w-11 max-w-full gap-1 rounded-lg whitespace-normal px-2 text-sm leading-tight font-semibold max-[359px]:[&_svg]:hidden sm:px-4" type="button" id="customer-new-ticket"
           aria-describedby={draftStrip ? "customer-draft-project" : undefined} aria-expanded={composer.open} onClick={composer.show}>
           {composer.hasDraft ? <PenLine aria-hidden="true" /> : <Plus aria-hidden="true" />}{composerLabel}
         </Button>}
