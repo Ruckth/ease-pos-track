@@ -799,6 +799,7 @@ test("phone staff search closes before a private commit and reopens for a differ
     await page.goBack();
     await search.waitFor();
     assert.equal(await search.inputValue(), "Printer");
+    await page.waitForFunction(input => document.activeElement === input, await search.elementHandle());
   } finally { await context.close(); }
 });
 

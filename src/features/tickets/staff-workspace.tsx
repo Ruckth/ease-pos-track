@@ -236,7 +236,7 @@ export function StaffWorkspace({ viewer, onLogout, t3Settings = false, onT3Setti
     composer.complete();
     if (draftProject && draftProject.key !== project?.key) {
       if (project) projectViews.current.set(project.key, nav.listView);
-      if (id) nav.openTicket(id, undefined, { key: draftProject.key, view: projectViews.current.get(draftProject.key) ?? "board" });
+      if (id) nav.openTicket(id, undefined, { key: draftProject.key, view: projectViews.current.get(draftProject.key) ?? defaultView });
       else chooseProject(draftProject.key);
     } else if (id) onSelect(id);
   };

@@ -169,7 +169,8 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
   const summary = (item: TicketSummary) => <TicketCard key={item._id} item={item} onSelect={onSelect} selected={item._id === selectedId}
     busy={workspace?.busy.has(item._id)} onMove={(_id, status) => { void onMove(item, status); }} onRestore={onRestore} />;
 
-  return <section className="min-w-0 space-y-3">
+  const showQueueRefresh = workspace && view === "queue" && !search && !showArchived;
+  return <section className="min-w-0 space-y-2 sm:space-y-3">
     <div className={cn("flex flex-wrap items-center gap-1.5", workspace && "empty:hidden")}>
       {!filters && <TicketFilterPopover activeCount={rules.count} onClear={rules.reset}><TicketFilterFields rules={rules} tags={tags} /></TicketFilterPopover>}
       {!workspace && search && onSearch && <Button variant="ghost" size="sm" className="min-h-11 md:min-h-8" onClick={() => onSearch("")}>{t("clearSearch")}</Button>}
@@ -177,7 +178,14 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
         <Button size="sm" variant={view === "board" ? "secondary" : "ghost"} aria-pressed={view === "board"} onClick={() => setLocalView("board")}><Columns3 />{c.board}</Button>
         <Button size="sm" variant={view === "table" ? "secondary" : "ghost"} aria-pressed={view === "table"} onClick={() => setLocalView("table")}><Table2 />{c.table}</Button>
       </div>}
-      {workspace && view === "queue" && !search && !showArchived && <Button size="sm" variant="ghost" className="min-h-11 md:min-h-8" onClick={() => setRevision(current => current + 1)}><RotateCw />{t("queueRefresh")}</Button>}
+      {showQueueRefresh && <>
+        {!loading && !filtering && ordered.length > 0 && <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {t("loadedTickets", { count: ordered.length })} · {t("queuePriority")}
+        </p>}
+        <Button size="sm" variant="ghost" className="min-h-11 min-w-11 max-sm:px-0 md:min-h-8" title={t("queueRefresh")} onClick={() => setRevision(current => current + 1)}>
+          <RotateCw aria-hidden /><span className="max-sm:sr-only">{t("queueRefresh")}</span>
+        </Button>
+      </>}
     </div>
     {!loading && resultSummary && <p role="status" className="text-sm text-muted-foreground">{resultSummary}</p>}
     {/* Counts come first; the rules stay folded unless the search found nothing. */}
@@ -194,7 +202,7 @@ export function TicketExplorer({ projectId, items, archivedItems, tags, search, 
           chosenStatus={preferredLane} onChooseStatus={chooseLane} busy={workspace?.busy}
           onSelect={onSelect} onMoveCard={onMove} />
       : ordered.length ? <div className="space-y-2">
-        {!search && !filtering && <p className="text-xs text-muted-foreground">{t("loadedTickets", { count: ordered.length })}{!showArchived ? ` · ${t("queuePriority")}` : ""}</p>}
+        {!showQueueRefresh && !search && !filtering && <p className="text-xs text-muted-foreground">{t("loadedTickets", { count: ordered.length })}{!showArchived ? ` · ${t("queuePriority")}` : ""}</p>}
         {ordered.map(summary)}
       </div> : <div role="status" className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">{emptyText}</div>}
     </Suspense>
