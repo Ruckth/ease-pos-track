@@ -7,13 +7,15 @@ import { DisposableTicketDraft } from "./draft";
 export type ReplyLink = { kind: "external"; url: string } | { kind: "page"; pageId: Id<"ticketPages"> };
 export type QuotedTicketMessage = Pick<TicketMessage, "_id" | "body" | "link">;
 
+export type TicketAnswer = { version: number; request: Id<"ticketMessages"> | null };
+
 type ReplySelection = {
   replyTo?: QuotedTicketMessage;
   evidence?: MessageEvidenceInput;
   link?: ReplyLink;
   requestReply: boolean;
-  answerVersion?: number;
-  submittedAnswerVersion?: number;
+  answer?: TicketAnswer;
+  submittedAnswer?: TicketAnswer;
 };
 
 export class TicketReplyDraft {
@@ -42,7 +44,7 @@ export class TicketReplyDraft {
     this.listeners.forEach(listener => listener());
   };
 
-  clear = () => this.update({ replyTo: undefined, evidence: undefined, link: undefined, requestReply: false, answerVersion: undefined, submittedAnswerVersion: undefined });
+  clear = () => this.update({ replyTo: undefined, evidence: undefined, link: undefined, requestReply: false, answer: undefined, submittedAnswer: undefined });
 }
 
 const ReplyDrafts = createContext<Map<Id<"tickets">, TicketReplyDraft> | null>(null);

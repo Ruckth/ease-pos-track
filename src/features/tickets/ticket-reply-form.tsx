@@ -18,7 +18,7 @@ import { useDraftAdapter, useTicketCapabilities } from "./adapter";
 import type { useConversation, TicketMessage as Message } from "./adapters/conversation";
 import { useConversationPages } from "./adapters/pages";
 import type { DraftSnapshot } from "./draft";
-import type { ReplyLink, TicketReplyDraft } from "./reply-drafts";
+import type { ReplyLink, TicketAnswer, TicketReplyDraft } from "./reply-drafts";
 
 const TicketPages = lazy(() => import("./ticket-pages").then(module => ({ default: module.TicketPages })));
 
@@ -26,8 +26,8 @@ const replyNoReceiptErrors = new Set([
   "COMMENT_NOT_FOUND", "INVALID_INPUT", "MEDIA_UNAVAILABLE", "PAGE_UNAVAILABLE", "TICKET_RESOLVED", "VERSION_CONFLICT",
 ]);
 
-export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send, needsAnswer }: {
-  needsAnswer: boolean; draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
+export function TicketReplyForm({ draft, state, ticket, role, writable, textarea, send, needsAnswer, currentAnswer }: {
+  needsAnswer: boolean; currentAnswer?: TicketAnswer; draft: TicketReplyDraft; state: DraftSnapshot; ticket: Ticket; role: Message["role"]; writable: boolean;
   textarea: RefObject<HTMLTextAreaElement | null>; send: ReturnType<typeof useConversation>["send"];
 }) {
   const { t, formatDate } = useI18n();
@@ -37,7 +37,7 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
   const messageId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const { owner } = draft;
-  const { replyTo, evidence, link, requestReply, answerVersion, submittedAnswerVersion } = useSyncExternalStore(draft.subscribe, draft.getSelection);
+  const { replyTo, evidence, link, requestReply, answer, submittedAnswer } = useSyncExternalStore(draft.subscribe, draft.getSelection);
   const setEvidence = (next?: MessageEvidenceInput) => draft.update({ evidence: next });
   const setLink = (next?: ReplyLink) => draft.update({ link: next });
   const [linkField, setLinkField] = useState<string>();
@@ -51,8 +51,8 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
   const progress = state.progress;
   const busy = owner.isSubmitting();
   const locked = busy || state.retryLocked;
-  const canEdit = writable && !locked;
-  const canSubmit = writable || state.retryLocked;
+  const canEdit = writable && !locked && (!needsAnswer || Boolean(answer ?? currentAnswer));
+  const canSubmit = state.retryLocked || (writable && (!needsAnswer || Boolean(answer ?? currentAnswer)));
   const hasReply = Boolean(state.description.trim() || link || state.items.length);
   const quoteLabel = replyTo && (replyTo.link?.kind === "page" ? replyTo.link.title : replyTo.body || replyTo.link?.url || t("threadReply"));
 
@@ -88,8 +88,8 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
     event.preventDefault();
     if (!canSubmit || busy || !hasReply || linkField !== undefined || pickingPage || pickingEvidence) return;
     setSent(undefined);
-    const version = state.retryLocked ? submittedAnswerVersion : answerVersion ?? (needsAnswer ? ticket.version : undefined);
-    if (!state.retryLocked) draft.update({ submittedAnswerVersion: version });
+    const boundAnswer = state.retryLocked ? submittedAnswer : answer ?? currentAnswer;
+    if (!state.retryLocked) draft.update({ submittedAnswer: boundAnswer });
     const ok = await owner.submit({
       token: accessToken ?? "",
       mediaEnabled: mediaEnabled && state.items.length > 0,
@@ -97,9 +97,9 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
       noReceiptErrors: replyNoReceiptErrors,
       createTicket: async ({ requestId, description, media, uploadIntentId, uploadIntentSecret }) => {
         await send({
-          id: ticket._id, expectedVersion: version ?? ticket.version, body: description, requestId,
+          id: ticket._id, expectedVersion: boundAnswer?.version ?? ticket.version, body: description, requestId,
           inReplyTo: replyTo?._id, requestReply: role === "staff" ? requestReply : undefined, link,
-          answeringRequest: version === undefined ? undefined : true,
+          ...(boundAnswer ? { answeringRequest: true, answerRequest: boundAnswer.request } : {}),
           ...(evidence ? { evidence } : {}),
           ...(media.length ? { media, uploadIntentId, uploadIntentSecret } : {}),
         });
@@ -110,12 +110,14 @@ export function TicketReplyForm({ draft, state, ticket, role, writable, textarea
       draft.clear();
       setSent(requestReply ? "questionSent" : "replySent");
     } else if (errorCode(owner.getSnapshot().error) === "VERSION_CONFLICT") {
-      draft.update({ answerVersion: undefined });
+      draft.update({ answer: undefined });
     }
   }
 
   if (!writable && !hasReply && !state.retryLocked) return <p className="text-sm text-muted-foreground">{t("threadResolved")}</p>;
-  return <form onSubmit={submit} onKeyDown={event => {
+  return <form onSubmit={submit} onFocusCapture={() => {
+    if (currentAnswer && !draft.getSelection().answer && !locked) draft.update({ answer: currentAnswer });
+  }} onKeyDown={event => {
     if (event.key !== "Escape" || publishingPage || (linkField === undefined && !pickingPage && !pickingEvidence)) return;
     event.preventDefault();
     event.stopPropagation();

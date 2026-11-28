@@ -439,6 +439,7 @@ export default defineSchema({
     // Thread additions; absent on legacy rows. `requestReply` is set only on staff messages.
     requestReply: v.optional(v.boolean()),
     answerVersion: v.optional(v.number()),
+    answerRequest: v.optional(v.union(v.id("ticketMessages"), v.null())),
     link: v.optional(messageLinkValidator),
     evidence: v.optional(messageEvidenceValidator),
     // Keys into the Ticket's own `media` ledger, hydrated on read.

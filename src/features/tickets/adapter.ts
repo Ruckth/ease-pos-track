@@ -1,5 +1,5 @@
 import type { TicketAssignmentFilter } from "../../../shared/ticket-routing";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { mergeQueueLanes } from "@/lib/staff-ticket-queue";
 import { BOARD_COLUMNS } from "@/lib/kanban-board";
 import { useStaffLanes } from "./lane-adapter";
@@ -66,9 +66,18 @@ export function useTicketActivity(id: Id<"tickets"> | null) {
 
 export function useCustomerTickets(projectId: Id<"projects"> | undefined, filter: CustomerQueueFilter, enabled = true) {
   const ready = useQuery(api.tickets.customerQueueIndexReady, projectId && enabled && filter !== "all" ? { projectId } : "skip");
-  return usePaginatedQuery(api.tickets.pageTickets, projectId && enabled && (filter === "all" || ready !== undefined) ? {
+  const page = usePaginatedQuery(api.tickets.pageTickets, projectId && enabled && (filter === "all" || ready !== undefined) ? {
     projectId, lifecycle: "active", ...(filter === "all" ? {} : { customerGroup: filter, legacyCustomerGroup: ready === false || undefined }),
   } : "skip", { initialNumItems: 20 });
+  // A bounded read can cross only nonmatching legacy rows. Continue until the
+  // first match or actual exhaustion, so an incomplete scan never looks empty.
+  const scanning = ready === false && page.results.length === 0
+    && (page.status === "CanLoadMore" || page.status === "LoadingMore");
+  const { loadMore, status } = page;
+  useEffect(() => {
+    if (scanning && status === "CanLoadMore") loadMore(20);
+  }, [scanning, status, loadMore]);
+  return { ...page, scanning };
 }
 
 export function useCustomerTicketSearch(projectId: Id<"projects"> | undefined, query: string, filter: CustomerQueueFilter) {

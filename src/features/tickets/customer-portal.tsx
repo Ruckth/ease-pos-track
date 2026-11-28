@@ -234,7 +234,7 @@ function CustomerTickets({ project, email, composerLabel, onNewTicket, onSelect,
   const all = useCustomerTickets(project?._id, "all");
   const scoped = useCustomerTickets(project?._id, statusScope, statusScope !== "all");
   const page = statusScope === "all" ? all : scoped;
-  const loaded = page.status !== "LoadingFirstPage";
+  const loaded = page.status !== "LoadingFirstPage" && !page.scanning;
   const counts = useMemo(() => customerQueueCounts(all.results), [all.results]);
   const browseTickets = useMemo(() => customerQueue(page.results, statusScope), [page.results, statusScope]);
   const text = query.trim();

@@ -71,10 +71,10 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
   const needsReply = role === "customer" && ticket.status === "waiting"
     && (ticket.latestReply?.awaitingCustomer === true || !ticket.latestReply?.answeredCustomerRequest);
   const hasQuestion = needsReply && ticket.latestReply?.awaitingCustomer === true;
-  const questionInPage = hasQuestion ? messages.results.find(message => message.role === "staff" && message.requestReply) : undefined;
-  const needsLookup = hasQuestion && !loading && !questionInPage;
-  const openRequest = useOpenReplyRequest(ticket._id, needsLookup);
-  const question = questionInPage ?? openRequest;
+  const question = useOpenReplyRequest(ticket._id, hasQuestion);
+  const currentAnswer = needsReply && (question || !hasQuestion)
+    ? { version: ticket.version, request: question?._id ?? null }
+    : undefined;
 
   useEffect(() => {
     if (loading || !evidenceRequest || evidenceRequest.nonce === handledEvidence.current) return;
@@ -111,8 +111,8 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
         <p className="text-sm font-semibold">{t("feedNeedsReply")}</p>
         {question?.body && <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">{question.body}</p>}
       </div>
-      <Button type="button" className="min-h-11" disabled={loading || !canQuote || (needsLookup && openRequest === undefined)} onClick={() => {
-        replyDraft.update({ answerVersion: ticket.version });
+      <Button type="button" className="min-h-11" disabled={loading || !canQuote || !currentAnswer} onClick={() => {
+        replyDraft.update({ answer: currentAnswer });
         if (question) focusReply(question);
         else textarea.current?.focus();
       }}>{t(hasQuestion ? "threadAnswerQuestion" : "threadReply")}</Button>
@@ -135,7 +135,7 @@ function ConversationThread({ ticket, role, children, onOpenMedia, onOpenEvidenc
           : <p className="text-sm text-muted-foreground">{t("noTicketMessages")}</p>}
       </>}
       {!loading && <TicketReplyForm draft={replyDraft} state={draft} ticket={ticket} role={role} writable={writable}
-        textarea={textarea} send={send} needsAnswer={needsReply} />}
+        textarea={textarea} send={send} needsAnswer={needsReply} currentAnswer={currentAnswer} />}
     </section>
   </div>;
 }
